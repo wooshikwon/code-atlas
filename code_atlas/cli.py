@@ -1,25 +1,29 @@
-"""code-atlas 명령."""
+"""code-atlas 명령. `code-atlas <레포>`는 분석 뒤 화면 서버를 띄우고, `code-atlas analyze <레포>`는 결과만 출력한다."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import threading
+import webbrowser
 
 from .analyze import PythonNotFound, analyze
+from .api import HOST, PORT, create_app
 from .model import to_dict
+from .venv import find
 
 
-def _analyze_command(args: argparse.Namespace) -> int:
+def _analyze_or_exit(repo: str, python: str | None):
     try:
-        analysis, _ = analyze(args.repo, args.python)
+        return analyze(repo, python)
     except PythonNotFound as exc:
         print(exc, file=sys.stderr)
-        return 2
-    if args.json:
-        json.dump(to_dict(analysis), sys.stdout, ensure_ascii=False)
-        sys.stdout.write("\n")
-        return 0
+        sys.exit(2)
+
+
+def _print_summary(analysis) -> None:
     s = analysis.stats
     rate = s["resolved"] / s["call_sites"] * 100 if s["call_sites"] else 0.0
     print(
@@ -28,19 +32,55 @@ def _analyze_command(args: argparse.Namespace) -> int:
     )
     for error in analysis.errors:
         print(f"파싱 실패 {error['path']}: {error['message']}", file=sys.stderr)
+
+
+def _analyze_command(args: argparse.Namespace) -> int:
+    analysis, _ = _analyze_or_exit(args.repo, args.python)
+    if args.json:
+        json.dump(to_dict(analysis), sys.stdout, ensure_ascii=False)
+        sys.stdout.write("\n")
+    else:
+        _print_summary(analysis)
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="code-atlas")
-    sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("analyze", help="레포를 분석해 결과를 출력한다")
+def _serve_command(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    python = args.python or find(args.repo)
+    analysis, files = _analyze_or_exit(args.repo, python)
+    _print_summary(analysis)
+    url = f"http://{HOST}:{args.port}"
+    if args.no_open or (sys.platform.startswith("linux") and not os.environ.get("DISPLAY")):
+        print(f"주소: {url}")
+    else:
+        threading.Timer(1.0, webbrowser.open, [url]).start()
+    uvicorn.run(create_app(analysis, files, python), host=HOST, port=args.port, log_level="warning")
+    return 0
+
+
+def _analyze_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="code-atlas analyze", description="레포를 분석해 결과를 출력한다")
     p.add_argument("repo")
     p.add_argument("--python", help="대상 레포의 파이썬 인터프리터 경로")
     p.add_argument("--json", action="store_true", help="분석 결과 전체를 JSON으로 출력한다")
-    p.set_defaults(func=_analyze_command)
-    args = parser.parse_args(argv)
-    return args.func(args)
+    return p
+
+
+def _serve_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="code-atlas", description="레포를 분석하고 탐색 화면 서버를 띄운다")
+    p.add_argument("repo")
+    p.add_argument("--python", help="대상 레포의 파이썬 인터프리터 경로")
+    p.add_argument("--port", type=int, default=PORT)
+    p.add_argument("--no-open", action="store_true", help="브라우저를 열지 않는다")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["analyze"]:
+        return _analyze_command(_analyze_parser().parse_args(argv[1:]))
+    return _serve_command(_serve_parser().parse_args(argv))
 
 
 if __name__ == "__main__":
