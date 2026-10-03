@@ -210,3 +210,418 @@ ul {
 .code-range {
   background: color-mix(in srgb, var(--ink) 10%, transparent);
 }
+
+/* 구조 뷰 */
+
+.graph {
+  position: relative;
+}
+
+.graph .react-flow {
+  --xy-background-color: var(--surface);
+  font-size: 12px;
+}
+
+.react-flow__node,
+.edge {
+  transition: opacity 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__node,
+  .edge {
+    transition: none;
+  }
+}
+
+.edge-markers {
+  position: absolute;
+}
+
+.node-handle {
+  visibility: hidden;
+}
+
+.node-package,
+.node-module,
+.node-class,
+.node-dataclass,
+.node-function {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.node-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  height: 32px;
+  padding: 0 16px;
+  line-height: 32px;
+  white-space: nowrap;
+}
+
+.node-label {
+  white-space: nowrap;
+}
+
+.node-label-bold {
+  font-weight: 600;
+}
+
+.node-entry {
+  font-weight: 400;
+}
+
+.node-aside,
+.node-below {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.node-label-hidden .node-label,
+.node-label-hidden .node-aside,
+.node-label-hidden .node-below,
+.node-label-hidden .node-table-row {
+  visibility: hidden;
+}
+
+.node-selected {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.node-package {
+  border: 1px solid var(--muted);
+  border-radius: 8px;
+}
+
+.node-module {
+  border: 1.5px solid var(--muted);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.node-module-leaf .node-header {
+  height: 100%;
+  padding: 0 12px;
+  line-height: 37px;
+}
+
+.node-below {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.node-class .node-header {
+  justify-content: center;
+  height: 100%;
+  padding: 0 14px;
+  line-height: 28px;
+}
+
+.node-class-expanded .node-header {
+  justify-content: flex-start;
+  height: 32px;
+  line-height: 32px;
+}
+
+.node-hexagon {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.node-hexagon polygon {
+  fill: color-mix(in srgb, var(--ink) 3%, transparent);
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.node-class.node-selected {
+  outline: none;
+}
+
+.node-class.node-selected polygon {
+  stroke: var(--ink);
+  stroke-width: 3;
+}
+
+.node-dataclass {
+  border: 1.5px solid var(--muted);
+  border-radius: 2px;
+  background: var(--surface);
+}
+
+.node-table-head {
+  padding: 0 8px;
+  line-height: 22px;
+  border-bottom: 1.5px solid var(--muted);
+  white-space: nowrap;
+}
+
+.node-table-row {
+  padding: 0 8px;
+  line-height: 18px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.node-function {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.node-function.node-selected {
+  outline: none;
+}
+
+.node-circle {
+  position: relative;
+  flex: none;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.node-function.node-selected .node-circle {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.badge {
+  position: absolute;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.badge-unresolved {
+  top: -7px;
+  right: -9px;
+  color: var(--surface);
+  background: var(--muted);
+}
+
+.badge-global {
+  bottom: -6px;
+  right: -7px;
+  color: var(--surface);
+  background: var(--ink);
+}
+
+/* 선 */
+
+.edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  cursor: pointer;
+}
+
+.edge-line,
+.legend-edge {
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.edge-use .edge-line,
+.legend-edge.edge-use {
+  stroke-dasharray: 5 3;
+}
+
+.edge-derive .edge-line,
+.legend-edge.edge-derive {
+  stroke-width: 3;
+}
+
+.tone-muted {
+  --tone: var(--muted);
+}
+
+.tone-outgoing {
+  --tone: var(--outgoing);
+}
+
+.tone-incoming {
+  --tone: var(--incoming);
+}
+
+.edge-line,
+.legend-edge {
+  stroke: var(--tone);
+}
+
+.marker-fill {
+  fill: var(--tone);
+}
+
+.marker-open {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 1.5;
+}
+
+.marker-hollow {
+  fill: var(--surface);
+  stroke: var(--tone);
+  stroke-width: 1.5;
+}
+
+.edge-weight {
+  fill: var(--ink);
+  stroke: var(--surface);
+  stroke-width: 3px;
+  paint-order: stroke;
+  font-size: 11px;
+}
+
+/* 그래프 위에 띄우는 칸 */
+
+.legend,
+.info-box,
+.graph-steps {
+  position: absolute;
+  z-index: 5;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  font-size: 12px;
+}
+
+.legend {
+  bottom: 8px;
+  left: 8px;
+  display: flex;
+  gap: 12px;
+  padding: 6px 8px;
+}
+
+.legend-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+}
+
+.legend-node,
+.legend-package,
+.legend-module {
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.legend-package {
+  fill: none;
+  stroke-width: 1;
+}
+
+.legend-module {
+  fill: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.legend-entry {
+  fill: var(--ink);
+  font-size: 11px;
+}
+
+.graph-steps {
+  top: 8px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  transform: translateX(-50%);
+}
+
+.info-box {
+  top: 8px;
+  right: 8px;
+  width: 340px;
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: 8px 10px;
+}
+
+.info-box-pinned {
+  border-color: var(--muted);
+}
+
+.info-title {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.info-muted {
+  color: var(--muted);
+}
+
+.info-path {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.info-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 6px 0 0;
+}
+
+.info-facts dt {
+  color: var(--muted);
+}
+
+.info-facts dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.info-sites {
+  margin-top: 6px;
+}
+
+.info-sites li {
+  padding: 1px 0;
+}
+
+.info-site {
+  display: block;
+  width: 100%;
+  padding: 1px 2px;
+  border-radius: 2px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.info-site:disabled {
+  cursor: default;
+}
+
+.info-site:not(:disabled):hover {
+  background: var(--hover-bg);
+}
+
+.info-site code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}

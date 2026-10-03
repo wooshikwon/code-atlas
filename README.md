@@ -23,7 +23,7 @@
 | `frontend/src/theme.ts` | 밝은 화면·어두운 화면 색 값과 CSS 변수 내보내기 |
 | `frontend/src/tree/` | 파일 트리. 파일을 누르면 그 모듈 노드를 고른다 |
 | `frontend/src/code/` | 읽기 전용 Monaco 코드 뷰어와 범위 강조. Monaco는 CDN 없이 번들에 넣는다 |
-| `frontend/src/graph/` | 구조 뷰 |
+| `frontend/src/graph/` | 구조 뷰. `layout.ts`가 ELK를 Web Worker로 돌려 좌표를 정하고, `scope.ts`가 그릴 선을, `focus.ts`가 초점 단계를, `view.ts`가 선마다 경로·색·불투명도를 정한다. `nodes/`·`edges/`는 React Flow 노드·선 컴포넌트, `Legend.tsx`·`InfoBox.tsx`는 범례와 정보 상자다 |
 | `tests/fixtures/sample_repo/` | 시험용 고정 레포. `src/` 소스 루트, 하위 패키지, 함수 안 import, 상속, dataclass, `__main__` 블록, 한글 문자열 뒤 호출, 동적 호출을 담는다 |
 
 ## 실행
@@ -47,4 +47,4 @@ python3 -m venv .venv
 
 `tests/test_lsp.py`·`tests/test_graph.py`는 code-atlas 가상환경의 basedpyright를 실제로 띄운다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다.
 
-화면을 고칠 때는 백엔드를 띄운 채 `frontend/`에서 `npm run dev`를 실행한다. Vite 개발 서버가 `/api`를 `localhost:8766`으로 넘긴다. `npm run typecheck`로 타입을 검사한다.
+화면을 고칠 때는 백엔드를 띄운 채 `frontend/`에서 `npm run dev`를 실행한다. Vite 개발 서버가 `/api`를 `localhost:8766`으로 넘긴다. `npm run typecheck`로 타입을 검사하고 `npm test`로 배치·그리는 범위·초점 계산을 고정 그래프에서 확인한다. `node scripts/screenshot.mjs [주소] [노드 id]`는 밝은 화면·어두운 화면·초점 상태 세 장을 `~/data/code-atlas/screenshots/`에 찍는다. Playwright가 받은 chromium과 다른 실행 파일을 쓰려면 `CHROMIUM_PATH`에 경로를 넣는다.

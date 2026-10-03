@@ -35,6 +35,15 @@ export function getGraph(): Promise<Graph> {
   return request("/api/graph");
 }
 
+const files = new Map<string, Promise<FileText>>();
+
+/** 코드 뷰어와 정보 상자가 같은 파일을 한 번만 받는다. 실패한 요청은 기억하지 않는다. */
 export function getFile(path: string): Promise<FileText> {
-  return request(`/api/file?path=${encodeURIComponent(path)}`);
+  let file = files.get(path);
+  if (file === undefined) {
+    file = request<FileText>(`/api/file?path=${encodeURIComponent(path)}`);
+    file.catch(() => files.delete(path));
+    files.set(path, file);
+  }
+  return file;
 }
