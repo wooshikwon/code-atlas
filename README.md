@@ -24,6 +24,7 @@
 | `frontend/src/tree/` | 파일 트리. 파일을 누르면 그 모듈 노드를 고른다 |
 | `frontend/src/code/` | 읽기 전용 Monaco 코드 뷰어와 범위 강조. Monaco는 CDN 없이 번들에 넣는다 |
 | `frontend/src/graph/` | 구조 뷰. `layout.ts`가 ELK를 Web Worker로 돌려 좌표를 정하고, `scope.ts`가 그릴 선을, `focus.ts`가 초점 단계를, `view.ts`가 선마다 경로·색·불투명도를 정한다. `nodes/`·`edges/`는 React Flow 노드·선 컴포넌트, `Legend.tsx`·`InfoBox.tsx`는 범례와 정보 상자다 |
+| `scripts/measure_resolution.py` | 호출 지점 해석 상태별 비율 출력, 고정 시드 표본 JSONL 작성(`~/data/code-atlas/resolution-sample.jsonl`), `--report`로 직접 채운 판정 집계 |
 | `tests/fixtures/sample_repo/` | 시험용 고정 레포. `src/` 소스 루트, 하위 패키지, 함수 안 import, 상속, dataclass, `__main__` 블록, 한글 문자열 뒤 호출, 동적 호출을 담는다 |
 
 ## 실행
