@@ -1,0 +1,9 @@
+[project]
+name = "sample"
+version = "0.0.1"
+
+[project.scripts]
+sample = "app.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
