@@ -11,7 +11,7 @@ from .collect import RepoFiles
 from .model import Analysis, to_dict
 
 HOST = "127.0.0.1"
-PORT = 8765
+PORT = 8766
 DIST_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 

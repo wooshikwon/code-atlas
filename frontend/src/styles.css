@@ -1,0 +1,212 @@
+/* 색은 theme.ts가 내보내는 변수만 쓴다. 칸 바탕·경계선·강조는 잉크를 바탕에 섞어 만든다. */
+:root {
+  --line: color-mix(in srgb, var(--muted) 35%, transparent);
+  --hover-bg: color-mix(in srgb, var(--ink) 6%, transparent);
+  --active-bg: color-mix(in srgb, var(--ink) 12%, transparent);
+  --panel-bg: color-mix(in srgb, var(--ink) 3%, var(--surface));
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--surface);
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.app {
+  height: 100%;
+}
+
+.separator {
+  width: 1px;
+  background: var(--line);
+  outline: none;
+}
+
+.separator-horizontal {
+  width: auto;
+  height: 1px;
+}
+
+.separator[data-separator="hover"],
+.separator[data-separator="active"] {
+  background: var(--muted);
+}
+
+/* 파일트리 */
+
+.explorer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--panel-bg);
+}
+
+.explorer-header {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.explorer-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+  user-select: none;
+}
+
+.explorer-empty,
+.explorer-error,
+.code-error,
+.graph-empty {
+  padding: 4px 8px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding-right: 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tree-row:hover {
+  background: var(--hover-bg);
+}
+
+.tree-row.active {
+  background: var(--active-bg);
+}
+
+.tree-toggle {
+  flex: none;
+  width: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 작업 영역 */
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.toolbar-stats {
+  color: var(--muted);
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.toolbar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.toolbar-button {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.toolbar-button:hover {
+  background: var(--hover-bg);
+}
+
+.views {
+  flex: 1;
+  min-height: 0;
+}
+
+.graph {
+  height: 100%;
+}
+
+/* 코드 뷰어 */
+
+.code {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.code-header {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  line-height: 24px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.code-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.code-range {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}

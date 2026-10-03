@@ -18,16 +18,22 @@
 | `code_atlas/venv.py` | 대상 레포의 가상환경 인터프리터 탐색 |
 | `code_atlas/api.py` | `/api/repo`·`/api/tree`·`/api/graph`·`/api/file` 경로와 `frontend/dist/` 서빙. `127.0.0.1`에만 연다 |
 | `code_atlas/cli.py` | `code-atlas <레포>`(분석 뒤 서버 실행)와 `code-atlas analyze <레포>`(결과 출력) 명령 |
+| `frontend/src/api/` | API 계약 자료형과 백엔드 호출. 화면 컴포넌트는 `client.ts`만 거친다 |
+| `frontend/src/state/` | 분석 결과와 선택·마우스 올림·연 파일·테스트 코드 표시·화면 색 상태를 담는 저장소 `useAtlas()` |
+| `frontend/src/theme.ts` | 밝은 화면·어두운 화면 색 값과 CSS 변수 내보내기 |
+| `frontend/src/tree/` | 파일 트리. 파일을 누르면 그 모듈 노드를 고른다 |
+| `frontend/src/code/` | 읽기 전용 Monaco 코드 뷰어와 범위 강조. Monaco는 CDN 없이 번들에 넣는다 |
+| `frontend/src/graph/` | 구조 뷰 |
 | `tests/fixtures/sample_repo/` | 시험용 고정 레포. `src/` 소스 루트, 하위 패키지, 함수 안 import, 상속, dataclass, `__main__` 블록, 한글 문자열 뒤 호출, 동적 호출을 담는다 |
 
 ## 실행
 
 ```bash
-.venv/bin/code-atlas <레포 경로> [--python PATH] [--port 8765] [--no-open]
+.venv/bin/code-atlas <레포 경로> [--python PATH] [--port 8766] [--no-open]
 .venv/bin/code-atlas analyze <레포 경로> [--python PATH] [--json]
 ```
 
-대상 레포의 인터프리터는 `.venv`, `venv`, poetry 환경 순서로 찾고, 찾지 못하면 `--python`으로 지정한다. 화면이 없는 서버에서는 브라우저를 열지 않고 주소만 출력한다.
+화면은 `frontend/dist/`를 같은 포트에서 서빙하므로 먼저 `cd frontend && npm install && npm run build`로 빌드한다. 대상 레포의 인터프리터는 `.venv`, `venv`, poetry 환경 순서로 찾고, 찾지 못하면 `--python`으로 지정한다. 화면이 없는 서버에서는 브라우저를 열지 않고 주소만 출력한다.
 
 ## 개발
 
@@ -40,3 +46,5 @@ python3 -m venv .venv
 ```
 
 `tests/test_lsp.py`·`tests/test_graph.py`는 code-atlas 가상환경의 basedpyright를 실제로 띄운다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다.
+
+화면을 고칠 때는 백엔드를 띄운 채 `frontend/`에서 `npm run dev`를 실행한다. Vite 개발 서버가 `/api`를 `localhost:8766`으로 넘긴다. `npm run typecheck`로 타입을 검사한다.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 import threading
 import webbrowser
@@ -44,18 +45,32 @@ def _analyze_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bind_or_exit(port: int) -> socket.socket:
+    """분석에 수십 초가 걸리므로 포트를 먼저 잡아 둔다."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((HOST, port))
+    except OSError as exc:
+        print(f"{HOST}:{port}에 서버를 띄울 수 없다: {exc.strerror}. --port로 다른 포트를 고른다", file=sys.stderr)
+        sys.exit(2)
+    return sock
+
+
 def _serve_command(args: argparse.Namespace) -> int:
     import uvicorn
 
+    sock = _bind_or_exit(args.port)
     python = args.python or find(args.repo)
     analysis, files = _analyze_or_exit(args.repo, python)
     _print_summary(analysis)
     url = f"http://{HOST}:{args.port}"
     if args.no_open or (sys.platform.startswith("linux") and not os.environ.get("DISPLAY")):
-        print(f"주소: {url}")
+        print(f"주소: {url}", flush=True)
     else:
         threading.Timer(1.0, webbrowser.open, [url]).start()
-    uvicorn.run(create_app(analysis, files, python), host=HOST, port=args.port, log_level="warning")
+    config = uvicorn.Config(create_app(analysis, files, python), log_level="warning")
+    uvicorn.Server(config).run(sockets=[sock])
     return 0
 
 
