@@ -1,4 +1,4 @@
-"""HTTP 경로를 메모리의 분석 결과와 언어 서버 세션에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
+"""HTTP 경로를 메모리의 분석 결과, 언어 서버 세션, 요약 캐시에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
 
 세션은 lifespan이 띄워 분석에 쓴 뒤 서버가 내려갈 때 닫는다.
 """
@@ -19,6 +19,7 @@ from .collect import RepoFiles, collect
 from .lsp import Location, Session
 from .model import Analysis, to_dict
 from .resolve import EXTERNAL_PREFIX, Index, external_of
+from .summary import KIND_NAMES, Summaries, SummaryError, outline
 
 HOST = "127.0.0.1"
 PORT = 8766
@@ -98,6 +99,9 @@ def create_app(
             app.state.session = session
             app.state.sessions = sessions
             app.state.reopening = asyncio.Lock()
+            app.state.nodes = {n.id: n for n in analysis.nodes}
+            app.state.summaries = Summaries()
+            await app.state.summaries.unavailable()
             app.state.repo = {
                 "name": files.root.name,
                 "root": str(files.root),
@@ -174,6 +178,32 @@ def create_app(
     async def get_definition(path: str, line: int = Query(ge=1), col: int = Query(ge=0)) -> dict:
         locations = await ask(path, lambda session: session.definition_at(path, line, col))
         return {"targets": [_target(loc, app.state.analyzed.index) for loc in locations]}
+
+    def summarized(node_id: str) -> tuple[str, str, str]:
+        """노드 id를 요약에 넘길 종류, 이름, 코드로 바꾼다. 파일은 문서 문자열과 시그니처 목록을, 그 밖의 노드는 자기 줄 범위를 넘긴다."""
+        node = app.state.nodes.get(node_id)
+        text = app.state.analyzed.texts.get(node.path) if node is not None and node.kind in KIND_NAMES else None
+        if text is None:
+            raise HTTPException(status_code=404, detail=f"요약할 노드가 아니다: {node_id}")
+        if node.kind == "module":
+            return node.kind, node.path, outline(text)
+        start, end = node.range
+        return node.kind, node.id.partition(":")[2], "\n".join(text.splitlines()[start - 1 : end])
+
+    @app.get("/api/summary")
+    async def get_summary(node: str) -> dict:
+        _, _, code = summarized(node)
+        summaries: Summaries = app.state.summaries
+        reason = await summaries.unavailable()
+        return {"summary": summaries.cached(code), "available": reason is None, "reason": reason}
+
+    @app.post("/api/summary")
+    async def make_summary(node: str, refresh: bool = False) -> dict:
+        kind, name, code = summarized(node)
+        try:
+            return {"summary": await app.state.summaries.make(kind, name, code, refresh)}
+        except SummaryError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/{path:path}", include_in_schema=False)
     def get_static(path: str) -> FileResponse:

@@ -5,16 +5,38 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from code_atlas import api
+from code_atlas import api, summary
 from code_atlas.api import create_app
+from code_atlas.summary import Summaries, SummaryError
 
 RUN_ENGINE_CALL = {"path": "src/app/cli.py", "line": 10, "col": 21}  # 한글 문자열 뒤의 run_engine
 
 
 @pytest.fixture(scope="module")
-def client(module_repo):
-    with TestClient(create_app(module_repo, sys.executable)) as client:
-        yield client
+def client(module_repo, tmp_path_factory):
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(summary, "CACHE_PATH", tmp_path_factory.mktemp("cache") / "summaries.db")
+        patch.setattr(summary, "find_cli", lambda: None)
+        with TestClient(create_app(module_repo, sys.executable)) as client:
+            yield client
+
+
+@pytest.fixture
+def generated(client, tmp_path, monkeypatch):
+    """빈 요약 캐시로 바꾸고 `claude` 호출을 가짜로 바꾼다. 가짜가 받은 (종류, 이름, 코드)를 돌려준 목록에 담는다."""
+    calls: list[tuple[str, str, str]] = []
+
+    async def generate(kind, name, code):
+        calls.append((kind, name, code))
+        return f"{name} 요약 {len(calls)}"
+
+    async def unavailable():
+        return None
+
+    monkeypatch.setattr(summary, "generate", generate)
+    monkeypatch.setattr(summary, "unavailable", unavailable)
+    monkeypatch.setattr(client.app.state, "summaries", Summaries(tmp_path / "summaries.db"))
+    return calls
 
 
 def test_repo(client):
@@ -132,3 +154,63 @@ def test_stopped_session_is_reopened(client, monkeypatch):
     body = client.get("/api/hover", params=RUN_ENGINE_CALL).json()
     assert body["range"] == [10, 21, 10, 31]
     assert state.session is not stopped and not state.session.stopped
+
+
+def test_summary_is_made_on_post_and_read_from_cache(client, generated):
+    node = {"node": "app.core:run_engine"}
+    assert client.get("/api/summary", params=node).json() == {"summary": None, "available": True, "reason": None}
+    assert generated == []
+
+    assert client.post("/api/summary", params=node).json() == {"summary": "run_engine 요약 1"}
+    kind, name, code = generated[0]
+    assert (kind, name) == ("function", "run_engine")
+    assert code.startswith("def run_engine(config: Config) -> Engine:") and code.endswith("return engine")
+
+    assert client.post("/api/summary", params=node).json() == {"summary": "run_engine 요약 1"}
+    assert client.get("/api/summary", params=node).json()["summary"] == "run_engine 요약 1"
+    assert len(generated) == 1
+
+    assert client.post("/api/summary", params={**node, "refresh": "true"}).json() == {"summary": "run_engine 요약 2"}
+    assert client.get("/api/summary", params=node).json()["summary"] == "run_engine 요약 2"
+
+
+def test_summary_of_method_and_file(client, generated):
+    client.post("/api/summary", params={"node": "app.core:Engine.start"})
+    client.post("/api/summary", params={"node": "app.core"})
+    (_, method_name, method_code), (file_kind, file_name, file_code) = generated
+    assert method_name == "Engine.start" and method_code.lstrip().startswith("def start(self")
+    assert (file_kind, file_name) == ("module", "src/app/core.py")
+    assert file_code.splitlines() == [
+        "def helper(value):",
+        "class Engine:",
+        "def run_engine(config: Config) -> Engine:",
+    ]
+
+
+def test_summary_reports_unavailable_cli(client, generated, monkeypatch):
+    async def unavailable():
+        return "Claude Code CLI를 찾지 못했다"
+
+    monkeypatch.setattr(summary, "unavailable", unavailable)
+    body = client.get("/api/summary", params={"node": "app.core:helper"}).json()
+    assert body == {"summary": None, "available": False, "reason": "Claude Code CLI를 찾지 못했다"}
+
+
+def test_summary_failure_is_503(client, generated, monkeypatch):
+    async def generate(kind, name, code):
+        raise SummaryError("Claude Code CLI가 60초 안에 응답하지 않았다")
+
+    monkeypatch.setattr(summary, "generate", generate)
+    response = client.post("/api/summary", params={"node": "app.core:helper"})
+    assert response.status_code == 503
+    assert response.json() == {"error": "Claude Code CLI가 60초 안에 응답하지 않았다"}
+    assert client.get("/api/summary", params={"node": "app.core:helper"}).json()["summary"] is None
+
+
+@pytest.mark.parametrize("method", ["get", "post"])
+@pytest.mark.parametrize("node", ["app.core:nope", "app", "ext:os"])
+def test_summary_of_unknown_or_codeless_node_is_404(client, generated, method, node):
+    response = getattr(client, method)("/api/summary", params={"node": node})
+    assert response.status_code == 404
+    assert "error" in response.json()
+    assert generated == []

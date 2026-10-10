@@ -1,5 +1,5 @@
 // 백엔드 호출은 모두 이 파일을 거친다. 화면 컴포넌트는 fetch를 직접 부르지 않는다.
-import type { ApiErrorBody, Definition, FileText, Graph, Hover, Repo, Tree } from "./types";
+import type { ApiErrorBody, Definition, FileText, Graph, Hover, MadeSummary, Repo, SummaryStatus, Tree } from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -11,8 +11,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(path, { signal });
+async function request<T>(path: string, signal?: AbortSignal, method = "GET"): Promise<T> {
+  const response = await fetch(path, { signal, method });
   if (response.ok) {
     return (await response.json()) as T;
   }
@@ -59,4 +59,14 @@ export function getHover(path: string, line: number, col: number, signal?: Abort
 
 export function getDefinition(path: string, line: number, col: number): Promise<Definition> {
   return request(`/api/definition?${position(path, line, col)}`);
+}
+
+/** 캐시에 있는 요약만 읽는다. */
+export function getSummary(node: string): Promise<SummaryStatus> {
+  return request(`/api/summary?node=${encodeURIComponent(node)}`);
+}
+
+/** 캐시에 없으면 요약을 만들게 한다. refresh면 캐시에 있어도 다시 만든다. */
+export function makeSummary(node: string, refresh: boolean): Promise<MadeSummary> {
+  return request(`/api/summary?node=${encodeURIComponent(node)}${refresh ? "&refresh=true" : ""}`, undefined, "POST");
 }
