@@ -91,10 +91,11 @@ describe("labelOf", () => {
     expect(labelOf(nodes.get("pkg.mod:Store")!)).toBe("Store");
   });
 
-  it("24자를 넘는 경로는 앞쪽 폴더부터 …/로 줄이고 그 밖의 이름표는 24자에서 자른다", () => {
+  it("24자를 넘는 경로는 앞쪽 폴더부터 …/로 줄이고, 줄인 폴더가 없는 경로와 그 밖의 이름표는 24자에서 자른다", () => {
     expect(labelOf(node("billing.adapters.stripe_gateway", "module", "stripe_gateway"))).toBe("…/stripe_gateway.py");
     expect(labelOf(node("services.billing.adapters", "package", "adapters"))).toBe("…/billing/adapters/");
     expect(labelOf(node("a.test_arbiter_lifecycle_extra", "module", "x"))).toBe("…/test_arbiter_lifecycl…");
+    expect(labelOf(node("test_arbiter_lifecycle_extra", "module", "x"))).toBe("test_arbiter_lifecycle_…");
     expect(labelOf(node("m:f", "function", "_rebuild_note_sections_all"))).toBe("_rebuild_note_sections_…");
     expect(titleOf(node("m:f", "function", "_rebuild_note_sections_all"))).toBe("_rebuild_note_sections_all()");
   });

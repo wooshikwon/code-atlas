@@ -8,7 +8,7 @@ function node(id: string, kind: AtlasNode["kind"], parent: string | null, path: 
   return { id, kind, name, parent, path, range: [start, start + 5], test } as AtlasNode;
 }
 
-// 소스 루트 src에는 패키지 노드가 없고, 폴더 parser와 그 안의 __init__.py는 같은 패키지 노드를 가리킨다.
+// 소스 루트 src에는 패키지 노드가 없고, 폴더 parser 안의 __init__.py는 모듈 노드가 없다.
 const graph: Graph = {
   nodes: [
     node("arbiter", "module", null, "src/arbiter.py"),
@@ -28,7 +28,7 @@ const graph: Graph = {
   edges: [],
 };
 
-const file = (path: string, nodeId: string, test = false) => ({
+const file = (path: string, nodeId: string | null, test = false) => ({
   path,
   name: path.split("/").at(-1)!,
   kind: "file" as const,
@@ -51,7 +51,7 @@ const tree: Tree = {
           kind: "dir",
           test: false,
           node: "parser",
-          children: [file("src/parser/__init__.py", "parser"), file("src/parser/plan.py", "parser.plan")],
+          children: [file("src/parser/__init__.py", null), file("src/parser/plan.py", "parser.plan")],
         },
         file("src/arbiter.py", "arbiter"),
         file("src/empty.py", "empty"),
@@ -64,6 +64,7 @@ const tree: Tree = {
 const state = (change: Partial<TreeState> = {}): TreeState => ({
   collapsed: new Set(),
   selected: null,
+  opened: null,
   showTests: false,
   changes: null,
   ...change,
@@ -89,7 +90,7 @@ describe("rows", () => {
     expect(rows(tree, graph, state()).map((row) => [row.label, row.kind, row.level, row.expanded])).toEqual([
       ["src/", "dir", 1, true],
       ["parser/", "dir", 2, true],
-      ["__init__.py", "file", 3, false],
+      ["__init__.py", "file", 3, null],
       ["plan.py", "file", 3, false],
       ["arbiter.py", "file", 2, false],
       ["empty.py", "file", 2, null],
@@ -143,15 +144,25 @@ describe("rows", () => {
     expect(list.some((row) => row.key === "parser.plan:parse_plan")).toBe(false);
   });
 
-  it("폴더와 __init__.py가 같은 패키지 노드를 가리키면 두 행을 고른 행으로 표시하고 목록은 파일 아래에 잇는다", () => {
+  it("__init__.py 행은 노드 없이 파일 경로를 담고, 폴더를 골라도 고른 행이 되지 않으며 아래에 목록을 잇지 않는다", () => {
     const list = rows(tree, graph, state({ selected: "parser" }));
-    expect(list.filter((row) => row.selected).map((row) => row.key)).toEqual(["src/parser", "src/parser/__init__.py"]);
-    expect(list.map((row) => row.key).slice(1, 5)).toEqual([
-      "src/parser",
-      "src/parser/__init__.py",
-      "parser:version",
-      "src/parser/plan.py",
-    ]);
+    expect(list.filter((row) => row.selected).map((row) => row.key)).toEqual(["src/parser"]);
+    expect(list.find((row) => row.key === "src/parser/__init__.py")).toMatchObject({ node: null, file: "src/parser/__init__.py", expanded: null });
+    expect(list.some((row) => row.key === "parser:version")).toBe(false);
+    expect(list.filter((row) => row.file !== null)).toHaveLength(1);
+  });
+
+  it("__init__.py 행이 패키지 노드 id를 담은 파일트리에서도 그 행은 노드 없이 파일 경로를 담는다", () => {
+    const old = structuredClone(tree);
+    old.entries[0].children![0].children![0].node = "parser";
+    const list = rows(old, graph, state({ selected: "parser" }));
+    expect(list.filter((row) => row.selected).map((row) => row.key)).toEqual(["src/parser"]);
+    expect(list.find((row) => row.key === "src/parser/__init__.py")).toMatchObject({ node: null, file: "src/parser/__init__.py" });
+  });
+
+  it("정보 패널에 연 파일의 행을 고른 행으로 표시한다", () => {
+    const list = rows(tree, graph, state({ selected: "arbiter", opened: "src/parser/__init__.py" }));
+    expect(list.filter((row) => row.selected).map((row) => row.key)).toEqual(["src/parser/__init__.py", "src/arbiter.py"]);
   });
 
   it("테스트 코드는 토글이 켜졌을 때만 넣는다", () => {
@@ -190,7 +201,7 @@ describe("변경 표시", () => {
     expect(list.map((row) => [row.key, row.level, row.node])).toEqual([
       ["src", 1, null],
       ["src/parser", 2, "parser"],
-      ["src/parser/__init__.py", 3, "parser"],
+      ["src/parser/__init__.py", 3, null],
       ["src/parser/note.py", 3, null],
       ["src/parser/plan.py", 3, "parser.plan"],
       ["src/tools", 2, null],
@@ -199,13 +210,36 @@ describe("변경 표시", () => {
       ["src/arbiter.py", 2, "arbiter"],
       ["src/empty.py", 2, "empty"],
     ]);
-    expect(list.find((row) => row.key === "src/parser/note.py")?.expanded).toBeNull();
+    expect(list.find((row) => row.key === "src/parser/note.py")).toMatchObject({ expanded: null, file: null });
     expect(tree.entries[0].children).toHaveLength(3);
   });
 
   it("접은 폴더는 안에 바뀐 파일이 있으면 수정으로 표시하고 펼친 폴더는 표시하지 않는다", () => {
     expect(marks().find(([label]) => label === "parser/")).toEqual(["parser/", null]);
     expect(marks({ collapsed: new Set(["parser"]) }).find(([label]) => label === "parser/")).toEqual(["parser/", "modified"]);
+  });
+
+  it("마지막 커밋과 같고 분석한 뒤에만 바뀐 파일은 변경 상태를 붙이지 않는다", () => {
+    const stale: Changes = { git: true, branch: "main", files: [{ path: "src/empty.py", status: "unchanged", stale: true }], nodes: {} };
+    expect(rows(tree, graph, state({ changes: stale })).every((row) => row.change === null)).toBe(true);
+  });
+
+  it("분석한 뒤 생긴 파일은 테스트 코드 폴더 아래에 있거나 이름이 테스트 코드 규칙에 맞으면 토글이 켜졌을 때만 넣는다", () => {
+    const added = (path: string) => ({ path, status: "added" as const, stale: false });
+    const fresh: Changes = {
+      git: true,
+      branch: "main",
+      files: ["src/test_new.py", "src/conftest.py", "src/tools/tests/case.py", "src/parser/plan_test.py", "src/latest.py"].map(added),
+      nodes: {},
+    };
+    const made = (showTests: boolean) =>
+      rows(tree, graph, state({ changes: fresh, showTests }))
+        .filter((row) => row.change === "added")
+        .map((row) => row.key);
+    expect(made(false)).toEqual(["src/latest.py"]);
+    expect(made(true).sort()).toEqual(
+      ["src/conftest.py", "src/latest.py", "src/parser/plan_test.py", "src/test_new.py", "src/tools/tests/case.py"].sort(),
+    );
   });
 
   it("지워진 파일과 변경 내용이 없을 때는 행을 더하지 않는다", () => {

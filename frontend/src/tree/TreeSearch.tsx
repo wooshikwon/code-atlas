@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import type { EntryKind } from "../search/index";
 import { Icon } from "./Icon";
 import type { Result } from "./rows";
@@ -20,6 +20,8 @@ function marked(text: string, positions: Set<number>): ReactNode {
 }
 
 interface SearchProps {
+  /** 검색 칸. 결과 행을 누른 뒤 포커스를 돌려줄 때 쓴다. */
+  input: RefObject<HTMLInputElement | null>;
   query: string;
   onQuery: (query: string) => void;
   list: Result[];
@@ -30,9 +32,7 @@ interface SearchProps {
 }
 
 /** 파일트리 맨 위 검색 칸. 질의가 있으면 오른쪽에 지우기 버튼을 그린다. */
-export function TreeSearch({ query, onQuery, list, active, onActive, onPick }: SearchProps) {
-  const input = useRef<HTMLInputElement>(null);
-
+export function TreeSearch({ input, query, onQuery, list, active, onActive, onPick }: SearchProps) {
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.nativeEvent.isComposing) {
       return;

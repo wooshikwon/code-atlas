@@ -1,7 +1,8 @@
 // 배치가 정한 직각 경로를 모서리를 둥글려 그린다. 선 분류는 선 모양과 화살촉으로, 초점은 선의 진하기로 가른다.
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
 import type { EdgeGroup } from "../../api/types";
-import { midpoint, roundedPath, type EdgeView, type Tone } from "../view";
+import type { Tone } from "../scope";
+import { midpoint, roundedPath, type EdgeView } from "../view";
 
 export type AtlasFlowEdge = Edge<EdgeView>;
 

@@ -3,9 +3,9 @@ import type { Graph } from "../api/types";
 import { nodeIndex, unitOf } from "./visible";
 
 export interface Flow {
-  /** 고른 노드가 파일 상자면 "file"이고, 이때 out과 incoming의 키는 파일 노드 id다. */
+  /** 고른 노드가 파일 상자나 폴더면 "file"이고, 이때 out과 incoming의 키는 파일 노드 id다. */
   unit: "file" | "node";
-  /** 고른 노드가 든 파일 상자 */
+  /** 고른 노드가 든 파일 상자. 폴더를 골랐으면 그 폴더다. */
   file: string;
   /** 나가는 선을 따라가는 단계 수 */
   depth: number;
@@ -17,15 +17,17 @@ export interface Flow {
   incoming: Set<string>;
 }
 
-export type Opacity = 1 | 0.5 | 0.2;
+type Opacity = 1 | 0.5 | 0.2;
 
 /**
  * 고른 노드에서 세 분류의 선을 나가는 방향으로 depth단계까지 따라가 단계를 센다. 함수 안 import 선도 따라가고,
- * hidden에 든 노드는 거치지 않는다. 파일 상자를 고르면 선의 양 끝을 파일 노드로 올린 파일 그래프에서 센다.
+ * hidden에 든 노드는 거치지 않는다. 파일 상자나 폴더를 고르면 선의 양 끝을 파일 노드로 올린 파일 그래프에서 세고,
+ * 고른 상자 안의 노드는 고른 상자로 올린다.
  */
 export function flow(graph: Graph, selection: string, depth: number, hidden: Set<string>): Flow {
   const nodes = nodeIndex(graph);
-  const unit = nodes.get(selection)?.kind === "module" ? "file" : "node";
+  const kind = nodes.get(selection)?.kind;
+  const unit = kind === "module" || kind === "package" ? "file" : "node";
 
   const children = new Map<string, string[]>();
   for (const node of graph.nodes) {
@@ -39,14 +41,15 @@ export function flow(graph: Graph, selection: string, depth: number, hidden: Set
   }
 
   const start = unit === "file" ? new Set([selection]) : seeds;
+  const end = (id: string) => (unit === "node" ? id : seeds.has(id) ? selection : unitOf(nodes, id));
   const targets = new Map<string, string[]>();
   const incoming = new Set<string>();
   for (const edge of graph.edges) {
     if (hidden.has(edge.source) || hidden.has(edge.target)) {
       continue;
     }
-    const source = unit === "file" ? unitOf(nodes, edge.source) : edge.source;
-    const target = unit === "file" ? unitOf(nodes, edge.target) : edge.target;
+    const source = end(edge.source);
+    const target = end(edge.target);
     if (source === target || (start.has(source) && start.has(target))) {
       continue;
     }

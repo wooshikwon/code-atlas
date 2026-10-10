@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getChanges } from "../api/client";
 import type { Changes } from "../api/types";
-import { inside, useChanges, watch } from "./changes";
+import { inside, staleCount, useChanges, watch } from "./changes";
 
 vi.mock("../api/client", () => ({ getChanges: vi.fn() }));
 
@@ -107,5 +107,18 @@ describe("inside", () => {
     expect(inside(nodes, "pk")).toBe(false);
     expect(inside(nodes, "pkg.mod.deep")).toBe(false);
     expect(inside({}, "pkg")).toBe(false);
+  });
+});
+
+describe("staleCount", () => {
+  it("분석한 뒤 바뀐 파일을 변경 상태와 관계없이 센다", () => {
+    const files: Changes["files"] = [
+      { path: "pkg/mod.py", status: "modified", stale: true },
+      { path: "pkg/util.py", status: "unchanged", stale: true },
+      { path: "pkg/new.py", status: "added", stale: false },
+    ];
+    expect(staleCount(changes({ files }))).toBe(2);
+    expect(staleCount(changes({ git: false, branch: null, files: [files[1]], nodes: {} }))).toBe(1);
+    expect(staleCount(null)).toBe(0);
   });
 });

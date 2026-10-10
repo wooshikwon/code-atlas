@@ -3,7 +3,16 @@ import type { EdgeKey } from "../graph/scope";
 
 export type View = { kind: "structure" } | { kind: "function"; center: string; expanded: string[] };
 
-export type Selection = { type: "node"; id: string } | { type: "edge"; key: EdgeKey } | null;
+/** 선을 고르면 직전에 초점을 둔 노드를 focus에 담아 그래프가 그 노드의 초점을 유지한다. */
+export type Selection = { type: "node"; id: string } | { type: "edge"; key: EdgeKey; focus: string | null } | null;
+
+/** 선택에서 그래프가 초점을 두는 노드 */
+export function focusOf(selection: Selection): string | null {
+  if (selection === null) {
+    return null;
+  }
+  return selection.type === "node" ? selection.id : selection.focus;
+}
 
 export interface Place {
   view: View;

@@ -10,6 +10,7 @@ import {
 import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { AtlasNode } from "../api/types";
+import type { History } from "../state/history";
 import { useAtlas } from "../state/store";
 import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./callview";
 import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
@@ -18,14 +19,12 @@ import { Legend } from "./Legend";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
-import { GROUP_NAMES, KIND_NAMES } from "./view";
-import { boundsOf, fitPadding, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { GROUP_NAMES, KIND_NAMES } from "./names";
+import { boundsOf, fitPadding, FRAME_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, nodeIndex } from "./visible";
 
 const nodeTypes: NodeTypes = { call: CallNode };
 
-/** 화면을 맞출 때 이름표가 본문 글자보다 커지지 않게 확대 비율을 100%에서 멈춘다. */
-const FRAME_ZOOM = 1;
 const EDGE_Z = 0;
 const NODE_Z = 1;
 
@@ -66,7 +65,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const selection = useAtlas((s) => s.selection);
   const select = useAtlas((s) => s.select);
   const selectEdge = useAtlas((s) => s.selectEdge);
-  const enterFunction = useAtlas((s) => s.enterFunction);
+  const open = useAtlas((s) => s.open);
   const expandFunction = useAtlas((s) => s.expandFunction);
   const { setViewport } = useReactFlow();
   const selected = selection?.type === "node" ? selection.id : null;
@@ -82,8 +81,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const onScreen = useRef<Layout | null>(null);
   /** 화면을 맞춰 둔 가운데 함수 */
   const framed = useRef<string | null>(null);
-  /** 직전에 한 번 누른 노드. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
-  const clicked = useRef<string | null>(null);
+  /** 직전에 한 번 누른 노드와 누르기 전의 이력. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
+  const clicked = useRef<{ id: string; from: History } | null>(null);
 
   const index = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
   const calls = useMemo(
@@ -165,18 +164,19 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       type: "orthogonal",
       data: view,
       zIndex: EDGE_Z,
-      interactionWidth: 12,
     }));
   }, [scene]);
 
-  /** 연달아 누른 두 번째 클릭이면 처음 누른 함수·메서드를 가운데로 옮기고 참을 돌려준다. 세 번째부터는 아무 일도 하지 않는다. */
+  /**
+   * 연달아 누른 두 번째 클릭이면 처음 누른 함수·메서드를 가운데로 옮기고 참을 돌려준다. 가운데 함수면 첫 클릭 전으로
+   * 되돌리기만 한다. 세 번째부터는 아무 일도 하지 않는다.
+   */
   const repeated = (event: ReactMouseEvent): boolean => {
     if (event.detail < 2) {
       return false;
     }
-    const kind = clicked.current === null ? undefined : index?.get(clicked.current)?.kind;
-    if (event.detail === 2 && clicked.current !== null && (kind === "function" || kind === "method")) {
-      enterFunction(clicked.current);
+    if (event.detail === 2 && clicked.current !== null) {
+      open(clicked.current.id, clicked.current.from);
     }
     return true;
   };
@@ -191,7 +191,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     if (repeated(event)) {
       return;
     }
-    clicked.current = node.id;
+    clicked.current = { id: node.id, from: useAtlas.getState().history };
     select(node.id);
   };
   const onPaneClick = (event: ReactMouseEvent) => {

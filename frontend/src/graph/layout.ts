@@ -34,12 +34,12 @@ export type Measure = (text: string, bold?: boolean) => number;
 /** ELK를 한 번 돌린다. 브라우저는 worker로, 시험은 elk.bundled.js로 돌린다. */
 export type RunElk = (graph: ElkNode) => Promise<ElkNode>;
 
-export const FONT = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
-export const HEADER = 32;
-export const PAD = 16;
+const FONT = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
+const HEADER = 32;
+const PAD = 16;
 export const TABLE_HEAD = 24;
 export const TABLE_ROW = 18;
-export const HEX_HEIGHT = 28;
+const HEX_HEIGHT = 28;
 export const MODULE_WIDTH = 220;
 export const MODULE_HEIGHT = 40;
 /** 접힌 파일 상자 아래에 적는 함수 수 글자의 높이 */
@@ -80,7 +80,7 @@ function cut(text: string): string {
   return text.length > LABEL_MAX ? `${text.slice(0, LABEL_MAX - 1)}…` : text;
 }
 
-/** 24자를 넘는 경로를 앞쪽 폴더부터 `…/`로 줄인다. 폴더 경로는 `/`로 끝난다. */
+/** 24자를 넘는 경로를 앞쪽 폴더부터 `…/`로 줄인다. 줄인 폴더가 없으면 `…/`를 붙이지 않는다. 폴더 경로는 `/`로 끝난다. */
 function shortPath(path: string): string {
   if (path.length <= LABEL_MAX) {
     return path;
@@ -91,7 +91,7 @@ function shortPath(path: string): string {
   while (parts.length > 0 && `…/${parts.at(-1)}/${tail}`.length <= LABEL_MAX) {
     tail = `${parts.pop()}/${tail}`;
   }
-  return cut(`…/${tail}`);
+  return cut(parts.length > 0 ? `…/${tail}` : tail);
 }
 
 /** 줄이지 않은 이름표. 파일과 폴더는 소스 루트 기준 경로이고 폴더는 `/`로 끝난다. 함수·메서드는 `이름()`이다. */
@@ -122,7 +122,7 @@ export function tableRows(node: AtlasNode): string[] {
   return rows.length > TABLE_ROWS_MAX ? [...rows.slice(0, TABLE_ROWS_MAX), `외 ${rows.length - TABLE_ROWS_MAX}개`] : rows;
 }
 
-export function tableHeight(node: AtlasNode): number {
+function tableHeight(node: AtlasNode): number {
   return TABLE_HEAD + tableRows(node).length * TABLE_ROW + 4;
 }
 

@@ -3,6 +3,7 @@
 // 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름과 수는 sync-engine을 연 서버가 기준이다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
 // summary 시나리오는 Claude Code 구독 사용량을 쓰므로 --only로 지정하거나 --with-summary를 줬을 때만 돈다.
+// 다른 시나리오가 보내는 POST /api/summary는 서버로 보내지 않고 붙잡아 두었다가 버린다.
 // changes 시나리오는 /api/repo의 root에서 git status와 git diff를 읽기 전용으로 부르므로 서버와 같은 기계에서 돌린다.
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -140,6 +141,14 @@ const edgesOf = (page) =>
       };
     }),
   );
+
+/** 선의 진하기 세 단계마다 그린 선 수 */
+function toneLevels(edges) {
+  const ink = edges.filter((e) => e.tone === "strong").length;
+  const full = edges.filter((e) => e.tone === "muted" && e.opacity === 1).length;
+  const dim = edges.filter((e) => e.tone === "muted" && e.opacity === DIM).length;
+  return `본문 잉크 ${ink}개, muted 100% ${full}개, muted 20% ${dim}개`;
+}
 
 /** CSS 변수의 값과 그 값을 브라우저가 계산한 rgb 문자열 */
 const colorOf = (page, name) =>
@@ -306,6 +315,17 @@ async function file(t, page) {
   );
   const zoom = await zoomOf(page);
   t.check("확대 비율이 누르기 전과 같다", near(zoom, before.zoom, 0.001), `${before.zoom.toFixed(3)} → ${zoom.toFixed(3)}`);
+  const edges = await edgesOf(page);
+  const touching = edges.filter((e) => e.source === FILE || e.target === FILE);
+  const levels = toneLevels(edges);
+  t.check(
+    "arbiter.py 상자에서 나가고 들어오는 집계 선만 본문 잉크이고 상자 안의 선은 muted 잉크 100%다",
+    touching.length > 0 &&
+      touching.every((e) => e.key.startsWith("agg|") && e.tone === "strong" && e.opacity === 1) &&
+      edges.every((e) => touching.includes(e) || e.tone === "muted") &&
+      edges.filter((e) => e.source.startsWith(`${FILE}:`) && e.target.startsWith(`${FILE}:`)).every((e) => e.opacity === 1),
+    `그린 선 ${edges.length}개: ${levels}`,
+  );
   const { free } = await stageOf(page);
   const box = await rectOf(page, node(FILE));
   const placed = (start, length, from, room) =>
@@ -324,12 +344,18 @@ async function focused(t, page) {
   await pick(page, FUNCTION);
   await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
   const edges = await edgesOf(page);
-  const touching = edges.filter((e) => e.tone === "strong" && e.opacity === 1 && (e.source === FUNCTION || e.target === FUNCTION));
-  const [out, into] = [touching.filter((e) => e.source === FUNCTION).length, touching.filter((e) => e.target === FUNCTION).length];
+  const strong = edges.filter((e) => e.tone === "strong");
+  const [out, into] = [strong.filter((e) => e.source === FUNCTION).length, strong.filter((e) => e.target === FUNCTION).length];
   t.check(
-    "고른 함수에 닿는 본문 잉크 선이 15개(나가는 선 14개, 들어오는 선 1개)다",
-    out === 14 && into === 1,
-    `나가는 선 ${out}개, 들어오는 선 ${into}개, 그린 선 ${edges.length}개 가운데 본문 잉크 ${edges.filter((e) => e.tone === "strong").length}개`,
+    "본문 잉크 선은 고른 함수에 닿는 15개(나가는 선 14개, 들어오는 선 1개)뿐이고 불투명도가 1이다",
+    out === 14 && into === 1 && strong.length === 15 && strong.every((e) => e.opacity === 1),
+    `나가는 선 ${out}개, 들어오는 선 ${into}개, 그린 선 ${edges.length}개: ${toneLevels(edges)}`,
+  );
+  const rest = edges.filter((e) => e.tone === "muted");
+  t.check(
+    "그 밖의 선은 muted 잉크이고 불투명도가 1(흐름에 든 노드 사이)이나 0.2다",
+    rest.some((e) => e.opacity === 1) && rest.some((e) => e.opacity === DIM) && rest.every((e) => e.opacity === 1 || e.opacity === DIM),
+    `불투명도 ${[...new Set(rest.map((e) => e.opacity))].sort().join("·")}`,
   );
   const [ink, muted] = [await colorOf(page, "--ink"), await colorOf(page, "--muted")];
   const strokes = [...new Set(edges.map((e) => e.stroke))].sort();
@@ -441,6 +467,17 @@ async function hover(t, page) {
   await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 });
   await page.waitForFunction(() => document.querySelector(".info-panel .monaco-editor .view-lines")?.textContent.includes("extract_today_items"));
 
+  const code = await rectOf(page, ".info-panel .code");
+  await page.mouse.click(code.x + code.width / 2, code.y + code.height / 2);
+  const focused = await page.evaluate(() => document.activeElement?.closest(".monaco-editor") != null);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(600);
+  t.check(
+    "코드 뷰어 안을 눌러 포커스를 준 뒤의 Esc는 선택을 풀지 않는다",
+    focused && (await selectedOf(page)) === FUNCTION && (await count(page, ".info-panel .code")) === 1,
+    `코드 뷰어 포커스 ${focused}, 선택 ${await selectedOf(page)}`,
+  );
+
   const word = await wordRect(page, "extract_today_items");
   const answered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/hover", { timeout: 15_000 });
   await page.mouse.move(word.x + word.width / 2 - 8, word.y + word.height / 2);
@@ -514,10 +551,23 @@ async function callview(t, page) {
   await settle(page);
   t.check("Alt+← 한 번에 펼치기 전의 함수 시점 뷰로 돌아간다", (await count(page, ".node-call")) === entered && (await count(page, ".trail-view")) === 1, `노드 ${await count(page, ".node-call")}개`);
   await page.keyboard.press("Alt+ArrowLeft");
+  await waitSelected(page, FILE).catch(() => {});
+  t.check(
+    "Alt+← 두 번에 더블클릭하기 전의 구조 뷰(arbiter.py 선택)로 돌아온다",
+    (await selectedOf(page)) === FILE && (await count(page, ".trail-view")) === 0 && (await count(page, ".node-call")) === 0,
+    `선택 ${await selectedOf(page)}`,
+  );
+
+  // 이미 고른 함수를 더블클릭한 뒤 뒤로 가면 그 함수를 고른 구조 뷰로 돌아온다.
+  await pick(page, FUNCTION);
+  await clickNode(page, FUNCTION, 2);
+  await page.waitForSelector(".node-call", { timeout: 30_000 });
+  await settle(page);
+  await page.getByRole("button", { name: "뒤로" }).click();
   await waitSelected(page, FUNCTION).catch(() => {});
   t.check(
-    "Alt+← 두 번에 구조 뷰의 직전 선택으로 돌아온다",
-    (await selectedOf(page)) === FUNCTION && (await count(page, ".trail-view")) === 0 && (await count(page, ".node-call")) === 0,
+    "고른 함수를 더블클릭해 들어간 함수 시점 뷰에서 뒤로 한 번에 그 함수를 고른 구조 뷰로 돌아온다",
+    (await selectedOf(page)) === FUNCTION && (await count(page, ".node-call")) === 0,
     `선택 ${await selectedOf(page)}`,
   );
 }
@@ -532,7 +582,8 @@ async function search(t, page) {
   await t.shot();
   await page.keyboard.press("Enter");
   await waitSelected(page, FUNCTION).catch(() => {});
-  t.check("인쇄 창이 뜨지 않는다", (await page.evaluate(() => window.__shotsPrints)) === 0);
+  const pressed = await page.evaluate(() => window.__shotsKeys.find((key) => key.key.toLowerCase() === "p" && key.mod));
+  t.check("Mod+P의 keydown이 preventDefault되어 인쇄 창이 뜨지 않는다", pressed?.prevented === true, JSON.stringify(pressed ?? null));
   t.check(
     "_rebuild_note_sections가 선택되고 팔레트가 닫힌다",
     first === FUNCTION && (await selectedOf(page)) === FUNCTION && (await count(page, ".palette")) === 0,
@@ -647,16 +698,26 @@ async function treeSearch(t, page) {
   await waitSelected(page, found[0]).catch(() => {});
   t.check("첫 결과를 누르면 그래프가 그 노드를 선택하고 결과 목록이 남는다", (await selectedOf(page)) === found[0] && (await count(page, ".tree-result")) === found.length, `선택 ${await selectedOf(page)}`);
   await t.shot();
-  await page.click(".tree-search-input");
   await page.keyboard.press("Escape");
   await page.waitForSelector("ul.tree", { timeout: 10_000 }).catch(() => {});
   await settle(page);
   const active = await page.evaluate(() => document.querySelector(".tree .tree-row.active")?.dataset.node ?? null);
   t.check(
-    "검색 칸의 Esc 뒤 파일트리가 돌아오고 선택은 그대로다",
+    "결과 행을 누른 뒤의 Esc에 질의가 비워져 파일트리가 돌아오고 선택은 그대로다",
     (await page.inputValue(".tree-search-input")) === "" && (await count(page, "ul.tree")) === 1 && (await selectedOf(page)) === found[0] && active === found[0],
     `선택 ${await selectedOf(page)}, 파일트리의 고른 행 ${active}`,
   );
+}
+
+/** `git status --porcelain`의 두 글자를 서버와 같은 규칙으로 상태로 바꾼다. 커밋에도 디스크에도 없는 파일은 null이다. */
+function stateOf(index, worktree) {
+  if (worktree === "D") {
+    return index === "A" ? null : "deleted";
+  }
+  if (index === "D") {
+    return "deleted";
+  }
+  return index === "A" || index === "?" ? "added" : "modified";
 }
 
 async function changes(t, page) {
@@ -668,20 +729,24 @@ async function changes(t, page) {
       encoding: "utf8",
     });
   const prefix = git("rev-parse", "--show-prefix").trim();
-  const modified = git("status", "--porcelain", "--", ".")
+  const modified = git("status", "--porcelain", "--untracked-files=all", "--no-renames", "--", ".")
     .split("\n")
-    .filter((line) => line.slice(0, 2).includes("M") && line.endsWith(".py"))
+    .filter((line) => line.endsWith(".py") && stateOf(line[0], line[1]) === "modified")
     .map((line) => line.slice(3).slice(prefix.length))
     .sort();
   const served = reply.files.filter((f) => f.status === "modified").map((f) => f.path).sort();
-  t.check("/api/changes의 수정 파일이 git status --porcelain의 수정 .py 파일과 같다", same(served, modified), `git ${modified.length}개, 서버 ${served.length}개`);
+  t.check(
+    "대상 레포에 수정한 .py 파일이 있고 /api/changes의 수정 파일이 git status --porcelain의 수정 .py 파일과 같다",
+    modified.length > 0 && same(served, modified),
+    `git ${modified.length}개, 서버 ${served.length}개`,
+  );
 
   await load(page);
   const pathOf = new Map(graph.nodes.map((n) => [n.id, n.path]));
   const boxed = (await boxes(page)).filter((b) => b.change === "modified");
   t.check(
     `git이 수정으로 내는 .py 파일과 같은 수(${modified.length}개)의 파일 상자에 [data-change="modified"]와 M이 있다`,
-    same(boxed.map((b) => pathOf.get(b.id)).sort(), modified) && boxed.every((b) => b.mark === "M"),
+    modified.length > 0 && same(boxed.map((b) => pathOf.get(b.id)).sort(), modified) && boxed.every((b) => b.mark === "M"),
     boxed.map((b) => b.label).join(", "),
   );
   const rows = await page.evaluate(() =>
@@ -694,31 +759,43 @@ async function changes(t, page) {
   const changed = (await colorOf(page, "--changed")).rgb;
   t.check(
     "파일트리의 같은 행에 수정 색 점과 M이 있다",
-    same(rows.map((row) => pathOf.get(row.node)).sort(), modified) && rows.every((row) => row.letter === "M" && row.dot === changed),
+    modified.length > 0 && same(rows.map((row) => pathOf.get(row.node)).sort(), modified) && rows.every((row) => row.letter === "M" && row.dot === changed),
     `${rows.length}행, 점 색 ${[...new Set(rows.map((row) => row.dot))].join("·")}`,
   );
 
-  await pick(page, FILE);
-  const hunks = [...git("diff", "-U0", "--relative", "--no-renames", "HEAD", "--", pathOf.get(FILE)).matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)].map(
-    ([, start, length]) => [Number(start), Number(start) + Math.max(Number(length ?? 1), 1) - 1],
-  );
-  const want = graph.nodes
-    .filter((n) => n.path === pathOf.get(FILE) && ["function", "method", "class", "dataclass"].includes(n.kind) && n.range !== null)
-    .filter((n) => hunks.some(([from, to]) => n.range[0] <= to && from <= n.range[1]))
-    .map((n) => n.id)
-    .sort();
+  // 수정 파일 가운데 바뀐 줄이 함수·클래스의 줄 범위와 겹치는 파일을 펼쳐 그 노드만 표시되는지 본다.
+  let target = null;
+  for (const box of boxed) {
+    const path = pathOf.get(box.id);
+    const hunks = [...git("diff", "-U0", "--relative", "--no-renames", "HEAD", "--", path).matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)].map(
+      ([, start, length]) => [Number(start), Number(start) + Math.max(Number(length ?? 1), 1) - 1],
+    );
+    const want = graph.nodes
+      .filter((n) => n.path === path && ["function", "method", "class", "dataclass"].includes(n.kind) && n.range !== null)
+      .filter((n) => hunks.some(([from, to]) => n.range[0] <= to && from <= n.range[1]))
+      .map((n) => n.id)
+      .sort();
+    if (want.length > 0 && (target === null || box.id === FILE)) {
+      target = { id: box.id, path, hunks, want };
+    }
+  }
+  if (target === null) {
+    t.check("바뀐 줄이 함수·클래스와 겹치는 수정 파일이 있다", false, `수정 파일 ${boxed.length}개`);
+    return;
+  }
+  await pick(page, target.id);
   const marked = await page.evaluate(
     (file) =>
       [...document.querySelectorAll(".react-flow__node > [data-change]")]
         .map((root) => root.closest(".react-flow__node").dataset.id)
         .filter((id) => id.startsWith(`${file}:`))
         .sort(),
-    FILE,
+    target.id,
   );
   t.check(
-    "arbiter.py를 펼치면 git diff -U0 HEAD의 바뀐 줄과 겹치는 함수만 표시된다",
-    same(marked, want),
-    `바뀐 줄 ${hunks.map(([from, to]) => `${from}~${to}`).join(", ") || "없음"}, 표시 ${marked.join(", ") || "없음"}`,
+    `${target.path} 상자를 펼치면 git diff -U0 HEAD의 바뀐 줄과 겹치는 함수만 표시된다`,
+    same(marked, target.want),
+    `바뀐 줄 ${target.hunks.map(([from, to]) => `${from}~${to}`).join(", ")}, 표시 ${marked.join(", ") || "없음"}`,
   );
 }
 
@@ -735,28 +812,30 @@ async function zoomKeep(t, page) {
   t.check("1.2로 키운 뒤 다른 함수를 고르면 확대 비율이 그대로다", near(large, 1.2, 0.01) && near(kept, large, 0.001), `${large.toFixed(3)} → ${kept.toFixed(3)}`);
 }
 
-async function summary(t, page) {
+/** GET은 캐시만 읽으므로 요약을 만들지 않고 캐시에 요약이 없는 함수를 want개까지 찾는다. */
+async function uncached(want) {
   const graph = await api("/api/graph");
   const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
-  // GET은 캐시만 읽으므로 요약을 만들지 않고 캐시에 없는 함수를 찾는다.
-  let target = null;
+  const found = [];
   let status = null;
   for (const candidate of graph.nodes.filter((n) => n.kind === "function" && !n.test)) {
     status = await api(`/api/summary?node=${encodeURIComponent(candidate.id)}`);
     if (status.summary === null) {
-      target = candidate;
-      break;
+      let owner = candidate;
+      while (owner.kind !== "module" && owner.parent !== null) {
+        owner = nodes.get(owner.parent);
+      }
+      found.push({ id: candidate.id, owner: owner.id });
+      if (found.length === want) {
+        break;
+      }
     }
   }
-  if (target === null || !status.available) {
-    t.check("캐시에 없는 함수가 있고 Claude Code CLI를 부를 수 있다", false, target === null ? "모든 함수의 요약이 캐시에 있다" : `${status.reason}`);
-    return;
-  }
-  let owner = target;
-  while (owner.kind !== "module" && owner.parent !== null) {
-    owner = nodes.get(owner.parent);
-  }
-  t.summaries.add(target.id);
+  return { found, available: status?.available === true, reason: status?.reason ?? null };
+}
+
+/** 이 페이지가 보낸 POST /api/summary의 노드 id를 차례로 담는 배열 */
+function summaryPosts(page) {
   const posts = [];
   page.on("request", (request) => {
     const at = new URL(request.url());
@@ -764,35 +843,201 @@ async function summary(t, page) {
       posts.push(at.searchParams.get("node"));
     }
   });
-  const sent = () => posts.filter((id) => id === target.id).length;
-  const hint = () => page.evaluate(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent ?? "");
+  return posts;
+}
 
-  await load(page);
-  await page.click(`.tree-row.tree-file[data-node="${owner.id}"]`);
+/** 파일트리에서 파일을 펼친 뒤 그 안의 함수 행을 눌러 고른다. */
+async function pickInTree(page, target) {
+  await page.click(`.tree-row.tree-file[data-node="${target.owner}"]`);
   await page.waitForSelector(`.tree-row.tree-symbol[data-node="${target.id}"]`, { timeout: 10_000 });
   await page.click(`.tree-row.tree-symbol[data-node="${target.id}"]`);
+  await waitSelected(page, target.id);
+}
+
+const summaryHint = (page) => page.evaluate(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent ?? "");
+
+/** 요약을 실제로 만들지 않고 "요약 생성" 버튼과 "자동 요약" 토글이 POST를 언제 보내는지만 본다. 보낸 POST는 붙잡혀 서버에 닿지 않는다. */
+async function summaryAsk(t, page) {
+  const { found, available, reason } = await uncached(2);
+  if (found.length < 2 || !available) {
+    t.check("캐시에 요약이 없는 함수가 두 개 있고 Claude Code CLI를 부를 수 있다", false, found.length < 2 ? `캐시에 없는 함수 ${found.length}개` : `${reason}`);
+    return;
+  }
+  const [first, second] = found;
+  const posts = summaryPosts(page);
+  await load(page);
+  t.check('상단 줄의 "자동 요약" 토글이 꺼진 채로 열린다', !(await page.getByLabel("자동 요약").isChecked()));
+  await pickInTree(page, first);
+  await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 }).catch(() => {});
+  await page.waitForTimeout(1_500);
+  t.check(
+    `캐시에 없는 함수 ${first.id}를 고르면 "요약 생성" 버튼이 보이고 POST를 보내지 않는다`,
+    (await count(page, ".info-panel-summary .summary-make")) === 1 && posts.length === 0,
+    `POST ${posts.length}번`,
+  );
+  await page.click(".info-panel-summary .summary-make");
+  await page.waitForFunction(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent === "요약을 만드는 중", null, { timeout: 5_000 }).catch(() => {});
+  t.check(
+    '"요약 생성"을 누르면 그 함수의 POST를 한 번 보내고 "요약을 만드는 중"을 보인다',
+    same(posts, [first.id]) && (await summaryHint(page)) === "요약을 만드는 중",
+    `POST ${posts.join(", ") || "없음"}, 문구 ${await summaryHint(page)}`,
+  );
+  await t.shot();
+
+  await page.getByLabel("자동 요약").check();
+  await pickInTree(page, second);
+  await page.waitForFunction(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent === "요약을 만드는 중", null, { timeout: 5_000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  t.check(
+    `"자동 요약"을 켜고 ${second.id}를 고르면 버튼을 누르지 않아도 그 함수의 POST를 한 번 보낸다`,
+    same(posts, [first.id, second.id]),
+    `POST ${posts.join(", ") || "없음"}`,
+  );
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  t.check('새로고침 뒤에도 "자동 요약" 토글이 켜져 있다', await page.getByLabel("자동 요약").isChecked());
+}
+
+async function summary(t, page) {
+  const { found, available, reason } = await uncached(1);
+  if (found.length === 0 || !available) {
+    t.check("캐시에 없는 함수가 있고 Claude Code CLI를 부를 수 있다", false, found.length === 0 ? "모든 함수의 요약이 캐시에 있다" : `${reason}`);
+    return;
+  }
+  const [target] = found;
+  t.summaries.add(target.id);
+  const posts = summaryPosts(page);
+  const sent = () => posts.filter((id) => id === target.id).length;
+
+  await load(page);
+  await pickInTree(page, target);
+  await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 }).catch(() => {});
+  await page.waitForTimeout(1_500);
+  t.check(`캐시에 없는 함수 ${target.id}를 고르면 "요약 생성" 버튼이 보이고 POST를 보내지 않는다`, (await count(page, ".info-panel-summary .summary-make")) === 1 && sent() === 0, `POST ${sent()}번`);
+  await page.click(".info-panel-summary .summary-make");
   const started = Date.now();
   await page.waitForFunction(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent === "요약을 만드는 중", null, { timeout: 5_000 }).catch(() => {});
-  const making = await hint();
+  const making = await summaryHint(page);
   await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 90_000 }).catch(() => {});
   const seconds = (Date.now() - started) / 1000;
   const made = await page.evaluate(() => document.querySelector(".info-panel-summary .summary-text")?.textContent ?? null);
   t.check(
-    `캐시에 없는 함수 ${target.id}를 고르면 "요약을 만드는 중" 뒤에 한국어 요약이 나온다`,
+    '"요약 생성"을 누르면 "요약을 만드는 중" 뒤에 한국어 요약이 나온다',
     making === "요약을 만드는 중" && made !== null && /[가-힣]/.test(made) && sent() === 1,
-    made === null ? `${seconds.toFixed(1)}초 동안 요약이 나오지 않았다: ${await hint()}` : `${seconds.toFixed(1)}초, ${made.length}자`,
+    made === null ? `${seconds.toFixed(1)}초 동안 요약이 나오지 않았다: ${await summaryHint(page)}` : `${seconds.toFixed(1)}초, ${made.length}자`,
   );
   await settle(page);
   await t.shot();
 
-  await page.click(`.tree-row.tree-file[data-node="${owner.id}"]`);
-  await waitSelected(page, owner.id);
+  await page.click(`.tree-row.tree-file[data-node="${target.owner}"]`);
+  await waitSelected(page, target.owner);
   await page.click(`.tree-row.tree-symbol[data-node="${target.id}"]`);
   const returned = Date.now();
   await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 5_000 }).catch(() => {});
   const again = await page.evaluate(() => document.querySelector(".info-panel-summary .summary-text")?.textContent ?? null);
   await page.waitForTimeout(1_000);
   t.check("다른 노드를 거쳐 돌아오면 POST 없이 바로 나온다", again === made && made !== null && sent() === 1, `${Date.now() - returned - 1_000}ms 안, 그 함수의 POST ${sent()}번`);
+}
+
+/** 폴더 안의 함수를 고른 뒤 탐색 경로의 폴더 단계를 누른다. */
+async function folderSelect(t, page) {
+  await load(page);
+  await page.click('.tree-row.tree-file[data-node="parser.plan"]');
+  await waitSelected(page, "parser.plan");
+  await page.click('.trail-step[data-node="parser"]');
+  await waitSelected(page, "parser");
+  const all = await boxes(page);
+  const functions = await count(page, ".react-flow__node .node-function");
+  t.check(
+    "parser/ 안의 파일 상자가 parser/ 상자 하나로 접히고 그 상자가 선택되며 펼친 파일 상자가 없다",
+    (await count(page, `${node("parser")} > .node-package.node-selected`)) === 1 &&
+      all.every((b) => !b.id.startsWith("parser.") && !b.open) &&
+      functions === 0,
+    `파일 상자 ${all.length}개, 함수 노드 ${functions}개`,
+  );
+  const edges = await edgesOf(page);
+  const strong = edges.filter((e) => e.tone === "strong");
+  t.check(
+    "본문 잉크 선은 parser/ 상자에서 나가고 들어오는 집계 선뿐이다",
+    strong.length > 0 && strong.every((e) => e.key.startsWith("agg|") && (e.source === "parser" || e.target === "parser") && e.opacity === 1),
+    `그린 선 ${edges.length}개: ${toneLevels(edges)}`,
+  );
+  const dims = await page.evaluate(() =>
+    Object.fromEntries([...document.querySelectorAll(".react-flow__node")].map((wrapper) => [wrapper.dataset.id, Number(getComputedStyle(wrapper).opacity)])),
+  );
+  const users = [...new Set(strong.filter((e) => e.target === "parser").map((e) => e.source))];
+  const used = [...new Set(strong.filter((e) => e.source === "parser").map((e) => e.target))];
+  t.check(
+    "이 폴더를 쓰는 파일 상자와 이 폴더가 쓰는 파일 상자가 접힌 채 불투명도 1로 보인다",
+    users.length > 0 && [...users, ...used].every((id) => dims[id] === 1),
+    `쓰는 파일 ${users.length}개, 쓰이는 파일 ${used.length}개`,
+  );
+  const head = await headOf(page);
+  t.check("정보 패널 머리 줄이 parser/ 폴더를 적는다", head.includes("parser/") && head.includes("폴더"), head.replaceAll("\n", " / "));
+}
+
+/** 파일트리에서 그래프 노드가 없는 __init__.py 행을 누른다. */
+async function initFile(t, page) {
+  await load(page);
+  await pick(page, FILE);
+  const row = '.tree-row.tree-file[title$="parser/__init__.py"]';
+  const before = { selected: await selectedOf(page), functions: await count(page, ".node-function"), packages: await count(page, ".node-package") };
+  await page.click(row);
+  await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 }).catch(() => {});
+  await settle(page);
+  const after = { selected: await selectedOf(page), functions: await count(page, ".node-function"), packages: await count(page, ".node-package") };
+  t.check("__init__.py 행을 눌러도 그래프 선택과 펼친 상자가 바뀌지 않는다", before.selected === FILE && same(after, before), JSON.stringify(after));
+  const head = await headOf(page);
+  const first = await page.evaluate(() => {
+    const numbers = [...document.querySelectorAll(".info-panel .monaco-editor .line-numbers")];
+    numbers.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+    return numbers[0]?.textContent ?? null;
+  });
+  t.check(
+    "정보 패널이 그 파일의 경로와 1번 줄부터의 코드만 보인다",
+    head.includes("__init__.py") && head.includes("parser/__init__.py") && first === "1" && (await count(page, ".info-panel-summary")) === 0,
+    `${head.replaceAll("\n", " / ")}, 첫 줄 번호 ${first}`,
+  );
+  t.check("그 행이 고른 행으로 표시되고 그래프 노드와 잇지 않는다", await page.evaluate((sel) => {
+    const element = document.querySelector(sel);
+    return element.classList.contains("active") && element.dataset.node === undefined;
+  }, row));
+  await t.shot();
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".info-panel-summary", { timeout: 10_000 }).catch(() => {});
+  t.check("Esc에 연 파일만 닫히고 선택은 그대로다", (await selectedOf(page)) === FILE && (await count(page, ".info-panel .code")) === 0 && (await headOf(page)).includes("arbiter.py"), `선택 ${await selectedOf(page)}`);
+  await page.click(row);
+  await page.waitForSelector(".info-panel .code", { timeout: 10_000 }).catch(() => {});
+  await page.click(`.tree-row.tree-symbol[data-node="${FUNCTION}"]`);
+  await waitSelected(page, FUNCTION);
+  t.check("그래프에서 다른 노드를 고르면 연 파일이 닫히고 그 노드의 코드를 보인다", (await headOf(page)).includes("src/arbiter.py:1058-1199"), (await headOf(page)).replaceAll("\n", " / "));
+}
+
+/** 상단 줄의 진입점 목록과 git 브랜치 이름 */
+async function toolbar(t, page) {
+  const [graph, reply] = [await api("/api/graph"), await api("/api/changes")];
+  const entries = graph.nodes.filter((n) => n.entry && !n.test).map((n) => n.id);
+  await load(page);
+  const branch = await page.evaluate(() => document.querySelector(".toolbar-branch")?.textContent ?? null);
+  t.check(
+    "상단 줄이 현재 git 브랜치 이름을 적는다",
+    reply.git && reply.branch !== null ? branch === `브랜치 ${reply.branch}` : branch === null,
+    `화면 ${branch}, 서버 ${reply.branch}`,
+  );
+  t.check("하단 상태 줄이 없고 진입점 목록이 접힌 채로 열린다", (await count(page, ".toolbar-menu")) === 0 && (await count(page, ".statusbar, .status-bar")) === 0);
+  await page.click(".toolbar-entries > .toolbar-button");
+  await page.waitForSelector(".toolbar-menu-item", { timeout: 5_000 }).catch(() => {});
+  const listed = await page.evaluate(() => [...document.querySelectorAll(".toolbar-menu-item")].map((item) => item.dataset.node));
+  t.check(`진입점 목록을 누르면 진입점 ${entries.length}개의 이름이 펼쳐진다`, entries.length > 0 && same([...listed].sort(), [...entries].sort()), listed.join(", "));
+  await t.shot();
+  await page.click(`.toolbar-menu-item[data-node="${entries.at(-1)}"]`);
+  await waitSelected(page, entries.at(-1)).catch(() => {});
+  t.check("이름을 고르면 그래프가 그 노드를 선택하고 목록이 접힌다", (await selectedOf(page)) === entries.at(-1) && (await count(page, ".toolbar-menu")) === 0, `선택 ${await selectedOf(page)}`);
+  const fits = await page.evaluate(() => {
+    const bar = document.querySelector(".toolbar");
+    return bar.scrollWidth <= bar.clientWidth;
+  });
+  t.check("상단 줄의 요소가 줄 폭 안에 들어간다", fits);
 }
 
 const SCENARIOS = [
@@ -803,6 +1048,9 @@ const SCENARIOS = [
   ["panel", panel],
   ["hover", hover],
   ["folder", folder],
+  ["folder-select", folderSelect],
+  ["init-file", initFile],
+  ["toolbar", toolbar],
   ["callview", callview],
   ["search", search],
   ["zoom", zoom],
@@ -812,28 +1060,20 @@ const SCENARIOS = [
   ["tree-search", treeSearch],
   ["changes", changes],
   ["zoom-keep", zoomKeep],
+  ["summary-ask", summaryAsk],
   ["summary", summary],
 ];
 
 // ── 실행 ─────────────────────────────────────────────────────────
 
-/**
- * hover·definition API가 없는 서버는 두 경로에 404를 돌려주고 코드 뷰어가 그 응답을 조용히 넘긴다.
- * 브라우저가 그때 남기는 자원 오류 줄은 콘솔 오류로 치지 않는다. 그 밖의 콘솔 오류와 페이지 오류는 모두 실패다.
- */
-function expected(message) {
-  const at = message.location().url;
-  const path = URL.canParse(at) ? new URL(at).pathname : "";
-  return (path === "/api/hover" || path === "/api/definition") && message.text().includes("404");
-}
-
 async function run(browser, name, scenario) {
   const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 2, colorScheme: "light" });
+  // 화면의 단축키 처리(window의 capture 단계)가 끝난 뒤에 keydown의 defaultPrevented를 적어 둔다.
   await context.addInitScript(() => {
-    window.__shotsPrints = 0;
-    window.print = () => {
-      window.__shotsPrints += 1;
-    };
+    window.__shotsKeys = [];
+    window.addEventListener("keydown", (event) =>
+      window.__shotsKeys.push({ key: event.key, mod: event.ctrlKey || event.metaKey, prevented: event.defaultPrevented }),
+    );
   });
   const results = [];
   const errors = [];
@@ -867,7 +1107,7 @@ async function run(browser, name, scenario) {
   );
   page.on("pageerror", (error) => errors.push(`페이지 오류: ${error.message}`));
   page.on("console", (message) => {
-    if (message.type() === "error" && !expected(message)) {
+    if (message.type() === "error") {
       errors.push(`콘솔 오류: ${message.text()}`);
     }
   });

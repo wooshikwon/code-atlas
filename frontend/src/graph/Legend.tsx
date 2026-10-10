@@ -2,7 +2,7 @@
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
 import { useAtlas } from "../state/store";
-import { GROUP_NAMES } from "./view";
+import { GROUP_NAMES } from "./names";
 
 const SHAPES = [
   { key: "package", name: "접힌 폴더" },

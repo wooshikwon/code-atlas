@@ -32,9 +32,30 @@ describe("select", () => {
 
   it("선을 고른 뒤 노드를 고르면 선택이 그 노드로 바뀐다", () => {
     store().selectEdge("agg|x|y");
-    expect(store().selection).toEqual({ type: "edge", key: "agg|x|y" });
+    expect(store().selection).toEqual({ type: "edge", key: "agg|x|y", focus: null });
     store().select(a);
     expect(store().selection).toEqual(node(a));
+  });
+});
+
+describe("selectEdge", () => {
+  it("직전에 초점을 둔 노드를 선 선택에 담고, 선을 이어 골라도 그 노드를 유지한다", () => {
+    store().select(a);
+    store().selectEdge("agg|x|y");
+    expect(store().selection).toEqual({ type: "edge", key: "agg|x|y", focus: a });
+    store().selectEdge("agg|y|z");
+    expect(store().selection).toEqual({ type: "edge", key: "agg|y|z", focus: a });
+    store().select(b);
+    store().back();
+    expect(store().selection).toEqual({ type: "edge", key: "agg|y|z", focus: a });
+  });
+
+  it("초점을 둔 노드가 든 폴더를 접으면 선 선택도 푼다", () => {
+    store().select("pkg.mod:Store.save");
+    store().selectEdge("agg|x|y");
+    store().toggleFolder(folder);
+    expect(store().selection).toBeNull();
+    expect(store().collapsed).toEqual(new Set([folder]));
   });
 });
 
@@ -88,6 +109,16 @@ describe("접은 폴더와 선택", () => {
     expect(store().collapsed).toEqual(new Set([folder]));
   });
 
+  it("펼친 폴더를 고르면 그 폴더를 접어 고르고 이력에 한 단계만 넣는다", () => {
+    store().select("pkg.mod:Store.save");
+    store().show(folder);
+    expect(store().selection).toEqual(node(folder));
+    expect(store().collapsed).toEqual(new Set([folder]));
+    expect(store().history.entries).toHaveLength(3);
+    store().select("app");
+    expect(store().collapsed).toEqual(new Set([folder, "app"]));
+  });
+
   it("고른 노드가 든 폴더를 접으면 선택을 풀고 이력에 한 단계만 넣는다", () => {
     store().select("pkg.mod:Store.save");
     store().toggleFolder(folder);
@@ -99,14 +130,87 @@ describe("접은 폴더와 선택", () => {
     expect(store().collapsed).toEqual(new Set());
   });
 
-  it("다른 폴더를 접거나 고른 폴더 자신을 접으면 선택을 유지한다", () => {
+  it("다른 폴더를 접으면 선택을 유지하고, 고른 폴더를 펼치면 선택을 풀어 이력에 한 단계만 넣는다", () => {
     store().select("main:run");
     store().toggleFolder(folder);
     expect(store().selection).toEqual(node("main:run"));
     store().select(folder);
+    const steps = store().history.entries.length;
     store().toggleFolder(folder);
+    expect(store().selection).toBeNull();
+    expect(store().collapsed).toEqual(new Set());
+    expect(store().history.entries).toHaveLength(steps + 1);
+  });
+});
+
+describe("open", () => {
+  it("함수를 더블클릭하면 첫 클릭이 넣은 단계 대신 함수 시점 뷰 한 단계를 넣는다", () => {
+    const from = store().history;
+    store().select(a);
+    store().open(a, from);
+    expect(store().view).toEqual({ kind: "function", center: a, expanded: [] });
+    expect(selected()).toEqual([null, node(a)]);
+    store().back();
+    expect(store().view).toEqual({ kind: "structure" });
+    expect(store().selection).toBeNull();
+  });
+
+  it("이미 고른 함수를 더블클릭하고 뒤로 가면 그 함수를 고른 구조 뷰로 돌아간다", () => {
+    store().select(a);
+    const from = store().history;
+    store().select(a);
+    expect(store().selection).toBeNull();
+    store().open(a, from);
+    expect(store().history).toMatchObject({ index: 2, entries: { length: 3 } });
+    store().back();
+    expect(store().view).toEqual({ kind: "structure" });
+    expect(store().selection).toEqual(node(a));
+  });
+
+  it("접힌 폴더를 더블클릭하면 한 단계로 펼치고, 고른 폴더였으면 선택을 푼다", () => {
     store().toggleFolder(folder);
-    expect(store().selection).toEqual(node(folder));
+    const from = store().history;
+    store().select(folder);
+    store().open(folder, from);
+    expect(store().collapsed).toEqual(new Set());
+    expect(store().selection).toBeNull();
+    expect(store().history).toMatchObject({ index: 2, entries: { length: 3 } });
+
+    store().select(folder);
+    const chosen = store().history;
+    store().select(folder);
+    store().open(folder, chosen);
+    expect(store().collapsed).toEqual(new Set());
+    expect(store().selection).toBeNull();
+    expect(store().history.entries).toHaveLength(chosen.entries.length + 1);
+  });
+
+  it("함수 시점 뷰의 가운데 함수를 더블클릭하면 첫 클릭 전으로 되돌려 펼친 단계를 남긴다", () => {
+    store().enterFunction(a);
+    store().expandFunction(b);
+    const from = store().history;
+    store().select(a);
+    store().open(a, from);
+    expect(store().view).toEqual({ kind: "function", center: a, expanded: [b] });
+    expect(store().selection).toEqual(node(a));
+    expect(store().history).toBe(from);
+  });
+
+  it("함수 시점 뷰의 양옆 함수를 더블클릭하면 그 함수가 가운데인 뷰 한 단계를 넣는다", () => {
+    store().enterFunction(a);
+    const from = store().history;
+    store().select(b);
+    store().open(b, from);
+    expect(store().view).toEqual({ kind: "function", center: b, expanded: [] });
+    expect(store().history).toMatchObject({ index: 2, entries: { length: 3 } });
+  });
+
+  it("열 것이 없는 노드는 첫 클릭의 선택을 그대로 둔다", () => {
+    const from = store().history;
+    store().select("pkg.mod:Store");
+    store().open("pkg.mod:Store", from);
+    expect(store().selection).toEqual(node("pkg.mod:Store"));
+    expect(store().history.entries).toHaveLength(2);
   });
 });
 
@@ -199,7 +303,7 @@ describe("이력", () => {
 });
 
 describe("화면 설정", () => {
-  it("흐름 단계·화면 색·패널·범례를 code-atlas:ui:v1에 쓴다", () => {
+  it("흐름 단계·화면 색·패널·범례·자동 요약을 code-atlas:ui:v1에 쓴다", () => {
     const saved = new Map<string, string>();
     vi.stubGlobal("localStorage", { setItem: (key: string, value: string) => saved.set(key, value) });
     vi.stubGlobal("document", { documentElement: { style: { setProperty: () => undefined }, dataset: {} } });
@@ -207,6 +311,7 @@ describe("화면 설정", () => {
     store().setTheme("dark");
     store().setPanel({ x: 10, y: 20, width: 300, height: 200 });
     store().toggleLegend();
+    store().toggleAutoSummary();
     vi.unstubAllGlobals();
     expect(store().history.entries).toHaveLength(1);
     expect(parseUi(saved.get("code-atlas:ui:v1")!, "light")).toEqual({
@@ -214,14 +319,15 @@ describe("화면 설정", () => {
       legendOpen: true,
       theme: "dark",
       depth: 3,
+      autoSummary: true,
     });
   });
 
   it("형태가 맞지 않는 값은 기본값으로 둔다", () => {
-    const defaults = { panel: null, legendOpen: false, theme: "dark", depth: 2 };
+    const defaults = { panel: null, legendOpen: false, theme: "dark", depth: 2, autoSummary: false };
     expect(parseUi(null, "dark")).toEqual(defaults);
     expect(parseUi("{", "dark")).toEqual(defaults);
-    expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, legendOpen: "yes", theme: "blue", depth: 4 }), "dark")).toEqual(
+    expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, legendOpen: "yes", theme: "blue", depth: 4, autoSummary: 1 }), "dark")).toEqual(
       defaults,
     );
   });

@@ -2,14 +2,14 @@
 import * as monaco from "monaco-editor/editor";
 import { getHover } from "../api/client";
 
-/** 코드 뷰어 모델의 주소. 노드의 줄 범위만 담은 모델이므로 파일 경로 뒤에 `#L{시작}-{끝}`을 붙인다. */
-export function modelPath(path: string, range: [number, number]): string {
-  return `${path}#L${range[0]}-${range[1]}`;
+/** 코드 뷰어 모델의 주소. 노드의 줄 범위만 담은 모델은 파일 경로 뒤에 `#L{시작}-{끝}`을, 파일 전체를 담은 모델은 `#L1`을 붙인다. */
+export function modelPath(path: string, range: [number, number] | null): string {
+  return range === null ? `${path}#L1` : `${path}#L${range[0]}-${range[1]}`;
 }
 
 /** 모델이 담은 파일 경로와 모델 첫 줄의 파일 줄 번호 */
 function located(model: monaco.editor.ITextModel): { path: string; start: number } | null {
-  const match = /^L(\d+)-\d+$/.exec(model.uri.fragment);
+  const match = /^L(\d+)(?:-\d+)?$/.exec(model.uri.fragment);
   return match === null ? null : { path: model.uri.path.replace(/^\//, ""), start: Number(match[1]) };
 }
 

@@ -1,6 +1,6 @@
 // 정보 패널 머리 줄. 첫 줄에 이름과 종류 칩을, 둘째 줄에 위치와 수치, 변경 상태를 적는다.
 import type { AtlasNode, EdgeGroup, EdgeKind, SiteRef } from "../api/types";
-import { EDGE_KIND_NAMES, GROUP_NAMES, KIND_NAMES } from "../graph/view";
+import { EDGE_KIND_NAMES, GROUP_NAMES, KIND_NAMES } from "../graph/names";
 import { CHANGE_NAMES, useChange } from "../state/changes";
 
 /** 고른 선. 집계 선이면 kind가 null이고 kinds에 종류마다 지점 수를 담는다. */
@@ -16,6 +16,7 @@ export interface PickedEdge {
 
 export type HeaderItem =
   | { type: "repo"; name: string }
+  | { type: "file"; path: string }
   | { type: "node"; node: AtlasNode; incoming: number; outgoing: number; functions: number }
   | { type: "edge"; edge: PickedEdge };
 
@@ -61,6 +62,10 @@ export function Header({ item, nodes }: HeaderProps) {
     name = item.name;
     chip = "레포";
     facts = ["파일을 고르면 정보를, 함수를 고르면 코드를 보여 준다"];
+  } else if (item.type === "file") {
+    name = item.path.split("/").pop()!;
+    chip = "파일";
+    facts = [item.path];
   } else if (item.type === "node") {
     const { node } = item;
     entry = node.entry;

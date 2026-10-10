@@ -37,6 +37,11 @@ export function within(nodes: Map<string, AtlasNode>, id: string, ancestor: stri
   return false;
 }
 
+/** 노드가 고른 노드와 같은 파일 상자에 든 노드인지 본다. 폴더 아래 다른 파일의 노드는 폴더의 `__init__.py` 정의와 같은 상자가 아니다. */
+export function local(nodes: Map<string, AtlasNode>, flow: Flow, id: string): boolean {
+  return unitOf(nodes, id) === flow.file;
+}
+
 /** 토글로 숨긴 노드. 테스트 코드와 외부 노드는 토글이 켜졌을 때만 보인다. */
 export function hidden(graph: Graph, opts: { showTests: boolean; showExternal: boolean }): Set<string> {
   return new Set(
@@ -84,7 +89,7 @@ export function shown(
       continue;
     }
     const inFlow = flow.unit === "node" && (flow.out.has(node.id) || flow.incoming.has(node.id));
-    if (!inFlow && !within(nodes, node.id, flow.file)) {
+    if (!inFlow && !local(nodes, flow, node.id)) {
       continue;
     }
     let inner: AtlasNode | undefined = node;
