@@ -1,166 +1,348 @@
-// 구조 뷰. 배치는 그래프와 테스트 코드 토글이 바뀔 때만 다시 계산하고, 고르기·마우스 올리기는 선과 불투명도만 바꾼다.
-import { ReactFlow, useReactFlow, type EdgeMouseHandler, type NodeMouseHandler } from "@xyflow/react";
+// 구조 뷰. 저장소 상태에서 보이는 노드와 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드로 화면을 옮긴다.
+import {
+  ReactFlow,
+  useReactFlow,
+  useStore,
+  ViewportPortal,
+  type EdgeMouseHandler,
+  type NodeMouseHandler,
+} from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import type { Graph } from "../api/types";
 import { useAtlas } from "../state/store";
+import { columns, type Columns } from "./columns";
 import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
-import { focus, OPACITY, seedsOf } from "./focus";
-import { InfoBox, type InfoItem } from "./InfoBox";
-import { functionCounts, type Layout } from "./layout";
-import { layout } from "./layout1";
+import { flow, opacities, type Flow } from "./flow";
+import { functionCounts, layout, titleOf, type Layout, type Point } from "./layout";
 import { Legend } from "./Legend";
-import type { AtlasFlowNode } from "./nodes/common";
+import { MOVE_MS, settled, tween } from "./motion";
+import type { AtlasFlowNode, AtlasNodeData } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
-import { nodeIndex, scope, visibleNodes } from "./scope";
-import { degrees, edgeIndex, edgeViews, parentFirst } from "./view";
+import { drawn } from "./scope";
+import { Tooltip, type TooltipHandle } from "./Tooltip";
+import { badges, edgeViews, GROUP_NAMES, KIND_NAMES, parentFirst } from "./view";
+import { centerOn, freeRect, PAN_MS } from "./viewport";
+import { hidden, nodeIndex, shown, type Shown } from "./visible";
 
-/** 왼쪽 아래 범례가 노드를 가리지 않도록 왼쪽에 범례 폭만큼 여백을 둔다. */
-export const FIT_PADDING = { top: "16px", right: "16px", bottom: "16px", left: "300px" } as const;
+/** "화면 맞춤"의 여백. 오른쪽은 정보 패널의 기본 위치와 폭만큼 비운다. */
+export const FIT_PADDING = { top: "24px", right: "504px", bottom: "24px", left: "24px" } as const;
 
-interface Laid {
+/** 선은 자식을 그리는 상자(깊이만큼 0부터)보다 위에, 그 밖의 노드보다 아래에 놓는다. */
+const EDGE_Z = 50;
+const LEAF_Z = 100;
+const SHELF_NAME = "연결 없음";
+const SHELF_NAME_HEIGHT = 22;
+
+/** 배치 한 번과 그 배치를 만든 입력. 노드와 선은 늘 같은 Scene에서 만든다. */
+interface Scene {
+  graph: Graph;
+  columns: Columns;
+  shown: Shown;
+  flow: Flow | null;
+  /** 초점을 둔 노드 */
+  focus: string | null;
   layout: Layout;
-  visible: Set<string>;
+}
+
+/** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. */
+interface Item {
+  id: string;
+  type: string;
+  parent: string | undefined;
+  opacity: number;
+  /** 자식을 그리는 상자는 선 아래에, 그 밖의 노드는 선 위에 그린다. */
+  z: number;
+  /** 펼친 폴더는 상자를 그리지 않으므로 마우스를 받지 않는다. */
+  inert: boolean;
+  data: AtlasNodeData;
+}
+
+function itemsOf(scene: Scene, functions: Map<string, number>): Item[] {
+  const order = parentFirst(scene.graph, scene.shown.nodes);
+  const parents = new Set(order.map((n) => n.parent));
+  const dim = opacities(scene.graph, scene.flow);
+  const marks = badges(scene.graph, scene.shown, scene.flow);
+  const depths = new Map<string, number>();
+  return order.map((node) => {
+    const opacity = dim.get(node.id) ?? 1;
+    const expanded = parents.has(node.id);
+    const parent = node.parent !== null && scene.shown.nodes.has(node.parent) ? node.parent : undefined;
+    const depth = parent === undefined ? 0 : depths.get(parent)! + 1;
+    depths.set(node.id, depth);
+    return {
+      id: node.id,
+      type: nodeType(node.kind),
+      parent,
+      opacity,
+      z: expanded ? depth : LEAF_Z,
+      inert: expanded && node.kind === "package",
+      data: {
+        node,
+        functions: functions.get(node.id) ?? 0,
+        expanded,
+        selected: node.id === scene.focus,
+        flow: scene.flow !== null && opacity > 0.2,
+        inflow: marks.get(node.id) ?? null,
+      },
+    };
+  });
+}
+
+/** 배치 at의 좌표로 React Flow 노드를 만든다. fresh에 든 노드는 불투명도 0으로 그린다. */
+function flowNodes(items: Item[], at: Layout, fresh: Set<string> | null): AtlasFlowNode[] {
+  return items.map((item) => {
+    const size = at.sizes.get(item.id) ?? { width: 0, height: 0 };
+    return {
+      id: item.id,
+      type: item.type,
+      parentId: item.parent,
+      position: at.positions.get(item.id) ?? { x: 0, y: 0 },
+      width: size.width,
+      height: size.height,
+      zIndex: item.z,
+      draggable: false,
+      connectable: false,
+      style: {
+        opacity: fresh?.has(item.id) === true ? 0 : item.opacity,
+        pointerEvents: item.inert ? "none" : undefined,
+      },
+      data: item.data,
+    };
+  });
+}
+
+/** 선반 단위 가운데 가장 왼쪽 위 상자의 왼쪽 위. 선반이 비었으면 null이다. */
+function shelfCorner(scene: Scene, at: Layout): Point | null {
+  const boxes = scene.columns.shelf.map((id) => at.boxes.get(id)).filter((box) => box !== undefined);
+  if (boxes.length === 0) {
+    return null;
+  }
+  return { x: Math.min(...boxes.map((b) => b.x)), y: Math.min(...boxes.map((b) => b.y)) };
+}
+
+function reducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 export function GraphView() {
   const graph = useAtlas((s) => s.graph);
   const showTests = useAtlas((s) => s.showTests);
+  const showExternal = useAtlas((s) => s.showExternal);
   const selection = useAtlas((s) => s.selection);
   const depth = useAtlas((s) => s.depth);
+  const collapsed = useAtlas((s) => s.collapsed);
   const select = useAtlas((s) => s.select);
   const selectEdge = useAtlas((s) => s.selectEdge);
-  const { fitView } = useReactFlow();
-  const [laid, setLaid] = useState<Laid | null>(null);
+  const toggleFolder = useAtlas((s) => s.toggleFolder);
+  const enterFunction = useAtlas((s) => s.enterFunction);
+  const { getViewport, setViewport } = useReactFlow();
+  /** 확대 비율 구간. 구간이 바뀔 때만 다시 그린다. */
+  const zoom = useStore((s) => (s.transform[2] < 0.4 ? 0 : s.transform[2] < 0.8 ? 1 : 2));
+
+  const [scene, setScene] = useState<Scene | null>(null);
+  const [nodes, setNodes] = useState<AtlasFlowNode[]>([]);
+  const [shelf, setShelf] = useState<Point | null>(null);
+  const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** 마우스를 올린 노드 id 또는 edge_key */
-  const [hovered, setHovered] = useState<string | null>(null);
-  const selected = selection?.type === "node" ? selection.id : null;
-  const pinned = selection?.type === "edge" ? selection.key : null;
+  /** 마우스를 올린 노드 id */
+  const [hover, setHover] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (graph === null) {
-      return;
-    }
-    let cancelled = false;
-    const visible = visibleNodes(graph, showTests);
-    layout(graph, visible)
-      .then((result) => !cancelled && setLaid({ layout: result, visible }))
-      .catch((caught: unknown) => !cancelled && setError(caught instanceof Error ? caught.message : String(caught)));
-    return () => {
-      cancelled = true;
-    };
-  }, [graph, showTests]);
+  const root = useRef<HTMLDivElement | null>(null);
+  const tip = useRef<TooltipHandle | null>(null);
+  /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
+  const onScreen = useRef<Layout | null>(null);
+  /** 화면을 옮겨 둔 노드 */
+  const panned = useRef<string | null>(null);
+  /** 직전에 한 번 누른 노드. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
+  const clicked = useRef<string | null>(null);
+  /** 초점을 둔 노드. 선을 골라도 직전에 고른 노드의 초점을 유지한다. */
+  const kept = useRef<string | null>(null);
+  if (selection === null) {
+    kept.current = null;
+  } else if (selection.type === "node") {
+    kept.current = selection.id;
+  }
+  const focus = kept.current;
 
-  useEffect(() => {
-    if (laid !== null) {
-      requestAnimationFrame(() => void fitView({ padding: FIT_PADDING }));
-    }
-  }, [laid, fitView]);
-
-  const derived = useMemo(() => {
-    if (graph === null || laid === null) {
+  const index = useMemo(
+    () => (graph === null ? null : { nodes: nodeIndex(graph), functions: functionCounts(graph) }),
+    [graph],
+  );
+  const cols = useMemo(
+    () => (graph === null ? null : columns(graph, { showTests, showExternal })),
+    [graph, showTests, showExternal],
+  );
+  const target = useMemo(() => {
+    if (graph === null || index === null) {
       return null;
     }
-    return {
-      nodes: nodeIndex(graph),
-      order: parentFirst(graph, laid.visible),
-      index: edgeIndex(graph, laid.visible),
-      degrees: degrees(graph),
-      functions: functionCounts(graph),
-      parents: new Set(graph.nodes.filter((n) => laid.visible.has(n.id)).map((n) => n.parent)),
+    const toggles = { showTests, showExternal };
+    const off = hidden(graph, toggles);
+    const picked = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
+    return { flow: picked, focus: picked === null ? null : focus, shown: shown(graph, { ...toggles, collapsed, flow: picked }) };
+  }, [graph, index, showTests, showExternal, collapsed, focus, depth]);
+
+  useEffect(() => {
+    if (graph === null || cols === null || target === null) {
+      return;
+    }
+    let stale = false;
+    layout(graph, target.shown, cols)
+      .then((result) => !stale && setScene({ graph, columns: cols, ...target, layout: result }))
+      .catch((caught: unknown) => !stale && setError(caught instanceof Error ? caught.message : String(caught)));
+    return () => {
+      stale = true;
     };
-  }, [graph, laid]);
+  }, [graph, cols, target]);
 
-  const focused = selected !== null && laid?.visible.has(selected) === true ? selected : null;
-  const hoveredNode = hovered !== null && derived?.nodes.has(hovered) === true ? hovered : null;
-
-  const levels = useMemo(
-    () => (graph === null || laid === null || focused === null ? null : focus(graph, laid.visible, focused, depth)),
-    [graph, laid, focused, depth],
-  );
-  const seeds = useMemo(() => (graph === null || focused === null ? null : seedsOf(graph, focused)), [graph, focused]);
-
-  const nodes = useMemo((): AtlasFlowNode[] => {
-    if (laid === null || derived === null) {
-      return [];
+  useEffect(() => {
+    if (scene === null || index === null) {
+      return;
     }
-    return derived.order.map((node) => {
-      const size = laid.layout.sizes.get(node.id) ?? { width: 0, height: 0 };
-      const level = levels?.get(node.id) ?? null;
-      return {
-        id: node.id,
-        type: nodeType(node.kind),
-        parentId: node.parent !== null && laid.visible.has(node.parent) ? node.parent : undefined,
-        position: laid.layout.positions.get(node.id) ?? { x: 0, y: 0 },
-        width: size.width,
-        height: size.height,
-        draggable: false,
-        connectable: false,
-        style: { opacity: level === null ? 1 : OPACITY[level] },
-        data: {
-          node,
-          functions: derived.functions.get(node.id) ?? 0,
-          level,
-          selected: node.id === focused,
-          hovered: node.id === hoveredNode,
-          expanded: derived.parents.has(node.id),
-        },
-      };
+    const items = itemsOf(scene, index.functions);
+    const to = scene.layout;
+    const from = onScreen.current;
+    const still = reducedMotion();
+    const draw = (at: Layout, fresh: Set<string> | null) => {
+      onScreen.current = at;
+      setNodes(flowNodes(items, at, fresh));
+      setShelf(shelfCorner(scene, at));
+    };
+
+    if (scene.focus !== panned.current) {
+      panned.current = scene.focus;
+      const box = scene.focus === null ? undefined : to.boxes.get(scene.focus);
+      const area = root.current?.getBoundingClientRect();
+      if (box !== undefined && area !== undefined) {
+        const panel = document.querySelector(".info-panel")?.getBoundingClientRect();
+        const free = freeRect(
+          { x: 0, y: 0, width: area.width, height: area.height },
+          panel === undefined
+            ? null
+            : { x: panel.left - area.left, y: panel.top - area.top, width: panel.width, height: panel.height },
+        );
+        const scale = getViewport().zoom;
+        void setViewport({ ...centerOn(box, free, scale), zoom: scale }, { duration: still ? 0 : PAN_MS });
+      }
+    }
+
+    if (from === null || still || settled(from, to)) {
+      draw(to, null);
+      setMoving(false);
+      return;
+    }
+    const fresh = new Set(items.filter((item) => !from.boxes.has(item.id)).map((item) => item.id));
+    const started = performance.now();
+    let frame = requestAnimationFrame(function step(now: number) {
+      const t = Math.min(1, (now - started) / MOVE_MS);
+      draw(tween(from, to, t), null);
+      if (t < 1) {
+        frame = requestAnimationFrame(step);
+      } else {
+        setMoving(false);
+      }
     });
-  }, [laid, derived, levels, focused, hoveredNode]);
+    draw(tween(from, to, 0), fresh);
+    setMoving(true);
+    return () => cancelAnimationFrame(frame);
+  }, [scene, index, getViewport, setViewport]);
 
+  const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
   const edges = useMemo((): AtlasFlowEdge[] => {
-    if (graph === null || laid === null || derived === null) {
+    if (scene === null || index === null) {
       return [];
     }
-    const keys = scope(graph, laid.visible, focused, hoveredNode);
-    return edgeViews(derived.index, laid.layout, keys, seeds, levels).map((view) => ({
+    return edgeViews(drawn(scene.graph, scene.shown, scene.flow, hovered), scene.layout, index.nodes).map((view) => ({
       id: view.key,
       source: view.source,
       target: view.target,
       type: "orthogonal",
       data: view,
+      zIndex: EDGE_Z,
       interactionWidth: 12,
     }));
-  }, [graph, laid, derived, focused, hoveredNode, seeds, levels]);
-
-  const clear = useCallback(() => select(null), [select]);
+  }, [scene, index, hovered]);
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && clear();
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && select(null);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clear]);
+  }, [select]);
 
-  const onNodeClick: NodeMouseHandler<AtlasFlowNode> = (_, node) => select(node.id);
-  const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (_, node) => setHovered(node.id);
-  const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => setHovered(edge.id);
+  /** 접힌 폴더 상자는 펼치고, 함수·메서드 노드는 함수 시점 뷰로 들어간다. */
+  const open = (id: string) => {
+    const node = index?.nodes.get(id);
+    if (node === undefined) {
+      return;
+    }
+    const state = useAtlas.getState();
+    if (node.kind === "package" && state.collapsed.has(id)) {
+      if (state.selection?.type === "node" && state.selection.id === id) {
+        select(id);
+      }
+      toggleFolder(id);
+    } else if (node.kind === "function" || node.kind === "method") {
+      enterFunction(id);
+    }
+  };
+
+  /** 연달아 누른 두 번째 클릭이면 처음 누른 노드를 열고 참을 돌려준다. 세 번째부터는 아무 일도 하지 않는다. */
+  const repeated = (event: ReactMouseEvent): boolean => {
+    if (event.detail < 2) {
+      return false;
+    }
+    if (event.detail === 2 && clicked.current !== null) {
+      open(clicked.current);
+    }
+    return true;
+  };
+
+  const onNodeClick: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
+    tip.current?.hide();
+    if (repeated(event)) {
+      return;
+    }
+    const opened = node.data.expanded && node.data.node.kind === "module";
+    if (opened && (event.target as Element).closest(".node-module-head") === null) {
+      clicked.current = null;
+      return;
+    }
+    clicked.current = node.id;
+    select(node.id);
+  };
+  const onPaneClick = (event: ReactMouseEvent) => {
+    tip.current?.hide();
+    if (repeated(event)) {
+      return;
+    }
+    clicked.current = null;
+    select(null);
+  };
   const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => selectEdge(edge.id);
-  const onLeave = () => setHovered(null);
 
-  const info = useMemo((): { item: InfoItem; pinned: boolean } | null => {
-    if (derived === null) {
-      return null;
+  const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
+    setHover(node.id);
+    tip.current?.show(`${titleOf(node.data.node)} · ${KIND_NAMES[node.data.node.kind]}`, event.clientX, event.clientY);
+  };
+  const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
+    const name = (id: string) => {
+      const node = index?.nodes.get(id);
+      return node === undefined ? id : titleOf(node);
+    };
+    if (edge.data !== undefined) {
+      const { source, target, group, sites } = edge.data;
+      tip.current?.show(`${name(source)} → ${name(target)} · ${GROUP_NAMES[group]} · ${sites}곳`, event.clientX, event.clientY);
     }
-    const node = (id: string | null) => (id === null ? undefined : derived.nodes.get(id));
-    const edgeOf = (key: string | null) =>
-      key !== null && (derived.index.raw.has(key) || derived.index.agg.has(key)) ? key : null;
-    const hoveredNodeItem = node(hoveredNode);
-    if (hoveredNodeItem !== undefined) {
-      return { item: { type: "node", node: hoveredNodeItem }, pinned: false };
-    }
-    const hoveredEdge = edgeOf(hovered);
-    if (hoveredEdge !== null) {
-      return { item: { type: "edge", key: hoveredEdge }, pinned: hoveredEdge === pinned };
-    }
-    if (edgeOf(pinned) !== null) {
-      return { item: { type: "edge", key: pinned! }, pinned: true };
-    }
-    const selected = node(focused);
-    return selected === undefined ? null : { item: { type: "node", node: selected }, pinned: false };
-  }, [derived, hovered, hoveredNode, pinned, focused]);
+  };
+  const onMove = (event: ReactMouseEvent) => tip.current?.move(event.clientX, event.clientY);
+  const onNodeLeave = () => {
+    setHover(null);
+    tip.current?.hide();
+  };
+  const onEdgeLeave = () => tip.current?.hide();
 
-  if (graph === null || laid === null || derived === null) {
+  if (scene === null) {
     return (
       <div className="graph">
         <div className="graph-empty">{error ?? (graph === null ? "불러오는 중" : "배치하는 중")}</div>
@@ -169,7 +351,7 @@ export function GraphView() {
   }
 
   return (
-    <div className="graph">
+    <div className="graph" ref={root} data-zoom={zoom} data-moving={moving ? "" : undefined}>
       <Markers />
       <ReactFlow
         nodes={nodes}
@@ -178,30 +360,37 @@ export function GraphView() {
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         onNodeMouseEnter={onNodeEnter}
-        onNodeMouseLeave={onLeave}
+        onNodeMouseMove={onMove}
+        onNodeMouseLeave={onNodeLeave}
         onEdgeClick={onEdgeClick}
         onEdgeMouseEnter={onEdgeEnter}
-        onEdgeMouseLeave={onLeave}
-        onPaneClick={clear}
+        onEdgeMouseMove={onMove}
+        onEdgeMouseLeave={onEdgeLeave}
+        onPaneClick={onPaneClick}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
+        zoomOnDoubleClick={false}
+        zIndexMode="manual"
+        fitView
+        fitViewOptions={{ padding: FIT_PADDING }}
         minZoom={0.05}
         maxZoom={4}
         proOptions={{ hideAttribution: true }}
-      />
+      >
+        {shelf !== null && (
+          <ViewportPortal>
+            <span
+              className="shelf-name"
+              style={{ transform: `translate(${shelf.x}px, ${shelf.y - SHELF_NAME_HEIGHT}px)` }}
+            >
+              {SHELF_NAME}
+            </span>
+          </ViewportPortal>
+        )}
+      </ReactFlow>
       <Legend />
-      {info !== null && (
-        <InfoBox
-          item={info.item}
-          pinned={info.pinned}
-          nodes={derived.nodes}
-          index={derived.index}
-          degrees={derived.degrees}
-          functions={derived.functions}
-          openSite={() => undefined}
-        />
-      )}
+      <Tooltip ref={tip} />
     </div>
   );
 }

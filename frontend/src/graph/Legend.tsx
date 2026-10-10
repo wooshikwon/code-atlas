@@ -1,14 +1,18 @@
-// 그래프 왼쪽 아래에 늘 띄우는 범례. 노드 모양 여섯 개, 선 모양 세 개, 초점 방향 색 두 개를 보여 준다.
+// 그래프 왼쪽 아래의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개, 초점 방향 색 두 개를 보여 준다.
 import type { EdgeGroup } from "../api/types";
+import { useAtlas } from "../state/store";
 import { GROUP_NAMES } from "./view";
 
 const SHAPES = [
-  { key: "package", name: "폴더" },
+  { key: "package", name: "접힌 폴더" },
   { key: "module", name: "파일" },
   { key: "class", name: "클래스" },
   { key: "dataclass", name: "데이터 클래스" },
   { key: "function", name: "함수·메서드" },
+  { key: "external", name: "외부 노드" },
   { key: "entry", name: "진입점" },
+  { key: "inflow", name: "편재 노드: 숨긴 선의 출발 노드 수" },
+  { key: "loc", name: "이름표 옆 숫자: 줄 수" },
 ];
 
 const GROUPS: EdgeGroup[] = ["run", "use", "derive"];
@@ -16,7 +20,7 @@ const GROUPS: EdgeGroup[] = ["run", "use", "derive"];
 function Shape({ kind }: { kind: string }) {
   switch (kind) {
     case "package":
-      return <rect x={1} y={2} width={20} height={12} rx={3} className="legend-package" />;
+      return <rect x={1} y={2} width={20} height={12} rx={4} className="legend-package" />;
     case "module":
       return <rect x={1} y={2} width={20} height={12} rx={2} className="legend-module" />;
     case "class":
@@ -31,50 +35,80 @@ function Shape({ kind }: { kind: string }) {
       );
     case "function":
       return <circle cx={11} cy={8} r={6} className="legend-node" />;
-    default:
+    case "external":
+      return <rect x={1} y={3} width={20} height={10} rx={5} className="legend-external" />;
+    case "entry":
       return (
         <text x={11} y={12} textAnchor="middle" className="legend-entry">
           ▶
+        </text>
+      );
+    case "inflow":
+      return (
+        <text x={11} y={12} textAnchor="middle" className="legend-inflow">
+          ←8
+        </text>
+      );
+    default:
+      return (
+        <text x={11} y={12} textAnchor="middle" className="legend-loc">
+          131
         </text>
       );
   }
 }
 
 export function Legend() {
+  const open = useAtlas((s) => s.legendOpen);
+  const toggleLegend = useAtlas((s) => s.toggleLegend);
   return (
-    <div className="legend">
-      <ul className="legend-list">
-        {SHAPES.map((s) => (
-          <li key={s.key}>
-            <svg width={22} height={16}>
-              <Shape kind={s.key} />
-            </svg>
-            {s.name}
-          </li>
-        ))}
-      </ul>
-      <ul className="legend-list">
-        {GROUPS.map((group) => (
-          <li key={group}>
-            <svg width={30} height={16}>
-              <path d="M2,8 L27,8" className={`legend-edge edge-${group} tone-muted`} markerEnd={`url(#arrow-${group}-muted)`} />
-            </svg>
-            {GROUP_NAMES[group]}
-          </li>
-        ))}
-        <li>
-          <svg width={30} height={16}>
-            <path d="M2,8 L27,8" className="legend-edge edge-run tone-outgoing" markerEnd="url(#arrow-run-outgoing)" />
-          </svg>
-          고른 노드가 쓰는 쪽
-        </li>
-        <li>
-          <svg width={30} height={16}>
-            <path d="M2,8 L27,8" className="legend-edge edge-run tone-incoming" markerEnd="url(#arrow-run-incoming)" />
-          </svg>
-          고른 노드를 쓰는 쪽
-        </li>
-      </ul>
-    </div>
+    <>
+      {open && (
+        <div className="legend" id="legend">
+          <ul className="legend-list">
+            {SHAPES.map((s) => (
+              <li key={s.key}>
+                <svg width={22} height={16}>
+                  <Shape kind={s.key} />
+                </svg>
+                {s.name}
+              </li>
+            ))}
+          </ul>
+          <ul className="legend-list">
+            {GROUPS.map((group) => (
+              <li key={group}>
+                <svg width={30} height={16}>
+                  <path d="M2,8 L27,8" className={`legend-edge edge-${group} tone-muted`} markerEnd={`url(#arrow-${group}-muted)`} />
+                </svg>
+                {GROUP_NAMES[group]}
+              </li>
+            ))}
+            <li>
+              <svg width={30} height={16}>
+                <path d="M2,8 L27,8" className="legend-edge edge-run tone-outgoing" markerEnd="url(#arrow-run-outgoing)" />
+              </svg>
+              고른 노드가 쓰는 쪽
+            </li>
+            <li>
+              <svg width={30} height={16}>
+                <path d="M2,8 L27,8" className="legend-edge edge-run tone-incoming" markerEnd="url(#arrow-run-incoming)" />
+              </svg>
+              고른 노드를 쓰는 쪽
+            </li>
+          </ul>
+        </div>
+      )}
+      <button
+        className="legend-button"
+        onClick={toggleLegend}
+        title="범례"
+        aria-label="범례"
+        aria-expanded={open}
+        aria-controls="legend"
+      >
+        ?
+      </button>
+    </>
   );
 }

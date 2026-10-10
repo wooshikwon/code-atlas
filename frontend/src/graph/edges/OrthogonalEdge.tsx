@@ -41,7 +41,7 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
   const path = roundedPath(data.points);
   const mid = data.weight === null ? null : midpoint(data.points);
   return (
-    <g className={`edge edge-${data.group} tone-${data.tone}`} style={{ opacity: data.opacity }}>
+    <g className={`edge edge-${data.group} tone-${data.tone}`} data-key={data.key} style={{ opacity: data.opacity }}>
       <path className="edge-hit" d={path} />
       <path className="edge-line" d={path} markerEnd={`url(#${markerId(data.group, data.tone)})`} />
       {mid !== null && (

@@ -1,8 +1,10 @@
-// 배치·그리는 범위·초점 단계를 합쳐 노드와 선 컴포넌트가 그대로 그리는 값을 만든다.
-import type { AtlasEdge, AtlasNode, EdgeGroup, EdgeKind, Graph } from "../api/types";
-import { OPACITY, type FocusLevel } from "./focus";
-import { belowRoute, crossRoute, type Layout, type Point } from "./layout";
-import { aggregates, edgeKey, type AggEdge, type EdgeKey } from "./scope";
+// 그릴 선과 배치를 합쳐 노드와 선 컴포넌트가 그대로 그리는 값을 만든다.
+import type { AtlasNode, EdgeGroup, EdgeKind, Graph } from "../api/types";
+import type { Flow } from "./flow";
+import { siblings } from "./columns";
+import { belowRoute, crossRoute, type Box, type Layout, type Point } from "./layout";
+import { aggKey, ubiquitous, type DrawnEdge, type EdgeKey } from "./scope";
+import { lift, nodeIndex, unitOf, type Shown } from "./visible";
 
 export type Tone = "muted" | "outgoing" | "incoming";
 
@@ -16,20 +18,9 @@ export type EdgeView = {
   opacity: number;
   /** 무게 2 이상인 집계 선만 숫자 이름표를 단다. */
   weight: number | null;
+  /** 합친 선의 sites 수 합 */
+  sites: number;
 };
-
-/** 원래 선과 집계 선을 edge_key로 찾는다. */
-export interface EdgeIndex {
-  raw: Map<EdgeKey, AtlasEdge>;
-  agg: Map<EdgeKey, AggEdge>;
-}
-
-export function edgeIndex(graph: Graph, visible: Set<string>): EdgeIndex {
-  return {
-    raw: new Map(graph.edges.map((e) => [edgeKey(e), e])),
-    agg: new Map(aggregates(graph, visible).map((a) => [a.key, a])),
-  };
-}
 
 /** 부모가 자식보다 앞에 오는 순서. React Flow는 parentId가 가리키는 노드가 먼저 나와야 한다. */
 export function parentFirst(graph: Graph, visible: Set<string>): AtlasNode[] {
@@ -48,52 +39,102 @@ export function parentFirst(graph: Graph, visible: Set<string>): AtlasNode[] {
   return nodes.sort((a, b) => depths.get(a.id)! - depths.get(b.id)!);
 }
 
-function opacityOf(levels: Map<string, FocusLevel> | null, id: string): number {
-  return levels === null ? 1 : OPACITY[levels.get(id) ?? 3];
+const JOG = 12;
+
+/**
+ * 형제가 아닌 두 노드를 잇는 경로. 두 노드를 형제가 될 때까지 올린 상자 사이의 배치 경로 trunk를 따라가고,
+ * 올린 쪽 끝만 원래 노드의 옆면 가운데로 옮긴다. trunk의 첫 선분과 끝 선분이 가로가 아니면 null이다.
+ */
+function alongRoute(trunk: Point[], source: Box | null, target: Box | null): Point[] | null {
+  const last = trunk.length - 1;
+  if (last < 1 || trunk[0].y !== trunk[1].y || trunk[last].y !== trunk[last - 1].y) {
+    return null;
+  }
+  const forward = trunk[1].x >= trunk[0].x;
+  const arriving = trunk[last].x >= trunk[last - 1].x;
+  const start =
+    source === null
+      ? trunk[0]
+      : { x: forward ? source.x + source.width : source.x, y: source.y + source.height / 2 };
+  const end =
+    target === null
+      ? trunk[last]
+      : { x: arriving ? target.x : target.x + target.width, y: target.y + target.height / 2 };
+  if (last === 1) {
+    const x = trunk[1].x + (forward ? -JOG : JOG);
+    return start.y === end.y ? [start, end] : [start, { x, y: start.y }, { x, y: end.y }, end];
+  }
+  const points = trunk.map((p) => ({ ...p }));
+  points[0] = start;
+  points[1].y = start.y;
+  points[last] = end;
+  points[last - 1].y = end.y;
+  return points;
 }
 
 /**
- * 그릴 선마다 경로·색·불투명도를 정한다. 경로는 ELK 결과를 먼저 쓰고, 없으면 함수 안 import는 `belowRoute`,
- * 파일 경계를 넘는 선은 `crossRoute`로 만든다. 초점 상태에서 출발점이 선택한 노드 안에 있으면 나가는 선,
- * 도착점이 선택한 노드 안에 있으면 들어오는 선이다. 나머지 선은 두 끝 노드 가운데 더 흐린 쪽 불투명도를 받는다.
+ * 그릴 선마다 경로를 정한다. 배치가 낸 경로를 먼저 쓴다. 없으면 함수 안 import만 합친 선은 `belowRoute`로,
+ * 형제가 아닌 두 노드를 잇는 선은 두 노드를 형제로 올린 상자 사이의 배치 경로를 따라가는 경로로 만들고,
+ * 따라갈 경로가 없으면 `crossRoute`로 만든다. 배치에 양 끝 상자가 없는 선은 뺀다.
  */
-export function edgeViews(
-  index: EdgeIndex,
-  layout: Layout,
-  keys: EdgeKey[],
-  seeds: Set<string> | null,
-  levels: Map<string, FocusLevel> | null,
-): EdgeView[] {
-  const views: EdgeView[] = [];
-  for (const key of keys) {
-    const raw = index.raw.get(key);
-    const agg = index.agg.get(key);
-    const edge = raw ?? agg;
-    if (edge === undefined) {
-      continue;
+export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string, AtlasNode>): EdgeView[] {
+  const route = (edge: DrawnEdge, source: Box, target: Box): Point[] => {
+    const found = layout.routes.get(edge.key);
+    if (found !== undefined) {
+      return found;
     }
+    if (edge.deferred) {
+      return belowRoute(source, target);
+    }
+    const ends = siblings(nodes, edge.source, edge.target);
+    const trunk = ends === null ? undefined : layout.routes.get(aggKey(ends[0], ends[1]));
+    const along =
+      ends === null || trunk === undefined
+        ? null
+        : alongRoute(trunk, ends[0] === edge.source ? null : source, ends[1] === edge.target ? null : target);
+    return along ?? crossRoute(source, target);
+  };
+
+  const views: EdgeView[] = [];
+  for (const edge of edges) {
     const source = layout.boxes.get(edge.source);
     const target = layout.boxes.get(edge.target);
     if (source === undefined || target === undefined) {
       continue;
     }
-    const points =
-      layout.routes.get(key) ?? (raw?.deferred === true ? belowRoute(source, target) : crossRoute(source, target));
-    const out = seeds?.has(edge.source) === true;
-    const into = seeds?.has(edge.target) === true;
     views.push({
-      key,
+      key: edge.key,
       source: edge.source,
       target: edge.target,
       group: edge.group,
-      points,
-      tone: out ? "outgoing" : into ? "incoming" : "muted",
-      opacity:
-        out || into ? 1 : Math.min(opacityOf(levels, edge.source), opacityOf(levels, edge.target)),
-      weight: agg !== undefined && agg.weight >= 2 ? agg.weight : null,
+      points: route(edge, source, target),
+      tone: edge.tone,
+      opacity: edge.opacity,
+      weight: edge.key.startsWith("agg|") && edge.weight >= 2 ? edge.weight : null,
+      sites: edge.weight,
     });
   }
   return views;
+}
+
+/**
+ * 편재 노드 배지를 다는 노드와 숨긴 선의 출발 노드 수. 초점이 없으면 편재 노드 전체이고,
+ * 고른 노드를 품었거나 고른 노드가 쓰는 편재 노드는 숨긴 선을 다시 그리므로 뺀다.
+ */
+export function badges(graph: Graph, shown: Shown, flow: Flow | null): Map<string, number> {
+  const result = ubiquitous(graph, shown);
+  if (flow === null) {
+    return result;
+  }
+  const nodes = nodeIndex(graph);
+  const used = graph.edges.filter((e) => flow.seeds.has(e.source)).map((e) => e.target);
+  for (const id of [...flow.seeds, ...used]) {
+    const box = lift(nodes, shown, unitOf(nodes, id));
+    if (box !== null) {
+      result.delete(box);
+    }
+  }
+  return result;
 }
 
 /** 노드에 닿는 선 수. 외부 노드로 가는 선도 센다. */
