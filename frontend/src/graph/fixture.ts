@@ -64,3 +64,43 @@ export const fixture: Graph = {
     edge("tests.test_mod:test_load", "pkg.mod:Store.load", "call"),
   ],
 };
+
+// 탐색 시험용 고정 그래프. fixture에 서로 import하는 진입점 파일 cli, 선이 없는 파일 scratch,
+// 파일 네 개가 import하는 common, 함수 진입점 index에서 시작해 파일 경계를 넘는 세 단계 호출 사슬
+// index → render → wrap → pad, 폴더 pkg 안의 테스트 코드 pkg.conftest를 더한다.
+export const repoFixture: Graph = {
+  nodes: [
+    ...fixture.nodes,
+    node("pkg.conftest", "module", "pkg", { path: "pkg/conftest.py", test: true }),
+    node("pkg.conftest:setup", "function", "pkg.conftest", { path: "pkg/conftest.py", test: true, range: [1, 3] }),
+    node("cli", "module", null, { path: "cli.py", loc: 20, entry: true }),
+    node("cli:main", "function", "cli", { path: "cli.py", range: [5, 15] }),
+    node("common", "module", null, { path: "common.py", loc: 12 }),
+    node("common:log", "function", "common", { path: "common.py", range: [1, 8] }),
+    node("scratch", "module", null, { path: "scratch.py", loc: 4 }),
+    node("scratch:todo", "function", "scratch", { path: "scratch.py", range: [1, 4] }),
+    node("app", "package", null, { path: "app/__init__.py" }),
+    node("app.web", "module", "app", { path: "app/web.py", loc: 30 }),
+    node("app.web:index", "function", "app.web", { path: "app/web.py", range: [5, 12], entry: true }),
+    node("app.web:render", "function", "app.web", { path: "app/web.py", range: [14, 25] }),
+    node("app.text", "module", "app", { path: "app/text.py", loc: 20 }),
+    node("app.text:wrap", "function", "app.text", { path: "app/text.py", range: [1, 8] }),
+    node("app.text:pad", "function", "app.text", { path: "app/text.py", range: [10, 16] }),
+  ],
+  edges: [
+    ...fixture.edges,
+    edge("main", "cli", "import"),
+    edge("cli", "main", "import"),
+    edge("cli:main", "main:run", "call"),
+    edge("main", "common", "import"),
+    edge("cli", "common", "import"),
+    edge("pkg.mod", "common", "import"),
+    edge("app.web", "common", "import"),
+    edge("cli:main", "common:log", "call"),
+    edge("app.web", "app.text", "import"),
+    edge("app.web:index", "app.web:render", "call"),
+    edge("app.web:render", "app.text:wrap", "call"),
+    edge("app.text:wrap", "app.text:pad", "call"),
+    edge("pkg.conftest:setup", "main:helper", "call"),
+  ],
+};
