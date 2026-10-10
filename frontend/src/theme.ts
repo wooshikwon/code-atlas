@@ -9,6 +9,8 @@ export interface Colors {
   ink: string;
   /** muted 잉크: 노드 테두리, 선, 보조 글자 */
   muted: string;
+  /** 이름표 옆 줄 수 숫자 */
+  loc: string;
   /** 초점 상태에서 선택한 노드가 쓰는 쪽으로 나가는 선 */
   outgoing: string;
   /** 초점 상태에서 선택한 노드를 쓰는 쪽에서 들어오는 선 */
@@ -16,8 +18,8 @@ export interface Colors {
 }
 
 const PALETTE: Record<Theme, Colors> = {
-  light: { surface: "#fcfcfb", ink: "#0b0b0b", muted: "#898781", outgoing: "#2a78d6", incoming: "#eb6834" },
-  dark: { surface: "#1a1a19", ink: "#ffffff", muted: "#898781", outgoing: "#3987e5", incoming: "#d95926" },
+  light: { surface: "#fcfcfb", ink: "#0b0b0b", muted: "#898781", loc: "#1d8169", outgoing: "#2a78d6", incoming: "#eb6834" },
+  dark: { surface: "#1a1a19", ink: "#ffffff", muted: "#898781", loc: "#3fb79a", outgoing: "#3987e5", incoming: "#d95926" },
 };
 
 export function colors(theme: Theme): Colors {

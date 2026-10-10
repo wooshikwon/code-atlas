@@ -4,19 +4,9 @@ import { opacities, type Flow } from "./flow";
 import type { Tone } from "./view";
 import { lift, nodeIndex, unitOf, within, type Shown } from "./visible";
 
-export { nodeIndex, unitOf };
+export { nodeIndex };
 
 export type EdgeKey = string;
-
-/** 파일 상자 사이 집계 선. 무게는 합친 선들의 sites 수 합이다. */
-export interface AggEdge {
-  key: EdgeKey;
-  source: string;
-  target: string;
-  group: EdgeGroup;
-  weight: number;
-  kinds: Partial<Record<EdgeKind, number>>;
-}
 
 /** 화면에 그리는 선 하나. 양 끝을 올려 합친 집계 선은 `agg|…` 키를, 올리지 않은 선은 edge_key를 쓴다. */
 export interface DrawnEdge {
@@ -41,61 +31,6 @@ export function edgeKey(edge: AtlasEdge): EdgeKey {
 
 export function aggKey(source: string, target: string): EdgeKey {
   return `agg|${source}|${target}`;
-}
-
-/** 외부 노드는 숨기고, 테스트 코드는 토글이 켜졌을 때만 보인다. */
-export function visibleNodes(graph: Graph, showTests: boolean): Set<string> {
-  return new Set(graph.nodes.filter((n) => n.kind !== "external" && (showTests || !n.test)).map((n) => n.id));
-}
-
-function drawable(edge: AtlasEdge, visible: Set<string>): boolean {
-  return visible.has(edge.source) && visible.has(edge.target);
-}
-
-/** 서로 다른 파일 상자를 잇는 선을 출발·도착 상자 쌍마다 하나로 합친다. 함수 안 import는 합치지 않는다. */
-export function aggregates(graph: Graph, visible: Set<string>): AggEdge[] {
-  const nodes = nodeIndex(graph);
-  const merged = new Map<EdgeKey, AggEdge>();
-  for (const edge of graph.edges) {
-    if (edge.deferred || !drawable(edge, visible)) {
-      continue;
-    }
-    const source = unitOf(nodes, edge.source);
-    const target = unitOf(nodes, edge.target);
-    if (source === target) {
-      continue;
-    }
-    const key = aggKey(source, target);
-    const agg = merged.get(key) ?? { key, source, target, group: edge.group, weight: 0, kinds: {} };
-    agg.weight += edge.sites.length;
-    agg.kinds[edge.kind] = (agg.kinds[edge.kind] ?? 0) + edge.sites.length;
-    if (GROUP_ORDER.indexOf(edge.group) < GROUP_ORDER.indexOf(agg.group)) {
-      agg.group = edge.group;
-    }
-    merged.set(key, agg);
-  }
-  return [...merged.values()];
-}
-
-/**
- * 그리는 범위 규칙 1·2로 그릴 선을 고른다.
- * 1. 파일 상자 사이 집계 선과 한 파일 상자 안의 선을 그린다.
- * 2. 고르거나 마우스를 올린 노드에 닿는 선을 파일 경계를 넘는 선과 함수 안 import까지 모두 그린다.
- */
-export function scope(graph: Graph, visible: Set<string>, selection: string | null, hover: string | null): EdgeKey[] {
-  const nodes = nodeIndex(graph);
-  const keys = aggregates(graph, visible).map((agg) => agg.key);
-  const touched = new Set([selection, hover].filter((id): id is string => id !== null && nodes.has(id)));
-  for (const edge of graph.edges) {
-    if (!drawable(edge, visible)) {
-      continue;
-    }
-    const inside = !edge.deferred && unitOf(nodes, edge.source) === unitOf(nodes, edge.target);
-    if (inside || touched.has(edge.source) || touched.has(edge.target)) {
-      keys.push(edgeKey(edge));
-    }
-  }
-  return keys;
 }
 
 /** 노드가 든 파일 상자를 화면에 보이는 가장 가까운 상자로 올린다. */

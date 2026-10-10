@@ -329,6 +329,12 @@ ul {
   transition: opacity 200ms ease-out;
 }
 
+.graph[data-moving] .edge {
+  opacity: 0 !important;
+  pointer-events: none;
+  transition: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .react-flow__node,
   .edge {
@@ -348,7 +354,8 @@ ul {
 .node-module,
 .node-class,
 .node-dataclass,
-.node-function {
+.node-function,
+.node-external {
   position: relative;
   width: 100%;
   height: 100%;
@@ -378,17 +385,20 @@ ul {
   font-weight: 400;
 }
 
-.node-aside,
-.node-below {
-  color: var(--muted);
-  font-size: 11px;
+.loc {
+  margin-left: 5px;
+  color: var(--loc);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
-.node-label-hidden .node-label,
-.node-label-hidden .node-aside,
-.node-label-hidden .node-below,
-.node-label-hidden .node-table-row {
-  visibility: hidden;
+.node-aside,
+.node-below,
+.node-inflow,
+.shelf-name {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .node-selected {
@@ -397,28 +407,79 @@ ul {
 }
 
 .node-package {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--muted);
   border-radius: 8px;
+}
+
+.node-package-open {
+  width: 100%;
+  height: 100%;
 }
 
 .node-module {
   border: 1.5px solid var(--muted);
   border-radius: 4px;
-  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  background: color-mix(in srgb, var(--ink) 4%, var(--surface));
 }
 
-.node-module-leaf .node-header {
+.node-module-name,
+.node-module-head {
+  display: flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.node-module-name {
   height: 100%;
   padding: 0 12px;
   line-height: 37px;
 }
 
+.node-module-open {
+  cursor: default;
+}
+
+.node-module-head {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 3px 3px 0 0;
+  line-height: 32px;
+  cursor: pointer;
+}
+
+.node-module-head:hover {
+  background: var(--hover-bg);
+}
+
+.node-module-head .node-aside {
+  margin-left: 12px;
+}
+
 .node-below {
   position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  white-space: nowrap;
+  top: calc(100% + 3px);
+  left: 1px;
   line-height: 1;
+}
+
+.node-inflow {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 4px);
+  transform: translateY(-50%);
+  line-height: 1;
+}
+
+.shelf-name {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .node-class .node-header {
@@ -441,7 +502,7 @@ ul {
 }
 
 .node-hexagon polygon {
-  fill: color-mix(in srgb, var(--ink) 3%, transparent);
+  fill: color-mix(in srgb, var(--ink) 3%, var(--surface));
   stroke: var(--muted);
   stroke-width: 1.5;
 }
@@ -479,7 +540,6 @@ ul {
 .node-function {
   display: flex;
   align-items: center;
-  gap: 6px;
 }
 
 .node-function.node-selected {
@@ -489,6 +549,9 @@ ul {
 .node-circle {
   position: relative;
   flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
   border: 1.5px solid var(--muted);
   border-radius: 50%;
   background: var(--surface);
@@ -497,6 +560,23 @@ ul {
 .node-function.node-selected .node-circle {
   outline: 3px solid var(--ink);
   outline-offset: 2px;
+}
+
+.node-external {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--muted);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--muted) 22%, var(--surface));
+}
+
+/* 이름표는 확대 비율 구간에 따라 숨긴다. 40% 미만은 폴더·파일 이름만, 80% 미만은 클래스·데이터 클래스 이름까지 보인다.
+   초점 상태에서 흐름에 든 노드의 이름표는 확대 비율과 관계없이 보인다. */
+.graph[data-zoom="0"] :is(.node-class, .node-dataclass, .node-function):not([data-flow]) :is(.node-label, .loc),
+.graph[data-zoom="1"] .node-function:not([data-flow]) :is(.node-label, .loc),
+.graph:not([data-zoom="2"]) .node-table-row {
+  visibility: hidden;
 }
 
 .badge {
@@ -594,7 +674,6 @@ ul {
 /* 그래프 위에 띄우는 칸 */
 
 .legend,
-.info-box,
 .info-panel {
   position: absolute;
   z-index: 5;
@@ -605,11 +684,30 @@ ul {
 }
 
 .legend {
-  bottom: 8px;
-  left: 8px;
+  bottom: 54px;
+  left: 12px;
   display: flex;
-  gap: 12px;
-  padding: 6px 8px;
+  gap: 16px;
+  padding: 8px 12px;
+}
+
+.legend-button {
+  position: absolute;
+  z-index: 5;
+  bottom: 12px;
+  left: 12px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--panel-bg);
+  font-weight: 600;
+}
+
+.legend-button:hover,
+.legend-button[aria-expanded="true"] {
+  color: var(--ink);
 }
 
 .legend-list li {
@@ -617,11 +715,13 @@ ul {
   align-items: center;
   gap: 6px;
   height: 18px;
+  white-space: nowrap;
 }
 
 .legend-node,
 .legend-package,
-.legend-module {
+.legend-module,
+.legend-external {
   fill: var(--surface);
   stroke: var(--muted);
   stroke-width: 1.5;
@@ -633,12 +733,41 @@ ul {
 }
 
 .legend-module {
-  fill: color-mix(in srgb, var(--ink) 4%, transparent);
+  fill: color-mix(in srgb, var(--ink) 4%, var(--surface));
+}
+
+.legend-external {
+  fill: color-mix(in srgb, var(--muted) 22%, var(--surface));
+  stroke-width: 1;
 }
 
 .legend-entry {
   fill: var(--ink);
   font-size: 11px;
+}
+
+.legend-inflow {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.legend-loc {
+  fill: var(--loc);
+  font-size: 10px;
+}
+
+.tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: var(--surface);
+  background: var(--ink);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .info-panel {
@@ -797,81 +926,4 @@ ul {
 
 .info-panel-resize[data-dir$="w"] {
   left: 0;
-}
-
-.info-box {
-  top: 8px;
-  left: 8px;
-  width: 340px;
-  max-height: calc(100% - 16px);
-  overflow: auto;
-  padding: 8px 10px;
-}
-
-.info-box-pinned {
-  border-color: var(--muted);
-}
-
-.info-title {
-  font-weight: 600;
-  word-break: break-all;
-}
-
-.info-muted {
-  color: var(--muted);
-}
-
-.info-path {
-  margin-top: 2px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  word-break: break-all;
-}
-
-.info-facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 2px 12px;
-  margin: 6px 0 0;
-}
-
-.info-facts dt {
-  color: var(--muted);
-}
-
-.info-facts dd {
-  margin: 0;
-  word-break: break-all;
-}
-
-.info-sites {
-  margin-top: 6px;
-}
-
-.info-sites li {
-  padding: 1px 0;
-}
-
-.info-site {
-  display: block;
-  width: 100%;
-  padding: 1px 2px;
-  border-radius: 2px;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.info-site:disabled {
-  cursor: default;
-}
-
-.info-site:not(:disabled):hover {
-  background: var(--hover-bg);
-}
-
-.info-site code {
-  font-family: var(--font-mono);
-  font-size: 11px;
 }

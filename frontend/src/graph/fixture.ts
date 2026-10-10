@@ -1,5 +1,8 @@
 // 시험용 고정 그래프. 폴더 pkg → 파일 pkg.mod → 클래스 Store → 메서드 두 개를 3단으로 중첩하고,
 // 메서드가 클래스 밖 데이터 클래스·함수로 계층을 넘어 잇고, 파일 main의 진입점 run과 메서드가 파일 경계를 넘어 서로 부른다.
+// 여기에 서로 import하는 진입점 파일 cli, 선이 없는 파일 scratch, 파일 네 개가 import하는 common,
+// 함수 진입점 index에서 시작해 파일 경계를 넘는 세 단계 호출 사슬 index → render → wrap → pad,
+// 폴더 pkg 안의 테스트 코드 pkg.conftest를 더한다.
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 
 function node(id: string, kind: AtlasNode["kind"], parent: string | null, extra: Partial<AtlasNode> = {}): AtlasNode {
@@ -30,7 +33,7 @@ function edge(source: string, target: string, kind: AtlasEdge["kind"], extra: Pa
   return { group, kind, source, target, sites: [{ path: "x.py", line: 1, col: 0 }], deferred: false, ...extra };
 }
 
-export const fixture: Graph = {
+export const repoFixture: Graph = {
   nodes: [
     node("main", "module", null, { path: "main.py", loc: 40, entry: true }),
     node("main:helper", "function", "main", { path: "main.py", range: [20, 30] }),
@@ -50,27 +53,6 @@ export const fixture: Graph = {
     node("tests.test_mod", "module", null, { path: "tests/test_mod.py", test: true }),
     node("tests.test_mod:test_load", "function", "tests.test_mod", { test: true, range: [1, 3] }),
     node("ext:json", "external", null, { origin: "stdlib" }),
-  ],
-  edges: [
-    edge("main", "pkg.mod", "import"),
-    edge("main:run", "pkg.mod:Store.load", "call", { sites: [1, 2, 3].map((line) => ({ path: "main.py", line, col: 0 })) }),
-    edge("main:run", "main:helper", "call"),
-    edge("pkg.mod:Store.save", "main:helper", "call"),
-    edge("pkg.mod:Store.load", "pkg.mod:Store.save", "call"),
-    edge("pkg.mod:Store.load", "pkg.mod:Row", "construct"),
-    edge("pkg.mod:Store.save", "pkg.mod:parse", "call"),
-    edge("pkg.mod", "pkg.util", "import", { deferred: true }),
-    edge("pkg.mod", "ext:json", "import"),
-    edge("tests.test_mod:test_load", "pkg.mod:Store.load", "call"),
-  ],
-};
-
-// 탐색 시험용 고정 그래프. fixture에 서로 import하는 진입점 파일 cli, 선이 없는 파일 scratch,
-// 파일 네 개가 import하는 common, 함수 진입점 index에서 시작해 파일 경계를 넘는 세 단계 호출 사슬
-// index → render → wrap → pad, 폴더 pkg 안의 테스트 코드 pkg.conftest를 더한다.
-export const repoFixture: Graph = {
-  nodes: [
-    ...fixture.nodes,
     node("pkg.conftest", "module", "pkg", { path: "pkg/conftest.py", test: true }),
     node("pkg.conftest:setup", "function", "pkg.conftest", { path: "pkg/conftest.py", test: true, range: [1, 3] }),
     node("cli", "module", null, { path: "cli.py", loc: 20, entry: true }),
@@ -88,7 +70,16 @@ export const repoFixture: Graph = {
     node("app.text:pad", "function", "app.text", { path: "app/text.py", range: [10, 16] }),
   ],
   edges: [
-    ...fixture.edges,
+    edge("main", "pkg.mod", "import"),
+    edge("main:run", "pkg.mod:Store.load", "call", { sites: [1, 2, 3].map((line) => ({ path: "main.py", line, col: 0 })) }),
+    edge("main:run", "main:helper", "call"),
+    edge("pkg.mod:Store.save", "main:helper", "call"),
+    edge("pkg.mod:Store.load", "pkg.mod:Store.save", "call"),
+    edge("pkg.mod:Store.load", "pkg.mod:Row", "construct"),
+    edge("pkg.mod:Store.save", "pkg.mod:parse", "call"),
+    edge("pkg.mod", "pkg.util", "import", { deferred: true }),
+    edge("pkg.mod", "ext:json", "import"),
+    edge("tests.test_mod:test_load", "pkg.mod:Store.load", "call"),
     edge("main", "cli", "import"),
     edge("cli", "main", "import"),
     edge("cli:main", "main:run", "call"),
