@@ -1,4 +1,11 @@
-from code_atlas.lsp import to_utf16, to_utf8
+import sys
+
+import pytest
+from lsprotocol import types
+
+from code_atlas.analyze import analyze_async
+from code_atlas.collect import collect
+from code_atlas.lsp import Session, markdown_of, to_utf16, to_utf8
 
 
 def edge_set(analysis, kind):
@@ -11,6 +18,33 @@ def test_column_conversion_round_trip():
     col16 = line.index("run_engine")
     assert to_utf16(line, col8) == col16
     assert to_utf8(line, col16) == col8
+
+
+def test_markdown_of_hover_content_forms():
+    code = types.MarkedStringWithLanguage(language="python", value="def f(): ...")
+    assert markdown_of(types.MarkupContent(kind=types.MarkupKind.Markdown, value="**f**")) == "**f**"
+    assert markdown_of("plain") == "plain"
+    assert markdown_of(code) == "```python\ndef f(): ...\n```"
+    assert markdown_of([code, "설명"]) == "```python\ndef f(): ...\n```\n\n설명"
+
+
+@pytest.mark.asyncio
+async def test_hover_and_definition_at_after_korean_string(sample_repo):
+    files = collect(sample_repo)
+    async with Session(files.root, sys.executable, files.extra_paths) as session:
+        analyzed = await analyze_async(files, session)
+        line = analyzed.texts["src/app/cli.py"].splitlines()[9]
+        col = line.index("run_engine")
+        assert col != line.encode().index(b"run_engine")
+
+        hover = await session.hover("src/app/cli.py", 10, col)
+        assert "run_engine" in hover.markdown
+        assert hover.range == (10, col, 10, col + len("run_engine"))
+
+        [loc] = await session.definition_at("src/app/cli.py", 10, col)
+        assert (loc.path, loc.line, loc.col) == (str(files.root / "src/app/core.py"), 31, 4)
+        assert not session.stopped
+    assert session.stopped
 
 
 def test_call_after_korean_string(analyzed):

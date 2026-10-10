@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import venv
@@ -13,7 +14,7 @@ from .extract import FileFacts, extract_repo, read_source
 from .graph import build
 from .lsp import Location, Session
 from .model import Analysis, Site
-from .resolve import resolve
+from .resolve import Index, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,24 @@ CONCURRENCY = 32
 
 class PythonNotFound(Exception):
     pass
+
+
+@dataclass
+class Analyzed:
+    """분석 결과와, 떠 있는 서버가 위치 질의와 세션 다시 열기에 쓰는 자료."""
+
+    analysis: Analysis
+    files: RepoFiles
+    index: Index
+    texts: dict[str, str]  # 레포 루트 기준 경로 → 본문
+    probe: tuple[str, int, int] | None  # `Session.wait_ready`에 넘기는 지점
+
+
+def require_python(repo: str | Path, python: str | None) -> str:
+    python = python or venv.find(repo)
+    if python is None:
+        raise PythonNotFound(f"{repo}에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.")
+    return python
 
 
 def _imported_module(site: Site) -> str:
@@ -67,23 +86,27 @@ async def _request_all(session: Session, sites: list[Site]) -> dict[int, list[Lo
     return found
 
 
-async def _locate(repo: RepoFiles, facts: list[FileFacts], texts: dict[str, str], python: str) -> dict[int, list[Location]]:
-    sites = [s for f in facts for s in f.sites]
-    async with Session(repo.root, python, repo.extra_paths) as session:
-        session.open_files(texts)
-        await session.wait_ready(_probe(facts))
-        return await _request_all(session, sites)
+async def analyze_async(repo: RepoFiles, session: Session) -> Analyzed:
+    """띄워 둔 세션에 레포 파일을 열고 분석한다. 세션은 닫지 않는다."""
+    started = time.monotonic()
+    facts = extract_repo(repo)
+    texts = {f.path: read_source(repo, f) for f in repo.files}
+    probe = _probe(facts)
+    session.open_files(texts)
+    await session.wait_ready(probe)
+    locations = await _request_all(session, [s for f in facts for s in f.sites])
+    index = Index(repo.root, facts)
+    analysis = build(repo, facts, resolve(facts, locations, index), texts)
+    analysis.stats["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+    return Analyzed(analysis, repo, index, texts, probe)
 
 
 def analyze(repo: str | Path, python: str | None = None) -> tuple[Analysis, RepoFiles]:
-    started = time.monotonic()
-    python = python or venv.find(repo)
-    if python is None:
-        raise PythonNotFound(f"{repo}에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.")
+    python = require_python(repo, python)
     files = collect(repo)
-    facts = extract_repo(files)
-    texts = {f.path: read_source(files, f) for f in files.files}
-    locations = asyncio.run(_locate(files, facts, texts, python))
-    analysis = build(files, facts, resolve(facts, locations, files.root), texts)
-    analysis.stats["elapsed_ms"] = round((time.monotonic() - started) * 1000)
-    return analysis, files
+
+    async def run() -> Analyzed:
+        async with Session(files.root, python, files.extra_paths) as session:
+            return await analyze_async(files, session)
+
+    return asyncio.run(run()).analysis, files

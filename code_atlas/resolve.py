@@ -51,10 +51,12 @@ class Index:
         self.modules: dict[str, str] = {}  # 레포 루트 기준 경로 → 모듈 id
         self.names: dict[tuple[str, int, int], str] = {}  # (경로, 줄, 열) → 노드 id
         self.kinds: dict[str, str] = {}
+        self.ranges: dict[str, list[tuple[int, int, str]]] = {}  # 레포 루트 기준 경로 → (시작 줄, 끝 줄, 노드 id)
         for f in facts:
             self.modules[f.file.path] = f.file.module_id
             for node in f.nodes:
                 self.kinds[node.id] = node.kind
+                self.ranges.setdefault(f.file.path, []).append((*node.range, node.id))
             for info in f.defs.values():
                 self.names[(f.file.path, info.name_line, info.name_col)] = info.node_id
 
@@ -63,6 +65,13 @@ class Index:
             return Path(path).resolve().relative_to(self.root).as_posix()
         except ValueError:
             return None
+
+    def enclosing(self, path: str, line: int, col: int) -> str | None:
+        """레포 루트 기준 경로의 위치를 품은 가장 안쪽 노드 id. 파일 첫 위치는 모듈이고, 분석 대상 파일이 아니면 None이다."""
+        if line == 1 and col == 0:
+            return self.modules.get(path)
+        inside = [r for r in self.ranges.get(path, []) if r[0] <= line <= r[1]]
+        return max(inside, key=lambda r: (r[0], -r[1]))[2] if inside else None
 
 
 def external_of(path: str) -> tuple[str, str] | None:
@@ -138,9 +147,8 @@ def resolve_site(site: Site, locations: list[Location], index: Index, externals:
     return ResolvedSite(**base, status="external", target=node.id, edge=EDGE_KINDS[site.kind].get("external"))
 
 
-def resolve(facts: list[FileFacts], locations: dict[int, list[Location]], root: Path) -> Resolution:
+def resolve(facts: list[FileFacts], locations: dict[int, list[Location]], index: Index) -> Resolution:
     """지점 순번(`facts`의 지점을 차례로 센 번호)마다 받은 위치로 대상을 정한다."""
-    index = Index(root, facts)
     externals: dict[str, Node] = {}
     sites: list[ResolvedSite] = []
     n = 0

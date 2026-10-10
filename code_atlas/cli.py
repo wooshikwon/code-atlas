@@ -10,15 +10,14 @@ import sys
 import threading
 import webbrowser
 
-from .analyze import PythonNotFound, analyze
+from .analyze import PythonNotFound, analyze, require_python
 from .api import HOST, PORT, create_app
 from .model import to_dict
-from .venv import find
 
 
-def _analyze_or_exit(repo: str, python: str | None):
+def _python_or_exit(repo: str, python: str | None) -> str:
     try:
-        return analyze(repo, python)
+        return require_python(repo, python)
     except PythonNotFound as exc:
         print(exc, file=sys.stderr)
         sys.exit(2)
@@ -36,7 +35,7 @@ def _print_summary(analysis) -> None:
 
 
 def _analyze_command(args: argparse.Namespace) -> int:
-    analysis, _ = _analyze_or_exit(args.repo, args.python)
+    analysis, _ = analyze(args.repo, _python_or_exit(args.repo, args.python))
     if args.json:
         json.dump(to_dict(analysis), sys.stdout, ensure_ascii=False)
         sys.stdout.write("\n")
@@ -61,15 +60,17 @@ def _serve_command(args: argparse.Namespace) -> int:
     import uvicorn
 
     sock = _bind_or_exit(args.port)
-    python = args.python or find(args.repo)
-    analysis, files = _analyze_or_exit(args.repo, python)
-    _print_summary(analysis)
+    python = _python_or_exit(args.repo, args.python)
     url = f"http://{HOST}:{args.port}"
-    if args.no_open or (sys.platform.startswith("linux") and not os.environ.get("DISPLAY")):
-        print(f"주소: {url}", flush=True)
-    else:
-        threading.Timer(1.0, webbrowser.open, [url]).start()
-    config = uvicorn.Config(create_app(analysis, files, python), log_level="warning")
+
+    def on_ready(analysis) -> None:
+        _print_summary(analysis)
+        if args.no_open or (sys.platform.startswith("linux") and not os.environ.get("DISPLAY")):
+            print(f"주소: {url}", flush=True)
+        else:
+            threading.Timer(1.0, webbrowser.open, [url]).start()
+
+    config = uvicorn.Config(create_app(args.repo, python, on_ready), log_level="warning")
     uvicorn.Server(config).run(sockets=[sock])
     return 0
 

@@ -33,13 +33,32 @@ def to_utf8(line: str, col_utf16: int) -> int:
     return len(prefix.encode())
 
 
+def markdown_of(contents) -> str:
+    """LSP hover 내용의 세 형태(MarkupContent, 문자열, 언어가 붙은 코드)와 그 목록을 markdown 문자열로 바꾼다."""
+    if isinstance(contents, types.MarkupContent):
+        return contents.value
+    if isinstance(contents, str):
+        return contents
+    if isinstance(contents, types.MarkedStringWithLanguage):
+        return f"```{contents.language}\n{contents.value}\n```"
+    return "\n\n".join(markdown_of(item) for item in contents)
+
+
 @dataclass(frozen=True)
 class Location:
-    """정의 위치. path는 절대경로, line은 1부터, col은 UTF-8 바이트 단위다."""
+    """정의 위치. path는 절대경로, line은 1부터 센다. col의 단위는 돌려준 메서드가 정한다."""
 
     path: str
     line: int
     col: int
+
+
+@dataclass(frozen=True)
+class Hover:
+    """hover 내용. range는 (시작 줄, 시작 열, 끝 줄, 끝 열)이고 줄은 1부터, 열은 UTF-16 단위다."""
+
+    markdown: str
+    range: tuple[int, int, int, int] | None
 
 
 def _server_command() -> str:
@@ -107,7 +126,7 @@ class Session:
         server = self.client._server
         if server is not None and server.stderr is not None:
             self.client._async_tasks.append(asyncio.create_task(self._drain(server.stderr)))
-        await self.client.initialize_async(
+        result = await self.client.initialize_async(
             types.InitializeParams(
                 process_id=None,
                 root_uri=self.root.as_uri(),
@@ -116,10 +135,15 @@ class Session:
                     workspace=types.WorkspaceClientCapabilities(configuration=True),
                     text_document=types.TextDocumentClientCapabilities(
                         definition=types.DefinitionClientCapabilities(link_support=False),
+                        hover=types.HoverClientCapabilities(
+                            content_format=[types.MarkupKind.Markdown, types.MarkupKind.PlainText]
+                        ),
                     ),
                 ),
             )
         )
+        # 응답에 값이 없으면 LSP 기본값인 UTF-16이다.
+        logger.info("basedpyright position encoding: %s", result.capabilities.position_encoding or "utf-16")
         self.client.initialized(types.InitializedParams())
         return self
 
@@ -137,6 +161,11 @@ class Session:
     async def _drain(stream: asyncio.StreamReader) -> None:
         while await stream.read(65536):
             pass
+
+    @property
+    def stopped(self) -> bool:
+        """basedpyright 프로세스가 끝났으면 참이다. 끝난 세션에는 요청을 보내지 못한다."""
+        return self.client.stopped
 
     def open_files(self, texts: dict[str, str]) -> None:
         """레포 루트 기준 경로와 본문을 받아 모두 didOpen으로 연다."""
@@ -163,10 +192,17 @@ class Session:
 
     async def definition(self, path: str, line: int, col_utf8: int) -> list[Location]:
         """레포 루트 기준 경로의 1부터 세는 줄, UTF-8 바이트 열에서 정의 위치를 묻는다."""
-        abs_path = str(self.root / path)
+        col_utf16 = to_utf16(self._line(str(self.root / path), line), col_utf8)
+        return [
+            Location(loc.path, loc.line, to_utf8(self._line(loc.path, loc.line), loc.col))
+            for loc in await self.definition_at(path, line, col_utf16)
+        ]
+
+    async def definition_at(self, path: str, line: int, col_utf16: int) -> list[Location]:
+        """레포 루트 기준 경로의 1부터 세는 줄, UTF-16 열에서 정의 위치를 묻는다. 돌려주는 열도 UTF-16 단위다."""
         params = types.DefinitionParams(
-            text_document=types.TextDocumentIdentifier(uri=Path(abs_path).as_uri()),
-            position=types.Position(line=line - 1, character=to_utf16(self._line(abs_path, line), col_utf8)),
+            text_document=types.TextDocumentIdentifier(uri=(self.root / path).as_uri()),
+            position=types.Position(line=line - 1, character=col_utf16),
         )
         result = await asyncio.wait_for(self.client.text_document_definition_async(params), REQUEST_TIMEOUT)
         if result is None:
@@ -181,10 +217,23 @@ class Session:
             target = to_fs_path(uri)
             if target is None:
                 continue
-            target_line = start.line + 1
-            col = to_utf8(self._line(target, target_line), start.character)
-            locations.append(Location(target, target_line, col))
+            locations.append(Location(target, start.line + 1, start.character))
         return locations
+
+    async def hover(self, path: str, line: int, col_utf16: int) -> Hover | None:
+        """레포 루트 기준 경로의 1부터 세는 줄, UTF-16 열에서 hover 내용을 묻는다."""
+        params = types.HoverParams(
+            text_document=types.TextDocumentIdentifier(uri=(self.root / path).as_uri()),
+            position=types.Position(line=line - 1, character=col_utf16),
+        )
+        result = await asyncio.wait_for(self.client.text_document_hover_async(params), REQUEST_TIMEOUT)
+        if result is None:
+            return None
+        r = result.range
+        return Hover(
+            markdown_of(result.contents),
+            (r.start.line + 1, r.start.character, r.end.line + 1, r.end.character) if r else None,
+        )
 
     async def wait_ready(self, probe: tuple[str, int, int] | None) -> None:
         """레포 안 정의를 가리키는 지점에 응답이 올 때까지 기다린다."""
