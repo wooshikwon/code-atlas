@@ -1,5 +1,6 @@
 import type { NodeProps } from "@xyflow/react";
-import { TABLE_HEAD, TABLE_ROW, tableRows, truncate } from "../layout";
+import { TABLE_HEAD, TABLE_ROW, tableRows } from "../layout";
+import { truncate } from "../layout1";
 import { Handles, Label, nodeClass, type AtlasFlowNode } from "./common";
 import { Badges } from "./FunctionNode";
 

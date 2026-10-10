@@ -1,8 +1,10 @@
 // ELK 입력을 만들고 결과를 React Flow 좌표로 바꾼다. 노드 컴포넌트는 ELK 결과를 읽지 않고 여기서 바꾼 값만 받는다.
 import ELK, { type ElkExtendedEdge, type ElkNode } from "elkjs/lib/elk-api";
 import elkWorkerUrl from "elkjs/lib/elk-worker.min.js?url";
-import type { AtlasNode, Graph } from "../api/types";
-import { aggregates, edgeKey, nodeIndex, unitOf, type EdgeKey } from "./scope";
+import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
+import { entryUnits, siblings, type Columns } from "./columns";
+import { aggKey, edgeKey, type EdgeKey } from "./scope";
+import { lift, nodeIndex, type Shown } from "./visible";
 
 export interface Point {
   x: number;
@@ -29,44 +31,94 @@ export interface Layout {
 /** 글자 폭을 잰다. 브라우저는 canvas로 재고 시험은 글자 수로 어림한다. */
 export type Measure = (text: string, bold?: boolean) => number;
 
+/** ELK를 한 번 돌린다. 브라우저는 worker로, 시험은 elk.bundled.js로 돌린다. */
+export type RunElk = (graph: ElkNode) => Promise<ElkNode>;
+
 export const FONT = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
 export const HEADER = 32;
 export const PAD = 16;
 export const TABLE_HEAD = 24;
 export const TABLE_ROW = 18;
 export const HEX_HEIGHT = 28;
+export const MODULE_WIDTH = 220;
 export const MODULE_HEIGHT = 40;
+/** 접힌 파일 상자 아래에 적는 함수 수 글자의 높이 */
+export const CAPTION_HEIGHT = 16;
+export const CIRCLE = 16;
+export const LEAF_HEIGHT = 18;
+export const EXTERNAL_HEIGHT = 24;
+export const ENTRY_MARK = "▶ ";
 const LABEL_MAX = 24;
 const TABLE_ROWS_MAX = 5;
 const CIRCLE_GAP = 6;
+const LOC_GAP = 5;
+const COUNT_GAP = 12;
+const FOLDER_PAD = 36;
+const STACK_GAP = 48;
+const SHELF_GAP = 64;
+const GRID_GAP = 24;
+const SHELF_COLUMNS = 4;
 
-const ROOT_OPTIONS = {
+/** 열은 partition으로, 열 안 순서는 children 배열 순서로 고정한다. 교차 최소화는 children 순서를 바꾸므로 끈다. */
+const ELK_OPTIONS = {
   "elk.algorithm": "layered",
   "elk.direction": "RIGHT",
   "elk.edgeRouting": "ORTHOGONAL",
-  "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+  "elk.partitioning.activate": "true",
   "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+  "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
+  "elk.layered.crossingMinimization.strategy": "NONE",
+  "elk.layered.crossingMinimization.greedySwitch.type": "OFF",
+  "elk.separateConnectedComponents": "false",
   "elk.spacing.nodeNode": "24",
   "elk.layered.spacing.nodeNodeBetweenLayers": "48",
 };
 
-export function truncate(text: string): string {
+const ROOT_OPTIONS = { ...ELK_OPTIONS, "elk.padding": "[top=0,left=0,bottom=0,right=0]" };
+
+function cut(text: string): string {
   return text.length > LABEL_MAX ? `${text.slice(0, LABEL_MAX - 1)}…` : text;
 }
 
-export function labelOf(node: AtlasNode): string {
-  return node.kind === "function" || node.kind === "method" ? `${node.name}()` : node.name;
+/** 24자를 넘는 경로를 앞쪽 폴더부터 `…/`로 줄인다. 폴더 경로는 `/`로 끝난다. */
+function shortPath(path: string): string {
+  if (path.length <= LABEL_MAX) {
+    return path;
+  }
+  const end = path.endsWith("/") ? "/" : "";
+  const parts = path.slice(0, path.length - end.length).split("/");
+  let tail = parts.pop()! + end;
+  while (parts.length > 0 && `…/${parts.at(-1)}/${tail}`.length <= LABEL_MAX) {
+    tail = `${parts.pop()}/${tail}`;
+  }
+  return cut(`…/${tail}`);
 }
 
-/** 줄 수의 제곱근에 비례하는 지름. 16~48px로 자른다. */
-export function circleDiameter(loc: number): number {
-  return Math.min(48, Math.max(16, Math.round(4 * Math.sqrt(loc))));
+/** 줄이지 않은 이름표. 파일과 폴더는 소스 루트 기준 경로이고 폴더는 `/`로 끝난다. 함수·메서드는 `이름()`이다. */
+export function titleOf(node: AtlasNode): string {
+  switch (node.kind) {
+    case "package":
+      return `${node.id.replaceAll(".", "/")}/`;
+    case "module":
+      return `${node.id.replaceAll(".", "/")}.py`;
+    case "function":
+    case "method":
+      return `${node.name}()`;
+    default:
+      return node.name;
+  }
+}
+
+/** 노드에 그리는 이름표. 24자에서 자르고, 경로는 앞쪽 폴더부터 줄여 파일 이름을 남긴다. */
+export function labelOf(node: AtlasNode): string {
+  const title = titleOf(node);
+  return node.kind === "package" || node.kind === "module" ? shortPath(title) : cut(title);
 }
 
 /** 데이터 클래스 표의 필드 칸. 여섯 개 이상이면 다섯 칸과 "외 k개" 칸이다. */
 export function tableRows(node: AtlasNode): string[] {
   const fields = node.fields ?? [];
-  const rows = fields.map((f) => (f.type === null ? f.name : `${f.name}: ${f.type}`));
+  const rows = fields.map((f) => cut(f.type === null ? f.name : `${f.name}: ${f.type}`));
   return rows.length > TABLE_ROWS_MAX ? [...rows.slice(0, TABLE_ROWS_MAX), `외 ${rows.length - TABLE_ROWS_MAX}개`] : rows;
 }
 
@@ -97,145 +149,260 @@ export function moduleHeader(node: AtlasNode, functions: number): string {
   return node.kind === "module" ? `함수 ${functions}개` : "";
 }
 
-const ORDER: Record<string, number> = { package: 0, module: 1 };
-
-/** 형제 순서: 폴더, 파일, 소스 정의 순서. */
-function siblingOrder(a: AtlasNode, b: AtlasNode): number {
-  const rank = (ORDER[a.kind] ?? 2) - (ORDER[b.kind] ?? 2);
-  if (rank !== 0) {
-    return rank;
-  }
-  if (a.range !== null && b.range !== null && (ORDER[a.kind] ?? 2) === 2) {
-    return a.range[0] - b.range[0];
-  }
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+/** 진입점 표지와 이름표의 폭. loc이 참이면 이름표 오른쪽 줄 수 숫자의 폭을 더한다. */
+function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, loc: boolean): number {
+  const label = measure((node.entry ? ENTRY_MARK : "") + labelOf(node), bold);
+  return loc ? label + LOC_GAP + measure(String(node.loc)) : label;
 }
 
-function leafSize(node: AtlasNode, measure: Measure, prefix: string): Size {
-  const label = prefix + truncate(labelOf(node));
-  switch (node.kind) {
-    case "function":
-    case "method": {
-      const d = circleDiameter(node.loc);
-      return { width: d + CIRCLE_GAP + measure(label), height: Math.max(d, 18) };
-    }
-    case "class":
-      return { width: measure(label, true) + 28, height: HEX_HEIGHT };
-    case "dataclass":
-      return tableSize(node, measure, prefix);
-    default:
-      return {
-        width: Math.max(Math.min(360, Math.max(120, 12 * Math.sqrt(node.loc))), measure(label, true) + 24),
-        height: MODULE_HEIGHT,
-      };
-  }
-}
-
-function tableSize(node: AtlasNode, measure: Measure, prefix: string): Size {
-  const widths = [measure(prefix + truncate(node.name), true), ...tableRows(node).map((r) => measure(truncate(r)))];
+function tableSize(node: AtlasNode, measure: Measure): Size {
+  const widths = [labelWidth(node, measure, true, true), ...tableRows(node).map((r) => measure(r))];
   return { width: Math.ceil(Math.max(...widths)) + 16, height: tableHeight(node) };
 }
 
-/**
- * 보이는 노드를 parent 사슬로 중첩한 ELK 입력. 선은 한 파일 상자 안의 선(함수 안 import 제외)과 파일 상자 사이
- * 집계 선이고, 뿌리에 선언한다. 파일 경계를 넘는 함수·클래스 선은 집계 선이 열 배정에 대신 쓰이고,
- * 경로는 `crossRoute`가 그린다. 다른 노드가 쓰지 않는 진입점은 열0에 고정한다.
- */
-export function elkGraph(graph: Graph, visible: Set<string>, measure: Measure): ElkNode {
-  const nodes = graph.nodes.filter((n) => visible.has(n.id));
-  const children = new Map<string | null, AtlasNode[]>();
-  for (const node of nodes) {
-    const parent = node.parent !== null && visible.has(node.parent) ? node.parent : null;
-    children.set(parent, [...(children.get(parent) ?? []), node]);
+/** 자식을 그리지 않는 노드의 크기 */
+function leafSize(node: AtlasNode, measure: Measure): Size {
+  switch (node.kind) {
+    case "function":
+    case "method":
+      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true), height: LEAF_HEIGHT };
+    case "class":
+      return { width: labelWidth(node, measure, true, false) + 28, height: HEX_HEIGHT };
+    case "dataclass":
+      return tableSize(node, measure);
+    case "package":
+      return { width: labelWidth(node, measure, true, false) + FOLDER_PAD, height: MODULE_HEIGHT };
+    case "external":
+      return { width: labelWidth(node, measure, false, false) + 24, height: EXTERNAL_HEIGHT };
+    case "module":
+      return { width: MODULE_WIDTH, height: MODULE_HEIGHT };
   }
-  for (const list of children.values()) {
-    list.sort(siblingOrder);
-  }
+}
 
-  const index = nodeIndex(graph);
-  const edges: ElkExtendedEdge[] = [];
-  const used = new Set<string>();
+/** 자식을 그리는 노드의 안쪽 여백과 최소 크기. 펼친 폴더는 테두리와 머리 줄을 그리지 않으므로 여백이 없다. */
+function boxOptions(node: AtlasNode, functions: number, measure: Measure): Record<string, string> {
+  if (node.kind === "package") {
+    return { "elk.padding": "[top=0,left=0,bottom=0,right=0]" };
+  }
+  let top = HEADER;
+  let minWidth = labelWidth(node, measure, true, node.kind === "module") + 2 * PAD;
+  if (node.kind === "module") {
+    minWidth += COUNT_GAP + measure(moduleHeader(node, functions));
+  }
+  if (node.kind === "dataclass") {
+    const table = tableSize(node, measure);
+    top = table.height + PAD;
+    minWidth = table.width;
+  }
+  return {
+    "elk.padding": `[top=${top},left=${PAD},bottom=${PAD},right=${PAD}]`,
+    "elk.nodeSize.constraints": "MINIMUM_SIZE",
+    "elk.nodeSize.minimum": `(${Math.ceil(minWidth)}, ${top + PAD})`,
+  };
+}
+
+/** 형제 노드 사이의 선 하나. key는 `drawn`이 같은 양 끝에 붙이는 키와 같다. */
+export interface Link {
+  key: EdgeKey;
+  source: string;
+  target: string;
+}
+
+export interface ElkInput {
+  /** 연결 묶음마다 ELK 뿌리 하나. 위에서 아래로 쌓는 순서다. */
+  components: ElkNode[];
+  /** 선반 단위마다 ELK 노드 하나. 펼친 단위만 children을 가진다. */
+  shelf: ElkNode[];
+  /** ELK에 넣지 않고 `sideRoute`로 잇는 진입점 단위 사이 선 */
+  side: Link[];
+}
+
+/**
+ * 선의 양 끝을 보이는 노드로 올린 뒤 같은 부모 아래 형제가 될 때까지 다시 올려 형제 쌍마다 모은다.
+ * 올린 선이 하나라도 있는 쌍은 집계 선 하나가, 그 밖의 쌍은 원래 선마다 하나가 된다.
+ * 진입점 단위 사이의 쌍은 side에, 나머지 쌍은 함수 안 import를 빼고 부모 노드 id 아래에 담는다.
+ */
+function links(graph: Graph, shown: Shown): { inside: Map<string | null, Link[]>; side: Link[] } {
+  const nodes = nodeIndex(graph);
+  const entries = entryUnits(graph, shown.hidden);
+  const pairs = new Map<string, { source: string; target: string; edges: AtlasEdge[]; lifted: boolean }>();
   for (const edge of graph.edges) {
-    if (edge.deferred || !visible.has(edge.source) || !visible.has(edge.target)) {
+    const source = lift(nodes, shown, edge.source);
+    const target = lift(nodes, shown, edge.target);
+    const ends = source === null || target === null ? null : siblings(nodes, source, target);
+    if (ends === null) {
       continue;
     }
-    used.add(edge.target);
-    if (unitOf(index, edge.source) === unitOf(index, edge.target)) {
-      edges.push({ id: edgeKey(edge), sources: [edge.source], targets: [edge.target] });
+    const id = `${ends[0]}|${ends[1]}`;
+    const pair = pairs.get(id) ?? { source: ends[0], target: ends[1], edges: [], lifted: false };
+    pair.edges.push(edge);
+    pair.lifted ||= ends[0] !== edge.source || ends[1] !== edge.target;
+    pairs.set(id, pair);
+  }
+
+  const inside = new Map<string | null, Link[]>();
+  const side: Link[] = [];
+  for (const { source, target, edges, lifted } of pairs.values()) {
+    const between = entries.has(source) && entries.has(target);
+    const used = between ? edges : edges.filter((e) => !e.deferred);
+    if (used.length === 0) {
+      continue;
+    }
+    const found = (lifted ? [aggKey(source, target)] : used.map(edgeKey)).map((key) => ({ key, source, target }));
+    if (between) {
+      side.push(...found);
+    } else {
+      const parent = nodes.get(source)!.parent;
+      inside.set(parent, [...(inside.get(parent) ?? []), ...found]);
     }
   }
-  for (const agg of aggregates(graph, visible)) {
-    edges.push({ id: agg.key, sources: [agg.source], targets: [agg.target] });
+  return { inside, side };
+}
+
+/**
+ * 보이는 노드를 연결 묶음마다 parent 사슬로 중첩한 ELK 입력. 자식을 그리는 노드마다 따로 배치하므로 선은 형제 사이로
+ * 올려 그 부모에 선언한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣는다.
+ */
+export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure: Measure): ElkInput {
+  const nodes = nodeIndex(graph);
+  const children = new Map<string, AtlasNode[]>();
+  for (const node of graph.nodes) {
+    if (shown.nodes.has(node.id) && node.parent !== null) {
+      children.set(node.parent, [...(children.get(node.parent) ?? []), node]);
+    }
   }
+  for (const list of children.values()) {
+    list.sort((a, b) => columns.order.get(a.id)! - columns.order.get(b.id)!);
+  }
+
+  const { inside, side } = links(graph, shown);
+  const edgesOf = (parent: string | null, members?: Set<string>): ElkExtendedEdge[] =>
+    (inside.get(parent) ?? [])
+      .filter((link) => members === undefined || members.has(link.source))
+      .map((link) => ({ id: link.key, sources: [link.source], targets: [link.target] }));
 
   const functions = functionCounts(graph);
   const build = (node: AtlasNode): ElkNode => {
-    const prefix = node.entry ? "▶ " : "";
     const kids = children.get(node.id) ?? [];
-    const options: Record<string, string> = {};
-    if (node.entry && !used.has(node.id)) {
-      options["elk.layered.layering.layerConstraint"] = "FIRST";
+    const options: Record<string, string> = {
+      "elk.partitioning.partition": String(columns.column.get(node.id)!),
+      "elk.alignment": "LEFT",
+    };
+    if (kids.length > 0) {
+      return {
+        id: node.id,
+        children: kids.map(build),
+        edges: edgesOf(node.id),
+        layoutOptions: { ...ELK_OPTIONS, ...options, ...boxOptions(node, functions.get(node.id) ?? 0, measure) },
+      };
     }
-    if (kids.length === 0) {
-      return { id: node.id, ...leafSize(node, measure, prefix), layoutOptions: options };
+    if (node.kind !== "module") {
+      return { id: node.id, ...leafSize(node, measure), layoutOptions: options };
     }
-    const header = `${prefix}${truncate(labelOf(node))}  ${moduleHeader(node, functions.get(node.id) ?? 0)}`;
-    let top = HEADER;
-    let minWidth = measure(header, true) + 2 * PAD;
-    if (node.kind === "dataclass") {
-      const table = tableSize(node, measure, prefix);
-      top = table.height + PAD;
-      minWidth = table.width;
-    }
+    const caption = moduleHeader(node, functions.get(node.id) ?? 0);
     return {
       id: node.id,
-      children: kids.map(build),
-      layoutOptions: {
-        ...options,
-        "elk.padding": `[top=${top},left=${PAD},bottom=${PAD},right=${PAD}]`,
-        "elk.nodeSize.constraints": "MINIMUM_SIZE",
-        "elk.nodeSize.minimum": `(${Math.ceil(minWidth)}, ${top + PAD})`,
-      },
+      ...leafSize(node, measure),
+      labels: [{ text: caption, width: measure(caption), height: CAPTION_HEIGHT }],
+      layoutOptions: { ...options, "elk.nodeLabels.placement": "OUTSIDE V_BOTTOM H_LEFT" },
     };
   };
 
-  return { id: "root", layoutOptions: ROOT_OPTIONS, children: (children.get(null) ?? []).map(build), edges };
+  return {
+    components: columns.components.map((ids, i) => ({
+      id: `component:${i}`,
+      layoutOptions: ROOT_OPTIONS,
+      children: ids.map((id) => build(nodes.get(id)!)),
+      edges: edgesOf(null, new Set(ids)),
+    })),
+    shelf: columns.shelf.map((id) => build(nodes.get(id)!)),
+    side,
+  };
 }
 
-/** ELK 결과를 부모 기준 좌표, 절대 좌표, 절대 좌표 선 경로로 바꾼다. 선 좌표는 결과의 container 기준이다. */
-export function fromElk(root: ElkNode): Layout {
+/** ELK 결과를 부모 기준 좌표, 절대 좌표, 절대 좌표 선 경로로 바꾼다. offset은 뿌리의 화면 기준 위치다. */
+export function fromElk(root: ElkNode, offset: Point = { x: 0, y: 0 }): Layout {
   const result: Layout = { positions: new Map(), sizes: new Map(), boxes: new Map(), routes: new Map() };
-  const origins = new Map<string, Point>([[root.id, { x: 0, y: 0 }]]);
-  const edges: ElkExtendedEdge[] = [];
+  const origins = new Map<string, Point>([[root.id, offset]]);
+  const edges: [ElkExtendedEdge, string][] = [];
 
   const walk = (node: ElkNode, origin: Point) => {
-    edges.push(...((node.edges ?? []) as ElkExtendedEdge[]));
+    for (const edge of (node.edges ?? []) as ElkExtendedEdge[]) {
+      edges.push([edge, node.id]);
+    }
     for (const child of node.children ?? []) {
       const x = child.x ?? 0;
       const y = child.y ?? 0;
       const size = { width: child.width ?? 0, height: child.height ?? 0 };
       const abs = { x: origin.x + x, y: origin.y + y };
-      result.positions.set(child.id, { x, y });
+      result.positions.set(child.id, node === root ? abs : { x, y });
       result.sizes.set(child.id, size);
       result.boxes.set(child.id, { ...abs, ...size });
       origins.set(child.id, abs);
       walk(child, abs);
     }
   };
-  walk(root, { x: 0, y: 0 });
+  walk(root, offset);
 
-  for (const edge of edges) {
+  for (const [edge, declared] of edges) {
     const section = edge.sections?.[0];
     if (section === undefined) {
       continue;
     }
-    const container = (edge as ElkExtendedEdge & { container?: string }).container ?? root.id;
-    const o = origins.get(container) ?? { x: 0, y: 0 };
+    const container = (edge as ElkExtendedEdge & { container?: string }).container ?? declared;
+    const o = origins.get(container) ?? offset;
     const points = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint];
     result.routes.set(
       edge.id,
       points.map((p) => ({ x: p.x + o.x, y: p.y + o.y })),
     );
+  }
+  return result;
+}
+
+/**
+ * 연결 묶음을 차례로 배치해 위에서 아래로 쌓고, 선반 단위를 마지막 묶음 아래 격자에 놓는다.
+ * 격자는 가장 넓은 묶음의 폭에서 줄을 바꾸고, 한 칸보다 넓은 단위는 여러 칸을 쓴다.
+ */
+export async function arrange(input: ElkInput, run: RunElk): Promise<Layout> {
+  const result: Layout = { positions: new Map(), sizes: new Map(), boxes: new Map(), routes: new Map() };
+  const add = (part: Layout) => {
+    part.positions.forEach((value, id) => result.positions.set(id, value));
+    part.sizes.forEach((value, id) => result.sizes.set(id, value));
+    part.boxes.forEach((value, id) => result.boxes.set(id, value));
+    part.routes.forEach((value, key) => result.routes.set(key, value));
+  };
+
+  let width = 0;
+  let y = 0;
+  for (const root of input.components) {
+    const done = await run(root);
+    add(fromElk(done, { x: 0, y }));
+    width = Math.max(width, done.width ?? 0);
+    y += (done.height ?? 0) + STACK_GAP;
+  }
+
+  const cell = MODULE_WIDTH + GRID_GAP;
+  const limit = Math.max(width, SHELF_COLUMNS * cell - GRID_GAP);
+  let x = 0;
+  let row = 0;
+  y = input.components.length > 0 ? y - STACK_GAP + SHELF_GAP : 0;
+  for (const node of input.shelf) {
+    const root: ElkNode = { id: `shelf:${node.id}`, layoutOptions: ROOT_OPTIONS, children: [node] };
+    const done = node.children === undefined ? root : await run(root);
+    const box = done.children![0];
+    if (x > 0 && x + box.width! > limit) {
+      x = 0;
+      y += row + GRID_GAP;
+      row = 0;
+    }
+    add(fromElk(done, { x, y }));
+    x += Math.ceil((box.width! + GRID_GAP) / cell) * cell;
+    row = Math.max(row, (box.labels ?? []).reduce((sum, label) => sum + (label.height ?? 0), box.height!));
+  }
+
+  for (const { key, source, target } of input.side) {
+    result.routes.set(key, sideRoute(result.boxes.get(source)!, result.boxes.get(target)!));
   }
   return result;
 }
@@ -288,6 +455,19 @@ export function belowRoute(source: Box, target: Box): Point[] {
   ];
 }
 
+/** 진입점 단위 사이 선의 경로. 두 상자 왼쪽으로 나가 위아래로 잇는다. */
+export function sideRoute(source: Box, target: Box): Point[] {
+  const x = Math.min(source.x, target.x) - ROUTE_GAP;
+  const sy = source.y + source.height / 2;
+  const ty = target.y + target.height / 2;
+  return [
+    { x: source.x, y: sy },
+    { x, y: sy },
+    { x, y: ty },
+    { x: target.x, y: ty },
+  ];
+}
+
 let canvas: CanvasRenderingContext2D | null = null;
 
 export const measureText: Measure = (text, bold = false) => {
@@ -302,14 +482,14 @@ export const measureText: Measure = (text, bold = false) => {
 let elk: InstanceType<typeof ELK> | null = null;
 
 /** ELK를 화면 스레드 밖에서 돌린다. elk-api가 요청 id로 응답을 맞춘다. */
-function runElk(input: ElkNode): Promise<ElkNode> {
+const runElk: RunElk = (input) => {
   elk ??= new ELK({ workerFactory: () => new Worker(elkWorkerUrl) });
   return elk.layout(input);
-}
+};
 
-export async function layout(graph: Graph, visible: Set<string>): Promise<Layout> {
+export async function layout(graph: Graph, shown: Shown, columns: Columns): Promise<Layout> {
   const started = performance.now();
-  const result = fromElk(await runElk(elkGraph(graph, visible, measureText)));
-  console.info(`layout ${visible.size} nodes ${Math.round(performance.now() - started)}ms`);
+  const result = await arrange(elkGraphs(graph, shown, columns, measureText), runElk);
+  console.info(`layout ${shown.nodes.size} nodes ${Math.round(performance.now() - started)}ms`);
   return result;
 }
