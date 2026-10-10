@@ -28,6 +28,11 @@ def sample_repo(tmp_path: Path) -> Path:
     return _copy_fixture(tmp_path)
 
 
+@pytest.fixture(scope="module")
+def module_repo(tmp_path_factory) -> Path:
+    return _copy_fixture(tmp_path_factory.mktemp("module"))
+
+
 @pytest.fixture(scope="session")
 def analyzed(tmp_path_factory):
     """고정 레포에 실제 basedpyright를 띄워 한 번 분석한 결과."""

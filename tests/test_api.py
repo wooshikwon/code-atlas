@@ -1,20 +1,27 @@
+import subprocess
+import sys
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
+from code_atlas import api
 from code_atlas.api import create_app
+
+RUN_ENGINE_CALL = {"path": "src/app/cli.py", "line": 10, "col": 21}  # 한글 문자열 뒤의 run_engine
 
 
 @pytest.fixture(scope="module")
-def client(analyzed):
-    analysis, files = analyzed
-    return TestClient(create_app(analysis, files, "/usr/bin/python3"))
+def client(module_repo):
+    with TestClient(create_app(module_repo, sys.executable)) as client:
+        yield client
 
 
 def test_repo(client):
     body = client.get("/api/repo").json()
     assert body["name"] == "sample_repo"
     assert body["source_root"] == "src"
-    assert body["python"] == "/usr/bin/python3"
+    assert body["python"] == sys.executable
     assert body["stats"]["files"] == 9
     assert body["stats"]["resolved"] + body["stats"]["unresolved"] == body["stats"]["call_sites"]
 
@@ -61,3 +68,67 @@ def test_unknown_api_path_is_404(client):
     response = client.get("/api/nope")
     assert response.status_code == 404
     assert "error" in response.json()
+
+
+def test_hover_returns_markdown(client):
+    body = client.get("/api/hover", params=RUN_ENGINE_CALL).json()
+    assert "def run_engine(config: Config) -> Engine" in body["markdown"]
+    assert body["markdown"].startswith("```python")
+    assert body["range"] == [10, 21, 10, 31]
+
+
+def test_hover_on_blank_is_null(client):
+    body = client.get("/api/hover", params={"path": "src/app/cli.py", "line": 5, "col": 0}).json()
+    assert body == {"markdown": None, "range": None}
+
+
+def test_definition_returns_node_in_another_file(client):
+    body = client.get("/api/definition", params=RUN_ENGINE_CALL).json()
+    assert body["targets"] == [
+        {"path": "src/app/core.py", "line": 31, "col": 4, "node": "app.core:run_engine", "external": None}
+    ]
+
+
+def test_definition_of_method_and_module(client):
+    start = client.get("/api/definition", params={"path": "src/app/core.py", "line": 33, "col": 11}).json()
+    assert [t["node"] for t in start["targets"]] == ["app.core:Engine.start"]
+    module = client.get("/api/definition", params={"path": "src/app/cli.py", "line": 2, "col": 9}).json()
+    assert [(t["path"], t["node"]) for t in module["targets"]] == [("src/app/core.py", "app.core")]
+
+
+def test_definition_of_stdlib_name_is_external(client):
+    body = client.get("/api/definition", params={"path": "src/app/core.py", "line": 21, "col": 15}).json()
+    assert body["targets"]
+    for target in body["targets"]:
+        assert (target["path"], target["node"], target["external"]) == (None, None, "ext:os")
+
+
+@pytest.mark.parametrize("route", ["/api/hover", "/api/definition"])
+@pytest.mark.parametrize("path", ["pyproject.toml", "../etc/passwd", "ignored_dir/skip.py"])
+def test_position_outside_analysis_is_404(client, route, path):
+    response = client.get(route, params={"path": path, "line": 1, "col": 0})
+    assert response.status_code == 404
+    assert "error" in response.json()
+
+
+def test_stopped_session_is_reopened(client, monkeypatch):
+    state = client.app.state
+    stopped = state.session
+    subprocess.run(["pkill", "-KILL", "-P", str(stopped.client._server.pid)], check=True)
+    deadline = time.monotonic() + 10
+    while not stopped.stopped and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert stopped.stopped
+
+    def fail(*args):
+        raise OSError("basedpyright-langserver를 띄우지 못했다")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(api, "Session", fail)
+        response = client.get("/api/hover", params=RUN_ENGINE_CALL)
+        assert response.status_code == 503
+        assert "error" in response.json()
+
+    body = client.get("/api/hover", params=RUN_ENGINE_CALL).json()
+    assert body["range"] == [10, 21, 10, 31]
+    assert state.session is not stopped and not state.session.stopped
