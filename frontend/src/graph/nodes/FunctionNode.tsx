@@ -1,5 +1,5 @@
 import type { NodeProps } from "@xyflow/react";
-import { circleDiameter } from "../layout";
+import { circleDiameter } from "../layout1";
 import { Handles, Label, nodeClass, type AtlasFlowNode, type AtlasNodeData } from "./common";
 
 /** 미확인 호출 수는 오른쪽 위, 모듈 변수 변경은 오른쪽 아래에 단다. */

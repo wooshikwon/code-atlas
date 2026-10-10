@@ -2,7 +2,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { getFile } from "../api/client";
 import type { AtlasNode, EdgeKind, SiteRef } from "../api/types";
-import { labelOf } from "./layout";
+import { labelOf } from "./layout1";
 import type { EdgeKey } from "./scope";
 import { EDGE_KIND_NAMES, GROUP_NAMES, KIND_NAMES, type EdgeIndex } from "./view";
 

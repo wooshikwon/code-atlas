@@ -2,7 +2,7 @@
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { AtlasNode } from "../../api/types";
 import type { FocusLevel } from "../focus";
-import { labelOf, truncate } from "../layout";
+import { labelOf, truncate } from "../layout1";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
