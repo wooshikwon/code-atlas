@@ -1,4 +1,4 @@
-// 그래프 왼쪽 아래의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개, 초점 방향 색 두 개를 보여 준다.
+// 그래프 왼쪽 아래의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개를 보여 준다.
 import type { EdgeGroup } from "../api/types";
 import { useAtlas } from "../state/store";
 import { GROUP_NAMES } from "./view";
@@ -84,18 +84,6 @@ export function Legend() {
                 {GROUP_NAMES[group]}
               </li>
             ))}
-            <li>
-              <svg width={30} height={16}>
-                <path d="M2,8 L27,8" className="legend-edge edge-run tone-outgoing" markerEnd="url(#arrow-run-outgoing)" />
-              </svg>
-              고른 노드가 쓰는 쪽
-            </li>
-            <li>
-              <svg width={30} height={16}>
-                <path d="M2,8 L27,8" className="legend-edge edge-run tone-incoming" markerEnd="url(#arrow-run-incoming)" />
-              </svg>
-              고른 노드를 쓰는 쪽
-            </li>
           </ul>
         </div>
       )}

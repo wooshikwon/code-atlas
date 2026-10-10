@@ -8,6 +8,8 @@ export const PAN_MS = 400;
 /** 확대 비율의 범위 */
 export const ZOOM_MIN = 0.05;
 export const ZOOM_MAX = 4;
+/** 함수 이름표가 모두 보이는 확대 비율 구간의 시작값. 노드를 고르면 확대 비율을 이 값까지 키운다. */
+export const NAMED_ZOOM = 0.8;
 
 const INSET = 20;
 const FIT_MARGIN = 24;

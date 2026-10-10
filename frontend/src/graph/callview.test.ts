@@ -138,8 +138,8 @@ describe("배치", () => {
     const views = callEdges(calls, load, layout);
     expect(views).toHaveLength(calls.edges.length);
     const tone = (key: string) => views.find((view) => view.key === key)!.tone;
-    expect(tone(`main:run|${load}|call`)).toBe("incoming");
-    expect(tone(`${load}|${save}|call`)).toBe("outgoing");
+    expect(tone(`main:run|${load}|call`)).toBe("strong");
+    expect(tone(`${load}|${save}|call`)).toBe("strong");
     expect(tone(`${save}|pkg.mod:parse|call`)).toBe("muted");
     expect(views.every((view) => view.weight === null && view.opacity === 1)).toBe(true);
   });

@@ -15,7 +15,7 @@ import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel
 import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
 import { Legend } from "./Legend";
-import { MOVE_MS, settled, tween } from "./motion";
+import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { GROUP_NAMES, KIND_NAMES } from "./view";
@@ -48,6 +48,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string |
         expanded: false,
         selected: id === selected,
         flow: false,
+        local: false,
         inflow: null,
         label: callLabel(nodes, node),
         file: fileLabel(nodes, node),
@@ -56,10 +57,6 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string |
       },
     };
   });
-}
-
-function reducedMotion(): boolean {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 export function CallView({ center, expanded }: { center: string; expanded: string[] }) {
@@ -147,19 +144,14 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       return;
     }
     const fresh = new Set(items.filter((item) => !from.boxes.has(item.id)).map((item) => item.id));
-    const started = performance.now();
-    let frame = requestAnimationFrame(function step(now: number) {
-      const t = Math.min(1, (now - started) / MOVE_MS);
-      draw(tween(from, to, t), null);
-      if (t < 1) {
-        frame = requestAnimationFrame(step);
-      } else {
-        setMoving(false);
-      }
-    });
     draw(tween(from, to, 0), fresh);
     setMoving(true);
-    return () => cancelAnimationFrame(frame);
+    return play(
+      from,
+      to,
+      (at) => draw(at, null),
+      () => setMoving(false),
+    );
   }, [scene, index, selected, setViewport]);
 
   const edges = useMemo((): AtlasFlowEdge[] => {
