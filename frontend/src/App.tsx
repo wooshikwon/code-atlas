@@ -2,6 +2,7 @@ import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { FIT_PADDING, GraphView } from "./graph/GraphView";
 import { InfoPanel } from "./panel/InfoPanel";
+import { Palette } from "./search/Palette";
 import { useAtlas, type Depth } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
@@ -88,6 +89,7 @@ export function App() {
               <GraphView />
               <InfoPanel />
             </div>
+            <Palette />
           </div>
         </ReactFlowProvider>
       </Panel>

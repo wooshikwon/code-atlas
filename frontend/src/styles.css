@@ -125,6 +125,102 @@ ul {
   text-overflow: ellipsis;
 }
 
+.tree {
+  outline: none;
+}
+
+.tree:focus .tree-row.cursor {
+  outline: 1px solid var(--muted);
+  outline-offset: -1px;
+}
+
+.tree-symbol {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tree-symbol.active {
+  color: var(--ink);
+}
+
+/* 검색 팔레트 */
+
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.palette {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100% - 32px));
+  max-height: min(420px, calc(100% - 72px));
+  transform: translateX(-50%);
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.palette-input {
+  flex: none;
+  height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  outline: none;
+  font: inherit;
+  color: var(--ink);
+  background: none;
+}
+
+.palette-list {
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.palette-list:empty {
+  display: none;
+}
+
+.palette-option {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  height: 24px;
+  padding: 0 12px;
+  line-height: 24px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.palette-option.active {
+  background: var(--active-bg);
+}
+
+.palette-name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.palette-aside {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
 /* 작업 영역 */
 
 .workspace {
