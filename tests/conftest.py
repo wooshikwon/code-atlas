@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -23,9 +24,32 @@ def _copy_fixture(tmp_path: Path) -> Path:
     return repo
 
 
+def git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.com", *args],
+        check=True,
+        capture_output=True,
+    )
+
+
+def _commit_fixture(tmp_path: Path) -> Path:
+    """고정 레포를 복사해 git 저장소로 만들고 모든 파일을 커밋한다."""
+    repo = tmp_path / "sample_repo"
+    shutil.copytree(FIXTURE, repo)
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "처음")
+    return repo
+
+
 @pytest.fixture
 def sample_repo(tmp_path: Path) -> Path:
     return _copy_fixture(tmp_path)
+
+
+@pytest.fixture
+def git_repo(tmp_path: Path) -> Path:
+    return _commit_fixture(tmp_path)
 
 
 @pytest.fixture(scope="module")

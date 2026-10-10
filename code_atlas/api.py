@@ -1,4 +1,4 @@
-"""HTTP 경로를 메모리의 분석 결과, 언어 서버 세션, 요약 캐시에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
+"""HTTP 경로를 메모리의 분석 결과, 언어 서버 세션, 요약 캐시, git 변경 내용에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
 
 세션은 lifespan이 띄워 분석에 쓴 뒤 서버가 내려갈 때 닫는다.
 """
@@ -14,6 +14,7 @@ from typing import TypeVar
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
+from . import changes
 from .analyze import Analyzed, analyze_async, require_python
 from .collect import RepoFiles, collect
 from .lsp import Location, Session
@@ -81,6 +82,21 @@ def _target(loc: Location, index: Index) -> dict:
         "node": None,
         "external": EXTERNAL_PREFIX + external[0] if external else None,
     }
+
+
+def _stale(analyzed: Analyzed, path: str) -> bool:
+    """분석할 때 읽은 본문과 지금 디스크의 본문이 다르다. 분석한 적 없는 파일은 거짓이다."""
+    text = analyzed.texts.get(path)
+    if text is None:
+        return False
+    try:
+        return analyzed.files.abs_path(path).read_bytes().decode("utf-8-sig", errors="replace") != text
+    except OSError:
+        return True
+
+
+def _overlaps(span: tuple[int, int] | None, ranges: list[tuple[int, int]]) -> bool:
+    return span is not None and any(start <= span[1] and span[0] <= end for start, end in ranges)
 
 
 def create_app(
@@ -204,6 +220,37 @@ def create_app(
             return {"summary": await app.state.summaries.make(kind, name, code, refresh)}
         except SummaryError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/changes")
+    def get_changes() -> dict:
+        analyzed: Analyzed = app.state.analyzed
+        root = analyzed.files.root
+        states = changes.status(root)
+        if states is None:
+            return {"git": False, "branch": None, "files": [], "nodes": {}}
+        states = {path: state for path, state in sorted(states.items()) if path.endswith(".py")}
+        known = analyzed.texts.keys()
+        if any(state != changes.DELETED and path not in known for path, state in states.items()):
+            known = known | {f.path for f in collect(root).files}
+        states = {path: state for path, state in states.items() if state == changes.DELETED or path in known}
+        ranges = (changes.hunks(root) or {}) if changes.MODIFIED in states.values() else {}
+        stale = {path: _stale(analyzed, path) for path in states}
+        nodes: dict[str, str] = {}
+        for node in app.state.nodes.values():
+            state = states.get(node.path)
+            if state is None or state == changes.DELETED:
+                continue
+            # 파일의 노드는 늘 넣고, 그 안의 정의는 줄 범위가 분석한 본문의 것이므로 본문이 그대로일 때만 넣는다.
+            if node.kind in ("module", "package") or (
+                not stale[node.path] and (state == changes.ADDED or _overlaps(node.range, ranges.get(node.path, [])))
+            ):
+                nodes[node.id] = state
+        return {
+            "git": True,
+            "branch": changes.branch(root),
+            "files": [{"path": path, "status": state, "stale": stale[path]} for path, state in states.items()],
+            "nodes": nodes,
+        }
 
     @app.get("/{path:path}", include_in_schema=False)
     def get_static(path: str) -> FileResponse:
