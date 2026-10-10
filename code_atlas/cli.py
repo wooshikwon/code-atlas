@@ -30,6 +30,8 @@ def _print_summary(analysis) -> None:
         f"노드 {s['nodes']} · 선 {s['edges']} · 지점 {len(analysis.sites)} · "
         f"호출 해석률 {rate:.1f}% ({s['resolved']}/{s['call_sites']}) · {s['elapsed_ms']}ms"
     )
+    if s["timed_out"]:
+        print(f"정의 요청 {s['timed_out']}개가 시간 안에 응답받지 못했다", file=sys.stderr)
     for error in analysis.errors:
         print(f"파싱 실패 {error['path']}: {error['message']}", file=sys.stderr)
 
@@ -70,8 +72,17 @@ def _serve_command(args: argparse.Namespace) -> int:
         else:
             threading.Timer(1.0, webbrowser.open, [url]).start()
 
-    config = uvicorn.Config(create_app(args.repo, python, on_ready), log_level="warning")
-    uvicorn.Server(config).run(sockets=[sock])
+    app = create_app(args.repo, python, on_ready)
+
+    class Server(uvicorn.Server):
+        def handle_exit(self, sig, frame) -> None:
+            """분석이 끝나기 전에 받은 첫 종료 신호에 분석을 끊는다."""
+            starting = app.state.starting
+            if starting is not None and not self.should_exit and not self.started:
+                starting.get_loop().call_soon_threadsafe(starting.cancel)
+            super().handle_exit(sig, frame)
+
+    Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
     return 0
 
 

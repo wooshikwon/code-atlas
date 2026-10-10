@@ -1,6 +1,7 @@
 """HTTP 경로를 메모리의 분석 결과, 언어 서버 세션, 요약 캐시, git 변경 내용에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
 
-세션은 lifespan이 띄워 분석에 쓴 뒤 서버가 내려갈 때 닫는다.
+세션은 lifespan이 띄워 분석에 쓴 뒤 서버가 내려갈 때 닫는다. 분석은 `app.state.starting` 태스크가 돌리고,
+이 태스크를 취소하면 lifespan이 세션을 닫고 분석 결과 없이 서버가 내려가기를 기다린다.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from . import changes
 from .analyze import Analyzed, analyze_async, require_python
-from .collect import RepoFiles, collect
+from .collect import RepoFiles, collect, collected
 from .lsp import Location, Session
 from .model import Analysis, to_dict
 from .resolve import EXTERNAL_PREFIX, Index, external_of
@@ -58,7 +59,7 @@ def _tree(files: RepoFiles, analysis: Analysis) -> list[dict]:
             "name": parts[-1],
             "kind": "file",
             "test": f.test,
-            "node": f.module_id if f.module_id in node_ids else None,
+            "node": f.module_id if f.module_id in node_ids and not f.is_init else None,
         }
     return _entries(root["children"])
 
@@ -84,15 +85,10 @@ def _target(loc: Location, index: Index) -> dict:
     }
 
 
-def _stale(analyzed: Analyzed, path: str) -> bool:
-    """분석할 때 읽은 본문과 지금 디스크의 본문이 다르다. 분석한 적 없는 파일은 거짓이다."""
-    text = analyzed.texts.get(path)
-    if text is None:
-        return False
-    try:
-        return analyzed.files.abs_path(path).read_bytes().decode("utf-8-sig", errors="replace") != text
-    except OSError:
-        return True
+async def _disconnected(request: Request) -> None:
+    """호출자가 연결을 끊을 때까지 기다린다."""
+    while (await request.receive())["type"] != "http.disconnect":
+        pass
 
 
 def _overlaps(span: tuple[int, int] | None, ranges: list[tuple[int, int]]) -> bool:
@@ -104,13 +100,27 @@ def create_app(
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        files = collect(repo)
         async with AsyncExitStack() as sessions:
-            session = await sessions.enter_async_context(
-                Session(files.root, require_python(repo, python), files.extra_paths)
-            )
-            analyzed = await analyze_async(files, session)
-            analysis = analyzed.analysis
+
+            async def start() -> tuple[Session, Analyzed]:
+                files = collect(repo)
+                async with AsyncExitStack() as opened:
+                    session = await opened.enter_async_context(
+                        Session(files.root, require_python(repo, python), files.extra_paths)
+                    )
+                    analyzed = await analyze_async(files, session)
+                    sessions.push_async_exit(opened.pop_all())
+                return session, analyzed
+
+            app.state.starting = asyncio.create_task(start())
+            try:
+                session, analyzed = await app.state.starting
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling():
+                    raise
+                yield
+                return
+            analysis, files = analyzed.analysis, analyzed.files
             app.state.analyzed = analyzed
             app.state.session = session
             app.state.sessions = sessions
@@ -135,6 +145,7 @@ def create_app(
             yield
 
     app = FastAPI(title="code-atlas", lifespan=lifespan)
+    app.state.starting = None
 
     async def live_session() -> Session:
         """세션이 멈췄으면 새 세션을 열어 바꾼다. 함께 들어온 요청은 한 번만 다시 연다."""
@@ -154,8 +165,7 @@ def create_app(
         if path not in app.state.analyzed.texts:
             raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
         try:
-            session = await live_session()
-            return await asyncio.wait_for(request(session), LSP_TIMEOUT)
+            return await request(await live_session())
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"언어 서버가 응답하지 않는다: {exc!r}") from exc
 
@@ -180,19 +190,18 @@ def create_app(
         analyzed: Analyzed = app.state.analyzed
         if path not in analyzed.texts:
             raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
-        text = analyzed.files.abs_path(path).read_bytes().decode("utf-8-sig", errors="replace")
-        return {"path": path, "text": text}
+        return {"path": path, "text": analyzed.texts[path]}
 
     @app.get("/api/hover")
     async def get_hover(path: str, line: int = Query(ge=1), col: int = Query(ge=0)) -> dict:
-        hover = await ask(path, lambda session: session.hover(path, line, col))
+        hover = await ask(path, lambda session: session.hover(path, line, col, LSP_TIMEOUT))
         if hover is None:
             return {"markdown": None, "range": None}
         return {"markdown": hover.markdown, "range": hover.range}
 
     @app.get("/api/definition")
     async def get_definition(path: str, line: int = Query(ge=1), col: int = Query(ge=0)) -> dict:
-        locations = await ask(path, lambda session: session.definition_at(path, line, col))
+        locations = await ask(path, lambda session: session.definition_at(path, line, col, LSP_TIMEOUT))
         return {"targets": [_target(loc, app.state.analyzed.index) for loc in locations]}
 
     def summarized(node_id: str) -> tuple[str, str, str]:
@@ -214,10 +223,19 @@ def create_app(
         return {"summary": summaries.cached(code), "available": reason is None, "reason": reason}
 
     @app.post("/api/summary")
-    async def make_summary(node: str, refresh: bool = False) -> dict:
+    async def make_summary(request: Request, node: str, refresh: bool = False) -> dict:
         kind, name, code = summarized(node)
+        making = asyncio.ensure_future(app.state.summaries.make(kind, name, code, refresh))
+        gone = asyncio.ensure_future(_disconnected(request))
         try:
-            return {"summary": await app.state.summaries.make(kind, name, code, refresh)}
+            done, _ = await asyncio.wait({making, gone}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            gone.cancel()
+            making.cancel()
+        if making not in done:
+            raise HTTPException(status_code=499, detail="호출자가 연결을 끊었다")
+        try:
+            return {"summary": making.result()}
         except SummaryError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -225,16 +243,13 @@ def create_app(
     def get_changes() -> dict:
         analyzed: Analyzed = app.state.analyzed
         root = analyzed.files.root
-        states = changes.status(root)
-        if states is None:
-            return {"git": False, "branch": None, "files": [], "nodes": {}}
-        states = {path: state for path, state in sorted(states.items()) if path.endswith(".py")}
-        known = analyzed.texts.keys()
-        if any(state != changes.DELETED and path not in known for path, state in states.items()):
-            known = known | {f.path for f in collect(root).files}
-        states = {path: state for path, state in states.items() if state == changes.DELETED or path in known}
+        stale = analyzed.stale()
+        found = changes.status(root)
+        states = {path: state for path, state in (found or {}).items() if path.endswith(".py")}
+        fresh = [p for p, state in states.items() if state != changes.DELETED and p not in analyzed.texts]
+        for path in set(fresh) - collected(root, fresh):
+            del states[path]
         ranges = (changes.hunks(root) or {}) if changes.MODIFIED in states.values() else {}
-        stale = {path: _stale(analyzed, path) for path in states}
         nodes: dict[str, str] = {}
         for node in app.state.nodes.values():
             state = states.get(node.path)
@@ -242,13 +257,18 @@ def create_app(
                 continue
             # 파일의 노드는 늘 넣고, 그 안의 정의는 줄 범위가 분석한 본문의 것이므로 본문이 그대로일 때만 넣는다.
             if node.kind in ("module", "package") or (
-                not stale[node.path] and (state == changes.ADDED or _overlaps(node.range, ranges.get(node.path, [])))
+                node.path not in stale
+                and (state == changes.ADDED or _overlaps(node.range, ranges.get(node.path, [])))
             ):
                 nodes[node.id] = state
+        for path in stale:
+            states.setdefault(path, changes.UNCHANGED)
         return {
-            "git": True,
-            "branch": changes.branch(root),
-            "files": [{"path": path, "status": state, "stale": stale[path]} for path, state in states.items()],
+            "git": found is not None,
+            "branch": changes.branch(root) if found is not None else None,
+            "files": [
+                {"path": path, "status": state, "stale": path in stale} for path, state in sorted(states.items())
+            ],
             "nodes": nodes,
         }
 

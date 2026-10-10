@@ -65,6 +65,14 @@ def _load_gitignore(root: Path) -> pathspec.PathSpec:
     return pathspec.GitIgnoreSpec.from_lines(lines)
 
 
+def _skipped(root: Path, rel: str, ignore: pathspec.PathSpec) -> bool:
+    """훑지 않는 폴더다. 숨긴 폴더, `SKIP_DIRS`, 가상환경, `.gitignore`에 걸린 폴더가 해당한다."""
+    name = rel.rsplit("/", 1)[-1]
+    if name.startswith(".") or name in SKIP_DIRS:
+        return True
+    return (root / rel / "pyvenv.cfg").exists() or ignore.match_file(rel + "/")
+
+
 def _walk(root: Path, ignore: pathspec.PathSpec) -> list[str]:
     found: list[str] = []
     stack = [root]
@@ -73,11 +81,8 @@ def _walk(root: Path, ignore: pathspec.PathSpec) -> list[str]:
         for entry in sorted(current.iterdir()):
             rel = entry.relative_to(root).as_posix()
             if entry.is_dir():
-                if entry.name.startswith(".") or entry.name in SKIP_DIRS:
-                    continue
-                if (entry / "pyvenv.cfg").exists() or ignore.match_file(rel + "/"):
-                    continue
-                stack.append(entry)
+                if not _skipped(root, rel, ignore):
+                    stack.append(entry)
             elif entry.suffix == ".py" and not ignore.match_file(rel):
                 found.append(rel)
     return sorted(found)
@@ -93,6 +98,20 @@ def _read_pyproject(root: Path) -> tuple[list[str], list[str]]:
     if isinstance(pythonpath, str):
         pythonpath = pythonpath.split()
     return scripts, list(pythonpath)
+
+
+def collected(root: Path, paths: list[str]) -> set[str]:
+    """레포 루트 기준 경로 가운데 `collect`가 모으는 파일. 레포를 훑지 않고 경로마다 조상 폴더와 `.gitignore`만 확인한다."""
+    if not paths:
+        return set()
+    ignore = _load_gitignore(root)
+    found: set[str] = set()
+    for path in paths:
+        parts = path.split("/")
+        folders = ("/".join(parts[:i]) for i in range(1, len(parts)))
+        if path.endswith(".py") and not ignore.match_file(path) and not any(_skipped(root, f, ignore) for f in folders):
+            found.add(path)
+    return found
 
 
 def collect(repo: str | Path) -> RepoFiles:

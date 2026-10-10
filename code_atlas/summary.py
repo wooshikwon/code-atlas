@@ -19,6 +19,7 @@ import sqlite3
 import tempfile
 import time
 from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -190,13 +191,22 @@ class Cache:
         )
 
 
+@dataclass
+class _Making:
+    """만드는 중인 요약 하나."""
+
+    task: asyncio.Task[str]
+    waiting: int = 0  # 결과를 기다리는 호출자 수
+    started: bool = False  # 동시 실행 자리를 얻어 `claude` 프로세스를 띄웠다
+
+
 class Summaries:
     """캐시와 만드는 중인 요약. 서버가 떠 있는 동안 하나다."""
 
     def __init__(self, path: Path | None = None):
         self.cache = Cache(path or CACHE_PATH)
         self._slots = asyncio.Semaphore(MAX_PROCESSES)
-        self._making: dict[str, asyncio.Task[str]] = {}
+        self._making: dict[str, _Making] = {}
         self._checking = asyncio.Lock()
         self._ready = False
 
@@ -213,20 +223,39 @@ class Summaries:
         return self.cache.get(key_of(code))
 
     async def make(self, kind: str, name: str, code: str, refresh: bool = False) -> str:
-        """캐시에 있으면 그 요약을, 없거나 `refresh`면 새로 만든 요약을 돌려준다. 같은 코드의 요청이 겹치면 한 번만 만든다."""
+        """캐시에 있으면 그 요약을, 없거나 `refresh`면 새로 만든 요약을 돌려준다. 같은 코드의 요청이 겹치면 한 번만 만든다.
+
+        기다리는 호출자가 모두 취소되면 동시 실행 자리를 기다리는 요약은 만들지 않고, 프로세스를 띄운 요약은 끝까지 만들어 캐시에 넣는다.
+        """
         key = key_of(code)
-        task = self._making.get(key)
-        if task is None:
+        making = self._making.get(key)
+        if making is None:
             cached = None if refresh else self.cache.get(key)
             if cached is not None:
                 return cached
-            task = asyncio.create_task(self._generate(key, kind, name, code))
-            self._making[key] = task
-            task.add_done_callback(lambda _: self._making.pop(key, None))
-        return await asyncio.shield(task)
+            making = _Making(asyncio.create_task(self._generate(key, kind, name, code)))
+            self._making[key] = making
+            making.task.add_done_callback(lambda task: self._made(key, task))
+        making.waiting += 1
+        try:
+            return await asyncio.shield(making.task)
+        finally:
+            making.waiting -= 1
+            if not making.waiting and not making.started and not making.task.done():
+                del self._making[key]
+                making.task.cancel()
+
+    def _made(self, key: str, task: asyncio.Task[str]) -> None:
+        """끝난 태스크를 만드는 중 목록에서 빼고, 기다리는 호출자 없이 실패한 태스크의 예외를 받아 둔다."""
+        making = self._making.get(key)
+        if making is not None and making.task is task:
+            del self._making[key]
+        if not task.cancelled():
+            task.exception()
 
     async def _generate(self, key: str, kind: str, name: str, code: str) -> str:
         async with self._slots:
+            self._making[key].started = True
             started = time.monotonic()
             summary = await generate(kind, name, code)
             logger.info("summary %s made in %.1fs", key[:12], time.monotonic() - started)
