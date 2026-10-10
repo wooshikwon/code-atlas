@@ -7,6 +7,8 @@ export interface Stats {
   call_sites: number;
   resolved: number;
   unresolved: number;
+  /** 언어 서버가 끝까지 응답하지 않은 지점 수 */
+  timed_out?: number;
   elapsed_ms: number;
 }
 
@@ -23,7 +25,7 @@ export interface TreeEntry {
   name: string;
   kind: "dir" | "file";
   test: boolean;
-  /** 폴더면 패키지 노드 id, 파일이면 모듈 노드 id */
+  /** 폴더면 패키지 노드 id, 파일이면 모듈 노드 id. `__init__.py`는 그래프 노드와 잇지 않으므로 null이다. */
   node: string | null;
   children?: TreeEntry[];
 }
@@ -128,12 +130,13 @@ export type Change = "modified" | "added";
 export interface ChangedFile {
   /** 레포 루트 기준 경로 */
   path: string;
-  status: Change | "deleted";
+  /** unchanged는 마지막 커밋과 같고 분석한 뒤에 내용만 바뀐 파일이다. */
+  status: Change | "deleted" | "unchanged";
   /** 레포를 열어 분석한 뒤 내용이 바뀌었다 */
   stale: boolean;
 }
 
-/** 마지막 커밋 뒤에 바뀐 `.py` 파일과 노드. git 저장소가 아니면 git이 거짓이고 나머지는 비어 있다. */
+/** 마지막 커밋 뒤에 바뀐 `.py` 파일과 노드. git 저장소가 아니면 git이 거짓이고 files는 분석한 뒤 바뀐 파일만 담는다. */
 export interface Changes {
   git: boolean;
   branch: string | null;

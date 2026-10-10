@@ -382,17 +382,60 @@ ul {
   border-bottom: 1px solid var(--line);
 }
 
-.toolbar-stats {
-  color: var(--muted);
-}
-
+.toolbar-stats,
+.toolbar-branch,
 .toolbar-stale {
   white-space: nowrap;
 }
 
+/* 줄 폭이 모자라면 탐색 경로보다 통계 문구를 먼저 줄인다. */
+.toolbar-stats {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+}
+
+.toolbar-branch {
+  color: var(--muted);
+}
+
+.toolbar-entries {
+  position: relative;
+  flex: none;
+}
+
+.toolbar-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 100%;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  list-style: none;
+}
+
+.toolbar-menu-item {
+  display: block;
+  width: 100%;
+  padding: 2px 8px;
+  border-radius: 3px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.toolbar-menu-item:hover {
+  background: var(--hover-bg);
+}
+
 .toolbar-trail {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -425,13 +468,21 @@ ul {
 
 .toolbar-toggle {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
+.toolbar-toggle input[type="range"] {
+  width: 72px;
+}
+
 .toolbar-button {
+  flex: none;
   padding: 2px 8px;
+  white-space: nowrap;
   border: 1px solid var(--line);
   border-radius: 4px;
 }
@@ -509,10 +560,30 @@ ul {
   transition: none;
 }
 
+/* 구조 뷰와 함수 시점 뷰를 오가면 새 뷰가 200ms 동안 나타난다. 배치를 기다리는 글자는 300ms 뒤에 보인다. */
+@keyframes graph-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.graph .react-flow {
+  animation: graph-in 200ms ease-out;
+}
+
+.graph-empty {
+  animation: graph-in 200ms ease-out 300ms backwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .react-flow__node,
   .edge {
     transition: none;
+  }
+
+  .graph .react-flow,
+  .graph-empty {
+    animation: none;
   }
 }
 
@@ -677,7 +748,7 @@ ul {
 }
 
 .node-hexagon polygon {
-  fill: color-mix(in srgb, var(--ink) 3%, var(--surface));
+  fill: var(--surface);
   stroke: var(--muted);
   stroke-width: 1.5;
 }
@@ -741,7 +812,7 @@ ul {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--muted);
+  border: 1.5px solid var(--muted);
   border-radius: 12px;
   background: color-mix(in srgb, var(--muted) 22%, var(--surface));
 }
@@ -1034,7 +1105,6 @@ ul {
 
 .legend-external {
   fill: color-mix(in srgb, var(--muted) 22%, var(--surface));
-  stroke-width: 1;
 }
 
 .legend-entry {
@@ -1171,6 +1241,15 @@ ul {
   color: var(--muted);
 }
 
+/* 요약이 도착해도 패널 높이가 바뀌지 않게 두 줄 높이를 미리 둔다. */
+.summary-body {
+  min-height: 3em;
+}
+
+.summary-make {
+  margin-left: 0;
+}
+
 .info-panel-summary:has(+ .code) {
   max-height: 40%;
   overflow-y: auto;
@@ -1184,6 +1263,8 @@ ul {
 .summary-action {
   margin-left: 6px;
   padding: 0 6px;
+  line-height: 14px;
+  vertical-align: middle;
   border: 1px solid var(--line);
   border-radius: 3px;
   color: var(--muted);

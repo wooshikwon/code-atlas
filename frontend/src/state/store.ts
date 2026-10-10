@@ -4,7 +4,7 @@ import { getGraph, getRepo, getTree } from "../api/client";
 import type { Graph, Repo, Tree } from "../api/types";
 import type { EdgeKey } from "../graph/scope";
 import { applyTheme, preferredTheme, type Theme } from "../theme";
-import { back, forward, jump, push, type History, type Place, type Selection, type View } from "./history";
+import { back, focusOf, forward, jump, push, type History, type Place, type Selection, type View } from "./history";
 
 export type { Place, Selection, View } from "./history";
 
@@ -30,6 +30,8 @@ export interface AtlasStore {
   depth: Depth;
   showTests: boolean;
   showExternal: boolean;
+  /** 노드를 고르면 캐시에 없는 LLM 요약을 만든다 */
+  autoSummary: boolean;
   theme: Theme;
   history: History;
   /** 정보 패널의 사각형. null이면 기본 위치(오른쪽 위)다. */
@@ -39,30 +41,40 @@ export interface AtlasStore {
 
   /** 저장해 둔 화면 설정을 되살리고 레포·그래프·파일트리를 받는다. */
   load(): void;
-  /** 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 같은 id를 다시 고르거나 null을 넘기면 선택을 푼다. */
+  /**
+   * 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 폴더를 고르면 그 폴더를 접는다.
+   * 같은 id를 다시 고르거나 null을 넘기면 선택을 푼다.
+   */
   select(id: string | null): void;
-  /** 구조 뷰로 돌아가 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 이미 고른 노드여도 선택을 풀지 않는다. */
+  /** 구조 뷰로 돌아가 select처럼 노드를 고른다. 이미 고른 노드여도 선택을 풀지 않는다. */
   show(id: string): void;
+  /** 선을 고른다. 초점은 직전에 초점을 둔 노드에 그대로 둔다. */
   selectEdge(key: EdgeKey): void;
-  /** 폴더를 접거나 펼친다. 고른 노드가 든 폴더를 접으면 선택을 푼다. */
+  /** 폴더를 접거나 펼친다. 초점을 둔 노드가 든 폴더를 접거나 초점을 둔 폴더를 펼치면 선택을 푼다. */
   toggleFolder(id: string): void;
   setDepth(depth: Depth): void;
   /** 함수 시점 뷰로 들어가 그 함수를 고른다. */
   enterFunction(id: string): void;
   /** 함수 시점 뷰에서 그 노드의 이웃을 한 단계 더 편다. */
   expandFunction(id: string): void;
+  /**
+   * 더블클릭한 노드를 연다. 접힌 폴더는 펼치고 함수·메서드는 함수 시점 뷰로 들어간다. 첫 클릭이 넣은 이력 단계를
+   * 버리도록 첫 클릭 전의 이력 from에서 이어 한 단계만 넣는다. 함수 시점 뷰의 가운데 함수면 from으로 되돌리기만 한다.
+   */
+  open(id: string, from: History): void;
   back(): void;
   forward(): void;
   jump(index: number): void;
   toggleTests(): void;
   toggleExternal(): void;
+  toggleAutoSummary(): void;
   setTheme(theme: Theme): void;
   setPanel(rect: Rect): void;
   toggleLegend(): void;
   setPalette(open: boolean): void;
 }
 
-type Ui = Pick<AtlasStore, "panel" | "legendOpen" | "theme" | "depth">;
+type Ui = Pick<AtlasStore, "panel" | "legendOpen" | "theme" | "depth" | "autoSummary">;
 
 const UI_KEY = "code-atlas:ui:v1";
 
@@ -92,6 +104,7 @@ export function parseUi(raw: string | null, theme: Theme): Ui {
     legendOpen: saved.legendOpen === true,
     theme: saved.theme === "light" || saved.theme === "dark" ? saved.theme : theme,
     depth: saved.depth === 1 || saved.depth === 2 || saved.depth === 3 ? saved.depth : 2,
+    autoSummary: saved.autoSummary === true,
   };
 }
 
@@ -122,11 +135,11 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
   /** 화면 설정을 바꾸고 localStorage에 쓴다. */
   const keep = (change: Partial<Ui>) => {
     set(change);
-    const { panel, legendOpen, theme, depth } = get();
-    localStorage.setItem(UI_KEY, JSON.stringify({ panel, legendOpen, theme, depth }));
+    const { panel, legendOpen, theme, depth, autoSummary } = get();
+    localStorage.setItem(UI_KEY, JSON.stringify({ panel, legendOpen, theme, depth, autoSummary }));
   };
 
-  const has = (id: string) => get().graph?.nodes.some((n) => n.id === id) === true;
+  const kindOf = (id: string) => get().graph?.nodes.find((n) => n.id === id)?.kind;
 
   /** 노드의 조상 id. 가까운 조상이 앞에 온다. */
   const ancestors = (id: string): string[] => {
@@ -138,11 +151,28 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     return ids;
   };
 
-  /** 노드를 품은 폴더를 뺀 접은 폴더 집합 */
-  const unfolded = (id: string): Set<string> => {
+  /** 노드를 고른 뒤의 접은 폴더 집합. 노드를 품은 폴더를 빼고, 고른 노드가 폴더면 그 폴더를 넣는다. */
+  const revealed = (id: string): Set<string> => {
     const collapsed = new Set(get().collapsed);
     ancestors(id).forEach((folder) => collapsed.delete(folder));
+    if (kindOf(id) === "package") {
+      collapsed.add(id);
+    }
     return collapsed;
+  };
+
+  const enter = (id: string) =>
+    visit({ view: { kind: "function", center: id, expanded: [] }, selection: { type: "node", id } });
+
+  const toggle = (id: string) => {
+    const collapsed = new Set(get().collapsed);
+    const focus = focusOf(get().selection);
+    if (collapsed.delete(id)) {
+      visit(focus === id ? { collapsed, selection: null } : { collapsed });
+      return;
+    }
+    collapsed.add(id);
+    visit(focus !== null && ancestors(focus).includes(id) ? { collapsed, selection: null } : { collapsed });
   };
 
   return {
@@ -154,6 +184,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     depth: 2,
     showTests: false,
     showExternal: false,
+    autoSummary: false,
     theme: "light",
     history: { entries: [placeOf(START)], index: 0 },
     panel: null,
@@ -174,7 +205,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         visit({ selection: null });
         return;
       }
-      if (!has(id)) {
+      if (kindOf(id) === undefined) {
         return;
       }
       const selection = get().selection;
@@ -182,29 +213,19 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         visit({ selection: null });
         return;
       }
-      visit({ selection: { type: "node", id }, collapsed: unfolded(id) });
+      visit({ selection: { type: "node", id }, collapsed: revealed(id) });
     },
     show: (id) => {
-      if (has(id)) {
-        visit({ view: { kind: "structure" }, selection: { type: "node", id }, collapsed: unfolded(id) });
+      if (kindOf(id) !== undefined) {
+        visit({ view: { kind: "structure" }, selection: { type: "node", id }, collapsed: revealed(id) });
       }
     },
-    selectEdge: (key) => visit({ selection: { type: "edge", key } }),
-    toggleFolder: (id) => {
-      const collapsed = new Set(get().collapsed);
-      if (collapsed.delete(id)) {
-        visit({ collapsed });
-        return;
-      }
-      collapsed.add(id);
-      const selection = get().selection;
-      const inside = selection?.type === "node" && ancestors(selection.id).includes(id);
-      visit(inside ? { collapsed, selection: null } : { collapsed });
-    },
+    selectEdge: (key) => visit({ selection: { type: "edge", key, focus: focusOf(get().selection) } }),
+    toggleFolder: toggle,
     setDepth: (depth) => keep({ depth }),
     enterFunction: (id) => {
-      if (has(id)) {
-        visit({ view: { kind: "function", center: id, expanded: [] }, selection: { type: "node", id } });
+      if (kindOf(id) !== undefined) {
+        enter(id);
       }
     },
     expandFunction: (id) => {
@@ -213,11 +234,27 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         visit({ view: { ...view, expanded: [...view.expanded, id] } });
       }
     },
+    open: (id, from) => {
+      const kind = kindOf(id);
+      const place = from.entries[from.index];
+      const centered = place.view.kind === "function" && place.view.center === id;
+      const folded = kind === "package" && place.collapsed.includes(id);
+      const callable = kind === "function" || kind === "method";
+      if (!centered && !folded && !callable) {
+        return;
+      }
+      set({ history: from, view: place.view, selection: place.selection, collapsed: new Set(place.collapsed) });
+      if (centered) {
+        return;
+      }
+      (folded ? toggle : enter)(id);
+    },
     back: () => restore(back(get().history)),
     forward: () => restore(forward(get().history)),
     jump: (index) => restore(jump(get().history, index)),
     toggleTests: () => set((state) => ({ showTests: !state.showTests })),
     toggleExternal: () => set((state) => ({ showExternal: !state.showExternal })),
+    toggleAutoSummary: () => keep({ autoSummary: !get().autoSummary }),
     setTheme: (theme) => {
       keep({ theme });
       applyTheme(theme);

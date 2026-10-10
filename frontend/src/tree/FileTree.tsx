@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useOpened } from "../panel/opened";
 import { useChanges } from "../state/changes";
 import { useAtlas } from "../state/store";
 import { build } from "../search/index";
@@ -21,10 +22,12 @@ export function FileTree() {
   const show = useAtlas((s) => s.show);
   const toggleFolder = useAtlas((s) => s.toggleFolder);
   const changes = useChanges((s) => s.changes);
+  const opened = useOpened((s) => s.path);
+  const toggleOpened = useOpened((s) => s.toggle);
   const selected = selection?.type === "node" ? selection.id : null;
   const list = useMemo(
-    () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, showTests, changes })),
-    [tree, graph, collapsed, selected, showTests, changes],
+    () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, opened, showTests, changes })),
+    [tree, graph, collapsed, selected, opened, showTests, changes],
   );
   /** 지워진 파일은 노드가 없으므로 파일트리 아래에 경로만 적는다. */
   const deleted = useMemo(() => (changes?.files ?? []).filter((file) => file.status === "deleted"), [changes]);
@@ -42,6 +45,7 @@ export function FileTree() {
   const found = useMemo(() => results(entries, query, selected, changes), [entries, query, selected, changes]);
   /** 키보드로 옮기는 활성 결과 행의 번호 */
   const [mark, setMark] = useState(0);
+  const search = useRef<HTMLInputElement | null>(null);
 
   // 선택이 바뀌면 활성 행을 고른 행으로 옮긴다. 활성 행이 이미 고른 행이면 그대로 둔다.
   useEffect(() => {
@@ -57,19 +61,23 @@ export function FileTree() {
 
   /**
    * 폴더 행은 접거나 펼치고, 파일·클래스·함수 행은 구조 뷰에서 고른다. 구조 뷰에서 고른 행을 다시 누르면 선택을 푼다.
-   * 패키지 노드가 없는 폴더는 늘 펼쳐 둔다.
+   * 패키지 노드가 없는 폴더는 늘 펼쳐 둔다. 모듈 노드가 없는 `__init__.py` 행은 그래프 선택을 바꾸지 않고
+   * 정보 패널에 그 파일의 코드를 열고, 다시 누르면 닫는다.
    */
   const pick = (row: Row) => {
     setCursor(row.key);
     if (row.node !== null) {
       (row.kind === "dir" ? toggleFolder : row.selected && structure ? select : show)(row.node);
+    } else if (row.file !== null) {
+      toggleOpened(row.file);
     }
   };
 
-  /** 검색 결과 행을 구조 뷰에서 고른다. 질의는 그대로 둔다. */
+  /** 검색 결과 행을 구조 뷰에서 고른다. 질의는 그대로 두고 포커스를 검색 칸에 돌려준다. */
   const pickResult = (result: Result) => {
     setMark(found.indexOf(result));
     show(result.hit.entry.id);
+    search.current?.focus();
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -118,6 +126,7 @@ export function FileTree() {
     <div className="explorer">
       <div className="explorer-header">{repo?.name ?? "code-atlas"}</div>
       <TreeSearch
+        input={search}
         query={query}
         onQuery={(text) => {
           setQuery(text);

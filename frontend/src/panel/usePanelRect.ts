@@ -22,15 +22,13 @@ interface PanelRect {
   grip: (kind: Grip) => (event: ReactPointerEvent<HTMLElement>) => void;
 }
 
-/** fitted면 높이를 내용에 맞춘 채로 둔다. */
+/** fitted면 높이를 내용에 맞추고 rect의 높이를 넘지 않게 한다. */
 function place(element: HTMLElement, rect: Rect, fitted: boolean): void {
   element.style.left = `${rect.x}px`;
   element.style.top = `${rect.y}px`;
   element.style.width = `${rect.width}px`;
-  if (!fitted) {
-    element.style.height = `${rect.height}px`;
-    element.style.maxHeight = "";
-  }
+  element.style.height = fitted ? "" : `${rect.height}px`;
+  element.style.maxHeight = fitted ? `${rect.height}px` : "";
 }
 
 /** compact는 내용에 코드 뷰어가 없을 때 참이다. */
@@ -78,13 +76,19 @@ export function usePanelRect(compact: boolean): PanelRect {
     /** 위쪽·아래쪽 가장자리를 옮기는 손잡이는 패널 높이를 정한다. 내용에 맞춘 패널은 화면에 그린 높이에서 출발한다. */
     const sizing = kind !== "move" && (kind.includes("n") || kind.includes("s"));
     const from = fitted && sizing ? { ...rect, height: panel.offsetHeight } : rect;
+    /** 세로로 끌지 않았을 때의 높이. 내용에 맞춘 높이가 최소 높이보다 낮으면 최소 높이다. */
+    const rest = kind === "move" ? from.height : resize(from, kind, 0, 0, area).height;
+    /** 끌어서 정한 사각형. 높이가 rest와 같으면 높이를 바꾼 것으로 치지 않고 저장한 높이를 유지한다. */
     let last: Rect | null = null;
+    let tall = false;
 
     const onMove = (moved: PointerEvent) => {
       const dx = moved.clientX - clientX;
       const dy = moved.clientY - clientY;
-      last = kind === "move" ? move(from, dx, dy, area) : resize(from, kind, dx, dy, area);
-      place(panel, last, fitted && !sizing);
+      const next = kind === "move" ? move(from, dx, dy, area) : resize(from, kind, dx, dy, area);
+      tall = sizing && next.height !== rest;
+      last = tall ? next : { ...next, height: rect.height };
+      place(panel, last, fitted && !tall);
     };
     const onEnd = () => {
       handle.removeEventListener("pointermove", onMove);
@@ -94,7 +98,7 @@ export function usePanelRect(compact: boolean): PanelRect {
       document.body.style.userSelect = "";
       if (last !== null) {
         setPanel(last);
-        if (sizing) {
+        if (tall) {
           localStorage.setItem(SIZED_KEY, "1");
           setSized(true);
         }

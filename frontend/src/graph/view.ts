@@ -1,13 +1,8 @@
 // 그릴 선과 배치를 합쳐 노드와 선 컴포넌트가 그대로 그리는 값을 만든다.
-import type { AtlasNode, EdgeGroup, EdgeKind, Graph } from "../api/types";
-import type { Flow } from "./flow";
+import type { AtlasNode, EdgeGroup, Graph } from "../api/types";
 import { siblings } from "./columns";
 import { belowRoute, crossRoute, type Box, type Layout, type Point } from "./layout";
-import { aggKey, ubiquitous, type DrawnEdge, type EdgeKey } from "./scope";
-import { lift, nodeIndex, unitOf, type Shown } from "./visible";
-
-/** 선의 진하기. strong은 본문 잉크, muted는 muted 잉크로 그린다. */
-export type Tone = "strong" | "muted";
+import { aggKey, type DrawnEdge, type EdgeKey, type Tone } from "./scope";
 
 export type EdgeView = {
   key: EdgeKey;
@@ -117,67 +112,6 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
   }
   return views;
 }
-
-/**
- * 편재 노드 배지를 다는 노드와 숨긴 선의 출발 노드 수. 초점이 없으면 편재 노드 전체이고,
- * 고른 노드를 품었거나 고른 노드가 쓰는 편재 노드는 숨긴 선을 다시 그리므로 뺀다.
- */
-export function badges(graph: Graph, shown: Shown, flow: Flow | null): Map<string, number> {
-  const result = ubiquitous(graph, shown);
-  if (flow === null) {
-    return result;
-  }
-  const nodes = nodeIndex(graph);
-  const used = graph.edges.filter((e) => flow.seeds.has(e.source)).map((e) => e.target);
-  for (const id of [...flow.seeds, ...used]) {
-    const box = lift(nodes, shown, unitOf(nodes, id));
-    if (box !== null) {
-      result.delete(box);
-    }
-  }
-  return result;
-}
-
-/** 노드에 닿는 선 수. 외부 노드로 가는 선도 센다. */
-export function degrees(graph: Graph): Map<string, { incoming: number; outgoing: number }> {
-  const result = new Map<string, { incoming: number; outgoing: number }>();
-  const entry = (id: string) => {
-    let value = result.get(id);
-    if (value === undefined) {
-      value = { incoming: 0, outgoing: 0 };
-      result.set(id, value);
-    }
-    return value;
-  };
-  for (const edge of graph.edges) {
-    entry(edge.source).outgoing++;
-    entry(edge.target).incoming++;
-  }
-  return result;
-}
-
-export const KIND_NAMES: Record<AtlasNode["kind"], string> = {
-  package: "폴더",
-  module: "파일",
-  class: "클래스",
-  dataclass: "데이터 클래스",
-  function: "함수",
-  method: "메서드",
-  external: "외부",
-};
-
-export const GROUP_NAMES: Record<EdgeGroup, string> = { run: "실행", use: "사용", derive: "계승" };
-
-export const EDGE_KIND_NAMES: Record<EdgeKind, string> = {
-  call: "호출",
-  construct: "생성",
-  import: "import",
-  pass: "전달",
-  decorate: "데코레이터",
-  type: "타입",
-  inherit: "상속",
-  override: "오버라이드",
-};
 
 /** 꺾이는 점마다 반지름 radius 원호를 넣은 SVG 경로. 선분이 짧으면 반지름을 선분 절반으로 줄인다. */
 export function roundedPath(points: Point[], radius = 4): string {

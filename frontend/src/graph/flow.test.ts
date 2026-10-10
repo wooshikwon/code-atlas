@@ -41,6 +41,15 @@ describe("flow", () => {
     expect(Object.fromEntries(result.out)).toEqual({ main: 1, "pkg.util": 1, common: 1, cli: 2 });
     expect([...result.incoming]).toEqual(["main"]);
   });
+
+  it("폴더를 고르면 폴더 안의 노드를 그 폴더로 올려 상자 단위로 센다", () => {
+    const result = flow(repoFixture, "pkg", 2, off);
+    expect(result.unit).toBe("file");
+    expect(result.file).toBe("pkg");
+    expect(result.seeds.has("pkg.mod:Store.save") && result.seeds.has("pkg.util")).toBe(true);
+    expect(Object.fromEntries(result.out)).toEqual({ main: 1, common: 1, cli: 2 });
+    expect([...result.incoming]).toEqual(["main"]);
+  });
 });
 
 describe("opacity", () => {
@@ -85,5 +94,13 @@ describe("opacities", () => {
     expect(result.get("cli")).toBe(0.5);
     expect(result.get("pkg.util")).toBe(1);
     expect(result.get("app.web")).toBe(0.2);
+  });
+
+  it("폴더를 고르면 그 폴더와 흐름에 든 파일 상자가 값을 받는다", () => {
+    const result = opacities(repoFixture, flow(repoFixture, "pkg", 2, off));
+    expect(result.get("pkg")).toBe(1);
+    expect(result.get("main")).toBe(1);
+    expect(result.get("cli")).toBe(0.5);
+    expect(result.get("app")).toBe(0.2);
   });
 });

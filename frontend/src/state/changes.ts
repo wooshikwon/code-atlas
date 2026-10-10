@@ -69,7 +69,16 @@ export function useFolderChange(id: string): Change | null {
   return useChanges((s) => (s.changes !== null && inside(s.changes.nodes, id) ? "modified" : null));
 }
 
-/** 레포를 열어 분석한 뒤 내용이 바뀐 파일 수 */
+/** 현재 git 브랜치 이름. git 저장소가 아니거나 브랜치 위가 아니면 null이다. */
+export function useBranch(): string | null {
+  return useChanges((s) => (s.changes?.git === true ? s.changes.branch : null));
+}
+
+/** 레포를 열어 분석한 뒤 내용이 바뀐 파일 수. 마지막 커밋과 같아 변경 표시가 없는 파일도 센다. */
+export function staleCount(changes: Changes | null): number {
+  return changes?.files.filter((f) => f.stale).length ?? 0;
+}
+
 export function useStaleCount(): number {
-  return useChanges((s) => s.changes?.files.filter((f) => f.stale).length ?? 0);
+  return useChanges((s) => staleCount(s.changes));
 }

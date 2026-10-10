@@ -10,6 +10,14 @@ export interface KeyHandlers {
   palette(): void;
 }
 
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+
+/** Mod만 누른 채인지. Mod는 Mac에서 Cmd, 그 밖에서 Ctrl이다. */
+function modOnly(event: KeyboardEvent): boolean {
+  const mod = MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  return mod && !event.shiftKey && !event.altKey;
+}
+
 /** 포커스가 Monaco나 글자 입력 칸에 있는지. 그 안에서는 Alt+←·Alt+→가 낱말 사이를 옮기는 키다. */
 function typing(): boolean {
   const element = document.activeElement;
@@ -22,9 +30,12 @@ function typing(): boolean {
   );
 }
 
-/** 포커스가 파일트리 검색 칸에 있는지. 그 안에서는 Esc가 질의를 비운다. */
-function searching(): boolean {
-  return document.activeElement?.classList.contains("tree-search-input") === true;
+/**
+ * 포커스가 Esc를 직접 쓰는 요소 안에 있는지. 파일트리 검색 칸은 질의를 비우고, 코드 뷰어는 hover 상자를 닫고,
+ * 진입점 목록은 목록을 접는다.
+ */
+function escaping(): boolean {
+  return document.activeElement?.closest(".tree-search-input, .monaco-editor, .toolbar-entries") != null;
 }
 
 /** 단축키를 등록하고 등록을 푸는 함수를 돌려준다. 이력 이동과 팔레트 열기는 브라우저의 기본 동작(이전 페이지, 인쇄)을 막는다. */
@@ -32,7 +43,7 @@ export function bind(handlers: KeyHandlers): () => void {
   const onKey = (event: KeyboardEvent) => {
     const mod = event.metaKey || event.ctrlKey;
     const key = event.key;
-    if (mod && (key.toLowerCase() === "p" || key.toLowerCase() === "k")) {
+    if (modOnly(event) && (key.toLowerCase() === "p" || key.toLowerCase() === "k")) {
       event.preventDefault();
       handlers.palette();
     } else if (event.altKey && !mod && !event.shiftKey && (key === "ArrowLeft" || key === "ArrowRight")) {
@@ -44,7 +55,7 @@ export function bind(handlers: KeyHandlers): () => void {
     } else if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && (key === "[" || key === "]")) {
       event.preventDefault();
       (key === "[" ? handlers.back : handlers.forward)();
-    } else if (key === "Escape" && !searching()) {
+    } else if (key === "Escape" && !escaping()) {
       handlers.escape();
     }
   };

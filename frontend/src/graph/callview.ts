@@ -19,9 +19,9 @@ export interface Calls {
 }
 
 /** 이름표 아래 파일 경로 줄의 높이 */
-export const FILE_HEIGHT = 14;
+const FILE_HEIGHT = 14;
 /** + 버튼의 한 변 */
-export const MORE = 16;
+const MORE = 16;
 const MORE_GAP = 4;
 const CIRCLE_GAP = 6;
 const LOC_GAP = 5;

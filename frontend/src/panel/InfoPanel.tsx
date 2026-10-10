@@ -1,11 +1,14 @@
 // 관계 그래프 위에 떠 있는 정보 패널. 저장소의 선택을 머리 줄, LLM 요약 칸, 지점 목록, 코드 뷰어로 바꾼다.
 import { useMemo, useState } from "react";
-import type { AtlasNode, EdgeKind, Graph, SiteRef } from "../api/types";
+import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
-import { edgeKey, type EdgeKey } from "../graph/scope";
-import { degrees } from "../graph/view";
+import { flow } from "../graph/flow";
+import { degrees, picked, type DrawnEdge } from "../graph/scope";
+import { hidden, nodeIndex, shown, within } from "../graph/visible";
+import { focusOf } from "../state/history";
 import { useAtlas, type Selection } from "../state/store";
 import { Header, type HeaderItem, type PickedEdge } from "./Header";
+import { useOpened } from "./opened";
 import type { Dir } from "./rect";
 import { Sites } from "./Sites";
 import { Summary } from "./Summary";
@@ -15,55 +18,16 @@ const DIRS: Dir[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 const SUMMARIZED = new Set<AtlasNode["kind"]>(["module", "class", "dataclass", "function", "method"]);
 /** 코드 뷰어를 열지 않는 종류 */
 const UNITS = new Set<AtlasNode["kind"]>(["module", "package"]);
-const GROUP_ORDER = ["run", "use", "derive"] as const;
-
-/** id가 ancestor이거나 그 자손인지 */
-function within(nodes: Map<string, AtlasNode>, id: string, ancestor: string): boolean {
-  for (let node = nodes.get(id); node !== undefined; node = node.parent === null ? undefined : nodes.get(node.parent)) {
-    if (node.id === ancestor) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * 선 키가 가리키는 선. `agg|출발|도착` 키면 출발 노드와 그 자손에서 도착 노드와 그 자손으로 가는 선을 합친다.
- * 화면에 그리지 않는 노드(shown이 거르는 테스트 코드·외부 노드)에 닿는 선은 합치지 않는다.
- */
-function pickEdge(
-  graph: Graph,
-  nodes: Map<string, AtlasNode>,
-  key: EdgeKey,
-  shown: (node: AtlasNode | undefined) => boolean,
-): PickedEdge | null {
-  const [tag, source, target] = key.split("|");
-  if (tag !== "agg") {
-    const edge = graph.edges.find((e) => edgeKey(e) === key);
-    return edge === undefined ? null : { ...edge, kinds: { [edge.kind]: edge.sites.length } };
-  }
-  const parts = graph.edges.filter(
-    (e) =>
-      shown(nodes.get(e.source)) &&
-      shown(nodes.get(e.target)) &&
-      within(nodes, e.source, source) &&
-      within(nodes, e.target, target),
-  );
-  if (parts.length === 0) {
-    return null;
-  }
-  const kinds: Partial<Record<EdgeKind, number>> = {};
-  for (const edge of parts) {
-    kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
-  }
+/** 그래프가 그린 선 edge를 머리 줄과 지점 목록에 쓰는 값으로 바꾼다. 집계 선이면 kind가 null이다. */
+function pickedEdge(edge: DrawnEdge): PickedEdge {
   return {
-    source,
-    target,
-    group: GROUP_ORDER.find((g) => parts.some((e) => e.group === g))!,
-    kind: null,
-    kinds,
-    deferred: parts.every((e) => e.deferred),
-    sites: parts.flatMap((e) => e.sites),
+    source: edge.source,
+    target: edge.target,
+    group: edge.group,
+    kind: edge.key.startsWith("agg|") ? null : edge.edges[0].kind,
+    kinds: edge.kinds,
+    deferred: edge.deferred,
+    sites: edge.edges.flatMap((e) => e.sites),
   };
 }
 
@@ -72,7 +36,7 @@ function rangeAround(graph: Graph, site: SiteRef): [number, number] | null {
   let found: [number, number] | null = null;
   for (const node of graph.nodes) {
     const range = node.range;
-    if (node.path !== site.path || node.kind === "package" || range === null) {
+    if (node.path !== site.path || range === null) {
       continue;
     }
     if (range[0] <= site.line && site.line <= range[1] && (found === null || range[1] - range[0] < found[1] - found[0])) {
@@ -88,6 +52,10 @@ export function InfoPanel() {
   const selection = useAtlas((s) => s.selection);
   const showTests = useAtlas((s) => s.showTests);
   const showExternal = useAtlas((s) => s.showExternal);
+  const collapsed = useAtlas((s) => s.collapsed);
+  const depth = useAtlas((s) => s.depth);
+  /** 그래프 선택과 무관하게 연 파일. 고른 노드나 선 대신 이 파일의 코드를 보인다. */
+  const file = useOpened((s) => s.path);
   /** 지점 목록에서 눌러 코드 뷰어에 연 지점과 그때 고른 선. 선택이 바뀌면 쓰지 않는다. */
   const [opened, setOpened] = useState<{ selection: Selection; site: SiteRef } | null>(null);
   const site = opened?.selection === selection ? opened.site : null;
@@ -96,7 +64,7 @@ export function InfoPanel() {
     () =>
       graph === null
         ? null
-        : { nodes: new Map(graph.nodes.map((n) => [n.id, n])), degrees: degrees(graph) },
+        : { nodes: nodeIndex(graph), degrees: degrees(graph) },
     [graph],
   );
 
@@ -104,15 +72,21 @@ export function InfoPanel() {
     if (graph === null || index === null || selection?.type !== "edge") {
       return null;
     }
-    const shown = (node: AtlasNode | undefined) =>
-      node !== undefined && (showTests || !node.test) && (showExternal || node.kind !== "external");
-    return pickEdge(graph, index.nodes, selection.key, shown);
-  }, [graph, index, selection, showTests, showExternal]);
+    // 그래프가 그 선을 그릴 때와 같은 흐름과 보이는 노드에서 선에 합친 원래 선을 찾는다.
+    const toggles = { showTests, showExternal };
+    const off = hidden(graph, toggles);
+    const focus = focusOf(selection);
+    const focused = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
+    const found = picked(graph, shown(graph, { ...toggles, collapsed, flow: focused }), focused, selection.key);
+    return found === null ? null : pickedEdge(found);
+  }, [graph, index, selection, showTests, showExternal, collapsed, depth]);
 
-  const node = selection?.type === "node" ? index?.nodes.get(selection.id) : undefined;
+  const node = file === null && selection?.type === "node" ? index?.nodes.get(selection.id) : undefined;
 
   let item: HeaderItem | null = null;
-  if (graph !== null && index !== null && node !== undefined) {
+  if (file !== null) {
+    item = { type: "file", path: file };
+  } else if (graph !== null && index !== null && node !== undefined) {
     const degree = index.degrees.get(node.id) ?? { incoming: 0, outgoing: 0 };
     const functions =
       node.kind === "module"
@@ -128,13 +102,15 @@ export function InfoPanel() {
   }
 
   const siteRange = graph !== null && site !== null ? rangeAround(graph, site) : null;
-  /** 코드 뷰어에 열 범위. 파일·폴더를 골랐거나 선의 지점을 누르지 않았으면 null이다. */
+  /** 코드 뷰어에 열 범위. 파일·폴더를 골랐거나 선의 지점을 누르지 않았으면 null이다. 연 파일은 파일 전체다. */
   const code =
-    node !== undefined && !UNITS.has(node.kind) && node.path !== null && node.range !== null
-      ? { path: node.path, range: node.range }
-      : site !== null && siteRange !== null
-        ? { path: site.path, range: siteRange, highlight: site.line }
-        : null;
+    file !== null
+      ? { path: file, range: null }
+      : node !== undefined && !UNITS.has(node.kind) && node.path !== null && node.range !== null
+        ? { path: node.path, range: node.range }
+        : site !== null && siteRange !== null
+          ? { path: site.path, range: siteRange, highlight: site.line }
+          : null;
   const { ref, rect, fitted, grip } = usePanelRect(code === null);
 
   return (
@@ -153,7 +129,7 @@ export function InfoPanel() {
             <Header item={item} nodes={index.nodes} />
           </div>
           {node !== undefined && SUMMARIZED.has(node.kind) && <Summary key={node.id} node={node.id} />}
-          {edge !== null && <Sites sites={edge.sites} opened={site} open={(picked) => setOpened({ selection, site: picked })} />}
+          {file === null && edge !== null && <Sites sites={edge.sites} opened={site} open={(picked) => setOpened({ selection, site: picked })} />}
           {code !== null && <CodeView {...code} />}
         </>
       )}

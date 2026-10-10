@@ -13,6 +13,7 @@ import {
 import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { AtlasNode, Graph } from "../api/types";
+import { focusOf, type History } from "../state/history";
 import { useAtlas } from "../state/store";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
@@ -21,13 +22,14 @@ import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, layout, titleOf, type Layout, type Point } from "./layout";
 import { Legend } from "./Legend";
 import { play, reducedMotion, settled, tween } from "./motion";
+import { GROUP_NAMES, KIND_NAMES } from "./names";
 import type { AtlasFlowNode, AtlasNodeData } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
-import { drawn } from "./scope";
+import { concealed, drawn } from "./scope";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
-import { badges, edgeViews, GROUP_NAMES, KIND_NAMES, parentFirst } from "./view";
+import { edgeViews, parentFirst } from "./view";
 import { boundsOf, centerOn, fitPadding, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
-import { hidden, nodeIndex, shown, within, type Shown } from "./visible";
+import { hidden, local, nodeIndex, shown, type Shown } from "./visible";
 
 /** 선은 자식을 그리는 상자(깊이만큼 0부터)보다 위에, 그 밖의 노드보다 아래에 놓는다. */
 const EDGE_Z = 50;
@@ -63,7 +65,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<str
   const order = parentFirst(scene.graph, scene.shown.nodes);
   const parents = new Set(order.map((n) => n.parent));
   const dim = opacities(scene.graph, scene.flow);
-  const marks = badges(scene.graph, scene.shown, scene.flow);
+  const marks = concealed(scene.graph, scene.shown, scene.flow);
   const depths = new Map<string, number>();
   return order.map((node) => {
     const opacity = dim.get(node.id) ?? 1;
@@ -84,7 +86,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<str
         expanded,
         selected: node.id === scene.focus,
         flow: scene.flow !== null && opacity > 0.2,
-        local: scene.flow !== null && node.id !== scene.flow.file && within(nodes, node.id, scene.flow.file),
+        local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
         inflow: marks.get(node.id) ?? null,
       },
     };
@@ -143,8 +145,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const collapsed = useAtlas((s) => s.collapsed);
   const select = useAtlas((s) => s.select);
   const selectEdge = useAtlas((s) => s.selectEdge);
-  const toggleFolder = useAtlas((s) => s.toggleFolder);
-  const enterFunction = useAtlas((s) => s.enterFunction);
+  const open = useAtlas((s) => s.open);
   const { getViewport, setViewport } = useReactFlow();
   /** 확대 비율 구간. 구간이 바뀔 때만 다시 그린다. */
   const zoom = useStore((s) => (s.transform[2] < 0.4 ? 0 : s.transform[2] < NAMED_ZOOM ? 1 : 2));
@@ -165,16 +166,10 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const onScreen = useRef<Layout | null>(null);
   /** 화면을 옮겨 둔 노드 */
   const panned = useRef<string | null>(null);
-  /** 직전에 한 번 누른 노드. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
-  const clicked = useRef<string | null>(null);
+  /** 직전에 한 번 누른 노드와 누르기 전의 이력. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
+  const clicked = useRef<{ id: string; from: History } | null>(null);
   /** 초점을 둔 노드. 선을 골라도 직전에 고른 노드의 초점을 유지한다. */
-  const kept = useRef<string | null>(null);
-  if (selection === null) {
-    kept.current = null;
-  } else if (selection.type === "node") {
-    kept.current = selection.id;
-  }
-  const focus = kept.current;
+  const focus = focusOf(selection);
 
   const index = useMemo(
     () => (graph === null ? null : { nodes: nodeIndex(graph), functions: functionCounts(graph) }),
@@ -279,34 +274,19 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       type: "orthogonal",
       data: view,
       zIndex: EDGE_Z,
-      interactionWidth: 12,
     }));
   }, [scene, index, hovered]);
 
-  /** 접힌 폴더 상자는 펼치고, 함수·메서드 노드는 함수 시점 뷰로 들어간다. */
-  const open = (id: string) => {
-    const node = index?.nodes.get(id);
-    if (node === undefined) {
-      return;
-    }
-    const state = useAtlas.getState();
-    if (node.kind === "package" && state.collapsed.has(id)) {
-      if (state.selection?.type === "node" && state.selection.id === id) {
-        select(id);
-      }
-      toggleFolder(id);
-    } else if (node.kind === "function" || node.kind === "method") {
-      enterFunction(id);
-    }
-  };
-
-  /** 연달아 누른 두 번째 클릭이면 처음 누른 노드를 열고 참을 돌려준다. 세 번째부터는 아무 일도 하지 않는다. */
+  /**
+   * 연달아 누른 두 번째 클릭이면 처음 누른 노드를 열고 참을 돌려준다. 접힌 폴더 상자는 펼쳐지고 함수·메서드 노드는
+   * 함수 시점 뷰로 들어간다. 세 번째부터는 아무 일도 하지 않는다.
+   */
   const repeated = (event: ReactMouseEvent): boolean => {
     if (event.detail < 2) {
       return false;
     }
     if (event.detail === 2 && clicked.current !== null) {
-      open(clicked.current);
+      open(clicked.current.id, clicked.current.from);
     }
     return true;
   };
@@ -321,7 +301,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       clicked.current = null;
       return;
     }
-    clicked.current = node.id;
+    clicked.current = { id: node.id, from: useAtlas.getState().history };
     select(node.id);
   };
   const onPaneClick = (event: ReactMouseEvent) => {

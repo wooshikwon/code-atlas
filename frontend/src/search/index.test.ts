@@ -29,13 +29,12 @@ const entries = build(graph, false);
 const ids = (query: string, limit?: number) => find(entries, query, limit).map((hit) => hit.entry.id);
 
 describe("build", () => {
-  it("파일·클래스·데이터 클래스·함수·메서드를 담고 파일 없는 폴더와 외부 노드는 뺀다", () => {
+  it("파일·클래스·데이터 클래스·함수·메서드를 담고 폴더와 그 __init__.py, 외부 노드는 뺀다", () => {
     expect(entries).toEqual([
       { id: "arbiter", name: "arbiter.py", path: "src/arbiter.py", kind: "file" },
       { id: "arbiter:_rebuild_note_sections", name: "_rebuild_note_sections", path: "src/arbiter.py", kind: "function" },
       { id: "arbiter:Arbiter", name: "Arbiter", path: "src/arbiter.py", kind: "class" },
       { id: "arbiter:Arbiter.run", name: "Arbiter.run", path: "src/arbiter.py", kind: "method" },
-      { id: "parser", name: "__init__.py", path: "src/parser/__init__.py", kind: "file" },
       { id: "parser.reminders", name: "reminders.py", path: "src/parser/reminders.py", kind: "file" },
       { id: "parser.reminders:Item", name: "Item", path: "src/parser/reminders.py", kind: "dataclass" },
     ]);
@@ -65,7 +64,6 @@ describe("find", () => {
   it("name에서 찾은 결과 뒤에 path에서 찾은 결과를 잇는다", () => {
     const hits = find(entries, "parser");
     expect(hits.map((hit) => [hit.entry.id, hit.field])).toEqual([
-      ["parser", "path"],
       ["parser.reminders", "path"],
       ["parser.reminders:Item", "path"],
     ]);
@@ -86,7 +84,7 @@ describe("find", () => {
         { view: { kind: "structure" }, selection: null, collapsed: [] },
         { view: { kind: "structure" }, selection: { type: "node", id: "arbiter" }, collapsed: [] },
         { view: { kind: "structure" }, selection: { type: "node", id: "parser.reminders:Item" }, collapsed: [] },
-        { view: { kind: "structure" }, selection: { type: "edge", key: "agg|a|b" }, collapsed: [] },
+        { view: { kind: "structure" }, selection: { type: "edge", key: "agg|a|b", focus: null }, collapsed: [] },
         { view: { kind: "structure" }, selection: { type: "node", id: "arbiter" }, collapsed: [] },
         { view: { kind: "structure" }, selection: { type: "node", id: "tests.test_reminders" }, collapsed: [] },
       ],

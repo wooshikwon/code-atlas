@@ -2,7 +2,7 @@
 // 메서드가 클래스 밖 데이터 클래스·함수로 계층을 넘어 잇고, 파일 main의 진입점 run과 메서드가 파일 경계를 넘어 서로 부른다.
 // 여기에 서로 import하는 진입점 파일 cli, 선이 없는 파일 scratch, 파일 네 개가 import하는 common,
 // 함수 진입점 index에서 시작해 파일 경계를 넘는 세 단계 호출 사슬 index → render → wrap → pad,
-// 폴더 pkg 안의 테스트 코드 pkg.conftest를 더한다.
+// 폴더 pkg 안의 테스트 코드 pkg.conftest, 폴더 app의 `__init__.py`에 정의한 함수 app:version을 더한다.
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 
 function node(id: string, kind: AtlasNode["kind"], parent: string | null, extra: Partial<AtlasNode> = {}): AtlasNode {
@@ -68,6 +68,7 @@ export const repoFixture: Graph = {
     node("app.text", "module", "app", { path: "app/text.py", loc: 20 }),
     node("app.text:wrap", "function", "app.text", { path: "app/text.py", range: [1, 8] }),
     node("app.text:pad", "function", "app.text", { path: "app/text.py", range: [10, 16] }),
+    node("app:version", "function", "app", { path: "app/__init__.py", range: [1, 3] }),
   ],
   edges: [
     edge("main", "pkg.mod", "import"),

@@ -10,8 +10,8 @@ type CodeEditor = Parameters<OnMount>[0];
 
 interface CodeViewProps {
   path: string;
-  /** 보여 줄 1부터 세는 시작 줄과 끝 줄 */
-  range: [number, number];
+  /** 보여 줄 1부터 세는 시작 줄과 끝 줄. null이면 파일 전체다. */
+  range: [number, number] | null;
   /** 강조하고 화면 가운데로 옮길 파일 줄 번호 */
   highlight?: number;
 }
@@ -33,7 +33,7 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
   /** 정의가 레포 밖에 있을 때 누른 곳 옆에 잠시 띄우는 말풍선 */
   const [note, setNote] = useState<Note | null>(null);
 
-  const [start, end] = range;
+  const [start, end] = range ?? [1, Infinity];
   const model = modelPath(path, range);
   const text = file?.path === path ? file.text : undefined;
   const code = useMemo(() => text?.split("\n").slice(start - 1, end).join("\n"), [text, start, end]);
@@ -84,15 +84,22 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
       }
       const body = editor.getContainerDomNode().getBoundingClientRect();
       const at = { x: mouse.browserEvent.clientX - body.left, y: mouse.browserEvent.clientY - body.top };
+      const asked = useAtlas.getState().selection;
       getDefinition(path, position.lineNumber + start - 1, position.column - 1)
         .then(({ targets }) => {
           const target = targets.at(0);
           const selection = useAtlas.getState().selection;
-          if (target === undefined) {
+          // 응답을 기다리는 동안 선택이 바뀌었으면 그 선택을 덮지 않는다.
+          if (target === undefined || selection !== asked) {
             return;
           }
           if (target.node !== null) {
             if (selection?.type !== "node" || selection.id !== target.node) {
+              // 포커스가 코드 뷰어에 남으면 이력 단축키가 듣지 않으므로 포커스를 뺀다.
+              const focused = document.activeElement;
+              if (focused instanceof HTMLElement && editor.getContainerDomNode().contains(focused)) {
+                focused.blur();
+              }
               select(target.node);
             }
           } else if (target.external !== null) {

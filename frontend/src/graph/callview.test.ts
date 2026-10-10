@@ -1,7 +1,7 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, Graph } from "../api/types";
-import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, FILE_HEIGHT, MORE } from "./callview";
+import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel } from "./callview";
 import { repoFixture } from "./fixture";
 import { fromElk, LEAF_HEIGHT } from "./layout";
 import { edgeKey } from "./scope";
@@ -111,13 +111,13 @@ describe("이름표와 크기", () => {
     expect(fileLabel(nodes, nodes.get("ext:json")!)).toBeNull();
   });
 
-  it("더 펼 선이 남은 노드는 + 버튼만큼 넓다", () => {
+  it("높이는 이름표 줄에 파일 경로 줄 14px를 더한 값이고, 더 펼 선이 남은 노드는 + 버튼 16px와 간격 4px만큼 넓다", () => {
     const calls = callview(repoFixture, load, [], off);
     const opened = callview(repoFixture, load, [save], off);
     const before = callSize(calls, nodes, nodes.get(save)!, measure);
     const after = callSize(opened, nodes, nodes.get(save)!, measure);
-    expect(before.height).toBe(LEAF_HEIGHT + FILE_HEIGHT);
-    expect(before.width - after.width).toBe(MORE + 4);
+    expect(before.height).toBe(LEAF_HEIGHT + 14);
+    expect(before.width - after.width).toBe(20);
   });
 });
 

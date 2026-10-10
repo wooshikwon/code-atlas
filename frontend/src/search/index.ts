@@ -23,7 +23,10 @@ export interface Hit {
   positions: Set<number>;
 }
 
-/** 파일·클래스·데이터 클래스·함수·메서드를 검색 항목으로 만든다. 테스트 코드는 토글이 켜졌을 때만 넣는다. */
+/**
+ * 파일·클래스·데이터 클래스·함수·메서드를 검색 항목으로 만든다. 테스트 코드는 토글이 켜졌을 때만 넣는다.
+ * 폴더와 모듈 노드가 없는 `__init__.py`는 넣지 않는다.
+ */
 export function build(graph: Graph, showTests: boolean): Entry[] {
   const nodes = nodeIndex(graph);
   const entries: Entry[] = [];
@@ -31,10 +34,11 @@ export function build(graph: Graph, showTests: boolean): Entry[] {
     if (node.path === null || node.kind === "external" || (node.test && !showTests)) {
       continue;
     }
-    if (node.kind === "module" || node.kind === "package") {
-      if (node.path.endsWith(".py")) {
-        entries.push({ id: node.id, name: node.path.split("/").at(-1)!, path: node.path, kind: "file" });
-      }
+    if (node.kind === "package") {
+      continue;
+    }
+    if (node.kind === "module") {
+      entries.push({ id: node.id, name: node.path.split("/").at(-1)!, path: node.path, kind: "file" });
       continue;
     }
     const owner = node.kind === "method" && node.parent !== null ? nodes.get(node.parent) : undefined;

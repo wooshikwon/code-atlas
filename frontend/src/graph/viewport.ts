@@ -10,6 +10,8 @@ export const ZOOM_MIN = 0.05;
 export const ZOOM_MAX = 4;
 /** 함수 이름표가 모두 보이는 확대 비율 구간의 시작값. 노드를 고르면 확대 비율을 이 값까지 키운다. */
 export const NAMED_ZOOM = 0.8;
+/** 함수 시점 뷰에서 화면을 맞출 때 이름표가 본문 글자보다 커지지 않게 확대 비율을 100%에서 멈춘다. */
+export const FRAME_ZOOM = 1;
 
 const INSET = 20;
 const FIT_MARGIN = 24;
@@ -64,7 +66,7 @@ export function boundsOf(boxes: Iterable<Box>): Box {
 }
 
 /** 관계 그래프 영역과 그 안에서 정보 패널이 가리지 않는 사각형 */
-export interface Stage {
+interface Stage {
   area: Rect;
   free: Rect;
 }

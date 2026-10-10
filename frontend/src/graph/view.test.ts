@@ -3,7 +3,7 @@ import { repoFixture } from "./fixture";
 import { flow } from "./flow";
 import type { Layout } from "./layout";
 import { drawn } from "./scope";
-import { badges, edgeViews, midpoint, parentFirst, roundedPath, type EdgeView } from "./view";
+import { edgeViews, midpoint, parentFirst, roundedPath, type EdgeView } from "./view";
 import { hidden, nodeIndex, shown, type Shown } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
@@ -112,7 +112,8 @@ describe("edgeViews", () => {
   it("진하기와 불투명도는 그릴 선의 값을 그대로 쓴다", () => {
     const focused = views("pkg.mod:Store.save");
     expect(focused.get("pkg.mod:Store.save|main:helper|call")).toMatchObject({ tone: "strong", opacity: 1 });
-    expect(focused.get("pkg.mod:Store.load|pkg.mod:Store.save|call")).toMatchObject({ tone: "strong", opacity: 1 });
+    expect(focused.get("pkg.mod:Store.save|pkg.mod:parse|call")).toMatchObject({ tone: "strong", opacity: 1 });
+    expect(focused.get("pkg.mod:Store.load|pkg.mod:Row|construct")).toMatchObject({ tone: "muted", opacity: 0.2 });
   });
 
   it("배치에 상자가 없는 노드에 닿는 선은 뺀다", () => {
@@ -122,24 +123,6 @@ describe("edgeViews", () => {
     const keys = edgeViews(drawn(repoFixture, visible, null, null), layout, nodes).map((v) => v.key);
     expect(keys).not.toContain("agg|main|pkg.mod");
     expect(keys).toContain("pkg.mod|pkg.util|import");
-  });
-});
-
-describe("badges", () => {
-  it("초점이 없으면 편재 노드마다 숨긴 선의 출발 노드 수를 낸다", () => {
-    expect([...badges(repoFixture, scene(null).shown, null)]).toEqual([["common", 4]]);
-  });
-
-  it("편재 노드를 쓰는 노드나 편재 노드 안의 노드를 고르면 배지를 뺀다", () => {
-    for (const selection of ["cli:main", "common:log", "common"]) {
-      const { flow: picked, shown: visible } = scene(selection);
-      expect(badges(repoFixture, visible, picked).size).toBe(0);
-    }
-  });
-
-  it("편재 노드와 관계없는 노드를 고르면 배지를 남긴다", () => {
-    const { flow: picked, shown: visible } = scene("app.text:pad");
-    expect([...badges(repoFixture, visible, picked)]).toEqual([["common", 4]]);
   });
 });
 

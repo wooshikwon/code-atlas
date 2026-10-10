@@ -56,6 +56,18 @@ describe("shown", () => {
     ]);
   });
 
+  it("폴더의 __init__.py에 든 정의를 고르면 그 정의만 남기고 폴더 아래 다른 파일 상자는 펼치지 않는다", () => {
+    const result = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: flow(repoFixture, "app:version", 2, off) });
+    expect([...result.nodes].filter((id) => id.includes(":"))).toEqual(["app:version"]);
+    expect([...result.open]).toEqual(["app"]);
+  });
+
+  it("접힌 폴더를 고르면 파일 상자를 펼치지 않는다", () => {
+    const result = shown(repoFixture, { ...toggles, collapsed: new Set(["pkg"]), flow: flow(repoFixture, "pkg", 2, off) });
+    expect([...result.nodes].some((id) => id.startsWith("pkg."))).toBe(false);
+    expect(result.open.size).toBe(0);
+  });
+
   it("접은 폴더 안에서는 흐름에 든 노드도 남기지 않는다", () => {
     const result = shown(repoFixture, {
       ...toggles,

@@ -10,6 +10,8 @@ export interface TreeState {
   collapsed: Set<string>;
   /** 고른 노드 id */
   selected: string | null;
+  /** 그래프 선택과 무관하게 정보 패널에 연 파일의 경로 */
+  opened: string | null;
   showTests: boolean;
   /** 마지막 커밋 뒤의 변경 내용. 아직 받지 못했으면 null이다. */
   changes: Changes | null;
@@ -25,8 +27,10 @@ export interface Row {
   level: number;
   label: string;
   title: string;
-  /** 폴더면 패키지 노드 id, 파일이면 모듈 노드 id. 패키지 노드가 없는 폴더는 null이다. */
+  /** 폴더면 패키지 노드 id, 파일이면 모듈 노드 id. 패키지 노드가 없는 폴더와 모듈 노드가 없는 파일은 null이다. */
   node: string | null;
+  /** 누르면 정보 패널에 코드만 여는 파일의 경로. 분석한 파일 가운데 모듈 노드가 없는 `__init__.py`가 해당한다. */
+  file: string | null;
   /** 아래 행을 펼쳤는지. 펼칠 행이 없으면 null이다. */
   expanded: boolean | null;
   selected: boolean;
@@ -84,17 +88,27 @@ function symbols(graph: Graph, nodes: Map<string, AtlasNode>): Map<string, Atlas
   return inner;
 }
 
-/** 파일트리에 없는 추가된 파일을 제 폴더에 끼워 넣는다. 그래프에 노드가 없는 파일이므로 node는 null이다. */
-function grown(entries: TreeEntry[], added: string[]): TreeEntry[] {
-  const known = new Set<string>();
-  const collect = (list: TreeEntry[]) => {
-    for (const entry of list) {
-      known.add(entry.path);
-      collect(entry.children ?? []);
-    }
-  };
-  collect(entries);
-  const fresh = added.filter((path) => !known.has(path));
+/** 파일트리가 담은 모든 경로 */
+function pathsOf(entries: TreeEntry[], found = new Set<string>()): Set<string> {
+  for (const entry of entries) {
+    found.add(entry.path);
+    pathsOf(entry.children ?? [], found);
+  }
+  return found;
+}
+
+const TEST_FOLDERS = new Set(["tests", "test"]);
+
+/** 파일 이름이 테스트 코드의 이름 규칙(`test_*.py`, `*_test.py`, `conftest.py`)에 맞는지 */
+function testFile(name: string): boolean {
+  return name.startsWith("test_") || name.endsWith("_test.py") || name === "conftest.py";
+}
+
+/**
+ * 파일트리에 없는 추가된 파일 fresh를 제 폴더에 끼워 넣는다. 그래프에 노드가 없는 파일이므로 node는 null이다.
+ * 테스트 코드 폴더 아래에 있거나 이름이 테스트 코드의 이름 규칙에 맞으면 테스트 코드다.
+ */
+function grown(entries: TreeEntry[], fresh: string[]): TreeEntry[] {
   if (fresh.length === 0) {
     return entries;
   }
@@ -111,18 +125,27 @@ function grown(entries: TreeEntry[], added: string[]): TreeEntry[] {
     parts.slice(0, -1).forEach((name, depth) => {
       const folder =
         list.find((e) => e.kind === "dir" && e.name === name) ??
-        put(list, { path: parts.slice(0, depth + 1).join("/"), name, kind: "dir", test, node: null, children: [] });
+        put(list, {
+          path: parts.slice(0, depth + 1).join("/"),
+          name,
+          kind: "dir",
+          test: test || TEST_FOLDERS.has(name),
+          node: null,
+          children: [],
+        });
       test = folder.test;
       list = folder.children ??= [];
     });
-    put(list, { path, name: parts.at(-1)!, kind: "file", test, node: null });
+    const name = parts.at(-1)!;
+    put(list, { path, name, kind: "file", test: test || testFile(name), node: null });
   }
   return root;
 }
 
 /**
  * 펼친 폴더, 파일, 고른 노드가 든 파일의 클래스·함수 목록을 위에서 아래로 그리는 순서로 낸다.
- * 레포를 열어 분석한 뒤 생긴 파일은 그래프에 노드가 없는 행으로 넣는다.
+ * 레포를 열어 분석한 뒤 생긴 파일은 그래프에 노드가 없는 행으로 넣는다. 파일 행은 모듈 노드만 가리키므로
+ * `__init__.py` 행은 node 없이 file에 경로를 담는다.
  */
 export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
   const nodes = nodeIndex(graph);
@@ -130,11 +153,12 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
   const chosen = fileOf(nodes, state.selected);
   const changed = new Map<string, Change>();
   for (const file of state.changes?.files ?? []) {
-    if (file.status !== "deleted") {
+    if (file.status === "modified" || file.status === "added") {
       changed.set(file.path, file.status);
     }
   }
-  const added = [...changed].filter(([, status]) => status === "added").map(([path]) => path);
+  const analyzed = pathsOf(tree.entries);
+  const fresh = [...changed].filter(([path, status]) => status === "added" && !analyzed.has(path)).map(([path]) => path);
   const within = (folder: string) => [...changed.keys()].some((path) => path.startsWith(`${folder}/`));
   const out: Row[] = [];
 
@@ -143,20 +167,25 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
       if (entry.test && !state.showTests) {
         continue;
       }
-      const selected = entry.node !== null && entry.node === state.selected;
-      const base = { key: entry.path, level, title: entry.path, node: entry.node, selected };
+      const base = { key: entry.path, level, title: entry.path };
       if (entry.kind === "dir") {
         const expanded = entry.node === null || !state.collapsed.has(entry.node);
         const change = !expanded && within(entry.path) ? "modified" : null;
-        out.push({ ...base, kind: "dir", icon: expanded ? "folder-open" : "folder", label: `${entry.name}/`, expanded, change });
+        const selected = entry.node !== null && entry.node === state.selected;
+        const icon = expanded ? "folder-open" : "folder";
+        out.push({ ...base, kind: "dir", icon, label: `${entry.name}/`, node: entry.node, file: null, expanded, selected, change });
         if (expanded) {
           walk(entry.children ?? [], level + 1);
         }
         continue;
       }
-      const list = entry.node === null ? [] : (inner.get(entry.node) ?? []);
-      const expanded = list.length === 0 ? null : entry.node === chosen;
-      out.push({ ...base, kind: "file", icon: "file", label: entry.name, expanded, change: changed.get(entry.path) ?? null });
+      const node = entry.node !== null && nodes.get(entry.node)?.kind === "module" ? entry.node : null;
+      const file = node === null && analyzed.has(entry.path) ? entry.path : null;
+      const selected = node === null ? file !== null && file === state.opened : node === state.selected;
+      const list = node === null ? [] : (inner.get(node) ?? []);
+      const expanded = list.length === 0 ? null : node === chosen;
+      const change = changed.get(entry.path) ?? null;
+      out.push({ ...base, kind: "file", icon: "file", label: entry.name, node, file, expanded, selected, change });
       if (expanded === true) {
         for (const node of list) {
           out.push({
@@ -167,6 +196,7 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
             label: labelOf(nodes, node),
             title: node.id,
             node: node.id,
+            file: null,
             expanded: null,
             selected: node.id === state.selected,
             change: state.changes?.nodes[node.id] ?? null,
@@ -175,7 +205,7 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
       }
     }
   };
-  walk(grown(tree.entries, added), 1);
+  walk(grown(tree.entries, fresh), 1);
   return out;
 }
 
