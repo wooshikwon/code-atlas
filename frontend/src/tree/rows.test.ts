@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AtlasNode, Graph, Tree } from "../api/types";
+import type { AtlasNode, Changes, Graph, Tree } from "../api/types";
 import { build, find } from "../search/index";
 import { parentOf, results, rows, type TreeState } from "./rows";
 
@@ -65,8 +65,23 @@ const state = (change: Partial<TreeState> = {}): TreeState => ({
   collapsed: new Set(),
   selected: null,
   showTests: false,
+  changes: null,
   ...change,
 });
+
+// arbiter.py의 메서드 하나를 고쳤고, plan.py는 분석한 뒤 고쳤고, 새 파일 두 개와 지워진 파일 하나가 있다.
+const changes: Changes = {
+  git: true,
+  branch: "main",
+  files: [
+    { path: "src/arbiter.py", status: "modified", stale: false },
+    { path: "src/gone.py", status: "deleted", stale: false },
+    { path: "src/parser/plan.py", status: "modified", stale: true },
+    { path: "src/parser/note.py", status: "added", stale: false },
+    { path: "src/tools/new/late.py", status: "added", stale: false },
+  ],
+  nodes: { arbiter: "modified", "arbiter:Arbiter.sync": "modified", "parser.plan": "modified" },
+};
 const keys = (change?: Partial<TreeState>) => rows(tree, graph, state(change)).map((row) => row.key);
 
 describe("rows", () => {
@@ -155,22 +170,72 @@ describe("parentOf", () => {
   });
 });
 
+describe("변경 표시", () => {
+  const marks = (change?: Partial<TreeState>) =>
+    rows(tree, graph, state({ changes, ...change })).map((row) => [row.label, row.change] as const);
+
+  it("바뀐 파일과 바뀐 정의의 행에만 변경 상태를 붙인다", () => {
+    const list = marks({ selected: "arbiter" });
+    expect(list.filter(([, change]) => change !== null)).toEqual([
+      ["note.py", "added"],
+      ["plan.py", "modified"],
+      ["late.py", "added"],
+      ["arbiter.py", "modified"],
+      ["Arbiter.sync()", "modified"],
+    ]);
+  });
+
+  it("분석한 뒤 생긴 파일을 제 폴더에 이름 순서로 넣고 없는 폴더는 만든다", () => {
+    const list = rows(tree, graph, state({ changes }));
+    expect(list.map((row) => [row.key, row.level, row.node])).toEqual([
+      ["src", 1, null],
+      ["src/parser", 2, "parser"],
+      ["src/parser/__init__.py", 3, "parser"],
+      ["src/parser/note.py", 3, null],
+      ["src/parser/plan.py", 3, "parser.plan"],
+      ["src/tools", 2, null],
+      ["src/tools/new", 3, null],
+      ["src/tools/new/late.py", 4, null],
+      ["src/arbiter.py", 2, "arbiter"],
+      ["src/empty.py", 2, "empty"],
+    ]);
+    expect(list.find((row) => row.key === "src/parser/note.py")?.expanded).toBeNull();
+    expect(tree.entries[0].children).toHaveLength(3);
+  });
+
+  it("접은 폴더는 안에 바뀐 파일이 있으면 수정으로 표시하고 펼친 폴더는 표시하지 않는다", () => {
+    expect(marks().find(([label]) => label === "parser/")).toEqual(["parser/", null]);
+    expect(marks({ collapsed: new Set(["parser"]) }).find(([label]) => label === "parser/")).toEqual(["parser/", "modified"]);
+  });
+
+  it("지워진 파일과 변경 내용이 없을 때는 행을 더하지 않는다", () => {
+    expect(rows(tree, graph, state({ changes })).some((row) => row.key === "src/gone.py")).toBe(false);
+    expect(rows(tree, graph, state()).every((row) => row.change === null)).toBe(true);
+  });
+});
+
 describe("results", () => {
   const entries = build(graph, false);
 
   it("질의가 있으면 결과 행이 find의 순서를 따른다", () => {
-    const list = results(entries, "pl", null);
+    const list = results(entries, "pl", null, null);
     expect(list.length).toBeGreaterThan(1);
     expect(list.map((result) => result.hit)).toEqual(find(entries, "pl", 200));
     expect(list[0].hit.entry.id).toBe("parser.plan");
   });
 
   it("고른 노드의 결과 행만 고른 행으로 표시한다", () => {
-    const list = results(entries, "plan", "parser.plan:parse_plan");
+    const list = results(entries, "plan", "parser.plan:parse_plan", null);
     expect(list.filter((result) => result.selected).map((result) => result.hit.entry.id)).toEqual(["parser.plan:parse_plan"]);
   });
 
   it("질의가 비면 결과 행이 없다", () => {
-    expect(results(entries, " ", "arbiter")).toEqual([]);
+    expect(results(entries, " ", "arbiter", null)).toEqual([]);
+  });
+
+  it("바뀐 노드의 결과 행에 변경 상태를 붙인다", () => {
+    const list = results(entries, "sync", null, changes);
+    expect(list.map((result) => [result.hit.entry.id, result.change])).toEqual([["arbiter:Arbiter.sync", "modified"]]);
+    expect(results(entries, "parse_plan", null, changes)[0].change).toBeNull();
   });
 });

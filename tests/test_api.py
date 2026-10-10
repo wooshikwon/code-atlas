@@ -5,6 +5,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import git
+
 from code_atlas import api, summary
 from code_atlas.api import create_app
 from code_atlas.summary import Summaries, SummaryError
@@ -37,6 +39,19 @@ def generated(client, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "unavailable", unavailable)
     monkeypatch.setattr(client.app.state, "summaries", Summaries(tmp_path / "summaries.db"))
     return calls
+
+
+@pytest.fixture
+def changed(git_repo, tmp_path):
+    """커밋한 고정 레포에서 `helper`를 고치고 추적하지 않는 파일을 더한 뒤 분석한다."""
+    core = git_repo / "src" / "app" / "core.py"
+    core.write_text(core.read_text().replace("    return value\n", "    return value or None\n"))
+    (git_repo / "src" / "app" / "extra.py").write_text("def fresh():\n    return 1\n")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+        patch.setattr(summary, "find_cli", lambda: None)
+        with TestClient(create_app(git_repo, sys.executable)) as client:
+            yield client
 
 
 def test_repo(client):
@@ -214,3 +229,45 @@ def test_summary_of_unknown_or_codeless_node_is_404(client, generated, method, n
     assert response.status_code == 404
     assert "error" in response.json()
     assert generated == []
+
+
+def test_changes_mark_changed_definitions_and_stale_files(changed, git_repo):
+    body = changed.get("/api/changes").json()
+    assert (body["git"], body["branch"]) == (True, "main")
+    assert body["files"] == [
+        {"path": "src/app/core.py", "status": "modified", "stale": False},
+        {"path": "src/app/extra.py", "status": "added", "stale": False},
+    ]
+    assert body["nodes"] == {
+        "app.core": "modified",
+        "app.core:helper": "modified",
+        "app.extra": "added",
+        "app.extra:fresh": "added",
+    }
+
+    app = git_repo / "src" / "app"
+    (app / "models.py").write_text("LIMIT = 3\n" + (app / "models.py").read_text())
+    (app / "extra.py").write_text("def fresh():\n    return 2\n")
+    (app / "late.py").write_text("def late():\n    return 1\n")
+    (app / "cli.py").unlink()
+    (git_repo / "notes.md").write_text("메모\n")
+    (git_repo / ".tools").mkdir()
+    (git_repo / ".tools" / "hidden.py").write_text("x = 1\n")
+    body = changed.get("/api/changes").json()
+    assert body["files"] == [
+        {"path": "src/app/cli.py", "status": "deleted", "stale": True},
+        {"path": "src/app/core.py", "status": "modified", "stale": False},
+        {"path": "src/app/extra.py", "status": "added", "stale": True},
+        {"path": "src/app/late.py", "status": "added", "stale": False},
+        {"path": "src/app/models.py", "status": "modified", "stale": True},
+    ]
+    assert body["nodes"] == {
+        "app.core": "modified",
+        "app.core:helper": "modified",
+        "app.extra": "added",
+        "app.models": "modified",
+    }
+
+
+def test_changes_outside_git_are_empty(client):
+    assert client.get("/api/changes").json() == {"git": False, "branch": None, "files": [], "nodes": {}}

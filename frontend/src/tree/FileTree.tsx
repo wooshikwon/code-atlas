@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useChanges } from "../state/changes";
 import { useAtlas } from "../state/store";
 import { build } from "../search/index";
 import { parentOf, results, rows, type Result, type Row } from "./rows";
@@ -19,11 +20,14 @@ export function FileTree() {
   const select = useAtlas((s) => s.select);
   const show = useAtlas((s) => s.show);
   const toggleFolder = useAtlas((s) => s.toggleFolder);
+  const changes = useChanges((s) => s.changes);
   const selected = selection?.type === "node" ? selection.id : null;
   const list = useMemo(
-    () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, showTests })),
-    [tree, graph, collapsed, selected, showTests],
+    () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, showTests, changes })),
+    [tree, graph, collapsed, selected, showTests, changes],
   );
+  /** 지워진 파일은 노드가 없으므로 파일트리 아래에 경로만 적는다. */
+  const deleted = useMemo(() => (changes?.files ?? []).filter((file) => file.status === "deleted"), [changes]);
   /** 키보드로 옮기는 활성 행의 key. 그 행이 목록에 없으면 첫 행이 활성 행이다. */
   const [cursor, setCursor] = useState<string | null>(null);
   const active = Math.max(
@@ -35,7 +39,7 @@ export function FileTree() {
   const [query, setQuery] = useState("");
   const searching = query.trim() !== "";
   const entries = useMemo(() => (graph === null ? [] : build(graph, showTests)), [graph, showTests]);
-  const found = useMemo(() => results(entries, query, selected), [entries, query, selected]);
+  const found = useMemo(() => results(entries, query, selected, changes), [entries, query, selected, changes]);
   /** 키보드로 옮기는 활성 결과 행의 번호 */
   const [mark, setMark] = useState(0);
 
@@ -142,6 +146,18 @@ export function FileTree() {
               <TreeNode key={row.key} row={row} id={rowId(index)} cursor={index === active} onPick={pick} />
             ))}
           </ul>
+        )}
+        {!searching && deleted.length > 0 && (
+          <div className="tree-deleted">
+            <div className="tree-deleted-title">지워진 파일</div>
+            <ul>
+              {deleted.map((file) => (
+                <li key={file.path} className="tree-deleted-row" title={file.path}>
+                  {file.path}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
     </div>

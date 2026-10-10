@@ -1,5 +1,6 @@
 import type { Node, NodeProps } from "@xyflow/react";
 import { memo } from "react";
+import { useChange } from "../../state/changes";
 import { counted, type Side } from "../callview";
 import { ENTRY_MARK } from "../layout";
 import { Badges, Handles, Loc, nodeProps, sameNode, type AtlasNodeData } from "./common";
@@ -44,13 +45,14 @@ function Shape({ data }: { data: CallNodeData }) {
 
 /** 지름 16px 원, 이름표와 줄 수, 그 아래 파일 경로. 더 펼 선이 남은 양옆 노드는 바깥쪽에 + 버튼을 단다. */
 export const CallNode = memo(function CallNode({ data }: NodeProps<CallFlowNode>) {
+  const change = useChange(data.node.id);
   const more = data.more && (
     <button className="call-more" title="한 단계 더 펼치기" aria-label="한 단계 더 펼치기">
       +
     </button>
   );
   return (
-    <div {...nodeProps("node-call", data)} data-side={data.side}>
+    <div {...nodeProps("node-call", data, change)} data-side={data.side}>
       <Handles />
       {data.side === "caller" && more}
       <Shape data={data} />

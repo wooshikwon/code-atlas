@@ -7,11 +7,13 @@ import { bind } from "./nav/keys";
 import { Trail } from "./nav/Trail";
 import { InfoPanel } from "./panel/InfoPanel";
 import { Palette } from "./search/Palette";
+import { useStaleCount, watch } from "./state/changes";
 import { useAtlas, type Depth } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
 function Toolbar() {
   const stats = useAtlas((s) => s.repo?.stats);
+  const stale = useStaleCount();
   const canBack = useAtlas((s) => s.history.index > 0);
   const canForward = useAtlas((s) => s.history.index < s.history.entries.length - 1);
   const depth = useAtlas((s) => s.depth);
@@ -49,6 +51,11 @@ function Toolbar() {
           {stats.call_sites === 0 ? "-" : `${Math.round((stats.resolved / stats.call_sites) * 1000) / 10}%`}
         </span>
       )}
+      {stale > 0 && (
+        <span className="toolbar-stale" title="그래프의 노드와 줄 범위는 레포를 열 때 분석한 값이다">
+          분석 뒤 바뀐 파일 {stale}개
+        </span>
+      )}
       <label className="toolbar-toggle">
         흐름 단계
         <input
@@ -80,6 +87,9 @@ function Toolbar() {
 
 export function App() {
   const main = useDefaultLayout({ id: "main", storage: localStorage });
+  const opened = useAtlas((s) => s.repo !== null);
+
+  useEffect(() => (opened ? watch() : undefined), [opened]);
 
   // 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다.
   useEffect(

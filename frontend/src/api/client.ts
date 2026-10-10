@@ -1,5 +1,16 @@
 // 백엔드 호출은 모두 이 파일을 거친다. 화면 컴포넌트는 fetch를 직접 부르지 않는다.
-import type { ApiErrorBody, Definition, FileText, Graph, Hover, MadeSummary, Repo, SummaryStatus, Tree } from "./types";
+import type {
+  ApiErrorBody,
+  Changes,
+  Definition,
+  FileText,
+  Graph,
+  Hover,
+  MadeSummary,
+  Repo,
+  SummaryStatus,
+  Tree,
+} from "./types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -69,4 +80,9 @@ export function getSummary(node: string): Promise<SummaryStatus> {
 /** 캐시에 없으면 요약을 만들게 한다. refresh면 캐시에 있어도 다시 만든다. */
 export function makeSummary(node: string, refresh: boolean): Promise<MadeSummary> {
   return request(`/api/summary?node=${encodeURIComponent(node)}${refresh ? "&refresh=true" : ""}`, undefined, "POST");
+}
+
+/** 마지막 커밋 뒤에 바뀐 파일과 노드 */
+export function getChanges(): Promise<Changes> {
+  return request("/api/changes");
 }

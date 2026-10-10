@@ -11,11 +11,15 @@ export interface Colors {
   muted: string;
   /** 이름표 옆 줄 수 숫자 */
   loc: string;
+  /** 변경 표시: 마지막 커밋 뒤에 수정했다 */
+  changed: string;
+  /** 변경 표시: 마지막 커밋에 없다 */
+  added: string;
 }
 
 const PALETTE: Record<Theme, Colors> = {
-  light: { surface: "#fcfcfb", ink: "#0b0b0b", muted: "#898781", loc: "#1d8169" },
-  dark: { surface: "#1a1a19", ink: "#ffffff", muted: "#898781", loc: "#3fb79a" },
+  light: { surface: "#fcfcfb", ink: "#0b0b0b", muted: "#898781", loc: "#1d8169", changed: "#eb6834", added: "#2a78d6" },
+  dark: { surface: "#1a1a19", ink: "#ffffff", muted: "#898781", loc: "#3fb79a", changed: "#d95926", added: "#3987e5" },
 };
 
 export function colors(theme: Theme): Colors {
