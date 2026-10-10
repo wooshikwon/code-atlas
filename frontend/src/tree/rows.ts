@@ -1,6 +1,9 @@
 // 파일트리를 화면에 그리는 행 배열로 편다. 폴더의 열림은 접은 폴더 집합에서, 파일 아래 목록은 선택에서 정한다.
+// 검색 칸에 질의가 있으면 행 배열 대신 검색 결과 행을 낸다.
 import type { AtlasNode, Graph, Tree, TreeEntry } from "../api/types";
 import { nodeIndex } from "../graph/visible";
+import { find, type Entry, type Hit } from "../search/index";
+import type { IconKind } from "./Icon";
 
 export interface TreeState {
   /** 접은 폴더(패키지 노드 id) */
@@ -14,6 +17,8 @@ export interface Row {
   /** 폴더·파일은 레포 루트 기준 경로, 클래스·함수는 노드 id */
   key: string;
   kind: "dir" | "file" | "symbol";
+  /** 이름 왼쪽에 그리는 종류 기호 */
+  icon: IconKind;
   /** 1부터 세는 깊이 */
   level: number;
   label: string;
@@ -24,6 +29,15 @@ export interface Row {
   expanded: boolean | null;
   selected: boolean;
 }
+
+/** 검색 결과 행 하나 */
+export interface Result {
+  hit: Hit;
+  selected: boolean;
+}
+
+/** 검색 결과를 몇 행까지 그리는지 */
+const RESULT_LIMIT = 200;
 
 /** 노드가 든 파일의 노드 id. 파일 밖 노드(파일 없는 폴더 패키지, 외부)면 null이다. */
 function fileOf(nodes: Map<string, AtlasNode>, id: string | null): string | null {
@@ -81,7 +95,7 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
       const base = { key: entry.path, level, title: entry.path, node: entry.node, selected };
       if (entry.kind === "dir") {
         const expanded = entry.node === null || !state.collapsed.has(entry.node);
-        out.push({ ...base, kind: "dir", label: `${entry.name}/`, expanded });
+        out.push({ ...base, kind: "dir", icon: expanded ? "folder-open" : "folder", label: `${entry.name}/`, expanded });
         if (expanded) {
           walk(entry.children ?? [], level + 1);
         }
@@ -89,12 +103,13 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
       }
       const list = entry.node === null ? [] : (inner.get(entry.node) ?? []);
       const expanded = list.length === 0 ? null : entry.node === chosen;
-      out.push({ ...base, kind: "file", label: entry.name, expanded });
+      out.push({ ...base, kind: "file", icon: "file", label: entry.name, expanded });
       if (expanded === true) {
         for (const node of list) {
           out.push({
             key: node.id,
             kind: "symbol",
+            icon: node.kind as IconKind,
             level: level + 1,
             label: labelOf(nodes, node),
             title: node.id,
@@ -108,6 +123,11 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
   };
   walk(tree.entries, 1);
   return out;
+}
+
+/** 질의와 이름이 맞는 파일·클래스·함수를 find가 내는 순서로 낸다. 질의가 비면 빈 배열이다. */
+export function results(entries: Entry[], query: string, selected: string | null): Result[] {
+  return find(entries, query, RESULT_LIMIT).map((hit) => ({ hit, selected: hit.entry.id === selected }));
 }
 
 /** 부모 행의 번호. 맨 위 깊이의 행이면 -1이다. */

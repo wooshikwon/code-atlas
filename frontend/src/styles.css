@@ -98,9 +98,8 @@ ul {
 .tree-row {
   display: flex;
   align-items: center;
-  gap: 2px;
   height: 22px;
-  padding-right: 8px;
+  padding: 0 8px 0 4px;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -113,11 +112,39 @@ ul {
   background: var(--active-bg);
 }
 
+/* 깊이 한 단계(14px)마다 부모 행의 펼침 화살표 아래로 세로 안내선을 긋는다. */
+.tree-indent {
+  flex: none;
+  align-self: stretch;
+  background: repeating-linear-gradient(to right, transparent 0 7px, var(--line) 7px 8px, transparent 8px 14px);
+}
+
 .tree-toggle {
   flex: none;
   width: 14px;
-  color: var(--muted);
-  text-align: center;
+  height: 14px;
+}
+
+.tree-chevron,
+.tree-icon {
+  flex: none;
+  fill: none;
+  stroke: var(--muted);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tree-chevron {
+  stroke-width: 1.4;
+}
+
+.tree-icon {
+  margin-right: 5px;
+  stroke-width: 1.1;
+}
+
+.tree-row.active .tree-icon {
+  stroke: var(--ink);
 }
 
 .tree-label {
@@ -141,6 +168,70 @@ ul {
 
 .tree-symbol.active {
   color: var(--ink);
+}
+
+.tree-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 28px;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tree-search:focus-within {
+  border-bottom-color: var(--muted);
+}
+
+.tree-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  outline: none;
+  font: inherit;
+  color: var(--ink);
+  background: none;
+}
+
+.tree-search-clear {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.tree-search-clear:hover {
+  color: var(--ink);
+  background: var(--hover-bg);
+}
+
+.tree-result {
+  padding-left: 8px;
+}
+
+.tree-result .tree-label {
+  flex: none;
+  max-width: 60%;
+}
+
+.tree-search:focus-within + .explorer-body .tree-result.cursor {
+  outline: 1px solid var(--muted);
+  outline-offset: -1px;
+}
+
+.tree-aside {
+  flex: 1;
+  min-width: 0;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
 }
 
 /* 검색 팔레트 */

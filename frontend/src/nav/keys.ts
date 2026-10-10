@@ -22,6 +22,11 @@ function typing(): boolean {
   );
 }
 
+/** 포커스가 파일트리 검색 칸에 있는지. 그 안에서는 Esc가 질의를 비운다. */
+function searching(): boolean {
+  return document.activeElement?.classList.contains("tree-search-input") === true;
+}
+
 /** 단축키를 등록하고 등록을 푸는 함수를 돌려준다. 이력 이동과 팔레트 열기는 브라우저의 기본 동작(이전 페이지, 인쇄)을 막는다. */
 export function bind(handlers: KeyHandlers): () => void {
   const onKey = (event: KeyboardEvent) => {
@@ -39,7 +44,7 @@ export function bind(handlers: KeyHandlers): () => void {
     } else if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && (key === "[" || key === "]")) {
       event.preventDefault();
       (key === "[" ? handlers.back : handlers.forward)();
-    } else if (key === "Escape") {
+    } else if (key === "Escape" && !searching()) {
       handlers.escape();
     }
   };

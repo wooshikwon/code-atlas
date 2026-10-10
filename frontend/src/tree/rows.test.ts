@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasNode, Graph, Tree } from "../api/types";
-import { parentOf, rows, type TreeState } from "./rows";
+import { build, find } from "../search/index";
+import { parentOf, results, rows, type TreeState } from "./rows";
 
 function node(id: string, kind: AtlasNode["kind"], parent: string | null, path: string, start = 1, test = false): AtlasNode {
   const name = id.includes(":") ? id.split(":")[1].split(".").at(-1)! : id.split(".").at(-1)!;
@@ -106,6 +107,20 @@ describe("rows", () => {
     expect(list[at + 6].key).toBe("src/empty.py");
   });
 
+  it("행마다 폴더의 열림과 노드 종류에 맞는 기호를 정한다", () => {
+    const list = rows(tree, graph, state({ collapsed: new Set(["parser"]), selected: "arbiter" }));
+    expect(list.slice(0, 7).map((row) => [row.label, row.icon])).toEqual([
+      ["src/", "folder-open"],
+      ["parser/", "folder"],
+      ["arbiter.py", "file"],
+      ["State", "dataclass"],
+      ["Arbiter", "class"],
+      ["Arbiter.load()", "method"],
+      ["Arbiter.sync()", "method"],
+    ]);
+    expect(list[7]).toMatchObject({ label: "run()", icon: "function" });
+  });
+
   it("함수를 고르면 그 함수가 든 파일의 목록을 펴고 함수 행만 고른 행으로 표시한다", () => {
     const list = rows(tree, graph, state({ selected: "arbiter:Arbiter.sync" }));
     expect(list.filter((row) => row.selected).map((row) => row.key)).toEqual(["arbiter:Arbiter.sync"]);
@@ -137,5 +152,25 @@ describe("parentOf", () => {
     expect(parentOf(list, at("arbiter:run"))).toBe(at("src/arbiter.py"));
     expect(parentOf(list, at("src/arbiter.py"))).toBe(at("src"));
     expect(parentOf(list, at("src"))).toBe(-1);
+  });
+});
+
+describe("results", () => {
+  const entries = build(graph, false);
+
+  it("질의가 있으면 결과 행이 find의 순서를 따른다", () => {
+    const list = results(entries, "pl", null);
+    expect(list.length).toBeGreaterThan(1);
+    expect(list.map((result) => result.hit)).toEqual(find(entries, "pl", 200));
+    expect(list[0].hit.entry.id).toBe("parser.plan");
+  });
+
+  it("고른 노드의 결과 행만 고른 행으로 표시한다", () => {
+    const list = results(entries, "plan", "parser.plan:parse_plan");
+    expect(list.filter((result) => result.selected).map((result) => result.hit.entry.id)).toEqual(["parser.plan:parse_plan"]);
+  });
+
+  it("질의가 비면 결과 행이 없다", () => {
+    expect(results(entries, " ", "arbiter")).toEqual([]);
   });
 });
