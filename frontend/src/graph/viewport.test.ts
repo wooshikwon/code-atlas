@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsOf, centerOn, fitOn, fitPadding, freeRect } from "./viewport";
+import { boundsOf, centerOn, fitOn, fitPadding, freeRect, freeRects } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -84,35 +84,57 @@ describe("boundsOf", () => {
   });
 });
 
+describe("freeRects", () => {
+  it("패널의 왼쪽·오른쪽·위·아래 사각형을 낸다", () => {
+    expect(freeRects(area, { x: 912, y: 8, width: 480, height: 420 })).toEqual([
+      { x: 0, y: 0, width: 912, height: 900 },
+      { x: 1392, y: 0, width: 8, height: 900 },
+      { x: 0, y: 0, width: 1400, height: 8 },
+      { x: 0, y: 428, width: 1400, height: 472 },
+    ]);
+  });
+
+  it("패널이 없거나 영역 밖에 있으면 영역 전체 하나다", () => {
+    expect(freeRects(area, null)).toEqual([area]);
+    expect(freeRects(area, { x: 1500, y: 0, width: 300, height: 300 })).toEqual([area]);
+  });
+});
+
 describe("fitOn", () => {
-  const free = { x: 0, y: 100, width: 1000, height: 800 };
+  const sides = freeRects(area, { x: 912, y: 8, width: 480, height: 420 });
   const anchor = { x: 100, y: 100, width: 200, height: 20 };
+  /** (100, 100)에서 2600×300인 묶음. 왼쪽 사각형에는 864/2600, 아래 사각형에는 1352/2600 = 0.52에서 들어온다. */
+  const wide = [anchor, { x: 2600, y: 300, width: 100, height: 100 }];
 
-  it("지금 확대 비율에서 모두 들어오면 확대 비율을 두고 묶음을 가운데로 옮긴다", () => {
+  it("사용자 확대 비율에서 여러 사각형에 들어오면 넓은 사각형 가운데로 옮긴다", () => {
     const boxes = [anchor, { x: 500, y: 300, width: 100, height: 100 }];
-    // 묶음은 (100, 100)에서 500×300이고 중심은 (350, 250)이다.
-    expect(fitOn(boxes, anchor, free, 1)).toEqual({ x: 500 - 350, y: 500 - 250, zoom: 1 });
-    expect(fitOn(boxes, anchor, free, 0.3)).toEqual({ x: 500 - 350 * 0.3, y: 500 - 250 * 0.3, zoom: 0.3 });
+    // 묶음은 (100, 100)에서 500×300이고 중심은 (350, 250)이다. 왼쪽 사각형의 중심은 (456, 450)이다.
+    expect(fitOn(boxes, anchor, sides, 1)).toEqual({ x: 456 - 350, y: 450 - 250, zoom: 1 });
   });
 
-  it("들어오지 않으면 24px를 두고 들어올 때까지 확대 비율을 줄인다", () => {
-    const boxes = [anchor, { x: 1100, y: 300, width: 904, height: 100 }];
-    // 묶음은 (100, 100)에서 1904×300이므로 가로 952px에 맞추면 0.5다.
-    expect(fitOn(boxes, anchor, free, 1)).toEqual({ x: 500 - 1052 * 0.5, y: 500 - 250 * 0.5, zoom: 0.5 });
+  it("묶음이 가장 크게 들어오는 사각형을 고르고 24px를 두고 들어올 때까지 줄인다", () => {
+    const view = fitOn(wide, anchor, sides, 1);
+    expect(view.zoom).toBeCloseTo(0.52);
+    expect(view.x).toBeCloseTo(700 - 1400 * 0.52);
+    expect(view.y).toBeCloseTo(428 + 236 - 250 * 0.52);
   });
 
-  it("확대 비율을 키우지 않는다", () => {
-    const view = fitOn([anchor], anchor, free, 0.7);
-    expect(view.zoom).toBe(0.7);
+  it("사용자 확대 비율을 넘지 않는다", () => {
+    const view = fitOn(wide, anchor, sides, 0.45);
+    expect(view.zoom).toBe(0.45);
+    expect(view.x).toBeCloseTo(700 - 1400 * 0.45);
   });
 
-  it("0.4에서도 들어오지 않으면 0.4에서 anchor를 가운데에 둔다", () => {
-    const boxes = [anchor, { x: 4000, y: 3000, width: 100, height: 100 }];
-    expect(fitOn(boxes, anchor, free, 1)).toEqual({ x: 500 - 200 * 0.4, y: 500 - 110 * 0.4, zoom: 0.4 });
+  it("어느 사각형에도 0.4에서 들어오지 않으면 가장 넓은 사각형 가운데에 anchor를 0.4로 둔다", () => {
+    const boxes = [anchor, { x: 9000, y: 9000, width: 100, height: 100 }];
+    expect(fitOn(boxes, anchor, sides, 1)).toEqual({ x: 456 - 200 * 0.4, y: 450 - 110 * 0.4, zoom: 0.4 });
   });
 
-  it("0.4보다 작은 확대 비율에서 들어오지 않으면 그 확대 비율에서 anchor를 가운데에 둔다", () => {
-    const boxes = [anchor, { x: 9000, y: 3000, width: 100, height: 100 }];
-    expect(fitOn(boxes, anchor, free, 0.2)).toEqual({ x: 500 - 200 * 0.2, y: 500 - 110 * 0.2, zoom: 0.2 });
+  it("사용자 확대 비율이 0.4보다 작으면 확대 비율을 바꾸지 않는다", () => {
+    const far = [anchor, { x: 9000, y: 9000, width: 100, height: 100 }];
+    expect(fitOn(far, anchor, sides, 0.2)).toEqual({ x: 456 - 200 * 0.2, y: 450 - 110 * 0.2, zoom: 0.2 });
+    const view = fitOn(wide, anchor, sides, 0.2);
+    expect(view.zoom).toBe(0.2);
+    expect(view.x).toBeCloseTo(456 - 1400 * 0.2);
   });
 });
