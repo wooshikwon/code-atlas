@@ -1,35 +1,22 @@
-import { useState } from "react";
-import type { TreeEntry } from "../api/types";
+import type { Row } from "./rows";
 
-export interface TreeHandlers {
-  showTests: boolean;
-  isActive: (entry: TreeEntry) => boolean;
-  onOpen: (entry: TreeEntry) => void;
-}
-
-export function TreeNode({ entry, depth, handlers }: { entry: TreeEntry; depth: number; handlers: TreeHandlers }) {
-  const [open, setOpen] = useState(true);
-  const children = (entry.children ?? []).filter((child) => handlers.showTests || !child.test);
-  const isDir = entry.kind === "dir";
-
+/** 파일트리의 행 하나. cursor는 키보드로 옮기는 활성 행이다. */
+export function TreeNode({ row, id, cursor, onPick }: { row: Row; id: string; cursor: boolean; onPick: (row: Row) => void }) {
   return (
-    <li role="treeitem" aria-expanded={isDir ? open : undefined}>
-      <div
-        className={`tree-row tree-${entry.kind}${handlers.isActive(entry) ? " active" : ""}`}
-        style={{ paddingLeft: depth * 14 + 4 }}
-        title={entry.path}
-        onClick={() => (isDir ? setOpen(!open) : handlers.onOpen(entry))}
-      >
-        <span className="tree-toggle">{isDir ? (open ? "▾" : "▸") : ""}</span>
-        <span className="tree-label">{entry.name}</span>
-      </div>
-      {isDir && open && children.length > 0 && (
-        <ul role="group">
-          {children.map((child) => (
-            <TreeNode key={child.path} entry={child} depth={depth + 1} handlers={handlers} />
-          ))}
-        </ul>
-      )}
+    <li
+      id={id}
+      role="treeitem"
+      aria-level={row.level}
+      aria-expanded={row.expanded ?? undefined}
+      aria-selected={row.selected}
+      className={`tree-row tree-${row.kind}${row.selected ? " active" : ""}${cursor ? " cursor" : ""}`}
+      style={{ paddingLeft: (row.level - 1) * 14 + 4 }}
+      title={row.title}
+      data-node={row.node ?? undefined}
+      onClick={() => onPick(row)}
+    >
+      <span className="tree-toggle">{row.kind === "dir" ? (row.expanded ? "▾" : "▸") : ""}</span>
+      <span className="tree-label">{row.label}</span>
     </li>
   );
 }
