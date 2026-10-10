@@ -89,6 +89,27 @@ export interface FileText {
   text: string;
 }
 
+export interface Hover {
+  markdown: string | null;
+  /** 시작 줄, 시작 열, 끝 줄, 끝 열. 줄은 1부터, 열은 0부터 세는 UTF-16 단위다. */
+  range: [number, number, number, number] | null;
+}
+
+export interface DefinitionTarget {
+  /** 레포 루트 기준 경로. 레포 밖이면 null이다. */
+  path: string | null;
+  line: number;
+  col: number;
+  /** 그 위치를 품은 가장 안쪽 노드 id */
+  node: string | null;
+  /** 레포 밖이면 `ext:{최상위 모듈}` */
+  external: string | null;
+}
+
+export interface Definition {
+  targets: DefinitionTarget[];
+}
+
 export interface ApiErrorBody {
   error: string;
 }
