@@ -110,6 +110,19 @@ export interface Definition {
   targets: DefinitionTarget[];
 }
 
+export interface SummaryStatus {
+  /** 캐시에 있는 요약. 아직 만들지 않았으면 null이다. */
+  summary: string | null;
+  /** Claude Code CLI를 부를 수 있는지 */
+  available: boolean;
+  /** 부를 수 없는 까닭 */
+  reason: string | null;
+}
+
+export interface MadeSummary {
+  summary: string;
+}
+
 export interface ApiErrorBody {
   error: string;
 }

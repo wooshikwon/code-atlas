@@ -152,7 +152,7 @@ export function InfoPanel() {
           <div className="info-panel-head" onPointerDown={grip("move")}>
             <Header item={item} nodes={index.nodes} />
           </div>
-          {node !== undefined && SUMMARIZED.has(node.kind) && <Summary kind={node.kind} />}
+          {node !== undefined && SUMMARIZED.has(node.kind) && <Summary key={node.id} node={node.id} />}
           {edge !== null && <Sites sites={edge.sites} opened={site} open={(picked) => setOpened({ selection, site: picked })} />}
           {code !== null && <CodeView {...code} />}
         </>

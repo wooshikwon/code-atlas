@@ -945,6 +945,30 @@ ul {
   color: var(--muted);
 }
 
+.info-panel-summary:has(+ .code) {
+  max-height: 40%;
+  overflow-y: auto;
+}
+
+.info-panel-summary code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.summary-action {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.summary-action:hover {
+  background: var(--hover-bg);
+  color: var(--ink);
+}
+
 .info-panel-sites {
   flex: 0 1 auto;
   min-height: 0;
