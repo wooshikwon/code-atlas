@@ -17,6 +17,7 @@ GIT_TIMEOUT = 5.0
 MODIFIED = "modified"
 ADDED = "added"
 DELETED = "deleted"
+UNCHANGED = "unchanged"
 
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 _NEW_FILE = "+++ b/"
@@ -72,7 +73,7 @@ def status(root: Path) -> dict[str, str] | None:
 def hunks(root: Path) -> dict[str, list[tuple[int, int]]] | None:
     """`.py` 파일마다 `HEAD`와 달라진 줄 범위(지금 파일의 1부터 세는 시작 줄과 끝 줄).
 
-    줄이 지워지기만 한 곳은 지워진 줄 바로 앞 줄 하나를 범위로 낸다.
+    줄이 지워지기만 한 곳은 지워진 줄 바로 앞 줄과 뒤 줄을 범위로 낸다.
     커밋이 없는 저장소는 빈 dict이고, git 저장소가 아니거나 git이 없으면 None이다.
     """
     if _git(root, "rev-parse", "--verify", "--quiet", "HEAD^{commit}") is None:
@@ -103,7 +104,7 @@ def hunks(root: Path) -> dict[str, list[tuple[int, int]]] | None:
                 ranges = found.setdefault(line[len(_NEW_FILE) :].rstrip("\t"), [])
         elif (m := _HUNK.match(line)) is not None:
             start, count = int(m[1]), int(m[2] or 1)
-            ranges.append((start, start + max(count, 1) - 1))
+            ranges.append((start, start + count - 1) if count else (max(start, 1), start + 1))
     return found
 
 
