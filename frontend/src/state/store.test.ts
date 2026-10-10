@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fixture } from "../graph/fixture";
+import { repoFixture } from "../graph/fixture";
 import { back, jump, push, type History, type Place } from "./history";
-import { fileOf, parseUi, useAtlas } from "./store";
+import { parseUi, useAtlas } from "./store";
 
-const [a, b, c] = fixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
-const folder = fixture.nodes.find((n) => n.kind === "package")!.id;
+const [a, b, c] = repoFixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
+const folder = repoFixture.nodes.find((n) => n.kind === "package")!.id;
 
 const store = () => useAtlas.getState();
 const selected = () => store().history.entries.map((place) => place.selection);
 const node = (id: string) => ({ type: "node", id });
 
 beforeEach(() => {
-  useAtlas.setState({ ...useAtlas.getInitialState(), graph: fixture }, true);
+  useAtlas.setState({ ...useAtlas.getInitialState(), graph: repoFixture }, true);
 });
 
 describe("select", () => {
@@ -35,6 +35,47 @@ describe("select", () => {
     expect(store().selection).toEqual({ type: "edge", key: "agg|x|y" });
     store().select(a);
     expect(store().selection).toEqual(node(a));
+  });
+});
+
+describe("접은 폴더와 선택", () => {
+  it("접은 폴더 안의 노드를 고르면 그 노드의 조상 폴더를 펼치고 이력에 한 단계만 넣는다", () => {
+    store().toggleFolder(folder);
+    store().toggleFolder("app");
+    store().select("pkg.mod:Store.save");
+    expect(store().selection).toEqual(node("pkg.mod:Store.save"));
+    expect(store().collapsed).toEqual(new Set(["app"]));
+    expect(store().history.entries).toHaveLength(4);
+    store().back();
+    expect(store().selection).toBeNull();
+    expect(store().collapsed).toEqual(new Set([folder, "app"]));
+  });
+
+  it("접은 폴더 자신을 고르면 접힌 채로 둔다", () => {
+    store().toggleFolder(folder);
+    store().select(folder);
+    expect(store().collapsed).toEqual(new Set([folder]));
+  });
+
+  it("고른 노드가 든 폴더를 접으면 선택을 풀고 이력에 한 단계만 넣는다", () => {
+    store().select("pkg.mod:Store.save");
+    store().toggleFolder(folder);
+    expect(store().selection).toBeNull();
+    expect(store().collapsed).toEqual(new Set([folder]));
+    expect(store().history.entries).toHaveLength(3);
+    store().back();
+    expect(store().selection).toEqual(node("pkg.mod:Store.save"));
+    expect(store().collapsed).toEqual(new Set());
+  });
+
+  it("다른 폴더를 접거나 고른 폴더 자신을 접으면 선택을 유지한다", () => {
+    store().select("main:run");
+    store().toggleFolder(folder);
+    expect(store().selection).toEqual(node("main:run"));
+    store().select(folder);
+    store().toggleFolder(folder);
+    store().toggleFolder(folder);
+    expect(store().selection).toEqual(node(folder));
   });
 });
 
@@ -152,15 +193,5 @@ describe("화면 설정", () => {
     expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, legendOpen: "yes", theme: "blue", depth: 4 }), "dark")).toEqual(
       defaults,
     );
-  });
-});
-
-describe("fileOf", () => {
-  it("함수는 줄 범위를, 모듈은 파일만 돌려주고 파일이 없는 노드는 null이다", () => {
-    const byKind = (kind: string) => fixture.nodes.find((n) => n.kind === kind && n.path?.endsWith(".py"))!;
-    const fn = byKind("function");
-    expect(fileOf(fn)).toEqual({ path: fn.path, range: fn.range });
-    expect(fileOf(byKind("module"))).toEqual({ path: byKind("module").path, range: null });
-    expect(fileOf({ ...fn, path: null })).toBeNull();
   });
 });

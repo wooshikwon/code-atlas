@@ -1,7 +1,7 @@
 // 분석 결과와 화면 상태를 파일트리·그래프·정보 패널이 함께 쓴다. 컴포넌트는 선택자로 필요한 필드만 구독한다.
 import { create } from "zustand";
 import { getGraph, getRepo, getTree } from "../api/client";
-import type { AtlasNode, Graph, Repo, Tree } from "../api/types";
+import type { Graph, Repo, Tree } from "../api/types";
 import type { EdgeKey } from "../graph/scope";
 import { applyTheme, preferredTheme, type Theme } from "../theme";
 import { back, forward, jump, push, type History, type Place, type Selection, type View } from "./history";
@@ -15,12 +15,6 @@ export interface Rect {
   y: number;
   width: number;
   height: number;
-}
-
-export interface OpenFile {
-  path: string;
-  /** 강조할 1부터 세는 시작 줄과 끝 줄. 없으면 강조하지 않는다. */
-  range: [number, number] | null;
 }
 
 export interface AtlasStore {
@@ -45,9 +39,10 @@ export interface AtlasStore {
 
   /** 저장해 둔 화면 설정을 되살리고 레포·그래프·파일트리를 받는다. */
   load(): void;
-  /** 노드를 고른다. 같은 id를 다시 고르거나 null을 넘기면 선택을 푼다. */
+  /** 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 같은 id를 다시 고르거나 null을 넘기면 선택을 푼다. */
   select(id: string | null): void;
   selectEdge(key: EdgeKey): void;
+  /** 폴더를 접거나 펼친다. 고른 노드가 든 폴더를 접으면 선택을 푼다. */
   toggleFolder(id: string): void;
   setDepth(depth: Depth): void;
   /** 함수 시점 뷰로 들어가 그 함수를 고른다. */
@@ -63,15 +58,6 @@ export interface AtlasStore {
   setPanel(rect: Rect): void;
   toggleLegend(): void;
   setPalette(open: boolean): void;
-}
-
-/** 노드가 든 파일과 강조 범위. 파일이 없는 노드(폴더 패키지, 외부)면 null이다. 모듈 전체는 강조하지 않는다. */
-export function fileOf(node: AtlasNode): OpenFile | null {
-  if (node.path === null || !node.path.endsWith(".py")) {
-    return null;
-  }
-  const whole = node.kind === "module" || node.kind === "package";
-  return { path: node.path, range: whole ? null : node.range };
 }
 
 type Ui = Pick<AtlasStore, "panel" | "legendOpen" | "theme" | "depth">;
@@ -140,6 +126,16 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
 
   const has = (id: string) => get().graph?.nodes.some((n) => n.id === id) === true;
 
+  /** 노드의 조상 id. 가까운 조상이 앞에 온다. */
+  const ancestors = (id: string): string[] => {
+    const parents = new Map(get().graph?.nodes.map((n) => [n.id, n.parent]));
+    const ids: string[] = [];
+    for (let parent = parents.get(id) ?? null; parent !== null; parent = parents.get(parent) ?? null) {
+      ids.push(parent);
+    }
+    return ids;
+  };
+
   return {
     repo: null,
     graph: null,
@@ -173,16 +169,25 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         return;
       }
       const selection = get().selection;
-      const same = selection?.type === "node" && selection.id === id;
-      visit({ selection: same ? null : { type: "node", id } });
+      if (selection?.type === "node" && selection.id === id) {
+        visit({ selection: null });
+        return;
+      }
+      const collapsed = new Set(get().collapsed);
+      ancestors(id).forEach((folder) => collapsed.delete(folder));
+      visit({ selection: { type: "node", id }, collapsed });
     },
     selectEdge: (key) => visit({ selection: { type: "edge", key } }),
     toggleFolder: (id) => {
       const collapsed = new Set(get().collapsed);
-      if (!collapsed.delete(id)) {
-        collapsed.add(id);
+      if (collapsed.delete(id)) {
+        visit({ collapsed });
+        return;
       }
-      visit({ collapsed });
+      collapsed.add(id);
+      const selection = get().selection;
+      const inside = selection?.type === "node" && ancestors(selection.id).includes(id);
+      visit(inside ? { collapsed, selection: null } : { collapsed });
     },
     setDepth: (depth) => keep({ depth }),
     enterFunction: (id) => {
