@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useAtlas } from "../state/store";
-import { parentOf, rows, type Row } from "./rows";
+import { build } from "../search/index";
+import { parentOf, results, rows, type Result, type Row } from "./rows";
 import { TreeNode } from "./TreeNode";
+import { TreeResults, TreeSearch } from "./TreeSearch";
 
 const rowId = (index: number) => `tree-row-${index}`;
 
@@ -29,6 +31,13 @@ export function FileTree() {
     0,
   );
   const activeKey = list[active]?.key;
+  /** 검색 칸의 질의. 비지 않으면 파일트리 대신 검색 결과 목록을 그린다. */
+  const [query, setQuery] = useState("");
+  const searching = query.trim() !== "";
+  const entries = useMemo(() => (graph === null ? [] : build(graph, showTests)), [graph, showTests]);
+  const found = useMemo(() => results(entries, query, selected), [entries, query, selected]);
+  /** 키보드로 옮기는 활성 결과 행의 번호 */
+  const [mark, setMark] = useState(0);
 
   // 선택이 바뀌면 활성 행을 고른 행으로 옮긴다. 활성 행이 이미 고른 행이면 그대로 둔다.
   useEffect(() => {
@@ -40,7 +49,7 @@ export function FileTree() {
 
   useEffect(() => {
     document.getElementById(rowId(active))?.scrollIntoView({ block: "nearest" });
-  }, [activeKey]);
+  }, [activeKey, searching]);
 
   /**
    * 폴더 행은 접거나 펼치고, 파일·클래스·함수 행은 구조 뷰에서 고른다. 구조 뷰에서 고른 행을 다시 누르면 선택을 푼다.
@@ -51,6 +60,12 @@ export function FileTree() {
     if (row.node !== null) {
       (row.kind === "dir" ? toggleFolder : row.selected && structure ? select : show)(row.node);
     }
+  };
+
+  /** 검색 결과 행을 구조 뷰에서 고른다. 질의는 그대로 둔다. */
+  const pickResult = (result: Result) => {
+    setMark(found.indexOf(result));
+    show(result.hit.entry.id);
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -98,20 +113,36 @@ export function FileTree() {
   return (
     <div className="explorer">
       <div className="explorer-header">{repo?.name ?? "code-atlas"}</div>
+      <TreeSearch
+        query={query}
+        onQuery={(text) => {
+          setQuery(text);
+          setMark(0);
+        }}
+        list={found}
+        active={mark}
+        onActive={setMark}
+        onPick={pickResult}
+      />
       <div className="explorer-body">
         {error !== null && <div className="explorer-error">{error}</div>}
         {error === null && tree === null && <div className="explorer-empty">불러오는 중</div>}
-        <ul
-          className="tree"
-          role="tree"
-          tabIndex={0}
-          aria-activedescendant={activeKey === undefined ? undefined : rowId(active)}
-          onKeyDown={onKeyDown}
-        >
-          {list.map((row, index) => (
-            <TreeNode key={row.key} row={row} id={rowId(index)} cursor={index === active} onPick={pick} />
-          ))}
-        </ul>
+        {searching && graph !== null && found.length === 0 && <div className="explorer-empty">이름이 맞는 항목 없음</div>}
+        {searching ? (
+          <TreeResults list={found} active={mark} onPick={pickResult} />
+        ) : (
+          <ul
+            className="tree"
+            role="tree"
+            tabIndex={0}
+            aria-activedescendant={activeKey === undefined ? undefined : rowId(active)}
+            onKeyDown={onKeyDown}
+          >
+            {list.map((row, index) => (
+              <TreeNode key={row.key} row={row} id={rowId(index)} cursor={index === active} onPick={pick} />
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
