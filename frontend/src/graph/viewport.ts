@@ -1,4 +1,4 @@
-// 고른 노드로 화면을 옮길 좌표·확대 비율과 "화면 맞춤"의 여백을 정한다. 좌표는 관계 그래프 영역의 왼쪽 위를 원점으로 한다.
+// 고른 노드로 화면을 옮길 좌표와 "화면 맞춤"의 여백을 정한다. 좌표는 관계 그래프 영역의 왼쪽 위를 원점으로 한다.
 import type { Rect } from "../state/store";
 import type { Box, Point } from "./layout";
 
@@ -8,44 +8,34 @@ export const PAN_MS = 400;
 /** 확대 비율의 범위 */
 export const ZOOM_MIN = 0.05;
 export const ZOOM_MAX = 4;
-/** 고른 노드로 화면을 옮길 때 확대 비율을 이 값 아래로 줄이지 않는다. */
-export const FOCUS_ZOOM_MIN = 0.4;
+/** 함수 이름표가 모두 보이는 확대 비율 구간의 시작값. 노드를 고르면 확대 비율을 이 값까지 키운다. */
+export const NAMED_ZOOM = 0.8;
 
 const INSET = 20;
 const FIT_MARGIN = 24;
 
-const areaOf = (rect: Rect) => rect.width * rect.height;
-
-function widest(rects: Rect[]): Rect {
-  return rects.reduce((best, rect) => (areaOf(rect) > areaOf(best) ? rect : best));
-}
-
 /**
- * 관계 그래프 영역에서 정보 패널을 뺀 왼쪽·오른쪽·위·아래 네 사각형.
- * 패널이 없거나 영역과 겹치지 않으면 영역 전체 하나다.
+ * 관계 그래프 영역에서 정보 패널을 뺀 왼쪽·오른쪽·위·아래 네 사각형 가운데 가장 넓은 사각형.
+ * 패널이 없거나 영역과 겹치지 않으면 영역 전체다.
  */
-export function freeRects(area: Rect, panel: Rect | null): Rect[] {
+export function freeRect(area: Rect, panel: Rect | null): Rect {
   if (panel === null) {
-    return [area];
+    return area;
   }
   const left = Math.max(area.x, Math.min(panel.x, area.x + area.width));
   const right = Math.max(area.x, Math.min(panel.x + panel.width, area.x + area.width));
   const top = Math.max(area.y, Math.min(panel.y, area.y + area.height));
   const bottom = Math.max(area.y, Math.min(panel.y + panel.height, area.y + area.height));
   if (left >= right || top >= bottom) {
-    return [area];
+    return area;
   }
-  return [
+  const sides: Rect[] = [
     { ...area, width: left - area.x },
     { ...area, x: right, width: area.x + area.width - right },
     { ...area, height: top - area.y },
     { ...area, y: bottom, height: area.y + area.height - bottom },
   ];
-}
-
-/** freeRects 가운데 가장 넓은 사각형 */
-export function freeRect(area: Rect, panel: Rect | null): Rect {
-  return widest(freeRects(area, panel));
+  return sides.reduce((best, side) => (side.width * side.height > best.width * best.height ? side : best));
 }
 
 /**
@@ -73,34 +63,14 @@ export function boundsOf(boxes: Iterable<Box>): Box {
   return left > right ? { x: 0, y: 0, width: 0, height: 0 } : { x: left, y: top, width: right - left, height: bottom - top };
 }
 
-/**
- * boxes가 sides 가운데 한 사각형 안에 24px를 두고 모두 들어오는 화면 이동 좌표와 확대 비율.
- * 사각형마다 boxes가 들어오는 확대 비율을 사용자 확대 비율 zoom을 넘지 않게 구하고, 그 값이 가장 큰 사각형(같으면 넓은 쪽)
- * 가운데로 boxes를 옮긴다. FOCUS_ZOOM_MIN 아래로는 줄이지 않으며, 어느 사각형에도 들어오지 않으면
- * 가장 넓은 사각형 가운데에 anchor를 둔다. zoom이 FOCUS_ZOOM_MIN보다 작으면 확대 비율을 zoom으로 둔다.
- */
-export function fitOn(boxes: Iterable<Box>, anchor: Box, sides: Rect[], zoom: number): Point & { zoom: number } {
-  const bounds = boundsOf(boxes);
-  const scale = (side: Rect) =>
-    Math.min(zoom, (side.width - 2 * FIT_MARGIN) / bounds.width, (side.height - 2 * FIT_MARGIN) / bounds.height);
-  const best = sides.reduce((a, b) =>
-    scale(b) > scale(a) || (scale(b) === scale(a) && areaOf(b) > areaOf(a)) ? b : a,
-  );
-  const floor = Math.min(zoom, FOCUS_ZOOM_MIN);
-  return scale(best) >= floor
-    ? { ...centerOn(bounds, best, scale(best)), zoom: scale(best) }
-    : { ...centerOn(anchor, widest(sides), floor), zoom: floor };
-}
-
-/** 관계 그래프 영역, 정보 패널이 가리지 않는 사각형 sides, 그 가운데 가장 넓은 사각형 free */
+/** 관계 그래프 영역과 그 안에서 정보 패널이 가리지 않는 사각형 */
 export interface Stage {
   area: Rect;
-  sides: Rect[];
   free: Rect;
 }
 
 /** "화면 맞춤"의 여백. 그래프를 free 안에 24px를 두고 맞추도록 area의 네 변에서 비울 폭을 낸다. */
-export function fitPadding({ area, free }: Pick<Stage, "area" | "free">) {
+export function fitPadding({ area, free }: Stage) {
   const px = (n: number) => `${Math.round(n) + FIT_MARGIN}px` as const;
   return {
     top: px(free.y - area.y),
@@ -115,11 +85,13 @@ export function stageOf(root: Element): Stage {
   const outer = root.getBoundingClientRect();
   const panel = document.querySelector(".info-panel")?.getBoundingClientRect();
   const area = { x: 0, y: 0, width: outer.width, height: outer.height };
-  const sides = freeRects(
+  return {
     area,
-    panel === undefined
-      ? null
-      : { x: panel.left - outer.left, y: panel.top - outer.top, width: panel.width, height: panel.height },
-  );
-  return { area, sides, free: widest(sides) };
+    free: freeRect(
+      area,
+      panel === undefined
+        ? null
+        : { x: panel.left - outer.left, y: panel.top - outer.top, width: panel.width, height: panel.height },
+    ),
+  };
 }

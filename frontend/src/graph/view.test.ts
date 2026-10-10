@@ -109,10 +109,10 @@ describe("edgeViews", () => {
     expect(views("main:run").get("main:run|main:helper|call")).toMatchObject({ weight: null, sites: 1 });
   });
 
-  it("방향 색과 불투명도는 그릴 선의 값을 그대로 쓴다", () => {
+  it("진하기와 불투명도는 그릴 선의 값을 그대로 쓴다", () => {
     const focused = views("pkg.mod:Store.save");
-    expect(focused.get("pkg.mod:Store.save|main:helper|call")).toMatchObject({ tone: "outgoing", opacity: 1 });
-    expect(focused.get("pkg.mod:Store.load|pkg.mod:Store.save|call")).toMatchObject({ tone: "incoming", opacity: 1 });
+    expect(focused.get("pkg.mod:Store.save|main:helper|call")).toMatchObject({ tone: "strong", opacity: 1 });
+    expect(focused.get("pkg.mod:Store.load|pkg.mod:Store.save|call")).toMatchObject({ tone: "strong", opacity: 1 });
   });
 
   it("배치에 상자가 없는 노드에 닿는 선은 뺀다", () => {

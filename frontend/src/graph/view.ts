@@ -6,7 +6,8 @@ import { belowRoute, crossRoute, type Box, type Layout, type Point } from "./lay
 import { aggKey, ubiquitous, type DrawnEdge, type EdgeKey } from "./scope";
 import { lift, nodeIndex, unitOf, type Shown } from "./visible";
 
-export type Tone = "muted" | "outgoing" | "incoming";
+/** 선의 진하기. strong은 본문 잉크, muted는 muted 잉크로 그린다. */
+export type Tone = "strong" | "muted";
 
 export type EdgeView = {
   key: EdgeKey;

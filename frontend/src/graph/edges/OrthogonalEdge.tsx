@@ -1,17 +1,17 @@
-// 배치가 정한 직각 경로를 모서리를 둥글려 그린다. 선 분류는 선 모양과 화살촉으로, 초점 방향은 색으로 가른다.
+// 배치가 정한 직각 경로를 모서리를 둥글려 그린다. 선 분류는 선 모양과 화살촉으로, 초점은 선의 진하기로 가른다.
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
 import type { EdgeGroup } from "../../api/types";
 import { midpoint, roundedPath, type EdgeView, type Tone } from "../view";
 
 export type AtlasFlowEdge = Edge<EdgeView>;
 
-const TONES: Tone[] = ["muted", "outgoing", "incoming"];
+const TONES: Tone[] = ["muted", "strong"];
 
 function markerId(group: EdgeGroup, tone: Tone): string {
   return `arrow-${group}-${tone}`;
 }
 
-/** 분류 세 개와 색 세 개의 화살촉. 끝점이 노드 테두리에 닿도록 화살촉 끝을 경로 끝에 맞춘다. */
+/** 분류 세 개와 진하기 두 개의 화살촉. 끝점이 노드 테두리에 닿도록 화살촉 끝을 경로 끝에 맞춘다. */
 export function Markers() {
   return (
     <svg className="edge-markers" width={0} height={0} aria-hidden>

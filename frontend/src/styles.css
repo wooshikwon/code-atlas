@@ -747,12 +747,8 @@ ul {
   --tone: var(--muted);
 }
 
-.tone-outgoing {
-  --tone: var(--outgoing);
-}
-
-.tone-incoming {
-  --tone: var(--incoming);
+.tone-strong {
+  --tone: var(--ink);
 }
 
 .edge-line,

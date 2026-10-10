@@ -75,9 +75,9 @@ describe("drawn", () => {
 
   it("규칙 2: 함수를 고르면 흐름에 든 노드 사이의 선과 들어오는 선을 원래 선으로 그린다", () => {
     const edges = draw("app.web:render");
-    expect(edges.get("app.web:render|app.text:wrap|call")).toMatchObject({ tone: "outgoing", opacity: 1 });
-    expect(edges.get("app.web:index|app.web:render|call")).toMatchObject({ tone: "incoming", opacity: 1 });
-    expect(edges.get("app.text:wrap|app.text:pad|call")).toMatchObject({ tone: "muted", opacity: 0.5 });
+    expect(edges.get("app.web:render|app.text:wrap|call")).toMatchObject({ tone: "strong", opacity: 1 });
+    expect(edges.get("app.web:index|app.web:render|call")).toMatchObject({ tone: "strong", opacity: 1 });
+    expect(edges.get("app.text:wrap|app.text:pad|call")).toMatchObject({ tone: "strong", opacity: 0.5 });
   });
 
   it("규칙 2: 접힌 상자 사이의 선은 흐리게 그대로 그리고, 펼친 파일 상자에 닿는 흐름 밖 선은 그리지 않는다", () => {
@@ -90,21 +90,21 @@ describe("drawn", () => {
   it("규칙 2: 고른 노드가 든 파일 상자 안의 선을 그린다", () => {
     const edges = draw("pkg.mod:parse");
     expect(edges.get("pkg.mod:Store.load|pkg.mod:Row|construct")).toMatchObject({ tone: "muted", opacity: 0.2 });
-    expect(edges.get("pkg.mod:Store.save|pkg.mod:parse|call")?.tone).toBe("incoming");
+    expect(edges.get("pkg.mod:Store.save|pkg.mod:parse|call")?.tone).toBe("strong");
   });
 
   it("규칙 2: 흐름이 접은 폴더로 들어가면 폴더에서 잇는다", () => {
     const edges = draw("main:run", ["pkg"]);
-    expect(edges.get("agg|main:run|pkg")).toMatchObject({ weight: 3, tone: "outgoing", opacity: 1 });
+    expect(edges.get("agg|main:run|pkg")).toMatchObject({ weight: 3, tone: "strong", opacity: 1 });
   });
 
   it("규칙 2: 파일 상자를 고르면 안의 선은 원래 선으로, 경계를 넘는 선은 파일 상자 사이 집계 선으로 그린다", () => {
     const edges = draw("pkg.mod");
-    expect(edges.get("pkg.mod:Store.load|pkg.mod:Store.save|call")).toMatchObject({ tone: "muted", opacity: 1 });
-    expect(edges.get("agg|main|pkg.mod")).toMatchObject({ weight: 4, tone: "incoming" });
-    expect(edges.get("agg|pkg.mod|main")).toMatchObject({ weight: 1, tone: "outgoing" });
-    expect(edges.get("pkg.mod|pkg.util|import")).toMatchObject({ tone: "outgoing", deferred: true });
-    expect(edges.get("agg|cli|main")).toMatchObject({ tone: "muted", opacity: 0.5 });
+    expect(edges.get("pkg.mod:Store.load|pkg.mod:Store.save|call")).toMatchObject({ tone: "strong", opacity: 1 });
+    expect(edges.get("agg|main|pkg.mod")).toMatchObject({ weight: 4, tone: "strong" });
+    expect(edges.get("agg|pkg.mod|main")).toMatchObject({ weight: 1, tone: "strong" });
+    expect(edges.get("pkg.mod|pkg.util|import")).toMatchObject({ tone: "strong", deferred: true });
+    expect(edges.get("agg|cli|main")).toMatchObject({ tone: "strong", opacity: 0.5 });
     expect(edges.get("agg|app.web|app.text")?.opacity).toBe(0.2);
   });
 
@@ -126,15 +126,15 @@ describe("drawn", () => {
 
   it("규칙 3: 편재 노드를 고르면 들어오는 선을 다시 그린다", () => {
     const edges = draw("common");
-    expect(edges.get("main|common|import")?.tone).toBe("incoming");
-    expect(edges.get("agg|cli|common")).toMatchObject({ weight: 2, tone: "incoming" });
+    expect(edges.get("main|common|import")?.tone).toBe("strong");
+    expect(edges.get("agg|cli|common")).toMatchObject({ weight: 2, tone: "strong" });
     expect(edges.has("app.web|common|import")).toBe(true);
   });
 
   it("규칙 3: 편재 노드를 쓰는 노드를 고르면 숨긴 선을 모두 다시 그린다", () => {
     const edges = draw("cli");
-    expect(edges.get("agg|cli|common")).toMatchObject({ weight: 2, tone: "outgoing", opacity: 1 });
-    expect(edges.get("pkg.mod|common|import")).toMatchObject({ tone: "muted", opacity: 0.5 });
+    expect(edges.get("agg|cli|common")).toMatchObject({ weight: 2, tone: "strong", opacity: 1 });
+    expect(edges.get("pkg.mod|common|import")).toMatchObject({ tone: "strong", opacity: 0.5 });
     expect(edges.get("app.web|common|import")?.opacity).toBe(0.2);
   });
 

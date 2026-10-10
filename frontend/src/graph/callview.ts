@@ -141,7 +141,7 @@ export function callElk(calls: Calls, size: (id: string) => Size): ElkNode {
   };
 }
 
-/** 실행 선마다 배치가 낸 경로와 색을 정한다. center에서 나가는 선과 center로 들어오는 선만 초점 방향 색으로 그린다. */
+/** 실행 선마다 배치가 낸 경로와 색을 정한다. center에 닿는 선만 본문 잉크로 그린다. */
 export function callEdges(calls: Calls, center: string, layout: Layout): EdgeView[] {
   const views: EdgeView[] = [];
   for (const edge of calls.edges) {
@@ -156,7 +156,7 @@ export function callEdges(calls: Calls, center: string, layout: Layout): EdgeVie
       target: edge.target,
       group: edge.group,
       points,
-      tone: edge.source === center ? "outgoing" : edge.target === center ? "incoming" : "muted",
+      tone: edge.source === center || edge.target === center ? "strong" : "muted",
       opacity: 1,
       weight: null,
       sites: edge.sites.length,

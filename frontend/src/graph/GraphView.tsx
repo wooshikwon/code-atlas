@@ -8,11 +8,10 @@ import {
   ViewportPortal,
   type EdgeMouseHandler,
   type NodeMouseHandler,
-  type OnMove,
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { AtlasNode, Graph } from "../api/types";
 import { useAtlas } from "../state/store";
 import { CallView } from "./CallView";
@@ -27,16 +26,14 @@ import { nodeType, nodeTypes } from "./nodes";
 import { drawn } from "./scope";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { badges, edgeViews, GROUP_NAMES, KIND_NAMES, parentFirst } from "./view";
-import { boundsOf, fitOn, fitPadding, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
-import { hidden, lift, nodeIndex, shown, within, type Shown } from "./visible";
+import { boundsOf, centerOn, fitPadding, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { hidden, nodeIndex, shown, within, type Shown } from "./visible";
 
 /** 선은 자식을 그리는 상자(깊이만큼 0부터)보다 위에, 그 밖의 노드보다 아래에 놓는다. */
 const EDGE_Z = 50;
 const LEAF_Z = 100;
 const SHELF_NAME = "연결 없음";
 const SHELF_NAME_HEIGHT = 22;
-/** 화면 이동이 끝났다는 알림이 오지 않을 때 이동 길이 뒤에 더 기다리는 시간(ms) */
-const GLIDE_SLACK_MS = 1000;
 
 /** 배치 한 번과 그 배치를 만든 입력. 노드와 선은 늘 같은 Scene에서 만든다. */
 interface Scene {
@@ -130,16 +127,14 @@ export function GraphView() {
   const view = useAtlas((s) => s.view);
   /** 구조 뷰의 화면 위치와 확대 비율. 레포를 열어 화면을 맞추기 전에는 null이다. */
   const home = useRef<Viewport | null>(null);
-  /** 사용자 확대 비율. 첫 화면 맞춤, "화면 맞춤" 버튼, 휠·핀치가 정하고 노드를 고를 때의 화면 이동은 바꾸지 않는다. */
-  const preferred = useRef(1);
   return view.kind === "function" ? (
     <CallView center={view.center} expanded={view.expanded} />
   ) : (
-    <StructureView home={home} preferred={preferred} />
+    <StructureView home={home} />
   );
 }
 
-function StructureView({ home, preferred }: { home: RefObject<Viewport | null>; preferred: RefObject<number> }) {
+function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const graph = useAtlas((s) => s.graph);
   const showTests = useAtlas((s) => s.showTests);
   const showExternal = useAtlas((s) => s.showExternal);
@@ -152,7 +147,7 @@ function StructureView({ home, preferred }: { home: RefObject<Viewport | null>; 
   const enterFunction = useAtlas((s) => s.enterFunction);
   const { getViewport, setViewport } = useReactFlow();
   /** 확대 비율 구간. 구간이 바뀔 때만 다시 그린다. */
-  const zoom = useStore((s) => (s.transform[2] < 0.4 ? 0 : s.transform[2] < 0.8 ? 1 : 2));
+  const zoom = useStore((s) => (s.transform[2] < 0.4 ? 0 : s.transform[2] < NAMED_ZOOM ? 1 : 2));
 
   const [scene, setScene] = useState<Scene | null>(null);
   const [nodes, setNodes] = useState<AtlasFlowNode[]>([]);
@@ -168,13 +163,8 @@ function StructureView({ home, preferred }: { home: RefObject<Viewport | null>; 
   const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
   const onScreen = useRef<Layout | null>(null);
-  /** 화면을 옮겨 둔 노드와 그 노드가 든 파일 상자 */
+  /** 화면을 옮겨 둔 노드 */
   const panned = useRef<string | null>(null);
-  const held = useRef<string | null>(null);
-  /** 이 컴포넌트가 시작한 화면 이동이 끝나기 전이면 그 이동을 끝난 것으로 볼 시각(ms), 아니면 0 */
-  const gliding = useRef(0);
-  /** 직전에 본 확대 비율 */
-  const seen = useRef(start?.zoom ?? 1);
   /** 직전에 한 번 누른 노드. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
   const clicked = useRef<string | null>(null);
   /** 초점을 둔 노드. 선을 골라도 직전에 고른 노드의 초점을 유지한다. */
@@ -217,27 +207,6 @@ function StructureView({ home, preferred }: { home: RefObject<Viewport | null>; 
     };
   }, [graph, cols, target]);
 
-  /** 사용자 확대 비율을 바꾸지 않고 화면을 옮긴다. */
-  const glide = useCallback(
-    (view: Viewport, duration: number) => {
-      gliding.current = performance.now() + duration + GLIDE_SLACK_MS;
-      void setViewport(view, { duration }).then(() => {
-        gliding.current = 0;
-      });
-    },
-    [setViewport],
-  );
-  /** 휠·핀치가 바꾼 확대 비율과 이 컴포넌트 밖에서 옮긴 화면("화면 맞춤")의 확대 비율을 사용자 확대 비율로 삼는다. */
-  const onViewportMove: OnMove = (event, viewport) => {
-    if (event !== null) {
-      gliding.current = 0;
-    }
-    if (event !== null ? viewport.zoom !== seen.current : performance.now() >= gliding.current) {
-      preferred.current = viewport.zoom;
-    }
-    seen.current = viewport.zoom;
-  };
-
   // 레포를 열면 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. 함수 시점 뷰에서 돌아오면 떠날 때의 화면에서 시작한다.
   useEffect(() => {
     if (scene === null || home.current !== null || root.current === null) {
@@ -247,9 +216,8 @@ function StructureView({ home, preferred }: { home: RefObject<Viewport | null>; 
     const { width, height } = stage.area;
     const bounds = boundsOf(scene.layout.boxes.values());
     home.current = getViewportForBounds(bounds, width, height, ZOOM_MIN, ZOOM_MAX, fitPadding(stage));
-    preferred.current = home.current.zoom;
-    glide(home.current, 0);
-  }, [scene, home, preferred, glide]);
+    void setViewport(home.current);
+  }, [scene, home, setViewport]);
   useEffect(
     () => () => {
       if (home.current !== null) {
@@ -275,29 +243,11 @@ function StructureView({ home, preferred }: { home: RefObject<Viewport | null>; 
 
     if (scene.focus !== panned.current) {
       panned.current = scene.focus;
-      const anchor = scene.focus === null ? undefined : to.boxes.get(scene.focus);
-      if (anchor !== undefined && scene.flow !== null && root.current !== null) {
-        held.current = scene.flow.file;
-        const boxes = [...scene.flow.out.keys(), ...scene.flow.incoming]
-          .map((id) => lift(index.nodes, scene.shown, id))
-          .map((id) => (id === null ? undefined : to.boxes.get(id)))
-          .filter((box) => box !== undefined);
-        glide(fitOn([anchor, ...boxes], anchor, stageOf(root.current).sides, preferred.current), still ? 0 : PAN_MS);
-      } else if (scene.focus === null && held.current !== null) {
-        // 초점을 풀면 고른 노드가 들어 있던 파일 상자의 왼쪽 위를 화면의 같은 곳에 둔 채 사용자 확대 비율로 돌아간다.
-        const before = from?.boxes.get(held.current);
-        const after = to.boxes.get(held.current);
-        const now = getViewport();
-        const zoom = preferred.current;
-        if (before !== undefined && after !== undefined && zoom !== now.zoom) {
-          const view = {
-            x: now.x + before.x * now.zoom - after.x * zoom,
-            y: now.y + before.y * now.zoom - after.y * zoom,
-            zoom,
-          };
-          glide(view, still ? 0 : PAN_MS);
-        }
-        held.current = null;
+      const box = scene.focus === null ? undefined : to.boxes.get(scene.focus);
+      if (box !== undefined && root.current !== null) {
+        const scale = Math.max(getViewport().zoom, NAMED_ZOOM);
+        const view = { ...centerOn(box, stageOf(root.current).free, scale), zoom: scale };
+        void setViewport(view, { duration: still ? 0 : PAN_MS });
       }
     }
 
@@ -315,7 +265,7 @@ function StructureView({ home, preferred }: { home: RefObject<Viewport | null>; 
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, index, preferred, getViewport, glide]);
+  }, [scene, index, getViewport, setViewport]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
   const edges = useMemo((): AtlasFlowEdge[] => {
@@ -430,7 +380,6 @@ function StructureView({ home, preferred }: { home: RefObject<Viewport | null>; 
         onEdgeMouseMove={onMove}
         onEdgeMouseLeave={onEdgeLeave}
         onPaneClick={onPaneClick}
-        onMove={onViewportMove}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
