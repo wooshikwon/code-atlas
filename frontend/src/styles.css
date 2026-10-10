@@ -56,11 +56,6 @@ ul {
   outline: none;
 }
 
-.separator-horizontal {
-  width: auto;
-  height: 1px;
-}
-
 .separator[data-separator="hover"],
 .separator[data-separator="active"] {
   background: var(--muted);
@@ -153,8 +148,9 @@ ul {
   color: var(--muted);
 }
 
-.toolbar-spacer {
+.toolbar-trail {
   flex: 1;
+  min-width: 0;
 }
 
 .toolbar-toggle {
@@ -170,11 +166,17 @@ ul {
   border-radius: 4px;
 }
 
-.toolbar-button:hover {
+.toolbar-button:hover:enabled {
   background: var(--hover-bg);
 }
 
-.views {
+.toolbar-button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.stage {
+  position: relative;
   flex: 1;
   min-height: 0;
 }
@@ -493,7 +495,7 @@ ul {
 
 .legend,
 .info-box,
-.graph-steps {
+.info-panel {
   position: absolute;
   z-index: 5;
   border: 1px solid var(--line);
@@ -539,19 +541,20 @@ ul {
   font-size: 11px;
 }
 
-.graph-steps {
+.info-panel {
   top: 8px;
-  left: 50%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  transform: translateX(-50%);
+  right: 8px;
+  width: 480px;
+  max-width: calc(100% - 16px);
+  height: 420px;
+  max-height: calc(100% - 16px);
+  overflow: hidden;
+  background: var(--surface);
 }
 
 .info-box {
   top: 8px;
-  right: 8px;
+  left: 8px;
   width: 340px;
   max-height: calc(100% - 16px);
   overflow: auto;

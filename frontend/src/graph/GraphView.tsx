@@ -1,14 +1,8 @@
 // 구조 뷰. 배치는 그래프와 테스트 코드 토글이 바뀔 때만 다시 계산하고, 고르기·마우스 올리기는 선과 불투명도만 바꾼다.
-import {
-  ReactFlow,
-  ReactFlowProvider,
-  useReactFlow,
-  type EdgeMouseHandler,
-  type NodeMouseHandler,
-} from "@xyflow/react";
+import { ReactFlow, useReactFlow, type EdgeMouseHandler, type NodeMouseHandler } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAtlas } from "../state/AtlasProvider";
+import { useAtlas } from "../state/store";
 import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { focus, OPACITY, seedsOf } from "./focus";
 import { InfoBox, type InfoItem } from "./InfoBox";
@@ -16,24 +10,31 @@ import { functionCounts, layout, type Layout } from "./layout";
 import { Legend } from "./Legend";
 import type { AtlasFlowNode } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
-import { nodeIndex, scope, visibleNodes, type EdgeKey } from "./scope";
+import { nodeIndex, scope, visibleNodes } from "./scope";
 import { degrees, edgeIndex, edgeViews, parentFirst } from "./view";
 
 /** 왼쪽 아래 범례가 노드를 가리지 않도록 왼쪽에 범례 폭만큼 여백을 둔다. */
-const FIT_PADDING = { top: "16px", right: "16px", bottom: "16px", left: "300px" } as const;
+export const FIT_PADDING = { top: "16px", right: "16px", bottom: "16px", left: "300px" } as const;
 
 interface Laid {
   layout: Layout;
   visible: Set<string>;
 }
 
-function GraphCanvas() {
-  const { graph, showTests, selection, hovered, select, hover, openSite } = useAtlas();
+export function GraphView() {
+  const graph = useAtlas((s) => s.graph);
+  const showTests = useAtlas((s) => s.showTests);
+  const selection = useAtlas((s) => s.selection);
+  const depth = useAtlas((s) => s.depth);
+  const select = useAtlas((s) => s.select);
+  const selectEdge = useAtlas((s) => s.selectEdge);
   const { fitView } = useReactFlow();
   const [laid, setLaid] = useState<Laid | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [steps, setSteps] = useState(1);
-  const [pinned, setPinned] = useState<EdgeKey | null>(null);
+  /** 마우스를 올린 노드 id 또는 edge_key */
+  const [hovered, setHovered] = useState<string | null>(null);
+  const selected = selection?.type === "node" ? selection.id : null;
+  const pinned = selection?.type === "edge" ? selection.key : null;
 
   useEffect(() => {
     if (graph === null) {
@@ -69,12 +70,12 @@ function GraphCanvas() {
     };
   }, [graph, laid]);
 
-  const focused = selection !== null && laid?.visible.has(selection) === true ? selection : null;
+  const focused = selected !== null && laid?.visible.has(selected) === true ? selected : null;
   const hoveredNode = hovered !== null && derived?.nodes.has(hovered) === true ? hovered : null;
 
   const levels = useMemo(
-    () => (graph === null || laid === null || focused === null ? null : focus(graph, laid.visible, focused, steps)),
-    [graph, laid, focused, steps],
+    () => (graph === null || laid === null || focused === null ? null : focus(graph, laid.visible, focused, depth)),
+    [graph, laid, focused, depth],
   );
   const seeds = useMemo(() => (graph === null || focused === null ? null : seedsOf(graph, focused)), [graph, focused]);
 
@@ -122,10 +123,7 @@ function GraphCanvas() {
     }));
   }, [graph, laid, derived, focused, hoveredNode, seeds, levels]);
 
-  const clear = useCallback(() => {
-    select(null);
-    setPinned(null);
-  }, [select]);
+  const clear = useCallback(() => select(null), [select]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && clear();
@@ -133,14 +131,11 @@ function GraphCanvas() {
     return () => window.removeEventListener("keydown", onKey);
   }, [clear]);
 
-  const onNodeClick: NodeMouseHandler<AtlasFlowNode> = (_, node) => {
-    select(node.id);
-    setPinned(null);
-  };
-  const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (_, node) => hover(node.id);
-  const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => hover(edge.id);
-  const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => setPinned(edge.id);
-  const onLeave = () => hover(null);
+  const onNodeClick: NodeMouseHandler<AtlasFlowNode> = (_, node) => select(node.id);
+  const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (_, node) => setHovered(node.id);
+  const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => setHovered(edge.id);
+  const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => selectEdge(edge.id);
+  const onLeave = () => setHovered(null);
 
   const info = useMemo((): { item: InfoItem; pinned: boolean } | null => {
     if (derived === null) {
@@ -194,13 +189,6 @@ function GraphCanvas() {
         maxZoom={4}
         proOptions={{ hideAttribution: true }}
       />
-      {focused !== null && (
-        <label className="graph-steps">
-          초점 단계
-          <input type="range" min={1} max={3} value={steps} onChange={(e) => setSteps(Number(e.target.value))} />
-          {steps}
-        </label>
-      )}
       <Legend />
       {info !== null && (
         <InfoBox
@@ -210,17 +198,9 @@ function GraphCanvas() {
           index={derived.index}
           degrees={derived.degrees}
           functions={derived.functions}
-          openSite={openSite}
+          openSite={() => undefined}
         />
       )}
     </div>
-  );
-}
-
-export function GraphView() {
-  return (
-    <ReactFlowProvider>
-      <GraphCanvas />
-    </ReactFlowProvider>
   );
 }

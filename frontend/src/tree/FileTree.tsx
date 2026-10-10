@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { AtlasNode, TreeEntry } from "../api/types";
-import { useAtlas } from "../state/AtlasProvider";
+import { useAtlas } from "../state/store";
 import { TreeNode, type TreeHandlers } from "./TreeNode";
 
 /** 선택한 노드를 품은 모듈 노드 id. 모듈 밖 노드(폴더 패키지, 외부)면 null이다. */
@@ -13,9 +13,15 @@ function moduleOf(id: string | null, nodes: Map<string, AtlasNode>): string | nu
 }
 
 export function FileTree() {
-  const { repo, tree, graph, error, selection, showTests, select } = useAtlas();
+  const repo = useAtlas((s) => s.repo);
+  const tree = useAtlas((s) => s.tree);
+  const graph = useAtlas((s) => s.graph);
+  const error = useAtlas((s) => s.error);
+  const selection = useAtlas((s) => s.selection);
+  const showTests = useAtlas((s) => s.showTests);
+  const select = useAtlas((s) => s.select);
   const nodes = useMemo(() => new Map(graph?.nodes.map((n) => [n.id, n])), [graph]);
-  const activeModule = moduleOf(selection, nodes);
+  const activeModule = moduleOf(selection?.type === "node" ? selection.id : null, nodes);
 
   const handlers: TreeHandlers = {
     showTests,

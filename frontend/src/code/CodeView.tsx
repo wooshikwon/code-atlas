@@ -1,13 +1,16 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useEffect, useRef, useState } from "react";
 import { getFile } from "../api/client";
-import { useAtlas } from "../state/AtlasProvider";
+import { fileOf, useAtlas, type OpenFile } from "../state/store";
 import { monacoTheme } from "./monaco";
 
 type CodeEditor = Parameters<OnMount>[0];
 
 export function CodeView() {
-  const { openFile, theme } = useAtlas();
+  const graph = useAtlas((s) => s.graph);
+  const selection = useAtlas((s) => s.selection);
+  const theme = useAtlas((s) => s.theme);
+  const [openFile, setOpenFile] = useState<OpenFile | null>(null);
   const [texts, setTexts] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<CodeEditor | null>(null);
@@ -15,6 +18,15 @@ export function CodeView() {
 
   const path = openFile?.path ?? null;
   const text = path === null ? undefined : texts.get(path);
+
+  // 고른 노드의 파일을 연다. 파일이 없는 노드나 선을 고르면 열려 있던 파일을 그대로 둔다.
+  useEffect(() => {
+    const node = selection?.type === "node" ? graph?.nodes.find((n) => n.id === selection.id) : undefined;
+    const file = node === undefined ? null : fileOf(node);
+    if (file !== null) {
+      setOpenFile(file);
+    }
+  }, [graph, selection]);
 
   useEffect(() => {
     if (path === null || texts.has(path)) {
