@@ -110,6 +110,20 @@ describe("drawn", () => {
     expect([...edges.keys()].some((key) => key.includes("pkg.mod"))).toBe(false);
   });
 
+  it("테스트 코드를 켜면 접은 폴더 안 테스트 파일의 선을 폴더의 집계 선에 넣는다", () => {
+    const visible = shown(repoFixture, { showTests: true, showExternal: false, collapsed: new Set(["pkg"]), flow: null });
+    const edges = new Map(drawn(repoFixture, visible, null, null).map((e) => [e.key, e]));
+    expect(edges.get("agg|pkg|main")).toMatchObject({ weight: 2, kinds: { call: 2 } });
+    expect(edges.get("agg|tests.test_mod|pkg")?.weight).toBe(1);
+  });
+
+  it("흐름이 depth보다 앞 단계에서 끝나면 끝 단계로 가는 선을 흐리지 않는다", () => {
+    const focus = flow(repoFixture, "app.web:render", 3, off);
+    const visible = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus });
+    const pad = drawn(repoFixture, visible, focus, null).find((e) => e.key === "app.text:wrap|app.text:pad|call");
+    expect(pad?.opacity).toBe(1);
+  });
+
   it("규칙 2: 함수를 고르면 흐름에 든 노드 사이의 선과 들어오는 선을 원래 선으로 그린다", () => {
     const edges = draw("app.web:render");
     expect(edges.get("app.web:render|app.text:wrap|call")).toMatchObject({ tone: "outgoing", opacity: 1 });

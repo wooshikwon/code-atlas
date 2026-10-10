@@ -6,6 +6,8 @@ export interface Shown {
   nodes: Set<string>;
   /** 자식을 그리는 파일 상자 */
   open: Set<string>;
+  /** 토글로 숨긴 노드 */
+  hidden: Set<string>;
 }
 
 const UNIT_KINDS = new Set(["module", "package"]);
@@ -69,7 +71,7 @@ export function shown(
   const nodes = nodeIndex(graph);
   const off = hidden(graph, opts);
   const { collapsed, flow } = opts;
-  const result: Shown = { nodes: new Set(), open: new Set() };
+  const result: Shown = { nodes: new Set(), open: new Set(), hidden: off };
   for (const node of graph.nodes) {
     if (off.has(node.id) || folded(nodes, collapsed, node)) {
       continue;
@@ -98,17 +100,16 @@ export function shown(
 }
 
 /**
- * 노드를 화면에 보이는 가장 가까운 조상으로 올린다. 보이는 노드는 자기 자신이고, 보이는 조상이 없으면 null이다.
- * 테스트 코드 노드는 테스트 코드가 아닌 상자로 올리지 않는다.
+ * 노드를 화면에 보이는 가장 가까운 조상으로 올린다. 보이는 노드는 자기 자신이고,
+ * 토글로 숨긴 노드와 보이는 조상이 없는 노드는 null이다.
  */
 export function lift(nodes: Map<string, AtlasNode>, shown: Shown, id: string): string | null {
-  const start = nodes.get(id);
-  let node = start;
+  if (shown.hidden.has(id)) {
+    return null;
+  }
+  let node = nodes.get(id);
   while (node !== undefined && !shown.nodes.has(node.id)) {
     node = node.parent === null ? undefined : nodes.get(node.parent);
   }
-  if (start === undefined || node === undefined || (start.test && !node.test)) {
-    return null;
-  }
-  return node.id;
+  return node?.id ?? null;
 }

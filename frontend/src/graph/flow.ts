@@ -7,6 +7,8 @@ export interface Flow {
   unit: "file" | "node";
   /** 고른 노드가 든 파일 상자 */
   file: string;
+  /** 나가는 선을 따라가는 단계 수 */
+  depth: number;
   /** 고른 노드와 그 자손 */
   seeds: Set<string>;
   /** seeds에서 나가는 선을 따라가 만나는 노드와 그 단계. 단계는 1부터 센다. */
@@ -69,14 +71,14 @@ export function flow(graph: Graph, selection: string, depth: number, hidden: Set
     }
     frontier = next;
   }
-  return { unit, file: unitOf(nodes, selection), seeds, out, incoming };
+  return { unit, file: unitOf(nodes, selection), depth, seeds, out, incoming };
 }
 
 /**
  * 노드 하나의 불투명도. 고른 노드와 그 자손, 고른 노드로 선을 보내는 노드는 1이다. 나가는 흐름에 든 노드는
  * 마지막 단계이고 depth가 2 이상이면 0.5, 그보다 앞 단계면 1이다. 그 밖은 0.2다.
  */
-export function opacity(flow: Flow | null, depth: number, id: string): Opacity {
+export function opacity(flow: Flow | null, id: string): Opacity {
   if (flow === null || flow.seeds.has(id) || flow.incoming.has(id)) {
     return 1;
   }
@@ -84,13 +86,13 @@ export function opacity(flow: Flow | null, depth: number, id: string): Opacity {
   if (step === undefined) {
     return 0.2;
   }
-  return step === depth && depth >= 2 ? 0.5 : 1;
+  return step === flow.depth && flow.depth >= 2 ? 0.5 : 1;
 }
 
 /** 노드마다 불투명도를 정한다. 상자는 자기 값과 안에 든 노드의 값 가운데 가장 큰 값을 받는다. */
-export function opacities(graph: Graph, flow: Flow | null, depth: number): Map<string, Opacity> {
+export function opacities(graph: Graph, flow: Flow | null): Map<string, Opacity> {
   const nodes = nodeIndex(graph);
-  const result = new Map(graph.nodes.map((n) => [n.id, opacity(flow, depth, n.id)]));
+  const result = new Map(graph.nodes.map((n) => [n.id, opacity(flow, n.id)]));
   for (const node of graph.nodes) {
     const own = result.get(node.id)!;
     let parent = node.parent;

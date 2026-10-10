@@ -170,7 +170,7 @@ function merge(
  *    마우스를 올린 노드에 닿는 선은 모두 그린다.
  * 3. 편재 노드로 들어오는 접힌 상자 사이의 선은 뺀다. 편재 노드나 편재 노드를 쓰는 노드를 고르면 다시 넣는다.
  * 올린 양 끝이 같은 선은 집계 규칙으로 합치고, 올린 양 끝이 같거나 한쪽이 다른 쪽의 조상인 선은 버린다.
- * 흐름에 든 노드 사이의 선은 두 끝 노드 가운데 더 흐린 쪽 불투명도를 받고, 이때 흐름 단계 수는 out의 가장 큰 단계로 센다.
+ * 방향 색이 없는 선은 두 끝 노드 가운데 더 흐린 쪽 불투명도를 받는다.
  */
 export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: string | null): DrawnEdge[] {
   const nodes = nodeIndex(graph);
@@ -229,7 +229,7 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
     pairs.set(id, pair);
   }
 
-  const dim = opacities(graph, flow, flow === null ? 0 : Math.max(0, ...flow.out.values()));
+  const dim = opacities(graph, flow);
   const result: DrawnEdge[] = [];
   for (const { source, target, edges, lifted } of pairs.values()) {
     if (lifted) {

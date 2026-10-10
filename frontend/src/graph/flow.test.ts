@@ -10,6 +10,7 @@ describe("flow", () => {
     const three = flow(repoFixture, "app.web:index", 3, off);
     expect(three.unit).toBe("node");
     expect(three.file).toBe("app.web");
+    expect(three.depth).toBe(3);
     expect([...three.out]).toEqual([
       ["app.web:render", 1],
       ["app.text:wrap", 2],
@@ -44,26 +45,30 @@ describe("flow", () => {
 
 describe("opacity", () => {
   it("흐름이 없으면 모두 1이다", () => {
-    expect(opacity(null, 2, "scratch")).toBe(1);
+    expect(opacity(null, "scratch")).toBe(1);
   });
 
   it("마지막 단계는 0.5, 그보다 앞 단계는 1, 흐름 밖은 0.2다", () => {
     const three = flow(repoFixture, "app.web:render", 2, off);
-    expect(opacity(three, 2, "app.web:render")).toBe(1);
-    expect(opacity(three, 2, "app.web:index")).toBe(1);
-    expect(opacity(three, 2, "app.text:wrap")).toBe(1);
-    expect(opacity(three, 2, "app.text:pad")).toBe(0.5);
-    expect(opacity(three, 2, "scratch:todo")).toBe(0.2);
+    expect(opacity(three, "app.web:render")).toBe(1);
+    expect(opacity(three, "app.web:index")).toBe(1);
+    expect(opacity(three, "app.text:wrap")).toBe(1);
+    expect(opacity(three, "app.text:pad")).toBe(0.5);
+    expect(opacity(three, "scratch:todo")).toBe(0.2);
+  });
+
+  it("흐름이 depth보다 앞 단계에서 끝나면 끝 단계도 1이다", () => {
+    expect(opacity(flow(repoFixture, "app.web:render", 3, off), "app.text:pad")).toBe(1);
   });
 
   it("depth가 1이면 마지막 단계도 1이다", () => {
-    expect(opacity(flow(repoFixture, "app.web:render", 1, off), 1, "app.text:wrap")).toBe(1);
+    expect(opacity(flow(repoFixture, "app.web:render", 1, off), "app.text:wrap")).toBe(1);
   });
 });
 
 describe("opacities", () => {
   it("상자는 안에 든 노드 가운데 가장 큰 값을 받는다", () => {
-    const result = opacities(repoFixture, flow(repoFixture, "main:run", 2, off), 2);
+    const result = opacities(repoFixture, flow(repoFixture, "main:run", 2, off));
     expect(result.get("main")).toBe(1);
     expect(result.get("main:helper")).toBe(1);
     expect(result.get("cli")).toBe(1);
@@ -75,7 +80,7 @@ describe("opacities", () => {
   });
 
   it("파일 상자를 고르면 파일 상자와 그 폴더가 값을 받는다", () => {
-    const result = opacities(repoFixture, flow(repoFixture, "pkg.mod", 2, off), 2);
+    const result = opacities(repoFixture, flow(repoFixture, "pkg.mod", 2, off));
     expect(result.get("main")).toBe(1);
     expect(result.get("cli")).toBe(0.5);
     expect(result.get("pkg.util")).toBe(1);

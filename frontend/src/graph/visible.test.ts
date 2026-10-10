@@ -76,8 +76,15 @@ describe("lift", () => {
   });
 
   it("숨긴 외부 노드와 테스트 코드는 올리지 않는다", () => {
+    expect(closed.hidden).toEqual(off);
     expect(lift(nodes, closed, "ext:json")).toBeNull();
     expect(lift(nodes, closed, "tests.test_mod:test_load")).toBeNull();
     expect(lift(nodes, closed, "pkg.conftest:setup")).toBeNull();
+  });
+
+  it("테스트 코드를 켜면 접은 폴더 안의 테스트 코드를 그 폴더로 올린다", () => {
+    const folded = shown(repoFixture, { showTests: true, showExternal: false, collapsed: new Set(["pkg"]), flow: null });
+    expect(lift(nodes, folded, "pkg.conftest:setup")).toBe("pkg");
+    expect(lift(nodes, folded, "tests.test_mod:test_load")).toBe("tests.test_mod");
   });
 });
