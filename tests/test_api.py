@@ -1,11 +1,14 @@
+import asyncio
+import json
 import subprocess
 import sys
 import time
+from urllib.parse import urlencode
 
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import git
+from conftest import git, group_ended
 
 from code_atlas import api, summary
 from code_atlas.api import create_app
@@ -60,6 +63,7 @@ def test_repo(client):
     assert body["source_root"] == "src"
     assert body["python"] == sys.executable
     assert body["stats"]["files"] == 9
+    assert body["stats"]["timed_out"] == 0
     assert body["stats"]["resolved"] + body["stats"]["unresolved"] == body["stats"]["call_sites"]
 
 
@@ -71,6 +75,7 @@ def test_tree(client):
     app = src["children"][0]
     assert (app["path"], app["kind"], app["node"]) == ("src/app", "dir", "app")
     assert [c["name"] for c in app["children"]][:2] == ["plugins", "__init__.py"]
+    assert app["children"][1]["node"] is None
     core = next(c for c in app["children"] if c["name"] == "core.py")
     assert (core["kind"], core["node"], "children" in core) == ("file", "app.core", False)
     plugins = app["children"][0]
@@ -171,6 +176,101 @@ def test_stopped_session_is_reopened(client, monkeypatch):
     assert state.session is not stopped and not state.session.stopped
 
 
+@pytest.mark.asyncio
+async def test_cancelled_start_ends_the_session_and_leaves_the_app_empty(sample_repo, monkeypatch):
+    sessions = []
+
+    async def analyze_async(files, session):
+        sessions.append(session)
+        app.state.starting.get_loop().call_soon(app.state.starting.cancel)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(api, "analyze_async", analyze_async)
+    app = create_app(sample_repo, sys.executable)
+    started = time.monotonic()
+    async with app.router.lifespan_context(app):
+        assert not hasattr(app.state, "analyzed")
+    assert time.monotonic() - started < 5
+    [session] = sessions
+    assert session.stopped and group_ended(session.client._server.pid)
+
+
+async def call(app, method: str, path: str, params: dict, gone: asyncio.Event | None = None) -> tuple[int, dict]:
+    """ASGI 앱에 요청 하나를 보내 상태 코드와 JSON 본문을 받는다. `gone`이 켜지면 호출자가 연결을 끊은 것으로 알린다."""
+    gone = gone or asyncio.Event()
+    request = [{"type": "http.request", "body": b"", "more_body": False}]
+    status: list[int] = []
+    body: list[bytes] = []
+
+    async def receive():
+        if request:
+            return request.pop()
+        await gone.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            status.append(message["status"])
+        else:
+            body.append(message.get("body", b""))
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": urlencode(params).encode(),
+        "headers": [],
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 80),
+    }
+    await app(scope, receive, send)
+    return status[0], json.loads(b"".join(body))
+
+
+@pytest.mark.asyncio
+async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects(sample_repo, tmp_path, monkeypatch):
+    made: list[str] = []
+    release = asyncio.Event()
+
+    async def generate(kind, name, code):
+        made.append(name)
+        await release.wait()
+        return f"{name} 요약"
+
+    async def unavailable():
+        return None
+
+    monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+    monkeypatch.setattr(summary, "generate", generate)
+    monkeypatch.setattr(summary, "unavailable", unavailable)
+    app = create_app(sample_repo, sys.executable)
+    async with app.router.lifespan_context(app):
+        nodes = ["app.core:helper", "app.core:run_engine", "app.core:Engine.start"]
+        gone = [asyncio.Event() for _ in nodes]
+        posts = [
+            asyncio.create_task(call(app, "POST", "/api/summary", {"node": node}, left))
+            for node, left in zip(nodes, gone)
+        ]
+        await asyncio.sleep(0.1)
+        assert made == ["helper", "run_engine"]
+
+        gone[0].set()
+        gone[2].set()
+        assert (await posts[0])[0] == (await posts[2])[0] == 499
+        release.set()
+        assert await posts[1] == (200, {"summary": "run_engine 요약"})
+        await asyncio.sleep(0.1)
+        assert made == ["helper", "run_engine"]
+        _, cached = await call(app, "GET", "/api/summary", {"node": nodes[0]})
+        assert cached["summary"] == "helper 요약"
+        _, skipped = await call(app, "GET", "/api/summary", {"node": nodes[2]})
+        assert skipped["summary"] is None
+
+
 def test_summary_is_made_on_post_and_read_from_cache(client, generated):
     node = {"node": "app.core:run_engine"}
     assert client.get("/api/summary", params=node).json() == {"summary": None, "available": True, "reason": None}
@@ -267,7 +367,38 @@ def test_changes_mark_changed_definitions_and_stale_files(changed, git_repo):
         "app.extra": "added",
         "app.models": "modified",
     }
+    assert "LIMIT" not in changed.get("/api/file", params={"path": "src/app/models.py"}).json()["text"]
+    assert "엔진 시작" in changed.get("/api/file", params={"path": "src/app/cli.py"}).json()["text"]
 
 
-def test_changes_outside_git_are_empty(client):
+def test_files_changed_after_analysis_stay_stale_after_commit(changed, git_repo):
+    app = git_repo / "src" / "app"
+    (app / "models.py").write_text("LIMIT = 3\n" + (app / "models.py").read_text())
+    (app / "cli.py").unlink()
+    (app / "core.py").write_text((app / "core.py").read_text())  # 내용은 같고 수정 시각만 바뀐다
+    git(git_repo, "add", "-A")
+    git(git_repo, "commit", "-q", "-m", "분석 뒤 커밋")
+    body = changed.get("/api/changes").json()
+    assert (body["git"], body["branch"]) == (True, "main")
+    assert body["files"] == [
+        {"path": "src/app/cli.py", "status": "unchanged", "stale": True},
+        {"path": "src/app/models.py", "status": "unchanged", "stale": True},
+    ]
+    assert body["nodes"] == {}
+
+
+def test_changes_outside_git_list_only_stale_files(client, module_repo):
     assert client.get("/api/changes").json() == {"git": False, "branch": None, "files": [], "nodes": {}}
+    models = module_repo / "src" / "app" / "models.py"
+    text = models.read_text()
+    try:
+        models.write_text("LIMIT = 3\n" + text)
+        assert client.get("/api/changes").json() == {
+            "git": False,
+            "branch": None,
+            "files": [{"path": "src/app/models.py", "status": "unchanged", "stale": True}],
+            "nodes": {},
+        }
+    finally:
+        models.write_text(text)
+    assert client.get("/api/changes").json()["files"] == []

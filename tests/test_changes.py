@@ -58,7 +58,29 @@ def test_hunks_give_changed_added_and_removed_lines(git_repo):
     edit(git_repo, CORE, "    return engine\n", "    print(handlers)\n    print(config)\n    return engine\n")
     (git_repo / "README.md").write_text("설명\n")
     (git_repo / "src/app/new.py").write_text("x = 1\n")
-    assert hunks(git_repo) == {CORE: [(11, 11), (19, 19), (34, 35)]}
+    assert hunks(git_repo) == {CORE: [(11, 11), (19, 20), (34, 35)]}
+
+
+def test_hunks_of_removed_lines_cover_the_line_before_and_after(git_repo):
+    path = "src/app/cached.py"
+    (git_repo / path).write_text(
+        "import functools\n\n\n"
+        "@functools.cache\ndef first():\n    return 1\n\n\n"
+        "def second():\n    return 2\n\n\n"
+        "def third():\n    return 3\n"
+    )
+    git(git_repo, "add", path)
+    git(git_repo, "commit", "-q", "-m", "더함")
+
+    edit(git_repo, path, "@functools.cache\n", "")
+    assert hunks(git_repo) == {path: [(3, 4)]}  # 4번 줄이 `def first():`다
+
+    edit(git_repo, path, "def second():\n    return 2\n\n\n", "")
+    [_, (before, after)] = hunks(git_repo)[path]
+    assert (before, after) == (7, 8)  # 8번 줄이 `def third():`다
+
+    edit(git_repo, path, "import functools\n", "")
+    assert hunks(git_repo)[path][0] == (1, 1)
 
 
 def test_hunks_skip_deleted_files_and_include_staged_changes(git_repo):

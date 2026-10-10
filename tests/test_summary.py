@@ -200,6 +200,40 @@ async def test_make_runs_two_processes_at_most(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_make_waiting_for_a_slot_is_dropped_when_every_caller_leaves(tmp_path, monkeypatch):
+    made: list[str] = []
+    release = asyncio.Event()
+
+    async def generate(kind, name, code):
+        made.append(code)
+        await release.wait()
+        return f"{code} 요약"
+
+    monkeypatch.setattr(summary, "generate", generate)
+    summaries = Summaries(tmp_path / "summaries.db")
+    running = [asyncio.create_task(summaries.make("function", "f", f"def f{i}(): ...")) for i in range(2)]
+    waiting = [asyncio.create_task(summaries.make("function", "f", "def late(): ...")) for _ in range(2)]
+    await asyncio.sleep(0.01)
+    assert made == ["def f0(): ...", "def f1(): ..."]
+
+    running[0].cancel()
+    waiting[0].cancel()
+    await asyncio.sleep(0.01)
+    assert not waiting[1].done()
+    waiting[1].cancel()
+    await asyncio.sleep(0.01)
+    release.set()
+    assert await running[1] == "def f1(): ... 요약"
+    await asyncio.sleep(0.01)
+    assert made == ["def f0(): ...", "def f1(): ..."]
+    assert summaries.cached("def f0(): ...") == "def f0(): ... 요약"
+    assert summaries.cached("def late(): ...") is None
+
+    assert await summaries.make("function", "f", "def late(): ...") == "def late(): ... 요약"
+    assert len(made) == 3
+
+
+@pytest.mark.asyncio
 async def test_summaries_asks_login_until_available(fake_cli, tmp_path):
     summaries = Summaries(tmp_path / "summaries.db")
     assert await summaries.unavailable() == "Claude Code CLI를 찾지 못했다"

@@ -1,6 +1,8 @@
+import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -30,6 +32,18 @@ def git(repo: Path, *args: str) -> None:
         check=True,
         capture_output=True,
     )
+
+
+def group_ended(pgid: int, within: float = 3.0) -> bool:
+    """프로세스 묶음에 남은 프로세스가 없다. 끝난 프로세스가 거둬질 때까지 `within`초 기다린다."""
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def _commit_fixture(tmp_path: Path) -> Path:

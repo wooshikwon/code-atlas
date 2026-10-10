@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +22,8 @@ from pygls.uris import to_fs_path
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 10.0
+SHUTDOWN_TIMEOUT = 5.0
+STOP_TIMEOUT = 5.0
 READY_TIMEOUT = 60.0
 READY_INTERVAL = 0.5
 
@@ -67,7 +72,10 @@ def _server_command() -> str:
 
 
 class Session:
-    """basedpyright 프로세스 하나의 수명. `async with`로 띄우고 닫는다."""
+    """basedpyright 프로세스 묶음 하나의 수명. `async with`로 띄우고 닫는다.
+
+    `basedpyright-langserver`는 node를 자식으로 띄우므로 새 세션에서 띄워 프로세스 묶음으로 다룬다.
+    """
 
     def __init__(self, root: Path, python: str | None, extra_paths: list[str]):
         self.root = Path(root).resolve()
@@ -122,7 +130,15 @@ class Session:
             client.feature(method)(lambda params: None)
 
     async def __aenter__(self) -> Session:
-        await self.client.start_io(_server_command(), "--stdio", cwd=str(self.root))
+        await self.client.start_io(_server_command(), "--stdio", cwd=str(self.root), start_new_session=True)
+        try:
+            await self._initialize()
+        except BaseException:
+            await self._close(graceful=False)
+            raise
+        return self
+
+    async def _initialize(self) -> None:
         server = self.client._server
         if server is not None and server.stderr is not None:
             self.client._async_tasks.append(asyncio.create_task(self._drain(server.stderr)))
@@ -145,17 +161,36 @@ class Session:
         # 응답에 값이 없으면 LSP 기본값인 UTF-16이다.
         logger.info("basedpyright position encoding: %s", result.capabilities.position_encoding or "utf-16")
         self.client.initialized(types.InitializedParams())
-        return self
 
-    async def __aexit__(self, *exc) -> None:
+    async def __aexit__(self, exc_type, *exc) -> None:
+        await self._close(graceful=exc_type is None)
+
+    async def _close(self, graceful: bool) -> None:
+        """shutdown 요청으로 닫고, 응답이 없거나 `graceful`이 거짓이면 프로세스 묶음을 끝낸다."""
+        server = self.client._server
+        if server is None:
+            return
+        graceful = graceful and not self.stopped
+        if graceful:
+            try:
+                await asyncio.wait_for(self._shutdown(server), SHUTDOWN_TIMEOUT)
+            except Exception:
+                logger.debug("basedpyright shutdown failed", exc_info=True)
+                graceful = False
+        if not graceful:
+            try:
+                os.killpg(server.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         try:
-            await asyncio.wait_for(self.client.shutdown_async(None), 5)
-            self.client.exit(None)
-        except Exception:
-            logger.debug("basedpyright shutdown failed", exc_info=True)
-            if self.client._server is not None and self.client._server.returncode is None:
-                self.client._server.kill()
-        await self.client.stop()
+            await asyncio.wait_for(self.client.stop(), STOP_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning("basedpyright process %s did not stop", server.pid)
+
+    async def _shutdown(self, server: asyncio.subprocess.Process) -> None:
+        await self.client.shutdown_async(None)
+        self.client.exit(None)
+        await server.wait()
 
     @staticmethod
     async def _drain(stream: asyncio.StreamReader) -> None:
@@ -190,21 +225,37 @@ class Session:
             self._lines[path] = lines
         return lines[line - 1] if 0 < line <= len(lines) else ""
 
-    async def definition(self, path: str, line: int, col_utf8: int) -> list[Location]:
+    async def _request(self, method: str, params, timeout: float):
+        """요청을 보내 응답을 기다린다. 시간 안에 응답이 없으면 `$/cancelRequest`를 보내고 `asyncio.TimeoutError`를 낸다."""
+        msg_id = str(uuid.uuid4())
+        response = asyncio.wrap_future(self.client.protocol.send_request(method, params, msg_id=msg_id))
+        # 취소한 요청에 늦게 오는 응답과 오류를 받아 둔다.
+        response.add_done_callback(lambda done: done.cancelled() or done.exception())
+        try:
+            return await asyncio.wait_for(asyncio.shield(response), timeout)
+        except asyncio.TimeoutError:
+            self.client.cancel_request(types.CancelParams(id=msg_id))
+            raise
+
+    async def definition(
+        self, path: str, line: int, col_utf8: int, timeout: float = REQUEST_TIMEOUT
+    ) -> list[Location]:
         """레포 루트 기준 경로의 1부터 세는 줄, UTF-8 바이트 열에서 정의 위치를 묻는다."""
         col_utf16 = to_utf16(self._line(str(self.root / path), line), col_utf8)
         return [
             Location(loc.path, loc.line, to_utf8(self._line(loc.path, loc.line), loc.col))
-            for loc in await self.definition_at(path, line, col_utf16)
+            for loc in await self.definition_at(path, line, col_utf16, timeout)
         ]
 
-    async def definition_at(self, path: str, line: int, col_utf16: int) -> list[Location]:
+    async def definition_at(
+        self, path: str, line: int, col_utf16: int, timeout: float = REQUEST_TIMEOUT
+    ) -> list[Location]:
         """레포 루트 기준 경로의 1부터 세는 줄, UTF-16 열에서 정의 위치를 묻는다. 돌려주는 열도 UTF-16 단위다."""
         params = types.DefinitionParams(
             text_document=types.TextDocumentIdentifier(uri=(self.root / path).as_uri()),
             position=types.Position(line=line - 1, character=col_utf16),
         )
-        result = await asyncio.wait_for(self.client.text_document_definition_async(params), REQUEST_TIMEOUT)
+        result = await self._request(types.TEXT_DOCUMENT_DEFINITION, params, timeout)
         if result is None:
             return []
         items = result if isinstance(result, list) else [result]
@@ -220,13 +271,13 @@ class Session:
             locations.append(Location(target, start.line + 1, start.character))
         return locations
 
-    async def hover(self, path: str, line: int, col_utf16: int) -> Hover | None:
+    async def hover(self, path: str, line: int, col_utf16: int, timeout: float = REQUEST_TIMEOUT) -> Hover | None:
         """레포 루트 기준 경로의 1부터 세는 줄, UTF-16 열에서 hover 내용을 묻는다."""
         params = types.HoverParams(
             text_document=types.TextDocumentIdentifier(uri=(self.root / path).as_uri()),
             position=types.Position(line=line - 1, character=col_utf16),
         )
-        result = await asyncio.wait_for(self.client.text_document_hover_async(params), REQUEST_TIMEOUT)
+        result = await self._request(types.TEXT_DOCUMENT_HOVER, params, timeout)
         if result is None:
             return None
         r = result.range

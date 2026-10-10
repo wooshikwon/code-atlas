@@ -174,6 +174,7 @@ def build(repo: RepoFiles, facts: list[FileFacts], resolution: Resolution, texts
         "call_sites": len(calls),
         "resolved": sum(s.status in ("resolved", "external") for s in calls),
         "unresolved": sum(s.status in ("unresolved", "dynamic") for s in calls),
+        "timed_out": 0,
         "elapsed_ms": 0,
     }
     errors = [{"path": f.file.path, "message": f.error} for f in facts if f.error]
