@@ -41,6 +41,8 @@ export interface AtlasStore {
   load(): void;
   /** 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 같은 id를 다시 고르거나 null을 넘기면 선택을 푼다. */
   select(id: string | null): void;
+  /** 구조 뷰로 돌아가 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 이미 고른 노드여도 선택을 풀지 않는다. */
+  show(id: string): void;
   selectEdge(key: EdgeKey): void;
   /** 폴더를 접거나 펼친다. 고른 노드가 든 폴더를 접으면 선택을 푼다. */
   toggleFolder(id: string): void;
@@ -136,6 +138,13 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     return ids;
   };
 
+  /** 노드를 품은 폴더를 뺀 접은 폴더 집합 */
+  const unfolded = (id: string): Set<string> => {
+    const collapsed = new Set(get().collapsed);
+    ancestors(id).forEach((folder) => collapsed.delete(folder));
+    return collapsed;
+  };
+
   return {
     repo: null,
     graph: null,
@@ -173,9 +182,12 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         visit({ selection: null });
         return;
       }
-      const collapsed = new Set(get().collapsed);
-      ancestors(id).forEach((folder) => collapsed.delete(folder));
-      visit({ selection: { type: "node", id }, collapsed });
+      visit({ selection: { type: "node", id }, collapsed: unfolded(id) });
+    },
+    show: (id) => {
+      if (has(id)) {
+        visit({ view: { kind: "structure" }, selection: { type: "node", id }, collapsed: unfolded(id) });
+      }
     },
     selectEdge: (key) => visit({ selection: { type: "edge", key } }),
     toggleFolder: (id) => {

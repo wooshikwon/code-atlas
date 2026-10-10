@@ -4,8 +4,6 @@ import { opacities, type Flow } from "./flow";
 import type { Tone } from "./view";
 import { lift, nodeIndex, unitOf, within, type Shown } from "./visible";
 
-export { nodeIndex };
-
 export type EdgeKey = string;
 
 /** 화면에 그리는 선 하나. 양 끝을 올려 합친 집계 선은 `agg|…` 키를, 올리지 않은 선은 edge_key를 쓴다. */

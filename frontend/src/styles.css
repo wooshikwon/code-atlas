@@ -245,8 +245,36 @@ ul {
 }
 
 .toolbar-trail {
+  display: flex;
   flex: 1;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.trail-root,
+.trail-gap {
+  color: var(--muted);
+}
+
+.trail-step {
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.trail-step:hover {
+  background: var(--hover-bg);
+}
+
+.trail-view {
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .toolbar-toggle {
@@ -395,7 +423,8 @@ ul {
 .node-aside,
 .node-below,
 .node-inflow,
-.shelf-name {
+.shelf-name,
+.call-file {
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
@@ -569,6 +598,90 @@ ul {
   border: 1px solid var(--muted);
   border-radius: 12px;
   background: color-mix(in srgb, var(--muted) 22%, var(--surface));
+}
+
+/* 함수 시점 뷰 */
+
+.node-call {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.node-call.node-selected {
+  outline: none;
+}
+
+.node-call.node-selected .node-circle {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.node-call[data-side="center"] .node-label {
+  font-weight: 600;
+}
+
+.call-shape {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  overflow: visible;
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.node-call.node-selected .call-shape {
+  stroke: var(--ink);
+  stroke-width: 3;
+}
+
+.call-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.call-name {
+  display: flex;
+  align-items: baseline;
+  height: 18px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.call-file {
+  height: 14px;
+  line-height: 14px;
+}
+
+.call-more {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--muted);
+  border-radius: 3px;
+  color: var(--muted);
+  background: var(--surface);
+  line-height: 13px;
+}
+
+.call-more:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+}
+
+.node-call[data-side="caller"] .call-more {
+  margin-right: 4px;
+}
+
+.node-call[data-side="callee"] .call-more {
+  margin-left: 4px;
 }
 
 /* 이름표는 확대 비율 구간에 따라 숨긴다. 40% 미만은 폴더·파일 이름만, 80% 미만은 클래스·데이터 클래스 이름까지 보인다.
