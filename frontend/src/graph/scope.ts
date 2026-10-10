@@ -42,7 +42,7 @@ function related(nodes: Map<string, AtlasNode>, a: string, b: string): boolean {
 
 /**
  * 그리는 범위 규칙 3의 편재 노드와 그 노드로 선을 보내는 상자 수. 선의 양 끝을 보이는 상자로 올려 세고,
- * 상자 수의 3분의 1 이상에서 선이 들어오는 상자를 고른다. 파일 상자를 펼쳐도 결과가 같다.
+ * 상자 수의 절반 이상에서 선이 들어오는 상자를 고른다. 파일 상자를 펼쳐도 결과가 같다.
  */
 export function ubiquitous(graph: Graph, shown: Shown): Map<string, number> {
   const nodes = nodeIndex(graph);
@@ -58,7 +58,7 @@ export function ubiquitous(graph: Graph, shown: Shown): Map<string, number> {
   const boxes = [...shown.nodes].map((id) => nodes.get(id)!).filter((n) => BOX_KINDS.has(n.kind));
   const expanded = new Set(boxes.map((n) => n.parent));
   const count = boxes.filter((n) => !expanded.has(n.id)).length;
-  return new Map([...sources].filter(([, from]) => from.size * 3 >= count).map(([id, from]) => [id, from.size]));
+  return new Map([...sources].filter(([, from]) => from.size * 2 >= count).map(([id, from]) => [id, from.size]));
 }
 
 function merge(

@@ -12,6 +12,8 @@ export interface AtlasNodeData extends Record<string, unknown> {
   selected: boolean;
   /** 초점 상태에서 흐름에 든 노드다 */
   flow: boolean;
+  /** 선택한 노드가 든 파일 상자 안의 노드다 */
+  local: boolean;
   /** 편재 노드면 숨긴 선의 출발 노드 수 */
   inflow: number | null;
 }
@@ -33,11 +35,12 @@ export function Handles() {
   );
 }
 
-/** 노드 뿌리 요소의 속성. 흐름에 든 노드는 `data-flow`를 받는다. */
+/** 노드 뿌리 요소의 속성. 흐름에 든 노드는 `data-flow`를, 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을 받는다. */
 export function nodeProps(base: string, data: AtlasNodeData) {
   return {
     className: data.selected ? `${base} node-selected` : base,
     "data-flow": data.flow ? "" : undefined,
+    "data-local": data.local ? "" : undefined,
   };
 }
 

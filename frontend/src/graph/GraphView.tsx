@@ -12,7 +12,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
-import type { Graph } from "../api/types";
+import type { AtlasNode, Graph } from "../api/types";
 import { useAtlas } from "../state/store";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
@@ -20,14 +20,14 @@ import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, layout, titleOf, type Layout, type Point } from "./layout";
 import { Legend } from "./Legend";
-import { MOVE_MS, settled, tween } from "./motion";
+import { play, reducedMotion, settled, tween } from "./motion";
 import type { AtlasFlowNode, AtlasNodeData } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
 import { drawn } from "./scope";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { badges, edgeViews, GROUP_NAMES, KIND_NAMES, parentFirst } from "./view";
-import { boundsOf, centerOn, fitPadding, freeRect, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
-import { hidden, nodeIndex, shown, type Shown } from "./visible";
+import { boundsOf, fitOn, fitPadding, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { hidden, lift, nodeIndex, shown, within, type Shown } from "./visible";
 
 /** 선은 자식을 그리는 상자(깊이만큼 0부터)보다 위에, 그 밖의 노드보다 아래에 놓는다. */
 const EDGE_Z = 50;
@@ -59,7 +59,7 @@ interface Item {
   data: AtlasNodeData;
 }
 
-function itemsOf(scene: Scene, functions: Map<string, number>): Item[] {
+function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<string, number>): Item[] {
   const order = parentFirst(scene.graph, scene.shown.nodes);
   const parents = new Set(order.map((n) => n.parent));
   const dim = opacities(scene.graph, scene.flow);
@@ -84,6 +84,7 @@ function itemsOf(scene: Scene, functions: Map<string, number>): Item[] {
         expanded,
         selected: node.id === scene.focus,
         flow: scene.flow !== null && opacity > 0.2,
+        local: scene.flow !== null && node.id !== scene.flow.file && within(nodes, node.id, scene.flow.file),
         inflow: marks.get(node.id) ?? null,
       },
     };
@@ -120,10 +121,6 @@ function shelfCorner(scene: Scene, at: Layout): Point | null {
     return null;
   }
   return { x: Math.min(...boxes.map((b) => b.x)), y: Math.min(...boxes.map((b) => b.y)) };
-}
-
-function reducedMotion(): boolean {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 export function GraphView() {
@@ -234,7 +231,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     if (scene === null || index === null) {
       return;
     }
-    const items = itemsOf(scene, index.functions);
+    const items = itemsOf(scene, index.nodes, index.functions);
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
@@ -246,18 +243,14 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
 
     if (scene.focus !== panned.current) {
       panned.current = scene.focus;
-      const box = scene.focus === null ? undefined : to.boxes.get(scene.focus);
-      const area = root.current?.getBoundingClientRect();
-      if (box !== undefined && area !== undefined) {
-        const panel = document.querySelector(".info-panel")?.getBoundingClientRect();
-        const free = freeRect(
-          { x: 0, y: 0, width: area.width, height: area.height },
-          panel === undefined
-            ? null
-            : { x: panel.left - area.left, y: panel.top - area.top, width: panel.width, height: panel.height },
-        );
-        const scale = getViewport().zoom;
-        void setViewport({ ...centerOn(box, free, scale), zoom: scale }, { duration: still ? 0 : PAN_MS });
+      const anchor = scene.focus === null ? undefined : to.boxes.get(scene.focus);
+      if (anchor !== undefined && scene.flow !== null && root.current !== null) {
+        const boxes = [...scene.flow.out.keys(), ...scene.flow.incoming]
+          .map((id) => lift(index.nodes, scene.shown, id))
+          .map((id) => (id === null ? undefined : to.boxes.get(id)))
+          .filter((box) => box !== undefined);
+        const view = fitOn([anchor, ...boxes], anchor, stageOf(root.current).free, getViewport().zoom);
+        void setViewport(view, { duration: still ? 0 : PAN_MS });
       }
     }
 
@@ -267,19 +260,14 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return;
     }
     const fresh = new Set(items.filter((item) => !from.boxes.has(item.id)).map((item) => item.id));
-    const started = performance.now();
-    let frame = requestAnimationFrame(function step(now: number) {
-      const t = Math.min(1, (now - started) / MOVE_MS);
-      draw(tween(from, to, t), null);
-      if (t < 1) {
-        frame = requestAnimationFrame(step);
-      } else {
-        setMoving(false);
-      }
-    });
     draw(tween(from, to, 0), fresh);
     setMoving(true);
-    return () => cancelAnimationFrame(frame);
+    return play(
+      from,
+      to,
+      (at) => draw(at, null),
+      () => setMoving(false),
+    );
   }, [scene, index, getViewport, setViewport]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;

@@ -1,4 +1,4 @@
-// 고른 노드로 화면을 옮길 좌표와 "화면 맞춤"의 여백을 정한다. 좌표는 관계 그래프 영역의 왼쪽 위를 원점으로 한다.
+// 고른 노드로 화면을 옮길 좌표·확대 비율과 "화면 맞춤"의 여백을 정한다. 좌표는 관계 그래프 영역의 왼쪽 위를 원점으로 한다.
 import type { Rect } from "../state/store";
 import type { Box, Point } from "./layout";
 
@@ -8,6 +8,8 @@ export const PAN_MS = 400;
 /** 확대 비율의 범위 */
 export const ZOOM_MIN = 0.05;
 export const ZOOM_MAX = 4;
+/** 고른 노드로 화면을 옮길 때 확대 비율을 이 값 아래로 줄이지 않는다. */
+export const FOCUS_ZOOM_MIN = 0.4;
 
 const INSET = 20;
 const FIT_MARGIN = 24;
@@ -59,6 +61,18 @@ export function boundsOf(boxes: Iterable<Box>): Box {
     bottom = Math.max(bottom, box.y + box.height);
   }
   return left > right ? { x: 0, y: 0, width: 0, height: 0 } : { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/**
+ * boxes가 모두 free 안에 24px를 두고 들어오는 화면 이동 좌표와 확대 비율. 확대 비율 zoom에서 들어오면 zoom을 그대로 두고
+ * boxes를 free 가운데로 옮기고, 들어오지 않으면 들어올 때까지 줄인다. FOCUS_ZOOM_MIN 아래로는 줄이지 않으며,
+ * 거기서도 들어오지 않으면 anchor를 free 가운데에 둔다.
+ */
+export function fitOn(boxes: Iterable<Box>, anchor: Box, free: Rect, zoom: number): Point & { zoom: number } {
+  const bounds = boundsOf(boxes);
+  const fit = Math.min((free.width - 2 * FIT_MARGIN) / bounds.width, (free.height - 2 * FIT_MARGIN) / bounds.height);
+  const scale = Math.min(zoom, Math.max(fit, FOCUS_ZOOM_MIN));
+  return { ...centerOn(scale <= fit ? bounds : anchor, free, scale), zoom: scale };
 }
 
 /** 관계 그래프 영역과 그 안에서 정보 패널이 가리지 않는 사각형 */

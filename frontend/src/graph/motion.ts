@@ -1,4 +1,4 @@
-// 배치가 바뀔 때 노드를 옮기는 움직임. 두 배치 사이의 중간 배치를 순수 함수로 만든다.
+// 배치가 바뀔 때 노드를 옮기는 움직임. 두 배치 사이의 중간 배치를 순수 함수로 만들고 프레임마다 그리게 한다.
 import type { Layout } from "./layout";
 
 /** 펼치기·접기 움직임의 길이(ms) */
@@ -55,4 +55,27 @@ export function settled(from: Layout, to: Layout): boolean {
     }
   }
   return true;
+}
+
+/** 움직임을 줄이는 시스템 설정이 켜져 있는지 본다. */
+export function reducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/**
+ * from에서 to로 가는 움직임을 MOVE_MS 동안 돌린다. 프레임마다 그 시점의 배치로 draw를 부르고 마지막 프레임 뒤에 done을 부른다.
+ * 돌려주는 함수는 남은 프레임을 취소한다.
+ */
+export function play(from: Layout, to: Layout, draw: (at: Layout) => void, done: () => void): () => void {
+  const started = performance.now();
+  let frame = requestAnimationFrame(function step(now: number) {
+    const t = Math.min(1, (now - started) / MOVE_MS);
+    draw(tween(from, to, t));
+    if (t < 1) {
+      frame = requestAnimationFrame(step);
+    } else {
+      done();
+    }
+  });
+  return () => cancelAnimationFrame(frame);
 }

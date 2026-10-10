@@ -88,7 +88,6 @@ export function InfoPanel() {
   const selection = useAtlas((s) => s.selection);
   const showTests = useAtlas((s) => s.showTests);
   const showExternal = useAtlas((s) => s.showExternal);
-  const { ref, rect, grip } = usePanelRect();
   /** 지점 목록에서 눌러 코드 뷰어에 연 지점과 그때 고른 선. 선택이 바뀌면 쓰지 않는다. */
   const [opened, setOpened] = useState<{ selection: Selection; site: SiteRef } | null>(null);
   const site = opened?.selection === selection ? opened.site : null;
@@ -129,12 +128,24 @@ export function InfoPanel() {
   }
 
   const siteRange = graph !== null && site !== null ? rangeAround(graph, site) : null;
+  /** 코드 뷰어에 열 범위. 파일·폴더를 골랐거나 선의 지점을 누르지 않았으면 null이다. */
+  const code =
+    node !== undefined && !UNITS.has(node.kind) && node.path !== null && node.range !== null
+      ? { path: node.path, range: node.range }
+      : site !== null && siteRange !== null
+        ? { path: site.path, range: siteRange, highlight: site.line }
+        : null;
+  const { ref, rect, fitted, grip } = usePanelRect(code === null);
 
   return (
     <div
       ref={ref}
       className="info-panel"
-      style={rect === null ? undefined : { left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+      style={
+        rect === null
+          ? undefined
+          : { left: rect.x, top: rect.y, width: rect.width, ...(fitted ? { maxHeight: rect.height } : { height: rect.height }) }
+      }
     >
       {rect !== null && item !== null && index !== null && (
         <>
@@ -143,10 +154,7 @@ export function InfoPanel() {
           </div>
           {node !== undefined && SUMMARIZED.has(node.kind) && <Summary kind={node.kind} />}
           {edge !== null && <Sites sites={edge.sites} opened={site} open={(picked) => setOpened({ selection, site: picked })} />}
-          {node !== undefined && !UNITS.has(node.kind) && node.path !== null && node.range !== null && (
-            <CodeView path={node.path} range={node.range} />
-          )}
-          {site !== null && siteRange !== null && <CodeView path={site.path} range={siteRange} highlight={site.line} />}
+          {code !== null && <CodeView {...code} />}
         </>
       )}
       {DIRS.map((dir) => (

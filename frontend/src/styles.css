@@ -685,9 +685,9 @@ ul {
 }
 
 /* 이름표는 확대 비율 구간에 따라 숨긴다. 40% 미만은 폴더·파일 이름만, 80% 미만은 클래스·데이터 클래스 이름까지 보인다.
-   초점 상태에서 흐름에 든 노드의 이름표는 확대 비율과 관계없이 보인다. */
-.graph[data-zoom="0"] :is(.node-class, .node-dataclass, .node-function):not([data-flow]) :is(.node-label, .loc),
-.graph[data-zoom="1"] .node-function:not([data-flow]) :is(.node-label, .loc),
+   초점 상태에서 흐름에 든 노드와 선택한 노드가 든 파일 상자 안의 노드는 이름표가 확대 비율과 관계없이 보인다. */
+.graph[data-zoom="0"] :is(.node-class, .node-dataclass, .node-function):not([data-flow], [data-local]) :is(.node-label, .loc),
+.graph[data-zoom="1"] .node-function:not([data-flow], [data-local]) :is(.node-label, .loc),
 .graph:not([data-zoom="2"]) .node-table-row {
   visibility: hidden;
 }

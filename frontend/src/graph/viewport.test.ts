@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsOf, centerOn, fitPadding, freeRect } from "./viewport";
+import { boundsOf, centerOn, fitOn, fitPadding, freeRect } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -81,5 +81,38 @@ describe("boundsOf", () => {
 
   it("상자가 없으면 크기가 0이다", () => {
     expect(boundsOf([])).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+  });
+});
+
+describe("fitOn", () => {
+  const free = { x: 0, y: 100, width: 1000, height: 800 };
+  const anchor = { x: 100, y: 100, width: 200, height: 20 };
+
+  it("지금 확대 비율에서 모두 들어오면 확대 비율을 두고 묶음을 가운데로 옮긴다", () => {
+    const boxes = [anchor, { x: 500, y: 300, width: 100, height: 100 }];
+    // 묶음은 (100, 100)에서 500×300이고 중심은 (350, 250)이다.
+    expect(fitOn(boxes, anchor, free, 1)).toEqual({ x: 500 - 350, y: 500 - 250, zoom: 1 });
+    expect(fitOn(boxes, anchor, free, 0.3)).toEqual({ x: 500 - 350 * 0.3, y: 500 - 250 * 0.3, zoom: 0.3 });
+  });
+
+  it("들어오지 않으면 24px를 두고 들어올 때까지 확대 비율을 줄인다", () => {
+    const boxes = [anchor, { x: 1100, y: 300, width: 904, height: 100 }];
+    // 묶음은 (100, 100)에서 1904×300이므로 가로 952px에 맞추면 0.5다.
+    expect(fitOn(boxes, anchor, free, 1)).toEqual({ x: 500 - 1052 * 0.5, y: 500 - 250 * 0.5, zoom: 0.5 });
+  });
+
+  it("확대 비율을 키우지 않는다", () => {
+    const view = fitOn([anchor], anchor, free, 0.7);
+    expect(view.zoom).toBe(0.7);
+  });
+
+  it("0.4에서도 들어오지 않으면 0.4에서 anchor를 가운데에 둔다", () => {
+    const boxes = [anchor, { x: 4000, y: 3000, width: 100, height: 100 }];
+    expect(fitOn(boxes, anchor, free, 1)).toEqual({ x: 500 - 200 * 0.4, y: 500 - 110 * 0.4, zoom: 0.4 });
+  });
+
+  it("0.4보다 작은 확대 비율에서 들어오지 않으면 그 확대 비율에서 anchor를 가운데에 둔다", () => {
+    const boxes = [anchor, { x: 9000, y: 3000, width: 100, height: 100 }];
+    expect(fitOn(boxes, anchor, free, 0.2)).toEqual({ x: 500 - 200 * 0.2, y: 500 - 110 * 0.2, zoom: 0.2 });
   });
 });

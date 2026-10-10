@@ -17,7 +17,7 @@ function draw(selection: string | null, collapsed: string[] = [], hover: string 
 describe("ubiquitous", () => {
   const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null });
 
-  it("상자 수의 3분의 1 이상에서 선이 들어오는 상자와 선을 보내는 상자 수를 낸다", () => {
+  it("상자 수의 절반 이상에서 선이 들어오는 상자와 선을 보내는 상자 수를 낸다", () => {
     expect([...ubiquitous(repoFixture, closed)]).toEqual([["common", 4]]);
   });
 
