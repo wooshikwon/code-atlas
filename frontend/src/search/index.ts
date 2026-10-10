@@ -1,7 +1,7 @@
 // 검색 색인. 노드 이름과 경로에서 노드 id를 찾는다. 그래프의 좌표와 배치를 모른다.
 import { Fzf } from "fzf";
 import type { Graph } from "../api/types";
-import { nodeIndex } from "../graph/scope";
+import { nodeIndex } from "../graph/visible";
 import type { History } from "../state/history";
 
 export type EntryKind = "file" | "class" | "dataclass" | "function" | "method";

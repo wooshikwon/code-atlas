@@ -1,6 +1,6 @@
 // 파일트리를 화면에 그리는 행 배열로 편다. 폴더의 열림은 접은 폴더 집합에서, 파일 아래 목록은 선택에서 정한다.
 import type { AtlasNode, Graph, Tree, TreeEntry } from "../api/types";
-import { nodeIndex } from "../graph/scope";
+import { nodeIndex } from "../graph/visible";
 
 export interface TreeState {
   /** 접은 폴더(패키지 노드 id) */

@@ -13,7 +13,9 @@ export function FileTree() {
   const selection = useAtlas((s) => s.selection);
   const collapsed = useAtlas((s) => s.collapsed);
   const showTests = useAtlas((s) => s.showTests);
+  const structure = useAtlas((s) => s.view.kind === "structure");
   const select = useAtlas((s) => s.select);
+  const show = useAtlas((s) => s.show);
   const toggleFolder = useAtlas((s) => s.toggleFolder);
   const selected = selection?.type === "node" ? selection.id : null;
   const list = useMemo(
@@ -40,11 +42,14 @@ export function FileTree() {
     document.getElementById(rowId(active))?.scrollIntoView({ block: "nearest" });
   }, [activeKey]);
 
-  /** 폴더 행은 접거나 펼치고, 파일·클래스·함수 행은 고른다. 패키지 노드가 없는 폴더는 늘 펼쳐 둔다. */
+  /**
+   * 폴더 행은 접거나 펼치고, 파일·클래스·함수 행은 구조 뷰에서 고른다. 구조 뷰에서 고른 행을 다시 누르면 선택을 푼다.
+   * 패키지 노드가 없는 폴더는 늘 펼쳐 둔다.
+   */
   const pick = (row: Row) => {
     setCursor(row.key);
     if (row.node !== null) {
-      (row.kind === "dir" ? toggleFolder : select)(row.node);
+      (row.kind === "dir" ? toggleFolder : row.selected && structure ? select : show)(row.node);
     }
   };
 

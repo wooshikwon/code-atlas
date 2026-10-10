@@ -1,6 +1,10 @@
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
+import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
-import { FIT_PADDING, GraphView } from "./graph/GraphView";
+import { GraphView } from "./graph/GraphView";
+import { fitPadding, stageOf } from "./graph/viewport";
+import { bind } from "./nav/keys";
+import { Trail } from "./nav/Trail";
 import { InfoPanel } from "./panel/InfoPanel";
 import { Palette } from "./search/Palette";
 import { useAtlas, type Depth } from "./state/store";
@@ -22,6 +26,14 @@ function Toolbar() {
   const setTheme = useAtlas((s) => s.setTheme);
   const { fitView } = useReactFlow();
 
+  /** 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. */
+  const fit = () => {
+    const graph = document.querySelector(".graph");
+    if (graph !== null) {
+      void fitView({ padding: fitPadding(stageOf(graph)) });
+    }
+  };
+
   return (
     <div className="toolbar">
       <button className="toolbar-button" onClick={back} disabled={!canBack} title="뒤로" aria-label="뒤로">
@@ -30,7 +42,7 @@ function Toolbar() {
       <button className="toolbar-button" onClick={forward} disabled={!canForward} title="앞으로" aria-label="앞으로">
         →
       </button>
-      <div className="toolbar-trail" />
+      <Trail />
       {stats !== undefined && (
         <span className="toolbar-stats">
           파일 {stats.files} · 노드 {stats.nodes} · 선 {stats.edges} · 호출 확인{" "}
@@ -56,7 +68,7 @@ function Toolbar() {
         <input type="checkbox" checked={showExternal} onChange={toggleExternal} />
         외부 노드
       </label>
-      <button className="toolbar-button" onClick={() => void fitView({ padding: FIT_PADDING })}>
+      <button className="toolbar-button" onClick={fit}>
         화면 맞춤
       </button>
       <button className="toolbar-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
@@ -68,6 +80,23 @@ function Toolbar() {
 
 export function App() {
   const main = useDefaultLayout({ id: "main", storage: localStorage });
+
+  // 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다.
+  useEffect(
+    () =>
+      bind({
+        back: () => useAtlas.getState().back(),
+        forward: () => useAtlas.getState().forward(),
+        escape: () => {
+          const state = useAtlas.getState();
+          if (!state.paletteOpen) {
+            state.select(null);
+          }
+        },
+        palette: () => useAtlas.getState().setPalette(true),
+      }),
+    [],
+  );
 
   return (
     <Group

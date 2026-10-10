@@ -21,7 +21,7 @@ function PaletteBox() {
   const graph = useAtlas((s) => s.graph);
   const showTests = useAtlas((s) => s.showTests);
   const history = useAtlas((s) => s.history);
-  const select = useAtlas((s) => s.select);
+  const show = useAtlas((s) => s.show);
   const setPalette = useAtlas((s) => s.setPalette);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -43,12 +43,9 @@ function PaletteBox() {
     document.getElementById(optionId(active))?.scrollIntoView({ block: "nearest" });
   }, [active, hits]);
 
-  /** 고른 노드로 옮기고 닫는다. 이미 고른 노드면 선택을 그대로 둔다. */
+  /** 구조 뷰에서 고른 노드로 옮기고 닫는다. */
   const choose = (hit: Hit) => {
-    const selection = useAtlas.getState().selection;
-    if (selection?.type !== "node" || selection.id !== hit.entry.id) {
-      select(hit.entry.id);
-    }
+    show(hit.entry.id);
     setPalette(false);
   };
 
@@ -126,22 +123,8 @@ function PaletteBox() {
   );
 }
 
-/** Mod+P·Mod+K로 여는 검색 팔레트. 닫혀 있는 동안에는 단축키만 듣는다. */
+/** 검색 팔레트. 저장소의 paletteOpen이 참인 동안 그린다. */
 export function Palette() {
   const open = useAtlas((s) => s.paletteOpen);
-  const setPalette = useAtlas((s) => s.setPalette);
-
-  useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      if ((event.metaKey || event.ctrlKey) && (key === "p" || key === "k")) {
-        event.preventDefault();
-        setPalette(true);
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [setPalette]);
-
   return open ? <PaletteBox /> : null;
 }

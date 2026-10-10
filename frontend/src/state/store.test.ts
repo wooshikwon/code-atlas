@@ -38,6 +38,37 @@ describe("select", () => {
   });
 });
 
+describe("show", () => {
+  it("함수 시점 뷰에서 구조 뷰로 돌아가 그 노드를 고르고 이력에 한 단계를 넣는다", () => {
+    store().enterFunction(a);
+    store().expandFunction(b);
+    store().show(c);
+    expect(store().view).toEqual({ kind: "structure" });
+    expect(store().selection).toEqual(node(c));
+    expect(store().history).toMatchObject({ index: 3, entries: { length: 4 } });
+    store().back();
+    expect(store().view).toEqual({ kind: "function", center: a, expanded: [b] });
+    expect(store().selection).toEqual(node(a));
+  });
+
+  it("구조 뷰에서 이미 고른 노드면 선택을 유지하고 이력에 넣지 않는다", () => {
+    store().select(a);
+    store().show(a);
+    expect(store().selection).toEqual(node(a));
+    expect(store().history.entries).toHaveLength(2);
+  });
+
+  it("접은 폴더 안의 노드면 그 노드의 조상 폴더를 펼치고, 그래프에 없는 id는 넘긴다", () => {
+    store().toggleFolder(folder);
+    store().show("pkg.mod:Store.save");
+    expect(store().collapsed).toEqual(new Set());
+    expect(store().history.entries).toHaveLength(3);
+    store().show("없는:노드");
+    expect(store().selection).toEqual(node("pkg.mod:Store.save"));
+    expect(store().history.entries).toHaveLength(3);
+  });
+});
+
 describe("접은 폴더와 선택", () => {
   it("접은 폴더 안의 노드를 고르면 그 노드의 조상 폴더를 펼치고 이력에 한 단계만 넣는다", () => {
     store().toggleFolder(folder);

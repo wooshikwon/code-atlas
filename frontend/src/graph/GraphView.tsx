@@ -1,16 +1,20 @@
-// 구조 뷰. 저장소 상태에서 보이는 노드와 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드로 화면을 옮긴다.
+// 관계 그래프. 저장소의 뷰 종류에 따라 구조 뷰나 함수 시점 뷰를 그린다. 구조 뷰는 저장소 상태에서 보이는 노드와
+// 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드로 화면을 옮긴다.
 import {
+  getViewportForBounds,
   ReactFlow,
   useReactFlow,
   useStore,
   ViewportPortal,
   type EdgeMouseHandler,
   type NodeMouseHandler,
+  type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { Graph } from "../api/types";
 import { useAtlas } from "../state/store";
+import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
@@ -22,11 +26,8 @@ import { nodeType, nodeTypes } from "./nodes";
 import { drawn } from "./scope";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { badges, edgeViews, GROUP_NAMES, KIND_NAMES, parentFirst } from "./view";
-import { centerOn, freeRect, PAN_MS } from "./viewport";
+import { boundsOf, centerOn, fitPadding, freeRect, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, nodeIndex, shown, type Shown } from "./visible";
-
-/** "화면 맞춤"의 여백. 오른쪽은 정보 패널의 기본 위치와 폭만큼 비운다. */
-export const FIT_PADDING = { top: "24px", right: "504px", bottom: "24px", left: "24px" } as const;
 
 /** 선은 자식을 그리는 상자(깊이만큼 0부터)보다 위에, 그 밖의 노드보다 아래에 놓는다. */
 const EDGE_Z = 50;
@@ -126,6 +127,17 @@ function reducedMotion(): boolean {
 }
 
 export function GraphView() {
+  const view = useAtlas((s) => s.view);
+  /** 구조 뷰의 화면 위치와 확대 비율. 레포를 열어 화면을 맞추기 전에는 null이다. */
+  const home = useRef<Viewport | null>(null);
+  return view.kind === "function" ? (
+    <CallView center={view.center} expanded={view.expanded} />
+  ) : (
+    <StructureView home={home} />
+  );
+}
+
+function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const graph = useAtlas((s) => s.graph);
   const showTests = useAtlas((s) => s.showTests);
   const showExternal = useAtlas((s) => s.showExternal);
@@ -148,6 +160,8 @@ export function GraphView() {
   /** 마우스를 올린 노드 id */
   const [hover, setHover] = useState<string | null>(null);
 
+  /** 이 컴포넌트를 그리기 시작할 때의 화면 */
+  const [start] = useState(() => home.current ?? undefined);
   const root = useRef<HTMLDivElement | null>(null);
   const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
@@ -195,6 +209,26 @@ export function GraphView() {
       stale = true;
     };
   }, [graph, cols, target]);
+
+  // 레포를 열면 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. 함수 시점 뷰에서 돌아오면 떠날 때의 화면에서 시작한다.
+  useEffect(() => {
+    if (scene === null || home.current !== null || root.current === null) {
+      return;
+    }
+    const stage = stageOf(root.current);
+    const { width, height } = stage.area;
+    const bounds = boundsOf(scene.layout.boxes.values());
+    home.current = getViewportForBounds(bounds, width, height, ZOOM_MIN, ZOOM_MAX, fitPadding(stage));
+    void setViewport(home.current);
+  }, [scene, home, setViewport]);
+  useEffect(
+    () => () => {
+      if (home.current !== null) {
+        home.current = getViewport();
+      }
+    },
+    [home, getViewport],
+  );
 
   useEffect(() => {
     if (scene === null || index === null) {
@@ -263,12 +297,6 @@ export function GraphView() {
       interactionWidth: 12,
     }));
   }, [scene, index, hovered]);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && select(null);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [select]);
 
   /** 접힌 폴더 상자는 펼치고, 함수·메서드 노드는 함수 시점 뷰로 들어간다. */
   const open = (id: string) => {
@@ -372,10 +400,9 @@ export function GraphView() {
         elementsSelectable={false}
         zoomOnDoubleClick={false}
         zIndexMode="manual"
-        fitView
-        fitViewOptions={{ padding: FIT_PADDING }}
-        minZoom={0.05}
-        maxZoom={4}
+        defaultViewport={start}
+        minZoom={ZOOM_MIN}
+        maxZoom={ZOOM_MAX}
         proOptions={{ hideAttribution: true }}
       >
         {shelf !== null && (

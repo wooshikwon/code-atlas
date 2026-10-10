@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centerOn, freeRect } from "./viewport";
+import { boundsOf, centerOn, fitPadding, freeRect } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -51,5 +51,35 @@ describe("centerOn", () => {
     const { x, y } = centerOn({ x: 300, y: 100, width: 1000, height: 200 }, free, 1);
     expect(300 + x).toBe(20);
     expect(100 + 100 + y).toBe(450);
+  });
+});
+
+describe("fitPadding", () => {
+  it("패널이 오른쪽 위에 있으면 오른쪽을 패널 왼쪽 끝까지 비운다", () => {
+    const free = freeRect(area, { x: 912, y: 8, width: 480, height: 420 });
+    expect(fitPadding({ area, free })).toEqual({ top: "24px", right: "512px", bottom: "24px", left: "24px" });
+  });
+
+  it("패널이 왼쪽에 있으면 왼쪽을 패널 오른쪽 끝까지 비운다", () => {
+    const free = freeRect(area, { x: 8, y: 8, width: 400, height: 800 });
+    expect(fitPadding({ area, free })).toEqual({ top: "24px", right: "24px", bottom: "24px", left: "432px" });
+  });
+
+  it("패널이 없으면 네 변을 24px씩 비운다", () => {
+    expect(fitPadding({ area, free: area })).toEqual({ top: "24px", right: "24px", bottom: "24px", left: "24px" });
+  });
+});
+
+describe("boundsOf", () => {
+  it("상자를 모두 품는 사각형을 낸다", () => {
+    const boxes = [
+      { x: 10, y: 40, width: 100, height: 20 },
+      { x: -30, y: 50, width: 20, height: 90 },
+    ];
+    expect(boundsOf(boxes)).toEqual({ x: -30, y: 40, width: 140, height: 100 });
+  });
+
+  it("상자가 없으면 크기가 0이다", () => {
+    expect(boundsOf([])).toEqual({ x: 0, y: 0, width: 0, height: 0 });
   });
 });

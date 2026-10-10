@@ -1,11 +1,16 @@
-// 고른 노드로 화면을 옮길 좌표를 정한다. 좌표는 관계 그래프 영역의 왼쪽 위를 원점으로 한다.
+// 고른 노드로 화면을 옮길 좌표와 "화면 맞춤"의 여백을 정한다. 좌표는 관계 그래프 영역의 왼쪽 위를 원점으로 한다.
 import type { Rect } from "../state/store";
 import type { Box, Point } from "./layout";
 
 /** 화면 이동의 길이(ms) */
 export const PAN_MS = 400;
 
+/** 확대 비율의 범위 */
+export const ZOOM_MIN = 0.05;
+export const ZOOM_MAX = 4;
+
 const INSET = 20;
+const FIT_MARGIN = 24;
 
 /**
  * 관계 그래프 영역에서 정보 패널을 뺀 왼쪽·오른쪽·위·아래 네 사각형 가운데 가장 넓은 사각형.
@@ -39,4 +44,52 @@ export function centerOn(box: Box, free: Rect, zoom: number): Point {
   const along = (start: number, length: number, from: number, room: number) =>
     length * zoom > room ? from + INSET - start * zoom : from + room / 2 - (start + length / 2) * zoom;
   return { x: along(box.x, box.width, free.x, free.width), y: along(box.y, box.height, free.y, free.height) };
+}
+
+/** 상자를 모두 품는 가장 작은 사각형 */
+export function boundsOf(boxes: Iterable<Box>): Box {
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const box of boxes) {
+    left = Math.min(left, box.x);
+    top = Math.min(top, box.y);
+    right = Math.max(right, box.x + box.width);
+    bottom = Math.max(bottom, box.y + box.height);
+  }
+  return left > right ? { x: 0, y: 0, width: 0, height: 0 } : { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/** 관계 그래프 영역과 그 안에서 정보 패널이 가리지 않는 사각형 */
+export interface Stage {
+  area: Rect;
+  free: Rect;
+}
+
+/** "화면 맞춤"의 여백. 그래프를 free 안에 24px를 두고 맞추도록 area의 네 변에서 비울 폭을 낸다. */
+export function fitPadding({ area, free }: Stage) {
+  const px = (n: number) => `${Math.round(n) + FIT_MARGIN}px` as const;
+  return {
+    top: px(free.y - area.y),
+    right: px(area.x + area.width - free.x - free.width),
+    bottom: px(area.y + area.height - free.y - free.height),
+    left: px(free.x - area.x),
+  };
+}
+
+/** 화면에서 관계 그래프 영역 root와 정보 패널의 사각형을 읽는다. */
+export function stageOf(root: Element): Stage {
+  const outer = root.getBoundingClientRect();
+  const panel = document.querySelector(".info-panel")?.getBoundingClientRect();
+  const area = { x: 0, y: 0, width: outer.width, height: outer.height };
+  return {
+    area,
+    free: freeRect(
+      area,
+      panel === undefined
+        ? null
+        : { x: panel.left - outer.left, y: panel.top - outer.top, width: panel.width, height: panel.height },
+    ),
+  };
 }

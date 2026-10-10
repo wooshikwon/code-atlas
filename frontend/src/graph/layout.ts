@@ -482,7 +482,7 @@ export const measureText: Measure = (text, bold = false) => {
 let elk: InstanceType<typeof ELK> | null = null;
 
 /** ELK를 화면 스레드 밖에서 돌린다. elk-api가 요청 id로 응답을 맞춘다. */
-const runElk: RunElk = (input) => {
+export const runElk: RunElk = (input) => {
   elk ??= new ELK({ workerFactory: () => new Worker(elkWorkerUrl) });
   return elk.layout(input);
 };
