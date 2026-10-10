@@ -123,6 +123,25 @@ export interface MadeSummary {
   summary: string;
 }
 
+export type Change = "modified" | "added";
+
+export interface ChangedFile {
+  /** 레포 루트 기준 경로 */
+  path: string;
+  status: Change | "deleted";
+  /** 레포를 열어 분석한 뒤 내용이 바뀌었다 */
+  stale: boolean;
+}
+
+/** 마지막 커밋 뒤에 바뀐 `.py` 파일과 노드. git 저장소가 아니면 git이 거짓이고 나머지는 비어 있다. */
+export interface Changes {
+  git: boolean;
+  branch: string | null;
+  files: ChangedFile[];
+  /** 노드 id → 변경 상태. 분석한 뒤 바뀐 파일은 파일 노드만 담는다. */
+  nodes: Record<string, Change>;
+}
+
 export interface ApiErrorBody {
   error: string;
 }

@@ -1,6 +1,7 @@
-// 정보 패널 머리 줄. 첫 줄에 이름과 종류 칩을, 둘째 줄에 위치와 수치를 적는다.
+// 정보 패널 머리 줄. 첫 줄에 이름과 종류 칩을, 둘째 줄에 위치와 수치, 변경 상태를 적는다.
 import type { AtlasNode, EdgeGroup, EdgeKind, SiteRef } from "../api/types";
 import { EDGE_KIND_NAMES, GROUP_NAMES, KIND_NAMES } from "../graph/view";
+import { CHANGE_NAMES, useChange } from "../state/changes";
 
 /** 고른 선. 집계 선이면 kind가 null이고 kinds에 종류마다 지점 수를 담는다. */
 export interface PickedEdge {
@@ -51,6 +52,7 @@ function whereOf(node: AtlasNode): string | null {
 }
 
 export function Header({ item, nodes }: HeaderProps) {
+  const change = useChange(item.type === "node" ? item.node.id : null);
   let entry = false;
   let name: string;
   let chip: string;
@@ -94,7 +96,17 @@ export function Header({ item, nodes }: HeaderProps) {
         </b>
         <span className="info-panel-chip">{chip}</span>
       </div>
-      <div className="info-panel-facts">{facts.filter((s) => s !== null).join(" · ")}</div>
+      <div className="info-panel-facts">
+        <span className="info-panel-facts-text">
+          {facts.filter((s) => s !== null).join(" · ")}
+          {change !== null && " ·"}
+        </span>
+        {change !== null && (
+          <span className="info-panel-change" data-change={change}>
+            {CHANGE_NAMES[change]}
+          </span>
+        )}
+      </div>
     </>
   );
 }

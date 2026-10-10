@@ -2,6 +2,7 @@ import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { EntryKind } from "../search/index";
 import { Icon } from "./Icon";
 import type { Result } from "./rows";
+import { ChangeMark } from "./TreeNode";
 
 const KIND_NAMES: Record<EntryKind, string> = {
   file: "파일",
@@ -101,7 +102,7 @@ export function TreeResults({ list, active, onPick }: Pick<SearchProps, "list" |
 
   return (
     <ul id="tree-results" className="tree-results" role="listbox">
-      {list.map(({ hit, selected }, index) => (
+      {list.map(({ hit, selected, change }, index) => (
         <li
           key={hit.entry.id}
           id={resultId(index)}
@@ -117,6 +118,7 @@ export function TreeResults({ list, active, onPick }: Pick<SearchProps, "list" |
           <span className="tree-aside">
             {KIND_NAMES[hit.entry.kind]} · {hit.field === "path" ? marked(hit.entry.path, hit.positions) : hit.entry.path}
           </span>
+          <ChangeMark change={change} />
         </li>
       ))}
     </ul>

@@ -46,6 +46,15 @@ ul {
   padding: 0;
 }
 
+/* 변경 표시를 그리는 요소는 data-change로 상태를 받고 --change 색을 쓴다. */
+[data-change="modified"] {
+  --change: var(--changed);
+}
+
+[data-change="added"] {
+  --change: var(--added);
+}
+
 .app {
   height: 100%;
 }
@@ -234,6 +243,48 @@ ul {
   text-align: right;
 }
 
+/* 변경 표시는 행 오른쪽 끝에 색 점과 글자로 붙인다. */
+.tree-change {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tree-change::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--change);
+}
+
+.tree-deleted {
+  margin-top: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.tree-deleted-title {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.tree-deleted-row {
+  height: 22px;
+  padding: 0 8px;
+  overflow: hidden;
+  line-height: 22px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* 검색 팔레트 */
 
 .palette-backdrop {
@@ -333,6 +384,10 @@ ul {
 
 .toolbar-stats {
   color: var(--muted);
+}
+
+.toolbar-stale {
+  white-space: nowrap;
 }
 
 .toolbar-trail {
@@ -809,6 +864,47 @@ ul {
   background: var(--ink);
 }
 
+/* 변경 표시. 파일 상자·데이터 클래스·접힌 폴더는 왼쪽 가장자리 3px 막대를, 함수·메서드는 원의 테두리를,
+   클래스는 육각형의 왼쪽 두 변을 변경 표시 색으로 그린다. 막대는 왼쪽 테두리와 안쪽 그림자를 더한 폭이다. */
+:is(.node-module, .node-dataclass)[data-change] {
+  border-left-color: var(--change);
+  box-shadow: inset 1.5px 0 0 var(--change);
+}
+
+.node-package[data-change] {
+  border-left-color: var(--change);
+  box-shadow: inset 2px 0 0 var(--change);
+}
+
+:is(.node-function, .node-call)[data-change] .node-circle {
+  border-color: var(--change);
+}
+
+.node-call[data-change]:not(.node-selected) .call-shape {
+  stroke: var(--change);
+}
+
+.node-hexagon-change {
+  fill: none;
+  stroke: var(--change);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+
+.change-mark {
+  flex: none;
+  margin-left: 5px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* 글자를 더해도 파일 상자 폭을 넘지 않게 이름표를 줄인다. */
+[data-change] > :is(.node-module-name, .node-module-head) > .node-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 선 */
 
 .edge-hit {
@@ -956,6 +1052,22 @@ ul {
   font-size: 10px;
 }
 
+.legend-change-bar {
+  fill: var(--change);
+}
+
+.legend-change-ring {
+  fill: var(--surface);
+  stroke: var(--change);
+  stroke-width: 1.5;
+}
+
+.legend-change-letter {
+  fill: var(--ink);
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .tooltip {
   position: fixed;
   top: 0;
@@ -1009,13 +1121,36 @@ ul {
 }
 
 .info-panel-facts {
+  display: flex;
+  align-items: baseline;
   margin-top: 3px;
-  overflow: hidden;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
   white-space: nowrap;
+}
+
+.info-panel-facts-text {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.info-panel-change {
+  flex: none;
+  margin-left: 1ch;
+  color: var(--ink);
+}
+
+.info-panel-change::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--change);
+  vertical-align: 1px;
 }
 
 .info-panel-summary {

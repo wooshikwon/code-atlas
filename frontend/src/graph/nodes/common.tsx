@@ -1,6 +1,7 @@
 // 노드 컴포넌트가 함께 쓰는 데이터 형태와 이름표·배지·보이지 않는 연결점.
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import type { AtlasNode } from "../../api/types";
+import type { AtlasNode, Change } from "../../api/types";
+import { CHANGE_LETTERS } from "../../state/changes";
 import { ENTRY_MARK, labelOf } from "../layout";
 
 export interface AtlasNodeData extends Record<string, unknown> {
@@ -35,12 +36,16 @@ export function Handles() {
   );
 }
 
-/** 노드 뿌리 요소의 속성. 흐름에 든 노드는 `data-flow`를, 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을 받는다. */
-export function nodeProps(base: string, data: AtlasNodeData) {
+/**
+ * 노드 뿌리 요소의 속성. 흐름에 든 노드는 `data-flow`를, 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을,
+ * 마지막 커밋 뒤에 바뀐 노드는 `data-change`를 받는다.
+ */
+export function nodeProps(base: string, data: AtlasNodeData, change: Change | null) {
   return {
     className: data.selected ? `${base} node-selected` : base,
     "data-flow": data.flow ? "" : undefined,
     "data-local": data.local ? "" : undefined,
+    "data-change": change ?? undefined,
   };
 }
 
@@ -56,6 +61,11 @@ export function Label({ data, bold = false }: { data: AtlasNodeData; bold?: bool
 /** 이름표 오른쪽의 줄 수 숫자 */
 export function Loc({ data }: { data: AtlasNodeData }) {
   return <span className="loc">{data.node.loc}</span>;
+}
+
+/** 파일 상자의 줄 수 숫자 뒤에 적는 변경 상태 글자 */
+export function Mark({ change }: { change: Change | null }) {
+  return change === null ? null : <span className="change-mark">{CHANGE_LETTERS[change]}</span>;
 }
 
 /** 미확인 호출 수는 오른쪽 위, 모듈 변수 변경은 오른쪽 아래에 단다. */
