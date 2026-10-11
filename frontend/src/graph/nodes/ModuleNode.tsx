@@ -13,31 +13,40 @@ import { Badges, Handles, Inflow, Label, Loc, Mark, nodeProps, sameNode, type At
 export const ModuleNode = memo(function ModuleNode({ data }: NodeProps<AtlasFlowNode>) {
   const count = moduleHeader(data.node, data.functions);
   const change = useChange(data.node.id);
+  const face = data.part === "face";
   if (data.expanded) {
     return (
       <div {...nodeProps("node-module node-module-open", data, change)}>
-        <Handles />
-        <div className="node-module-head">
-          <Label data={data} bold />
-          <Loc data={data} />
-          <Mark change={change} />
-          {count !== "" && <span className="node-aside">{count}</span>}
-        </div>
-        <Inflow data={data} />
+        <Handles data={data} />
+        {face && (
+          <>
+            <div className="node-module-head">
+              <Label data={data} bold />
+              <Loc data={data} />
+              <Mark change={change} />
+              {count !== "" && <span className="node-aside">{count}</span>}
+            </div>
+            <Inflow data={data} />
+          </>
+        )}
       </div>
     );
   }
   return (
     <div {...nodeProps("node-module", data, change)}>
-      <Handles />
-      <div className="node-module-name">
-        <Label data={data} bold />
-        <Loc data={data} />
-        <Mark change={change} />
-      </div>
-      {count !== "" && <span className="node-below">{count}</span>}
-      <Inflow data={data} />
-      <Badges data={data} />
+      <Handles data={data} />
+      {face && (
+        <>
+          <div className="node-module-name">
+            <Label data={data} bold />
+            <Loc data={data} />
+            <Mark change={change} />
+          </div>
+          {count !== "" && <span className="node-below">{count}</span>}
+          <Inflow data={data} />
+          <Badges data={data} />
+        </>
+      )}
     </div>
   );
 }, sameNode);

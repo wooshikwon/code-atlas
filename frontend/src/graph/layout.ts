@@ -50,8 +50,17 @@ export const EXTERNAL_HEIGHT = 24;
 export const ENTRY_MARK = "▶ ";
 const LABEL_MAX = 24;
 const TABLE_ROWS_MAX = 5;
-const CIRCLE_GAP = 6;
-const LOC_GAP = 5;
+/**
+ * 배지는 노드 모양의 오른쪽 위 모서리(미확인 호출 수)와 오른쪽 아래 모서리(모듈 변수 변경)에 단다. 배지의 세로 가운데를
+ * 모양의 위·아래 변에 맞추고 오른쪽 끝을 모양의 오른쪽 끝에서 BADGE_OVERHANG만큼 내보낸다. 글자가 늘면 배지가
+ * 왼쪽으로 넓어지므로 모양 오른쪽으로 나온 폭은 글자 수와 관계없이 같다.
+ */
+export const BADGE_OVERHANG = 6;
+/** 배지의 오른쪽 끝과 이름표 사이에 남기는 폭 */
+export const BADGE_GAP = 3;
+/** 원과 그 오른쪽 이름표 사이의 폭. 배지가 나온 폭과 배지 뒤에 남기는 폭을 더한 값이다. */
+export const CIRCLE_GAP = BADGE_OVERHANG + BADGE_GAP;
+export const LOC_GAP = 5;
 const COUNT_GAP = 12;
 const FOLDER_PAD = 36;
 const STACK_GAP = 48;

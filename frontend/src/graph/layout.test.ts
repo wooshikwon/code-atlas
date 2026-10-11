@@ -7,7 +7,10 @@ import { repoFixture } from "./fixture";
 import { flow } from "./flow";
 import {
   arrange,
+  BADGE_GAP,
+  BADGE_OVERHANG,
   belowRoute,
+  CIRCLE_GAP,
   crossRoute,
   elkGraphs,
   labelOf,
@@ -135,9 +138,10 @@ describe("elkGraphs", () => {
     expect(find(mod, "pkg.mod:Store")?.children?.map((c) => c.id)).toEqual(["pkg.mod:Store.load", "pkg.mod:Store.save"]);
   });
 
-  it("함수·메서드는 원, 이름표, 줄 수 숫자를 담는 폭에 높이 18이다", () => {
+  it("함수·메서드는 원, 배지가 나오는 폭과 그 뒤에 남기는 폭, 이름표, 줄 수 숫자를 담는 폭에 높이 18이다", () => {
     const load = find(opened.components[0], "pkg.mod:Store.load")!;
-    expect(load).toMatchObject({ width: 16 + 6 + measure("load()") + 5 + measure("9"), height: 18 });
+    expect(CIRCLE_GAP).toBe(BADGE_OVERHANG + BADGE_GAP);
+    expect(load).toMatchObject({ width: 16 + BADGE_OVERHANG + BADGE_GAP + measure("load()") + 5 + measure("9"), height: 18 });
   });
 
   it("데이터 클래스는 머리 칸에 줄 수 숫자 폭을 더한 표 크기다", () => {

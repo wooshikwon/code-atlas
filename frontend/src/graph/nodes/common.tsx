@@ -1,11 +1,15 @@
 // 노드 컴포넌트가 함께 쓰는 데이터 형태와 이름표·배지·보이지 않는 연결점.
+// 노드 컴포넌트는 바탕 요소와 글자 요소를 같은 뼈대로 그리고(`layers.ts`), 요소에 따라 테두리·채움이나 글자·배지만 그린다.
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
-import { ENTRY_MARK, labelOf } from "../layout";
+import { faceId, layerOf, type Part } from "../layers";
+import { BADGE_OVERHANG, CIRCLE_GAP, ENTRY_MARK, labelOf, type Box } from "../layout";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
+  /** 이 React Flow 노드가 그리는 요소 */
+  part: Part;
   /** 파일 상자에 적는 함수 수 */
   functions: number;
   /** 안에 보이는 자식 노드가 있다 */
@@ -23,13 +27,62 @@ export interface AtlasNodeData extends Record<string, unknown> {
 
 export type AtlasFlowNode = Node<AtlasNodeData>;
 
+/** 움직이는 동안 바뀌지 않는 노드 하나의 값. data는 요소마다 하나씩 두어 참조를 유지한다. */
+export interface Drawn<D extends AtlasNodeData> {
+  id: string;
+  type: string;
+  opacity: number;
+  /** 아무것도 그리지 않아 마우스를 받지 않는 노드다 */
+  inert: boolean;
+  body: D;
+  /** 글자 요소를 그리지 않는 노드는 null이다 */
+  face: D | null;
+}
+
+/** 노드 종류와 같은 값으로 요소마다의 data를 만든다. */
+export function parts<D extends object>(data: D): Record<Part, D & { part: Part }> {
+  return { body: { ...data, part: "body" }, face: { ...data, part: "face" } };
+}
+
+/**
+ * 노드마다 화면 기준 상자 at에 놓은 React Flow 노드 두 개. 바탕 요소를 모두 앞에, 글자 요소를 모두 뒤에 둔다.
+ * 층은 노드 종류와 요소로만 정한다. 글자 요소는 글자와 배지만 마우스를 받으므로 감싼 요소는 마우스를 받지 않는다.
+ * fresh에 든 노드는 불투명도 0으로 그린다.
+ */
+export function flowNodes<D extends AtlasNodeData>(items: Drawn<D>[], at: Map<string, Box>, fresh: Set<string> | null): Node<D>[] {
+  const node = (item: Drawn<D>, data: D): Node<D> => {
+    const box = at.get(item.id) ?? { x: 0, y: 0, width: 0, height: 0 };
+    const face = data.part === "face";
+    return {
+      id: face ? faceId(item.id) : item.id,
+      type: item.type,
+      position: { x: box.x, y: box.y },
+      width: box.width,
+      height: box.height,
+      zIndex: layerOf(data.node.kind, data.part),
+      draggable: false,
+      connectable: false,
+      focusable: !face,
+      style: {
+        opacity: fresh?.has(item.id) === true ? 0 : item.opacity,
+        pointerEvents: face || item.inert ? "none" : undefined,
+      },
+      data,
+    };
+  };
+  return [...items.map((item) => node(item, item.body)), ...items.flatMap((item) => (item.face === null ? [] : [node(item, item.face)]))];
+}
+
 /** 움직이는 동안에는 위치만 바뀌므로 데이터와 크기가 같으면 노드 본문을 다시 그리지 않는다. */
 export function sameNode(a: NodeProps<AtlasFlowNode>, b: NodeProps<AtlasFlowNode>): boolean {
   return a.data === b.data && a.width === b.width && a.height === b.height;
 }
 
-/** 선은 배치가 정한 경로로 그리므로 연결점은 React Flow가 선을 찾는 데만 쓴다. */
-export function Handles() {
+/** 선은 배치가 정한 경로로 그리므로 연결점은 React Flow가 선을 찾는 데만 쓴다. 바탕 요소에만 둔다. */
+export function Handles({ data }: { data: AtlasNodeData }) {
+  if (data.part === "face") {
+    return null;
+  }
   return (
     <>
       <Handle type="target" position={Position.Left} className="node-handle" isConnectable={false} />
@@ -39,12 +92,12 @@ export function Handles() {
 }
 
 /**
- * 노드 뿌리 요소의 속성. 흐름에 든 노드는 `data-flow`를, 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을,
- * 마지막 커밋 뒤에 바뀐 노드는 `data-change`를 받는다.
+ * 노드 뿌리 요소의 속성. 바탕 요소는 `node-body`, 글자 요소는 `node-face`를 받는다. 흐름에 든 노드는 `data-flow`를,
+ * 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을, 마지막 커밋 뒤에 바뀐 노드는 `data-change`를 받는다.
  */
 export function nodeProps(base: string, data: AtlasNodeData, change: Change | null) {
   return {
-    className: data.selected ? `${base} node-selected` : base,
+    className: `${base} node-${data.part}${data.selected ? " node-selected" : ""}`,
     "data-flow": data.flow ? "" : undefined,
     "data-local": data.local ? "" : undefined,
     "data-change": change ?? undefined,
@@ -79,13 +132,37 @@ export function Mark({ change }: { change: Change | null }) {
   return change === null ? null : <span className="change-mark">{CHANGE_LETTERS[change]}</span>;
 }
 
-/** 미확인 호출 수는 오른쪽 위, 모듈 변수 변경은 오른쪽 아래에 단다. */
+/**
+ * 감싼 모양의 오른쪽 위 모서리에 미확인 호출 수를, 오른쪽 아래 모서리에 모듈 변수 변경을 단다. 글자 요소에만 그린다.
+ * 배지의 오른쪽 끝은 모양의 오른쪽 끝에서 `BADGE_OVERHANG`만큼 나간다.
+ */
 export function Badges({ data }: { data: AtlasNodeData }) {
+  if (data.part === "body") {
+    return null;
+  }
+  const style = { right: -BADGE_OVERHANG };
   return (
     <>
-      {data.unresolved > 0 && <span className="badge badge-unresolved">?{data.unresolved}</span>}
-      {data.node.global_write && <span className="badge badge-global">g</span>}
+      {data.unresolved > 0 && (
+        <span className="badge badge-unresolved" style={style}>
+          ?{data.unresolved}
+        </span>
+      )}
+      {data.node.global_write && (
+        <span className="badge badge-global" style={style}>
+          g
+        </span>
+      )}
     </>
+  );
+}
+
+/** 함수·메서드의 지름 16px 원. 바탕 요소가 테두리와 채움을, 글자 요소가 배지와 선택 고리를 그린다. */
+export function Circle({ data }: { data: AtlasNodeData }) {
+  return (
+    <span className="node-circle" style={{ marginRight: CIRCLE_GAP }}>
+      <Badges data={data} />
+    </span>
   );
 }
 

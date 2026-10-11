@@ -13,16 +13,20 @@ export const PackageNode = memo(function PackageNode({ data }: NodeProps<AtlasFl
   if (data.expanded) {
     return (
       <div className="node-package-open">
-        <Handles />
+        <Handles data={data} />
       </div>
     );
   }
   return (
     <div {...nodeProps("node-package", data, change)}>
-      <Handles />
-      <Label data={data} bold />
-      <Inflow data={data} />
-      <Badges data={data} />
+      <Handles data={data} />
+      {data.part === "face" && (
+        <>
+          <Label data={data} bold />
+          <Inflow data={data} />
+          <Badges data={data} />
+        </>
+      )}
     </div>
   );
 }, sameNode);

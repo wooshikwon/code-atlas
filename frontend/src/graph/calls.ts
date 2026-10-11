@@ -1,7 +1,7 @@
 // 함수 시점 뷰에 그릴 노드와 실행 선을 정하고 ELK 입력을 만든다. 파일 상자와 열 배정을 쓰지 않는다.
 import type { ElkNode } from "elkjs/lib/elk-api";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
-import { CIRCLE, ENTRY_MARK, labelOf, LEAF_HEIGHT, titleOf, type Layout, type Measure, type Size } from "./layout";
+import { CIRCLE, CIRCLE_GAP, ENTRY_MARK, labelOf, LEAF_HEIGHT, LOC_GAP, titleOf, type Layout, type Measure, type Size } from "./layout";
 import { edgeKey } from "./scope";
 import type { EdgeView } from "./view";
 import { unitOf } from "./visible";
@@ -23,8 +23,6 @@ const FILE_HEIGHT = 14;
 /** + 버튼의 한 변 */
 const MORE = 16;
 const MORE_GAP = 4;
-const CIRCLE_GAP = 6;
-const LOC_GAP = 5;
 
 const CALL_OPTIONS = {
   "elk.algorithm": "layered",

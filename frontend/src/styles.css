@@ -7,6 +7,13 @@
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
+  /* 그래프 밖 요소의 겹침 순서. 그래프 안 요소의 층은 graph/layers.ts가 정한다. */
+  --z-panel-grip: 2;
+  --z-overlay: 5;
+  --z-menu: 20;
+  --z-palette: 50;
+  --z-tooltip: 60;
+
   font-family: var(--font-ui);
   font-size: 13px;
   line-height: 1.4;
@@ -290,7 +297,7 @@ ul {
 .palette-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--z-palette);
 }
 
 .palette {
@@ -595,7 +602,7 @@ ul {
 
 .code-note {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-menu);
   padding: 2px 6px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -667,17 +674,25 @@ ul {
   visibility: hidden;
 }
 
+/* 노드 하나는 바탕 요소(.node-body)와 글자 요소(.node-face)로 그린다. 두 요소는 같은 종류 클래스로 크기와 안쪽 배치를 함께 쓰고,
+   바탕 요소가 테두리와 채움을, 글자 요소가 이름표·줄 수 숫자·배지·선택 고리를 그린다. 두 요소의 층은 graph/layers.ts가 정한다. */
 .node-package,
 .node-module,
 .node-class,
 .node-dataclass,
 .node-function,
-.node-external {
+.node-external,
+.node-call {
   position: relative;
   width: 100%;
   height: 100%;
   color: var(--ink);
   cursor: pointer;
+}
+
+/* 글자 요소는 글자와 배지, 펼친 파일 상자의 머리 줄만 마우스를 받는다. */
+.node-face :is(.node-label, .loc, .change-mark, .badge, .node-aside, .node-below, .node-inflow, .node-field, .node-module-head, .call-file, .call-more) {
+  pointer-events: auto;
 }
 
 .node-header {
@@ -719,17 +734,36 @@ ul {
   white-space: nowrap;
 }
 
-.node-selected {
+/* 선택 고리는 글자 요소가 그린다. 상자는 테두리 바깥에, 함수는 원 바깥에 두르고 클래스는 육각형 테두리를 굵게 그린다. */
+.node-face.node-selected {
   outline: 3px solid var(--ink);
   outline-offset: 2px;
+}
+
+.node-face:is(.node-class, .node-function, .node-call).node-selected {
+  outline: none;
+}
+
+.node-face.node-selected .node-circle {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.node-face.node-selected :is(.node-hexagon polygon, .call-shape) {
+  stroke: var(--ink);
+  stroke-width: 3;
 }
 
 .node-package {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--muted);
+  border: 1px solid transparent;
   border-radius: 8px;
+}
+
+.node-body.node-package {
+  border-color: var(--muted);
 }
 
 .node-package-open {
@@ -738,8 +772,12 @@ ul {
 }
 
 .node-module {
-  border: 1.5px solid var(--muted);
+  border: 1.5px solid transparent;
   border-radius: 4px;
+}
+
+.node-body.node-module {
+  border-color: var(--muted);
   background: color-mix(in srgb, var(--ink) 4%, var(--surface));
 }
 
@@ -801,7 +839,6 @@ ul {
 }
 
 .node-class .node-header {
-  position: relative;
   justify-content: center;
   height: 100%;
   padding: 0 14px;
@@ -821,39 +858,47 @@ ul {
 }
 
 .node-hexagon polygon {
+  fill: none;
+  stroke: none;
+}
+
+.node-body .node-hexagon polygon {
   fill: var(--surface);
   stroke: var(--muted);
   stroke-width: 1.5;
 }
 
-.node-class.node-selected {
-  outline: none;
-}
-
-.node-class.node-selected polygon {
-  stroke: var(--ink);
-  stroke-width: 3;
-}
-
 .node-dataclass {
-  border: 1.5px solid var(--muted);
+  border: 1.5px solid transparent;
   border-radius: 2px;
+}
+
+.node-body.node-dataclass {
+  border-color: var(--muted);
   background: var(--surface);
 }
 
 .node-table-head {
   padding: 0 8px;
   line-height: 22px;
-  border-bottom: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid transparent;
   white-space: nowrap;
 }
 
 .node-table-row {
   padding: 0 8px;
   line-height: 18px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid transparent;
   white-space: nowrap;
   font-size: 11px;
+}
+
+.node-body .node-table-head {
+  border-bottom-color: var(--muted);
+}
+
+.node-body .node-table-row {
+  border-bottom-color: var(--line);
 }
 
 .node-function {
@@ -861,54 +906,39 @@ ul {
   align-items: center;
 }
 
-.node-function.node-selected {
-  outline: none;
-}
-
+/* 원과 이름표 사이의 폭은 layout.ts의 CIRCLE_GAP을 컴포넌트가 넣는다. */
 .node-circle {
   position: relative;
   flex: none;
   width: 16px;
   height: 16px;
-  margin-right: 6px;
-  border: 1.5px solid var(--muted);
+  border: 1.5px solid transparent;
   border-radius: 50%;
-  background: var(--surface);
 }
 
-.node-function.node-selected .node-circle {
-  outline: 3px solid var(--ink);
-  outline-offset: 2px;
+.node-body .node-circle {
+  border-color: var(--muted);
+  background: var(--surface);
 }
 
 .node-external {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid var(--muted);
+  border: 1.5px solid transparent;
   border-radius: 12px;
+}
+
+.node-body.node-external {
+  border-color: var(--muted);
   background: color-mix(in srgb, var(--muted) 22%, var(--surface));
 }
 
 /* 함수 시점 뷰 */
 
 .node-call {
-  position: relative;
   display: flex;
   align-items: center;
-  width: 100%;
-  height: 100%;
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.node-call.node-selected {
-  outline: none;
-}
-
-.node-call.node-selected .node-circle {
-  outline: 3px solid var(--ink);
-  outline-offset: 2px;
 }
 
 .node-call[data-side="center"] .node-label {
@@ -919,16 +949,15 @@ ul {
   flex: none;
   width: 16px;
   height: 16px;
-  margin-right: 6px;
   overflow: visible;
-  fill: var(--surface);
-  stroke: var(--muted);
+  fill: none;
+  stroke: none;
   stroke-width: 1.5;
 }
 
-.node-call.node-selected .call-shape {
-  stroke: var(--ink);
-  stroke-width: 3;
+.node-body .call-shape {
+  fill: var(--surface);
+  stroke: var(--muted);
 }
 
 .call-text {
@@ -949,10 +978,14 @@ ul {
   line-height: 14px;
 }
 
-.call-more {
+.call-more,
+.call-more-slot {
   flex: none;
   width: 16px;
   height: 16px;
+}
+
+.call-more {
   padding: 0;
   border: 1px solid var(--muted);
   border-radius: 3px;
@@ -966,11 +999,11 @@ ul {
   background: color-mix(in srgb, var(--ink) 6%, var(--surface));
 }
 
-.node-call[data-side="caller"] .call-more {
+.node-call[data-side="caller"] :is(.call-more, .call-more-slot) {
   margin-right: 4px;
 }
 
-.node-call[data-side="callee"] .call-more {
+.node-call[data-side="callee"] :is(.call-more, .call-more-slot) {
   margin-left: 4px;
 }
 
@@ -982,6 +1015,7 @@ ul {
   visibility: hidden;
 }
 
+/* 배지는 감싼 모양의 오른쪽 위·아래 모서리에 세로 가운데를 맞춘다. 오른쪽으로 나가는 폭은 layout.ts의 BADGE_OVERHANG을 컴포넌트가 넣는다. */
 .badge {
   position: absolute;
   min-width: 14px;
@@ -996,35 +1030,33 @@ ul {
 
 .badge-unresolved {
   top: -7px;
-  right: -9px;
   color: var(--surface);
   background: var(--muted);
 }
 
 .badge-global {
-  bottom: -6px;
-  right: -7px;
+  bottom: -7px;
   color: var(--surface);
   background: var(--ink);
 }
 
 /* 변경 표시. 파일 상자·데이터 클래스·접힌 폴더는 왼쪽 가장자리 3px 막대를, 함수·메서드는 원의 테두리를,
    클래스는 육각형의 왼쪽 두 변을 변경 표시 색으로 그린다. 막대는 왼쪽 테두리와 안쪽 그림자를 더한 폭이다. */
-:is(.node-module, .node-dataclass)[data-change] {
+.node-body:is(.node-module, .node-dataclass)[data-change] {
   border-left-color: var(--change);
   box-shadow: inset 1.5px 0 0 var(--change);
 }
 
-.node-package[data-change] {
+.node-body.node-package[data-change] {
   border-left-color: var(--change);
   box-shadow: inset 2px 0 0 var(--change);
 }
 
-:is(.node-function, .node-call)[data-change] .node-circle {
+.node-body:is(.node-function, .node-call)[data-change] .node-circle {
   border-color: var(--change);
 }
 
-.node-call[data-change]:not(.node-selected) .call-shape {
+.node-body.node-call[data-change] .call-shape {
   stroke: var(--change);
 }
 
@@ -1116,7 +1148,7 @@ ul {
 .legend,
 .info-panel {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-overlay);
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--panel-bg);
@@ -1133,7 +1165,7 @@ ul {
 
 .legend-button {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-overlay);
   bottom: 12px;
   left: 12px;
   width: 34px;
@@ -1215,7 +1247,7 @@ ul {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 60;
+  z-index: var(--z-tooltip);
   padding: 3px 8px;
   border-radius: 4px;
   color: var(--surface);
@@ -1415,7 +1447,7 @@ ul {
 
 .info-panel-resize {
   position: absolute;
-  z-index: 2;
+  z-index: var(--z-panel-grip);
   touch-action: none;
 }
 
