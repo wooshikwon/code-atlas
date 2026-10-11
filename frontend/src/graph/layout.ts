@@ -74,6 +74,9 @@ export type RouteEnd = keyof typeof END_NAMES;
 export const END_GAP = 6;
 export const END_PAD = 6;
 const COUNT_GAP = 12;
+/** 펼친 파일 상자의 머리 줄에서 줄 수 뒤에 적는 변경 상태 글자 앞의 폭과 그 글자 가운데 넓은 쪽 */
+const CHANGE_GAP = 5;
+const CHANGE_MARK = "M";
 const FOLDER_PAD = 36;
 /** 펼친 폴더 영역에서 폴더 경로를 적는 머리 줄의 높이 */
 export const REGION_HEAD = 28;
@@ -232,12 +235,15 @@ function leafSize(node: AtlasNode, measure: Measure, marks: Marks): Size {
   }
 }
 
-/** 자식을 그리는 노드의 안쪽 여백과 최소 크기. 펼친 폴더 영역은 머리 줄에 폴더 경로만 적는다. */
+/**
+ * 자식을 그리는 노드의 안쪽 여백과 최소 크기. 펼친 폴더 영역은 머리 줄에 폴더 경로만 적는다. 펼친 파일 상자는 변경 상태 글자의 폭을
+ * 변경 표시가 없을 때도 잡아 두어, 변경 표시가 생기거나 사라져도 배치가 바뀌지 않는다.
+ */
 function boxOptions(node: AtlasNode, functions: number, measure: Measure, marks: Marks): Record<string, string> {
   let top = node.kind === "package" ? REGION_HEAD : HEADER;
   let minWidth = labelWidth(node, measure, true, node.kind === "module", marks) + 2 * PAD;
   if (node.kind === "module") {
-    minWidth += COUNT_GAP + measure(moduleHeader(node, functions));
+    minWidth += CHANGE_GAP + measure(CHANGE_MARK, true) + COUNT_GAP + measure(moduleHeader(node, functions));
   }
   if (node.kind === "dataclass") {
     const table = tableSize(node, measure, marks);
