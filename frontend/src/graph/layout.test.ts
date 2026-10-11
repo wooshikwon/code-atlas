@@ -11,7 +11,6 @@ import {
   BADGE_OVERHANG,
   belowRoute,
   CIRCLE_GAP,
-  crossRoute,
   elkGraphs,
   labelOf,
   sideRoute,
@@ -94,13 +93,14 @@ describe("labelOf", () => {
     expect(labelOf(nodes.get("pkg.mod:Store")!)).toBe("Store");
   });
 
-  it("24자를 넘는 경로는 앞쪽 폴더부터 …/로 줄이고, 줄인 폴더가 없는 경로와 그 밖의 이름표는 24자에서 자른다", () => {
-    expect(labelOf(node("billing.adapters.stripe_gateway", "module", "stripe_gateway"))).toBe("…/stripe_gateway.py");
-    expect(labelOf(node("services.billing.adapters", "package", "adapters"))).toBe("…/billing/adapters/");
-    expect(labelOf(node("a.test_arbiter_lifecycle_extra", "module", "x"))).toBe("…/test_arbiter_lifecycl…");
-    expect(labelOf(node("test_arbiter_lifecycle_extra", "module", "x"))).toBe("test_arbiter_lifecycle_…");
-    expect(labelOf(node("m:f", "function", "_rebuild_note_sections_all"))).toBe("_rebuild_note_sections_…");
-    expect(titleOf(node("m:f", "function", "_rebuild_note_sections_all"))).toBe("_rebuild_note_sections_all()");
+  it("36자를 넘는 경로는 앞쪽 폴더부터 …/로 줄이고, 줄인 폴더가 없는 경로와 그 밖의 이름표는 36자에서 자른다", () => {
+    expect(labelOf(node("services.billing.adapters.stripe_gateway", "module", "stripe_gateway"))).toBe("…/billing/adapters/stripe_gateway.py");
+    expect(labelOf(node("services.billing.adapters.gateways.stripe", "package", "stripe"))).toBe("…/billing/adapters/gateways/stripe/");
+    expect(labelOf(node("mdp.cli._logging_bootstrap", "module", "_logging_bootstrap"))).toBe("mdp/cli/_logging_bootstrap.py");
+    expect(labelOf(node("a.test_arbiter_lifecycle_extra_long_cases", "module", "x"))).toBe("…/test_arbiter_lifecycle_extra_long…");
+    expect(labelOf(node("test_arbiter_lifecycle_extra_long_cases", "module", "x"))).toBe("test_arbiter_lifecycle_extra_long_c…");
+    expect(labelOf(node("m:f", "function", "_rebuild_note_sections_for_every_week"))).toBe("_rebuild_note_sections_for_every_we…");
+    expect(titleOf(node("m:f", "function", "_rebuild_note_sections_for_every_week"))).toBe("_rebuild_note_sections_for_every_week()");
   });
 });
 
@@ -118,9 +118,9 @@ describe("elkGraphs", () => {
     expect(closed.shelf.map((n) => n.id)).toEqual(["scratch"]);
   });
 
-  it("접힌 파일 상자는 220×40이고 함수 수 글자를 상자 아래 이름표로 넘긴다", () => {
+  it("접힌 파일 상자는 320×40이고 함수 수 글자를 상자 아래 이름표로 넘긴다", () => {
     const main = find(closed.components[0], "main")!;
-    expect(main).toMatchObject({ width: 220, height: 40, labels: [{ text: "함수 2개", height: 16 }] });
+    expect(main).toMatchObject({ width: 320, height: 40, labels: [{ text: "함수 2개", height: 16 }] });
     expect(main.children).toBeUndefined();
   });
 
@@ -159,13 +159,6 @@ describe("elkGraphs", () => {
     const mod = find(opened.components[0], "pkg.mod")!;
     expect(mod.edges?.map((e) => e.id).sort()).toEqual(["agg|pkg.mod:Store|pkg.mod:Row", "agg|pkg.mod:Store|pkg.mod:parse"]);
     expect(find(mod, "pkg.mod:Store")?.edges?.map((e) => e.id)).toEqual(["pkg.mod:Store.load|pkg.mod:Store.save|call"]);
-  });
-
-  it("진입점 단위 사이 선을 side에 담는다", () => {
-    expect(closed.side).toEqual([
-      { key: "main|cli|import", source: "main", target: "cli" },
-      { key: "agg|cli|main", source: "cli", target: "main" },
-    ]);
   });
 
   it("파일 상자를 펼쳐도 최상위 선과 partition이 같다", () => {
@@ -229,7 +222,7 @@ describe("arrange", async () => {
       const bottom = Math.max(...units.map((id) => result.boxes.get(id)!.y + result.boxes.get(id)!.height));
       expect(result.boxes.get("scratch")!.y).toBeGreaterThanOrEqual(bottom + 64);
     }
-    expect(closed.sizes.get("scratch")).toEqual({ width: 220, height: 40 });
+    expect(closed.sizes.get("scratch")).toEqual({ width: 320, height: 40 });
   });
 
   it("선반 단위를 펼치면 그 안의 노드를 배치한다", async () => {
@@ -275,12 +268,9 @@ describe("arrange", async () => {
     }
   });
 
-  it("진입점 단위 사이 선은 두 상자 왼쪽으로 나가는 경로를 받는다", () => {
-    const route = closed.routes.get("agg|cli|main")!;
-    const cli = closed.boxes.get("cli")!;
-    const main = closed.boxes.get("main")!;
-    expect(route).toEqual(sideRoute(cli, main));
-    expect(route[1].x).toBe(cli.x - 12);
+  it("진입점 단위 사이 선에는 경로를 내지 않는다", () => {
+    expect(closed.routes.has("agg|cli|main")).toBe(false);
+    expect(closed.routes.has("main|cli|import")).toBe(false);
   });
 
   it("연결 묶음을 노드가 많은 묶음부터 48px 간격으로 쌓는다", async () => {
@@ -302,27 +292,10 @@ describe("arrange", async () => {
   });
 });
 
-describe("crossRoute, belowRoute, sideRoute", () => {
+describe("belowRoute, sideRoute", () => {
   const a = { x: 0, y: 0, width: 40, height: 20 };
   const right = { x: 100, y: 50, width: 40, height: 20 };
   const under = { x: 10, y: 80, width: 40, height: 20 };
-
-  it("가로로 떨어진 두 노드는 마주 보는 옆면을 잇는다", () => {
-    for (const [s, t] of [
-      [a, right],
-      [right, a],
-    ]) {
-      const route = crossRoute(s, t);
-      expect(onBorder(route[0], s) && onBorder(route.at(-1)!, t)).toBe(true);
-      expect(route[0].y).toBe(s.y + s.height / 2);
-    }
-  });
-
-  it("가로로 겹치는 두 노드는 윗면·아랫면을 잇는다", () => {
-    const route = crossRoute(a, under);
-    expect(route[0]).toEqual({ x: 20, y: 20 });
-    expect(route.at(-1)).toEqual({ x: 30, y: 80 });
-  });
 
   it("함수 안 import는 두 노드 아래로 돌아간다", () => {
     const route = belowRoute(a, right);
@@ -331,12 +304,30 @@ describe("crossRoute, belowRoute, sideRoute", () => {
     expect(route.at(-1)).toEqual({ x: 120, y: 70 });
   });
 
-  it("진입점 단위 사이 선은 두 노드 왼쪽 12px 밖으로 돌아간다", () => {
+  it("도착 상자가 오른쪽에 있으면 출발 상자의 오른쪽 변에서 나와 도착 상자 12px 앞에서 꺾어 왼쪽 변으로 들어간다", () => {
+    expect(sideRoute(a, right)).toEqual([
+      { x: 40, y: 10 },
+      { x: 88, y: 10 },
+      { x: 88, y: 60 },
+      { x: 100, y: 60 },
+    ]);
+  });
+
+  it("도착 상자가 왼쪽에 있으면 출발 상자의 왼쪽 변에서 나와 도착 상자의 오른쪽 변으로 들어간다", () => {
+    expect(sideRoute(right, a)).toEqual([
+      { x: 100, y: 60 },
+      { x: 52, y: 60 },
+      { x: 52, y: 10 },
+      { x: 40, y: 10 },
+    ]);
+  });
+
+  it("가로로 겹치는 두 상자는 두 상자의 오른쪽 12px 밖으로 돌아 도착 상자의 오른쪽 변으로 들어간다", () => {
     expect(sideRoute(a, under)).toEqual([
-      { x: 0, y: 10 },
-      { x: -12, y: 10 },
-      { x: -12, y: 90 },
-      { x: 10, y: 90 },
+      { x: 40, y: 10 },
+      { x: 62, y: 10 },
+      { x: 62, y: 90 },
+      { x: 50, y: 90 },
     ]);
   });
 });

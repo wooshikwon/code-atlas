@@ -175,6 +175,75 @@ const edgesOf = (page) =>
     }),
   );
 
+/** 선마다 경로의 시작점·끝점(그래프 좌표), 선 굵기, 층, 마우스를 올린 선인지 */
+const linesOf = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].map((edge) => {
+      const line = edge.querySelector(".edge-line");
+      const total = line.getTotalLength();
+      const [start, end] = [line.getPointAtLength(0), line.getPointAtLength(total)];
+      return {
+        key: edge.dataset.key,
+        start: { x: start.x, y: start.y },
+        end: { x: end.x, y: end.y },
+        width: parseFloat(getComputedStyle(line).strokeWidth),
+        glow: getComputedStyle(line).filter !== "none",
+        layer: getComputedStyle(edge.closest("svg")).zIndex,
+        pointed: edge.hasAttribute("data-pointed"),
+        tone: edge.classList.contains("tone-strong") ? "strong" : "muted",
+        opacity: Number(getComputedStyle(edge).opacity),
+      };
+    }),
+  );
+
+/** 노드마다 그래프 좌표의 상자 */
+const flowBoxes = (page) =>
+  page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll(".react-flow__node")]
+        .filter((wrapper) => !wrapper.dataset.id.endsWith("#face"))
+        .map((wrapper) => {
+          const [x, y] = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(wrapper.style.transform).slice(1).map(Number);
+          return [wrapper.dataset.id, { x, y, width: parseFloat(wrapper.style.width), height: parseFloat(wrapper.style.height) }];
+        }),
+    ),
+  );
+
+/**
+ * 선 위에서 맨 위 요소가 그 선인 화면 좌표. 경로를 따라 8px마다 찾고, 관계 그래프 영역 밖과 정보 패널 아래는 건너뛴다.
+ * 없으면 null이다.
+ */
+const edgePoint = (page, key) =>
+  page.evaluate((want) => {
+    const edge = [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].find((e) => e.dataset.key === want);
+    const line = edge?.querySelector(".edge-line");
+    if (line == null) {
+      return null;
+    }
+    const matrix = line.getScreenCTM();
+    const total = line.getTotalLength();
+    for (let step = 0; step <= total / 2; step += 8) {
+      for (const length of [total / 2 - step, total / 2 + step]) {
+        const point = new DOMPoint(line.getPointAtLength(length).x, line.getPointAtLength(length).y).matrixTransform(matrix);
+        if (document.elementFromPoint(point.x, point.y)?.closest(".edge") === edge) {
+          return { x: point.x, y: point.y };
+        }
+      }
+    }
+    return null;
+  }, key);
+
+/** lines 가운데 누를 점이 있는 첫 선과 그 점. 다른 선의 누름 영역에 모두 덮인 선은 건너뛴다. 없으면 null이다. */
+async function hittable(page, lines) {
+  for (const line of lines) {
+    const at = await edgePoint(page, line.key);
+    if (at !== null) {
+      return { line, at };
+    }
+  }
+  return null;
+}
+
 /** 선의 진하기 세 단계마다 그린 선 수 */
 function toneLevels(edges) {
   const ink = edges.filter((e) => e.tone === "strong").length;
@@ -329,8 +398,8 @@ async function open(t, page) {
   const files = graph.nodes.filter((n) => n.kind === "module" && !n.test).length;
   const all = await boxes(page);
   t.check(
-    `파일 상자 ${files}개가 모두 220×40이다`,
-    all.length === files && all.every((b) => near(b.width, 220, 0.5) && near(b.height, 40, 0.5)),
+    `파일 상자 ${files}개가 모두 320×40이다`,
+    all.length === files && all.every((b) => near(b.width, 320, 0.5) && near(b.height, 40, 0.5)),
     `${all.length}개, 크기 ${[...new Set(all.map((b) => `${Math.round(b.width)}×${Math.round(b.height)}`))].join("·")}`,
   );
   const [arbiter, batch] = [all.find((b) => b.id === "arbiter"), all.find((b) => b.id === "note_batch")];
@@ -649,6 +718,113 @@ async function hover(t, page) {
   t.check("Mod+클릭 뒤 선택이 note_common:extract_today_items로 바뀐다", (await selectedOf(page)) === "note_common:extract_today_items", `${await selectedOf(page)}`);
 }
 
+async function edge(t, page) {
+  await load(page);
+  const graph = await api("/api/graph");
+  const entries = new Set(graph.nodes.filter((n) => n.entry && n.kind === "module" && !n.test).map((n) => n.id));
+  const [lines, at] = [await linesOf(page), await flowBoxes(page)];
+  const ends = (line) => {
+    const parts = line.key.split("|");
+    return parts[0] === "agg" ? [parts[1], parts[2]] : [parts[0], parts[1]];
+  };
+  const leaving = lines.filter((line) => entries.has(ends(line)[0]));
+  const onRight = leaving.filter((line) => near(line.start.x, at[ends(line)[0]].x + at[ends(line)[0]].width));
+  t.check(
+    `진입점 파일 ${entries.size}개에서 나가는 선이 모두 그 상자의 오른쪽 변에서 나온다`,
+    leaving.length > 0 && onRight.length === leaving.length,
+    `나가는 선 ${leaving.length}개 가운데 오른쪽 변 ${onRight.length}개`,
+  );
+  const forward = lines.filter((line) => {
+    const [source, target] = ends(line).map((id) => at[id]);
+    return source.x + source.width < target.x;
+  });
+  const sided = forward.filter((line) => {
+    const [source, target] = ends(line).map((id) => at[id]);
+    return near(line.start.x, source.x + source.width) && near(line.end.x, target.x);
+  });
+  t.check(
+    "도착 상자가 오른쪽 열에 있는 선은 출발 상자의 오른쪽 변에서 나와 도착 상자의 왼쪽 변으로 들어간다",
+    forward.length > 0 && sided.length === forward.length,
+    `오른쪽 열로 가는 선 ${forward.length}개 가운데 ${sided.length}개`,
+  );
+  const weights = await page.evaluate((texts) => {
+    const touching = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const letters = [...document.querySelectorAll(`.node-face :is(${texts})`)].map((element) => element.getBoundingClientRect());
+    const all = [...document.querySelectorAll(".edge-weight")].map((element) => element.getBoundingClientRect());
+    return { all: all.length, covered: all.filter((rect) => letters.some((letter) => touching(rect, letter))).length };
+  }, TEXTS);
+  t.check("집계 선의 숫자가 노드의 글자·배지와 겹치지 않는다", weights.all > 0 && weights.covered === 0, `숫자 ${weights.all}개 가운데 겹친 숫자 ${weights.covered}개`);
+
+  // 마우스를 올린 선
+  const { line: first, at: spot } = await hittable(page, [...leaving.filter((line) => !entries.has(ends(line)[1])), ...lines]);
+  await page.mouse.move(spot.x, spot.y);
+  await page.waitForSelector(".edge[data-pointed]", { timeout: 5_000 }).catch(() => {});
+  const over = (await linesOf(page)).find((line) => line.key === first.key);
+  const rest = (await linesOf(page)).filter((line) => line.key !== first.key);
+  t.check(
+    "선에 마우스를 올리면 그 선만 굵어지고 빛을 두르며 본문 잉크로 다른 선 위의 층에 그려진다",
+    over.pointed && over.width > first.width && over.glow && over.tone === "strong" && over.opacity === 1 && over.layer === "4" &&
+      rest.every((line) => !line.pointed && line.layer === "3" && !line.glow),
+    `굵기 ${first.width} → ${over.width}, 층 ${first.layer} → ${over.layer}, 진하기 ${first.tone} → ${over.tone}`,
+  );
+  await t.shot();
+  await page.mouse.move(spot.x, spot.y - 40);
+  await page.waitForFunction(() => document.querySelector(".edge[data-pointed]") === null, null, { timeout: 5_000 }).catch(() => {});
+  const back = (await linesOf(page)).find((line) => line.key === first.key);
+  t.check("마우스를 떼면 굵기와 층이 돌아온다", !back.pointed && back.width === first.width && back.layer === "3", `굵기 ${back.width}, 층 ${back.layer}`);
+
+  // 선 클릭
+  const target = ends(first)[1];
+  await page.mouse.click(spot.x, spot.y);
+  await waitSelected(page, target).catch(() => {});
+  t.check("선을 누르면 도착 노드가 선택되고 정보 패널이 그 노드를 적는다", (await selectedOf(page)) === target && (await count(page, ".info-panel-sites")) === 0, `선택 ${await selectedOf(page)}`);
+  const again = await hittable(page, (await linesOf(page)).filter((line) => ends(line)[1] === target));
+  if (again === null) {
+    t.skip("고른 노드로 들어오는 선을 눌러도 선택이 풀리지 않는다", "화면에 누를 선이 없다");
+  } else {
+    await page.mouse.click(again.at.x, again.at.y);
+    await settle(page);
+    t.check("고른 노드로 들어오는 선을 눌러도 선택이 풀리지 않는다", (await selectedOf(page)) === target, `선택 ${await selectedOf(page)}`);
+  }
+  const { at: where } = await hittable(page, (await linesOf(page)).filter((line) => line.key.startsWith("agg|")));
+  const chosen = await selectedOf(page);
+  await page.keyboard.down("Shift");
+  await page.mouse.click(where.x, where.y);
+  await page.keyboard.up("Shift");
+  await page.waitForSelector(".info-panel-sites", { timeout: 10_000 }).catch(() => {});
+  const head = await headOf(page);
+  t.check(
+    "Shift를 누른 채 선을 누르면 정보 패널이 그 선의 코드 줄 목록을 열고 고른 노드의 초점은 그대로다",
+    (await count(page, ".info-panel-site")) > 0 && head.includes("→") && (await selectedOf(page)) === chosen,
+    `${head.replaceAll("\n", " / ").slice(0, 80)}, 코드 줄 ${await count(page, ".info-panel-site")}개`,
+  );
+
+  // 함수 시점 뷰
+  await page.click(`.tree-row.tree-file[data-node="${FILE}"]`);
+  await waitSelected(page, FILE);
+  await clickNode(page, FUNCTION, 2);
+  await page.waitForSelector(".node-call", { timeout: 30_000 });
+  await settle(page);
+  const calls = await linesOf(page);
+  const { line: call, at: point } = await hittable(page, [...calls.filter((line) => ends(line)[0] === FUNCTION), ...calls]);
+  await page.mouse.move(point.x, point.y);
+  await page.waitForSelector(".edge[data-pointed]", { timeout: 5_000 }).catch(() => {});
+  const pointedCall = (await linesOf(page)).find((line) => line.key === call.key);
+  t.check(
+    "함수 시점 뷰에서도 마우스를 올린 선이 굵어지고 다른 선 위의 층에 그려진다",
+    pointedCall.pointed && pointedCall.width > call.width && pointedCall.layer === "4",
+    `굵기 ${call.width} → ${pointedCall.width}, 층 ${pointedCall.layer}`,
+  );
+  await page.mouse.click(point.x, point.y);
+  await waitSelected(page, ends(call)[1]).catch(() => {});
+  t.check(
+    "함수 시점 뷰에서 선을 누르면 도착 함수가 선택되고 가운데 함수는 그대로다",
+    (await selectedOf(page)) === ends(call)[1] &&
+      (await page.evaluate(() => document.querySelector('.node-call[data-side="center"]')?.closest(".react-flow__node")?.dataset.id)) === FUNCTION,
+    `선택 ${await selectedOf(page)}`,
+  );
+}
+
 async function folder(t, page) {
   await load(page);
   const inside = (id) => id === "parser" || id.startsWith("parser.");
@@ -811,8 +987,8 @@ async function labels(t, page) {
   );
   t.check("클래스 노드가 든 화면을 하나 이상 확인했다", total.classes > 0, `클래스 노드 ${total.classes}개`);
   t.check(
-    "상자, 클래스, 선, 함수 원, 글자의 z-index가 1, 2, 3, 4, 5다",
-    same(layers, ["1", "2", "3", "4", "5"]),
+    "상자, 클래스, 선, 함수 원, 글자의 z-index가 1, 2, 3, 5, 6이다",
+    same(layers, ["1", "2", "3", "5", "6"]),
     JSON.stringify(layers),
   );
 }
@@ -1017,7 +1193,18 @@ async function zoomKeep(t, page) {
   const raised = await zoomOf(page);
   t.check("휠로 0.5까지 줄인 뒤 함수를 고르면 확대 비율이 0.8이 된다", near(small, 0.5, 0.01) && near(raised, NAMED_ZOOM, 0.001), `${small.toFixed(3)} → ${raised.toFixed(3)}`);
   const large = await zoomTo(page, 1.2);
-  await pick(page, "arbiter:_strip_wikilinks");
+  // 이름표 가운데가 화면에 보이는 다른 함수를 고른다.
+  const other = await page.evaluate(() => {
+    for (const label of document.querySelectorAll(".node-face.node-function .node-label")) {
+      const wrapper = label.closest(".react-flow__node");
+      const rect = label.getBoundingClientRect();
+      if (wrapper.querySelector(".node-selected") === null && wrapper.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))) {
+        return wrapper.dataset.id.replace(/#face$/, "");
+      }
+    }
+    return null;
+  });
+  await pick(page, other);
   const kept = await zoomOf(page);
   t.check("1.2로 키운 뒤 다른 함수를 고르면 확대 비율이 그대로다", near(large, 1.2, 0.01) && near(kept, large, 0.001), `${large.toFixed(3)} → ${kept.toFixed(3)}`);
 }
@@ -1495,6 +1682,7 @@ const SCENARIOS = [
   ["body", body],
   ["panel", panel],
   ["hover", hover],
+  ["edge", edge],
   ["folder", folder],
   ["folder-select", folderSelect],
   ["init-file", initFile],

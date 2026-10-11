@@ -1,7 +1,7 @@
 // 그릴 선과 배치를 합쳐 노드와 선 컴포넌트가 그대로 그리는 값을 만든다.
 import type { AtlasNode, EdgeGroup, Graph } from "../api/types";
 import { siblings } from "./columns";
-import { belowRoute, crossRoute, type Box, type Layout, type Point } from "./layout";
+import { BADGE_HEIGHT, BADGE_OVERHANG, belowRoute, CAPTION_HEIGHT, HEADER, sideRoute, type Box, type Layout, type Point } from "./layout";
 import { aggKey, type DrawnEdge, type EdgeKey, type Tone } from "./scope";
 
 export type EdgeView = {
@@ -12,8 +12,8 @@ export type EdgeView = {
   points: Point[];
   tone: Tone;
   opacity: number;
-  /** 무게 2 이상인 집계 선만 숫자 이름표를 단다. */
-  weight: number | null;
+  /** 무게 2 이상인 집계 선만 숫자 이름표를 단다. at은 숫자의 가운데 점이다. */
+  weight: { count: number; at: Point } | null;
   /** 합친 선의 sites 수 합 */
   sites: number;
 };
@@ -71,7 +71,7 @@ function alongRoute(trunk: Point[], source: Box | null, target: Box | null): Poi
 /**
  * 그릴 선마다 경로를 정한다. 배치가 낸 경로를 먼저 쓴다. 없으면 함수 안 import만 합친 선은 `belowRoute`로,
  * 형제가 아닌 두 노드를 잇는 선은 두 노드를 형제로 올린 상자 사이의 배치 경로를 따라가는 경로로 만들고,
- * 따라갈 경로가 없으면 `crossRoute`로 만든다. 배치에 양 끝 상자가 없는 선은 뺀다.
+ * 따라갈 경로가 없으면 `sideRoute`로 만든다. 배치에 양 끝 상자가 없는 선은 뺀다.
  */
 export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string, AtlasNode>): EdgeView[] {
   const route = (edge: DrawnEdge, source: Box, target: Box): Point[] => {
@@ -88,9 +88,10 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       ends === null || trunk === undefined
         ? null
         : alongRoute(trunk, ends[0] === edge.source ? null : source, ends[1] === edge.target ? null : target);
-    return along ?? crossRoute(source, target);
+    return along ?? sideRoute(source, target);
   };
 
+  const lettered = letteredBoxes(layout, nodes);
   const views: EdgeView[] = [];
   for (const edge of edges) {
     const source = layout.boxes.get(edge.source);
@@ -98,15 +99,17 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
     if (source === undefined || target === undefined) {
       continue;
     }
+    const points = route(edge, source, target);
+    const counted = edge.key.startsWith("agg|") && edge.weight >= 2;
     views.push({
       key: edge.key,
       source: edge.source,
       target: edge.target,
       group: edge.group,
-      points: route(edge, source, target),
+      points,
       tone: edge.tone,
       opacity: edge.opacity,
-      weight: edge.key.startsWith("agg|") && edge.weight >= 2 ? edge.weight : null,
+      weight: counted ? { count: edge.weight, at: weightPoint(points, String(edge.weight).length, lettered) } : null,
       sites: edge.weight,
     });
   }
@@ -132,10 +135,9 @@ export function roundedPath(points: Point[], radius = 4): string {
   return `${d} L${last.x},${last.y}`;
 }
 
-/** 경로 길이의 절반이 되는 점. 집계 선 숫자 이름표를 여기 단다. */
-export function midpoint(points: Point[]): Point {
-  const total = points.slice(1).reduce((sum, p, i) => sum + distance(points[i], p), 0);
-  let left = total / 2;
+/** 경로를 따라 시작점에서 length만큼 간 점 */
+function along(points: Point[], offset: number): Point {
+  let left = offset;
   for (let i = 1; i < points.length; i++) {
     const length = distance(points[i - 1], points[i]);
     if (length >= left && length > 0) {
@@ -143,7 +145,63 @@ export function midpoint(points: Point[]): Point {
     }
     left -= length;
   }
-  return points[0] ?? { x: 0, y: 0 };
+  return points.at(-1) ?? { x: 0, y: 0 };
+}
+
+function lengthOf(points: Point[]): number {
+  return points.slice(1).reduce((sum, p, i) => sum + distance(points[i], p), 0);
+}
+
+/** 경로 길이의 절반이 되는 점 */
+export function midpoint(points: Point[]): Point {
+  return along(points, lengthOf(points) / 2);
+}
+
+/**
+ * 글자를 그리는 칸. 자식을 그리지 않는 노드는 상자에 배지가 나가는 폭을 더한 칸이고 접힌 파일 상자는 상자 아래
+ * 함수 수 글자까지 더한다. 자식을 그리는 파일 상자·클래스 노드는 머리 줄만이다.
+ */
+export function letteredBoxes(layout: Layout, nodes: Map<string, AtlasNode>): Box[] {
+  const parents = new Set([...layout.boxes.keys()].map((id) => nodes.get(id)?.parent));
+  const result: Box[] = [];
+  for (const [id, box] of layout.boxes) {
+    const kind = nodes.get(id)?.kind;
+    if (!parents.has(id)) {
+      result.push({
+        x: box.x,
+        y: box.y - BADGE_HEIGHT / 2,
+        width: box.width + BADGE_OVERHANG,
+        height: box.height + (kind === "module" ? Math.max(CAPTION_HEIGHT, BADGE_HEIGHT / 2) : BADGE_HEIGHT / 2) + BADGE_HEIGHT / 2,
+      });
+    } else if (kind !== "package") {
+      result.push({ ...box, height: HEADER });
+    }
+  }
+  return result;
+}
+
+const DIGIT_WIDTH = 7;
+const WEIGHT_HEIGHT = 14;
+const WEIGHT_STEP = 4;
+
+/**
+ * 집계 선 숫자 이름표의 가운데 점. 경로 길이의 절반이 되는 점에서 시작해 경로를 따라 양쪽으로 4px씩 옮기며
+ * digits 자리 숫자가 lettered의 어느 칸에도 닿지 않는 첫 점을 고른다. 그런 점이 없으면 절반이 되는 점이다.
+ */
+export function weightPoint(points: Point[], digits: number, lettered: Box[]): Point {
+  const total = lengthOf(points);
+  const half = { x: (digits * DIGIT_WIDTH) / 2 + 2, y: WEIGHT_HEIGHT / 2 };
+  const free = (at: Point) =>
+    !lettered.some((b) => at.x + half.x > b.x && at.x - half.x < b.x + b.width && at.y + half.y > b.y && at.y - half.y < b.y + b.height);
+  for (let shift = 0; shift <= total / 2; shift += WEIGHT_STEP) {
+    for (const length of shift === 0 ? [total / 2] : [total / 2 - shift, total / 2 + shift]) {
+      const at = along(points, length);
+      if (free(at)) {
+        return at;
+      }
+    }
+  }
+  return midpoint(points);
 }
 
 function distance(a: Point, b: Point): number {

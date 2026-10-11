@@ -13,15 +13,15 @@ import type { AtlasNode } from "../api/types";
 import type { History } from "../state/history";
 import { useAtlas } from "../state/store";
 import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
-import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
+import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
-import { LAYER } from "./layers";
 import { Legend } from "./Legend";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { flowNodes, parts, type Drawn } from "./nodes/common";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { GROUP_NAMES, KIND_NAMES } from "./names";
+import type { EdgeKey } from "./scope";
 import { boundsOf, fitPadding, FRAME_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, nodeIndex } from "./visible";
 
@@ -72,6 +72,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const [nodes, setNodes] = useState<CallFlowNode[]>([]);
   const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 마우스를 올린 선 */
+  const [pointed, setPointed] = useState<EdgeKey | null>(null);
 
   const root = useRef<HTMLDivElement | null>(null);
   const tip = useRef<TooltipHandle | null>(null);
@@ -144,15 +146,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     if (scene === null) {
       return [];
     }
-    return callEdges(scene.calls, scene.center, scene.layout).map((view) => ({
-      id: view.key,
-      source: view.source,
-      target: view.target,
-      type: "orthogonal",
-      data: view,
-      zIndex: LAYER.edge,
-    }));
-  }, [scene]);
+    return flowEdges(callEdges(scene.calls, scene.center, scene.layout), pointed);
+  }, [scene, pointed]);
 
   /**
    * 연달아 누른 두 번째 클릭이면 처음 누른 함수·메서드를 가운데로 옮기고 참을 돌려준다. 가운데 함수면 첫 클릭 전으로
@@ -189,13 +184,27 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     clicked.current = null;
     select(null);
   };
-  const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => selectEdge(edge.id);
+  /** 선을 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 선을 골라 정보 패널에 지점 목록을 연다. */
+  const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
+    tip.current?.hide();
+    setPointed(null);
+    if (repeated(event)) {
+      return;
+    }
+    clicked.current = null;
+    if (event.shiftKey) {
+      selectEdge(edge.id);
+    } else if (edge.data !== undefined && edge.data.target !== selected) {
+      select(edge.data.target);
+    }
+  };
 
   const onNodeEnter: NodeMouseHandler<CallFlowNode> = (event, node) => {
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
     tip.current?.show(`${title} · ${KIND_NAMES[node.data.node.kind]}`, event.clientX, event.clientY);
   };
   const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
+    setPointed(edge.id);
     const name = (id: string) => {
       const node = index?.get(id);
       return node === undefined || index === null ? id : callTitle(index, node);
@@ -207,6 +216,10 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   };
   const onMove = (event: ReactMouseEvent) => tip.current?.move(event.clientX, event.clientY);
   const onLeave = () => tip.current?.hide();
+  const onEdgeLeave = () => {
+    setPointed(null);
+    tip.current?.hide();
+  };
 
   if (scene === null) {
     return (
@@ -231,7 +244,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
         onEdgeClick={onEdgeClick}
         onEdgeMouseEnter={onEdgeEnter}
         onEdgeMouseMove={onMove}
-        onEdgeMouseLeave={onLeave}
+        onEdgeMouseLeave={onEdgeLeave}
         onPaneClick={onPaneClick}
         nodesDraggable={false}
         nodesConnectable={false}

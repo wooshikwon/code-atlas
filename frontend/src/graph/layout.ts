@@ -35,12 +35,12 @@ export type Measure = (text: string, bold?: boolean) => number;
 export type RunElk = (graph: ElkNode) => Promise<ElkNode>;
 
 const FONT = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
-const HEADER = 32;
+export const HEADER = 32;
 const PAD = 16;
 export const TABLE_HEAD = 24;
 export const TABLE_ROW = 18;
 const HEX_HEIGHT = 28;
-export const MODULE_WIDTH = 220;
+export const MODULE_WIDTH = 320;
 export const MODULE_HEIGHT = 40;
 /** 접힌 파일 상자 아래에 적는 함수 수 글자의 높이 */
 export const CAPTION_HEIGHT = 16;
@@ -48,7 +48,7 @@ export const CIRCLE = 16;
 export const LEAF_HEIGHT = 18;
 export const EXTERNAL_HEIGHT = 24;
 export const ENTRY_MARK = "▶ ";
-const LABEL_MAX = 24;
+const LABEL_MAX = 36;
 const TABLE_ROWS_MAX = 5;
 /**
  * 배지는 노드 모양의 오른쪽 위 모서리(미확인 호출 수)와 오른쪽 아래 모서리(모듈 변수 변경)에 단다. 배지의 세로 가운데를
@@ -56,6 +56,8 @@ const TABLE_ROWS_MAX = 5;
  * 왼쪽으로 넓어지므로 모양 오른쪽으로 나온 폭은 글자 수와 관계없이 같다.
  */
 export const BADGE_OVERHANG = 6;
+/** 배지의 높이. 배지는 모양의 위·아래 변에서 이 높이의 절반만큼 나간다. */
+export const BADGE_HEIGHT = 14;
 /** 배지의 오른쪽 끝과 이름표 사이에 남기는 폭 */
 export const BADGE_GAP = 3;
 /** 원과 그 오른쪽 이름표 사이의 폭. 배지가 나온 폭과 배지 뒤에 남기는 폭을 더한 값이다. */
@@ -89,7 +91,7 @@ function cut(text: string): string {
   return text.length > LABEL_MAX ? `${text.slice(0, LABEL_MAX - 1)}…` : text;
 }
 
-/** 24자를 넘는 경로를 앞쪽 폴더부터 `…/`로 줄인다. 줄인 폴더가 없으면 `…/`를 붙이지 않는다. 폴더 경로는 `/`로 끝난다. */
+/** 36자를 넘는 경로를 앞쪽 폴더부터 `…/`로 줄인다. 줄인 폴더가 없으면 `…/`를 붙이지 않는다. 폴더 경로는 `/`로 끝난다. */
 function shortPath(path: string): string {
   if (path.length <= LABEL_MAX) {
     return path;
@@ -118,7 +120,7 @@ export function titleOf(node: AtlasNode): string {
   }
 }
 
-/** 노드에 그리는 이름표. 24자에서 자르고, 경로는 앞쪽 폴더부터 줄여 파일 이름을 남긴다. */
+/** 노드에 그리는 이름표. 36자에서 자르고, 경로는 앞쪽 폴더부터 줄여 파일 이름을 남긴다. */
 export function labelOf(node: AtlasNode): string {
   const title = titleOf(node);
   return node.kind === "package" || node.kind === "module" ? shortPath(title) : cut(title);
@@ -222,16 +224,15 @@ export interface ElkInput {
   components: ElkNode[];
   /** 선반 단위마다 ELK 노드 하나. 펼친 단위만 children을 가진다. */
   shelf: ElkNode[];
-  /** ELK에 넣지 않고 `sideRoute`로 잇는 진입점 단위 사이 선 */
-  side: Link[];
 }
 
 /**
  * 선의 양 끝을 보이는 노드로 올린 뒤 같은 부모 아래 형제가 될 때까지 다시 올려 형제 쌍마다 모은다.
  * 올린 선이 하나라도 있는 쌍은 집계 선 하나가, 그 밖의 쌍은 원래 선마다 하나가 된다.
- * 진입점 단위 사이의 쌍은 side에, 나머지 쌍은 함수 안 import를 빼고 부모 노드 id 아래에 담는다.
+ * 함수 안 import만 있는 쌍을 빼고 부모 노드 id 아래에 담는다. 진입점 단위 사이의 쌍은 두 단위가 같은 열0에 놓이므로
+ * 담지 않고, 그 선은 `edgeViews`가 `sideRoute`로 잇는다.
  */
-function links(graph: Graph, shown: Shown): { inside: Map<string | null, Link[]>; side: Link[] } {
+function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
   const nodes = nodeIndex(graph);
   const entries = entryUnits(graph, shown.hidden);
   const pairs = new Map<string, { source: string; target: string; edges: AtlasEdge[]; lifted: boolean }>();
@@ -250,22 +251,16 @@ function links(graph: Graph, shown: Shown): { inside: Map<string | null, Link[]>
   }
 
   const inside = new Map<string | null, Link[]>();
-  const side: Link[] = [];
   for (const { source, target, edges, lifted } of pairs.values()) {
-    const between = entries.has(source) && entries.has(target);
-    const used = between ? edges : edges.filter((e) => !e.deferred);
-    if (used.length === 0) {
+    const used = edges.filter((e) => !e.deferred);
+    if (used.length === 0 || (entries.has(source) && entries.has(target))) {
       continue;
     }
     const found = (lifted ? [aggKey(source, target)] : used.map(edgeKey)).map((key) => ({ key, source, target }));
-    if (between) {
-      side.push(...found);
-    } else {
-      const parent = nodes.get(source)!.parent;
-      inside.set(parent, [...(inside.get(parent) ?? []), ...found]);
-    }
+    const parent = nodes.get(source)!.parent;
+    inside.set(parent, [...(inside.get(parent) ?? []), ...found]);
   }
-  return { inside, side };
+  return inside;
 }
 
 /**
@@ -284,7 +279,7 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
     list.sort((a, b) => columns.order.get(a.id)! - columns.order.get(b.id)!);
   }
 
-  const { inside, side } = links(graph, shown);
+  const inside = links(graph, shown);
   const edgesOf = (parent: string | null, members?: Set<string>): ElkExtendedEdge[] =>
     (inside.get(parent) ?? [])
       .filter((link) => members === undefined || members.has(link.source))
@@ -325,7 +320,6 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
       edges: edgesOf(null, new Set(ids)),
     })),
     shelf: columns.shelf.map((id) => build(nodes.get(id)!)),
-    side,
   };
 }
 
@@ -409,47 +403,10 @@ export async function arrange(input: ElkInput, run: RunElk): Promise<Layout> {
     x += Math.ceil((box.width! + GRID_GAP) / cell) * cell;
     row = Math.max(row, (box.labels ?? []).reduce((sum, label) => sum + (label.height ?? 0), box.height!));
   }
-
-  for (const { key, source, target } of input.side) {
-    result.routes.set(key, sideRoute(result.boxes.get(source)!, result.boxes.get(target)!));
-  }
   return result;
 }
 
 const ROUTE_GAP = 12;
-
-/**
- * ELK가 경로를 내지 않은 파일 경계 너머 선의 직각 경로. 가로로 떨어져 있으면 마주 보는 옆면을 가로-세로-가로로 잇고,
- * 가로로 겹치면 마주 보는 윗면·아랫면을 세로-가로-세로로 잇는다.
- */
-export function crossRoute(source: Box, target: Box): Point[] {
-  const sy = source.y + source.height / 2;
-  const ty = target.y + target.height / 2;
-  if (source.x + source.width <= target.x || target.x + target.width <= source.x) {
-    const forward = source.x + source.width <= target.x;
-    const sx = forward ? source.x + source.width : source.x;
-    const tx = forward ? target.x : target.x + target.width;
-    const mid = (sx + tx) / 2;
-    return [
-      { x: sx, y: sy },
-      { x: mid, y: sy },
-      { x: mid, y: ty },
-      { x: tx, y: ty },
-    ];
-  }
-  const sx = source.x + source.width / 2;
-  const tx = target.x + target.width / 2;
-  const down = source.y + source.height <= target.y;
-  const start = down ? source.y + source.height : source.y;
-  const end = down ? target.y : target.y + target.height;
-  const mid = (start + end) / 2;
-  return [
-    { x: sx, y: start },
-    { x: sx, y: mid },
-    { x: tx, y: mid },
-    { x: tx, y: end },
-  ];
-}
 
 /** 함수 안 import 선의 경로. 출발 노드 아래로 내려가 두 노드 아래를 지나 도착 노드 아래로 들어간다. */
 export function belowRoute(source: Box, target: Box): Point[] {
@@ -464,16 +421,27 @@ export function belowRoute(source: Box, target: Box): Point[] {
   ];
 }
 
-/** 진입점 단위 사이 선의 경로. 두 상자 왼쪽으로 나가 위아래로 잇는다. */
+/**
+ * 배치가 경로를 내지 않은 선의 경로. 진입점 단위 사이 선이 이 경로를 쓴다. 화면에 보이는 양 끝 상자의 위치로 정한다.
+ * 도착 상자가 오른쪽에 있으면 출발 상자의 오른쪽 변에서 나와 도착 상자 바로 앞에서 세로로 꺾어 왼쪽 변으로 들어간다.
+ * 도착 상자가 왼쪽에 있으면 좌우를 뒤집은 경로다. 두 상자가 가로로 겹치면 같은 열이므로 두 상자의 오른쪽으로 나가
+ * 도착 상자의 오른쪽 변으로 들어간다.
+ */
 export function sideRoute(source: Box, target: Box): Point[] {
-  const x = Math.min(source.x, target.x) - ROUTE_GAP;
   const sy = source.y + source.height / 2;
   const ty = target.y + target.height / 2;
+  const [sr, tr] = [source.x + source.width, target.x + target.width];
+  const [sx, x, tx] =
+    sr + ROUTE_GAP <= target.x
+      ? [sr, target.x - ROUTE_GAP, target.x]
+      : tr + ROUTE_GAP <= source.x
+        ? [source.x, tr + ROUTE_GAP, tr]
+        : [sr, Math.max(sr, tr) + ROUTE_GAP, tr];
   return [
-    { x: source.x, y: sy },
+    { x: sx, y: sy },
     { x, y: sy },
     { x, y: ty },
-    { x: target.x, y: ty },
+    { x: tx, y: ty },
   ];
 }
 

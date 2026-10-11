@@ -1,10 +1,29 @@
 // 배치가 정한 직각 경로를 모서리를 둥글려 그린다. 선 분류는 선 모양과 화살촉으로, 초점은 선의 진하기로 가른다.
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
 import type { EdgeGroup } from "../../api/types";
-import type { Tone } from "../scope";
-import { midpoint, roundedPath, type EdgeView } from "../view";
+import { LAYER } from "../layers";
+import type { EdgeKey, Tone } from "../scope";
+import { roundedPath, type EdgeView } from "../view";
 
-export type AtlasFlowEdge = Edge<EdgeView>;
+/** pointed는 마우스를 올린 선이다. */
+export type AtlasFlowEdge = Edge<EdgeView & { pointed: boolean }>;
+
+/**
+ * 그릴 선마다 React Flow 선 하나. 마우스를 올린 선 pointed는 다른 선 위의 층에 본문 잉크, 불투명도 1로 그린다.
+ */
+export function flowEdges(views: EdgeView[], pointed: EdgeKey | null): AtlasFlowEdge[] {
+  return views.map((view) => {
+    const on = view.key === pointed;
+    return {
+      id: view.key,
+      source: view.source,
+      target: view.target,
+      type: "orthogonal",
+      data: on ? { ...view, tone: "strong", opacity: 1, pointed: true } : { ...view, pointed: false },
+      zIndex: on ? LAYER.pointed : LAYER.edge,
+    };
+  });
+}
 
 const TONES: Tone[] = ["muted", "strong"];
 
@@ -40,14 +59,18 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
     return null;
   }
   const path = roundedPath(data.points);
-  const mid = data.weight === null ? null : midpoint(data.points);
   return (
-    <g className={`edge edge-${data.group} tone-${data.tone}`} data-key={data.key} style={{ opacity: data.opacity }}>
+    <g
+      className={`edge edge-${data.group} tone-${data.tone}`}
+      data-key={data.key}
+      data-pointed={data.pointed ? "" : undefined}
+      style={{ opacity: data.opacity }}
+    >
       <path className="edge-hit" d={path} />
       <path className="edge-line" d={path} markerEnd={`url(#${markerId(data.group, data.tone)})`} />
-      {mid !== null && (
-        <text className="edge-weight" x={mid.x} y={mid.y} dy="0.35em" textAnchor="middle">
-          {data.weight}
+      {data.weight !== null && (
+        <text className="edge-weight" x={data.weight.at.x} y={data.weight.at.y} dy="0.35em" textAnchor="middle">
+          {data.weight.count}
         </text>
       )}
     </g>

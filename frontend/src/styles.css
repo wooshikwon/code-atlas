@@ -1051,6 +1051,7 @@ ul {
   position: absolute;
   right: calc(0px - var(--overhang));
   min-width: 14px;
+  /* layout.ts의 BADGE_HEIGHT와 같다. */
   height: 14px;
   padding: 0 3px;
   border-radius: 7px;
@@ -1173,6 +1174,20 @@ ul {
   stroke-width: 3px;
   paint-order: stroke;
   font-size: 11px;
+}
+
+/* 마우스를 올린 선은 1px 굵게 그리고 선 색의 옅은 빛을 두른다. 진하기와 층은 edges/OrthogonalEdge.tsx의 flowEdges가 올린다. */
+.edge[data-pointed] .edge-line {
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--tone) 45%, transparent));
+}
+
+.edge-derive[data-pointed] .edge-line {
+  stroke-width: 4;
+}
+
+.edge[data-pointed] .edge-weight {
+  font-weight: 700;
 }
 
 /* 그래프 위에 띄우는 칸 */

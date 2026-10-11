@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture } from "./fixture";
 import { flow } from "./flow";
-import type { Layout } from "./layout";
+import { sideRoute, type Layout } from "./layout";
 import { drawn } from "./scope";
-import { edgeViews, midpoint, parentFirst, roundedPath, type EdgeView } from "./view";
+import { edgeViews, letteredBoxes, midpoint, parentFirst, roundedPath, weightPoint, type EdgeView } from "./view";
 import { hidden, nodeIndex, shown, type Shown } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
@@ -95,6 +95,13 @@ describe("edgeViews", () => {
     ]);
   });
 
+  it("진입점 단위 사이 선은 보이는 양 끝 상자의 위치로 정한 경로를 받는다", () => {
+    const { shown: visible } = scene(null);
+    const layout = lineLayout(visible);
+    const view = edgeViews(drawn(repoFixture, visible, null, null), layout, nodes).find((v) => v.key === "agg|cli|main")!;
+    expect(view.points).toEqual(sideRoute(layout.boxes.get("cli")!, layout.boxes.get("main")!));
+  });
+
   it("함수 안 import만 합친 선은 두 상자 아래로 돌아가는 경로를 받는다", () => {
     const points = views(null).get("pkg.mod|pkg.util|import")!.points;
     expect(points[0].y).toBe(20);
@@ -104,7 +111,7 @@ describe("edgeViews", () => {
 
   it("집계 선은 무게가 2 이상일 때만 숫자를 달고, sites 수는 늘 담는다", () => {
     const closed = views(null);
-    expect(closed.get("agg|main|pkg.mod")).toMatchObject({ weight: 4, sites: 4 });
+    expect(closed.get("agg|main|pkg.mod")).toMatchObject({ weight: { count: 4 }, sites: 4 });
     expect(closed.get("agg|pkg.mod|main")).toMatchObject({ weight: null, sites: 1 });
     expect(views("main:run").get("main:run|main:helper|call")).toMatchObject({ weight: null, sites: 1 });
   });
@@ -139,5 +146,36 @@ describe("roundedPath, midpoint", () => {
 
   it("경로 길이의 절반이 되는 점을 찾는다", () => {
     expect(midpoint(points)).toEqual({ x: 10, y: 0 });
+  });
+});
+
+describe("letteredBoxes, weightPoint", () => {
+  const line = [
+    { x: 0, y: 0 },
+    { x: 200, y: 0 },
+  ];
+
+  it("숫자 이름표는 글자를 그리는 칸에 닿지 않으면 경로 길이의 절반이 되는 점에 단다", () => {
+    expect(weightPoint(line, 2, [{ x: 0, y: 40, width: 200, height: 20 }])).toEqual({ x: 100, y: 0 });
+  });
+
+  it("절반이 되는 점이 칸에 닿으면 경로를 따라 칸에 닿지 않는 가장 가까운 점으로 옮긴다", () => {
+    const at = weightPoint(line, 2, [{ x: 80, y: -10, width: 60, height: 20 }]);
+    expect(at).toEqual({ x: 68, y: 0 });
+  });
+
+  it("칸에 닿지 않는 점이 없으면 절반이 되는 점에 단다", () => {
+    expect(weightPoint(line, 2, [{ x: -50, y: -10, width: 300, height: 20 }])).toEqual({ x: 100, y: 0 });
+  });
+
+  it("접힌 파일 상자는 배지가 나가는 폭과 상자 아래 함수 수 글자까지, 펼친 파일 상자는 머리 줄만 글자를 그리는 칸이다", () => {
+    const { shown: visible } = scene("main:run");
+    const layout = lineLayout(visible);
+    const lettered = letteredBoxes(layout, nodes);
+    const [common, run] = [layout.boxes.get("common")!, layout.boxes.get("main:run")!];
+    expect(lettered).toContainEqual({ x: common.x, y: -7, width: 40 + 6, height: 7 + 20 + 16 });
+    expect(lettered).toContainEqual({ ...layout.boxes.get("main")!, height: 32 });
+    expect(lettered).toContainEqual({ x: run.x, y: -7, width: 40 + 6, height: 7 + 20 + 7 });
+    expect(lettered).toHaveLength(visible.nodes.size - [...visible.nodes].filter((id) => nodes.get(id)!.kind === "package").length);
   });
 });

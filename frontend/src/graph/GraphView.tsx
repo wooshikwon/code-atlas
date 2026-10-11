@@ -18,7 +18,7 @@ import { focusOf, type History } from "../state/history";
 import { useAtlas } from "../state/store";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
-import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
+import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, layout, titleOf, type Layout, type Point } from "./layout";
 import { Legend } from "./Legend";
@@ -27,7 +27,7 @@ import { GROUP_NAMES, KIND_NAMES } from "./names";
 import { LAYER } from "./layers";
 import { flowNodes, parts, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
-import { concealed, drawn } from "./scope";
+import { concealed, drawn, type EdgeKey } from "./scope";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst } from "./view";
 import { boundsOf, centerOn, fitPadding, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
@@ -113,6 +113,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const [error, setError] = useState<string | null>(null);
   /** 마우스를 올린 노드 id */
   const [hover, setHover] = useState<string | null>(null);
+  /** 마우스를 올린 선 */
+  const [pointed, setPointed] = useState<EdgeKey | null>(null);
 
   /** 이 컴포넌트를 그리기 시작할 때의 화면 */
   const [start] = useState(() => home.current ?? undefined);
@@ -219,19 +221,11 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   }, [scene, index, getViewport, setViewport]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
-  const edges = useMemo((): AtlasFlowEdge[] => {
-    if (scene === null || index === null) {
-      return [];
-    }
-    return edgeViews(drawn(scene.graph, scene.shown, scene.flow, hovered), scene.layout, index.nodes).map((view) => ({
-      id: view.key,
-      source: view.source,
-      target: view.target,
-      type: "orthogonal",
-      data: view,
-      zIndex: LAYER.edge,
-    }));
-  }, [scene, index, hovered]);
+  const views = useMemo(
+    () => (scene === null || index === null ? [] : edgeViews(drawn(scene.graph, scene.shown, scene.flow, hovered), scene.layout, index.nodes)),
+    [scene, index, hovered],
+  );
+  const edges = useMemo(() => flowEdges(views, pointed), [views, pointed]);
 
   /**
    * 연달아 누른 두 번째 클릭이면 처음 누른 노드를 열고 참을 돌려준다. 접힌 폴더 상자는 펼쳐지고 함수·메서드 노드는
@@ -272,13 +266,27 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       select(null);
     }
   };
-  const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => selectEdge(edge.id);
+  /** 선을 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 선을 골라 정보 패널에 지점 목록을 연다. */
+  const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
+    tip.current?.hide();
+    setPointed(null);
+    if (repeated(event)) {
+      return;
+    }
+    clicked.current = null;
+    if (event.shiftKey) {
+      selectEdge(edge.id);
+    } else if (edge.data !== undefined && !(selection?.type === "node" && selection.id === edge.data.target)) {
+      select(edge.data.target);
+    }
+  };
 
   const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
     setHover(node.data.node.id);
     tip.current?.show(`${titleOf(node.data.node)} · ${KIND_NAMES[node.data.node.kind]}`, event.clientX, event.clientY);
   };
   const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
+    setPointed(edge.id);
     const name = (id: string) => {
       const node = index?.nodes.get(id);
       return node === undefined ? id : titleOf(node);
@@ -293,7 +301,10 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     setHover(null);
     tip.current?.hide();
   };
-  const onEdgeLeave = () => tip.current?.hide();
+  const onEdgeLeave = () => {
+    setPointed(null);
+    tip.current?.hide();
+  };
 
   if (scene === null) {
     return (
