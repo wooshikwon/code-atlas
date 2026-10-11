@@ -35,12 +35,12 @@ describe("read", () => {
       store().read(node);
     }
     expect(store().states.a).toEqual({ phase: "reading" });
-    reads[0].resolve({ summary: "요지", available: true, reason: null });
-    reads[1].resolve({ summary: null, available: true, reason: null });
-    reads[2].resolve({ summary: null, available: false, reason: "Claude Code CLI를 찾지 못했다" });
+    reads[0].resolve({ summary: "요지", stale: true, available: true, reason: null });
+    reads[1].resolve({ summary: null, stale: false, available: true, reason: null });
+    reads[2].resolve({ summary: null, stale: false, available: false, reason: "Claude Code CLI를 찾지 못했다" });
     await settle();
     expect(store().states).toEqual({
-      a: { phase: "done", summary: "요지", available: true },
+      a: { phase: "done", summary: "요지", available: true, stale: true },
       b: { phase: "empty" },
       c: { phase: "unavailable", reason: "Claude Code CLI를 찾지 못했다" },
     });
@@ -50,7 +50,7 @@ describe("read", () => {
     store().read("a");
     store().read("a");
     expect(reads).toHaveLength(1);
-    reads[0].resolve({ summary: null, available: true, reason: null });
+    reads[0].resolve({ summary: null, stale: false, available: true, reason: null });
     await settle();
     store().read("a");
     expect(reads).toHaveLength(2);
@@ -72,7 +72,7 @@ describe("make", () => {
     expect(store().states.a).toEqual({ phase: "making" });
     makes[0].resolve({ summary: "요지" });
     await settle();
-    expect(store().states.a).toEqual({ phase: "done", summary: "요지", available: true });
+    expect(store().states.a).toEqual({ phase: "done", summary: "요지", available: true, stale: false });
     store().make("a", true);
     expect(makes).toHaveLength(2);
   });
@@ -80,7 +80,7 @@ describe("make", () => {
   it("만드는 동안 늦게 온 읽기 응답은 만드는 중 상태를 덮지 않는다", async () => {
     store().read("a");
     store().make("a", false);
-    reads[0].resolve({ summary: null, available: true, reason: null });
+    reads[0].resolve({ summary: null, stale: false, available: true, reason: null });
     await settle();
     expect(store().states.a).toEqual({ phase: "making" });
   });

@@ -220,7 +220,8 @@ def create_app(
         prompt = summarized(node)
         summaries: Summaries = app.state.summaries
         reason = await summaries.unavailable()
-        return {"summary": summaries.cached(prompt), "available": reason is None, "reason": reason}
+        summary, stale = summaries.kept(prompt, Subject(app.state.repo["root"], "node", node))
+        return {"summary": summary, "stale": stale, "available": reason is None, "reason": reason}
 
     async def made(request: Request, making: Awaitable[str]) -> str:
         """설명을 다 만들 때까지 기다린다. 호출자가 먼저 연결을 끊으면 기다리기를 그만둔다."""
@@ -240,7 +241,8 @@ def create_app(
 
     @app.post("/api/summary")
     async def make_summary(request: Request, node: str, refresh: bool = False) -> dict:
-        return {"summary": await made(request, app.state.summaries.make(summarized(node), refresh))}
+        subject = Subject(app.state.repo["root"], "node", node)
+        return {"summary": await made(request, app.state.summaries.make(summarized(node), refresh, "node", subject))}
 
     def explained(path: str, start: int, end: int) -> tuple[str, Subject]:
         """파일의 줄 범위를 설명을 만들 프롬프트와, 그 설명을 남길 대상으로 바꾼다."""

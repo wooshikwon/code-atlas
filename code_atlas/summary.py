@@ -21,7 +21,7 @@ import textwrap
 import time
 from collections.abc import Iterable, Mapping
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .model import Edge, Node
@@ -778,7 +778,7 @@ class Subject:
     repo: str
     kind: str  # node·range
     name: str  # 노드 id, 또는 `파일 경로:시작 줄-끝 줄`
-    digest: str
+    digest: str | None = None  # 코드 범위는 범위 코드의 해시다. None이면 설명을 만든 캐시 키를 쓴다
 
 
 @dataclass(frozen=True)
@@ -876,6 +876,18 @@ class Summaries:
         except SummaryError:
             return None
 
+    def kept(self, prompt: str, subject: Subject) -> tuple[str | None, bool]:
+        """대상에 보여 줄 설명과, 그 설명이 지금 프롬프트로 만든 것이 아닌지.
+
+        캐시에 지금 프롬프트의 설명이 있으면 그 설명이다. 없으면 대상에 남겨 둔 가장 최근 설명이고, 코드나 앞뒤 흐름,
+        서술 규약 문서가 바뀌기 전에 만든 것이므로 둘째 값이 참이다. 둘 다 없으면 None이다.
+        """
+        cached = self.cached(prompt)
+        if cached is not None:
+            return cached, False
+        kept = self.latest.get(subject.repo, subject.kind, subject.name)
+        return (kept.text, True) if kept is not None else (None, False)
+
     async def make(self, prompt: str, refresh: bool = False, kind: str = "node", subject: Subject | None = None) -> str:
         """캐시에 있으면 그 설명을, 없거나 `refresh`면 새로 만든 설명을 돌려준다. 같은 프롬프트의 요청이 겹치면 한 번만 만든다.
 
@@ -885,6 +897,8 @@ class Summaries:
         """
         system = system_prompt_of(self.style_guide, kind)
         key = key_of(system, prompt)
+        if subject is not None and subject.digest is None:
+            subject = replace(subject, digest=key)
         making = self._making.get(key)
         if making is None:
             cached = None if refresh else self.cache.get(key)

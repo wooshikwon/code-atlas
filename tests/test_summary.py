@@ -667,3 +667,17 @@ async def test_make_of_range_uses_range_system_prompt_plain_text_and_keeps_lates
     assert await summaries.make("[대상]\n종류: 코드 범위", kind="range", subject=moved) == text
     assert (record / "runs").read_text().count("run") == 1
     assert summaries.latest.get("/repo", "range", moved.name).text == text
+
+
+@pytest.mark.asyncio
+async def test_kept_gives_the_latest_summary_of_a_node_as_stale_when_the_prompt_changed(fake_cli, tmp_path):
+    fake_cli(OK)
+    summaries = Summaries(tmp_path / "summaries.db")
+    subject = summary.Subject("/repo", "node", "core:run_engine")
+    assert summaries.kept("def f(): 1", subject) == (None, False)
+    made = await summaries.make("def f(): 1", subject=subject)
+    assert summaries.kept("def f(): 1", subject) == (made, False)
+    assert summaries.latest.get("/repo", "node", subject.name).digest == summary.key_of(summary.system_prompt_of(None), "def f(): 1")
+    assert summaries.kept("def f(): 2", subject) == (made, True)
+    assert summaries.kept("def f(): 2", summary.Subject("/repo", "node", "core:helper")) == (None, False)
+    assert summaries.kept("def f(): 2", summary.Subject("/other", "node", subject.name)) == (None, False)

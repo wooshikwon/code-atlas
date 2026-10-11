@@ -1488,7 +1488,7 @@ async function answerSummaryReads(page, reply) {
 
 /** 요약을 만들지 않고 서버 대신 답해 요약 칸의 크기를 본다. */
 async function summaryPanel(t, page) {
-  await answerSummaryReads(page, () => ({ summary: longSummary(6), available: true, reason: null }));
+  await answerSummaryReads(page, () => ({ summary: longSummary(6), stale: false, available: true, reason: null }));
   await load(page);
   await pick(page, FILE);
   await pick(page, FUNCTION);
@@ -1545,7 +1545,7 @@ async function summaryBusy(t, page) {
   const folderId = ownerOf(chosen).parent;
   const counted = functions.find((n) => unresolved.has(ownerOf(n).id) && ownerOf(n).id !== target.owner);
   const extra = counted === undefined ? null : { id: counted.id, owner: ownerOf(counted).id };
-  await answerSummaryReads(page, () => ({ summary: null, available: true, reason: null }));
+  await answerSummaryReads(page, () => ({ summary: null, stale: false, available: true, reason: null }));
   const held = await holdSummaryPosts(page);
   const aborted = summaryAborts(page);
   const busy = (id) => count(page, `${face(id)} .badge-busy`);
@@ -1759,6 +1759,45 @@ async function explain(t, page) {
   t.check("지우기를 누르면 창과 표지가 사라지고 저장한 설명도 지워진다", (await count(page, ".code-note-window, .code-note-glyph")) === 0 && notes.saved.length === 0, `저장된 설명 ${notes.saved.length}개`);
 }
 
+/** 요약을 만들지 않고 서버 대신 답해, 코드가 바뀌기 전에 만든 요약을 흐리게 보이고 다시 만드는지 본다. */
+async function summaryStale(t, page) {
+  const target = { id: FUNCTION, owner: FILE };
+  await answerSummaryReads(page, (id) => ({ summary: id === target.id ? longSummary(1) : null, stale: id === target.id, available: true, reason: null }));
+  const held = await holdSummaryPosts(page);
+  await load(page);
+  await pickInTree(page, target);
+  await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 10_000 }).catch(() => {});
+  const shown = await page.evaluate(() => ({
+    note: document.querySelector(".info-panel-summary .stale-note")?.textContent ?? "",
+    opacity: Number(getComputedStyle(document.querySelector(".info-panel-summary .summary-text") ?? document.body).opacity),
+    button: [...document.querySelectorAll(".info-panel-summary .summary-action")].map((b) => b.textContent).join(","),
+  }));
+  t.check(
+    '바뀌기 전에 만든 요약은 본문을 흐리게 그리고 위에 그 사실을 적으며 "다시 생성" 버튼을 보인다',
+    shown.note === "코드나 앞뒤 흐름이 바뀌기 전에 만든 요약" && shown.opacity < 1 && shown.button === "다시 생성" && held.length === 0,
+    `문구 "${shown.note}", 본문 불투명도 ${shown.opacity}, 버튼 ${shown.button}, POST ${held.length}번`,
+  );
+  await t.shot();
+  await page.click(".info-panel-summary .summary-action");
+  await page.waitForFunction(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent === "요약을 만드는 중", null, { timeout: 5_000 }).catch(() => {});
+  held[0]?.answer(longSummary(2));
+  await page.waitForFunction(() => document.querySelector(".info-panel-summary .summary-text:not(.stale-text)") !== null, null, { timeout: 5_000 }).catch(() => {});
+  t.check(
+    '"다시 생성"을 누르면 POST를 한 번 보내고, 새 요약은 흐리지 않게 그리며 문구가 사라진다',
+    held.length === 1 && held[0].node === target.id && (await count(page, ".info-panel-summary .stale-note")) === 0 && (await count(page, ".info-panel-summary .summary-text:not(.stale-text)")) === 1,
+    `POST ${held.length}번`,
+  );
+
+  // "자동 요약"이 켜져 있으면 바뀌기 전에 만든 요약을 누르지 않아도 다시 만든다.
+  await page.getByLabel("자동 요약").check();
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  await pickInTree(page, target);
+  await page.waitForFunction(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent === "요약을 만드는 중", null, { timeout: 5_000 }).catch(() => {});
+  t.check('"자동 요약"을 켜 두면 바뀌기 전에 만든 요약을 고른 채 머물 때 POST를 보낸다', held.length === 2 && held[1].node === target.id, `POST ${held.length}번`);
+}
+
 /** 요약을 실제로 만들지 않고 "요약 생성" 버튼과 "자동 요약" 토글이 POST를 언제 보내는지만 본다. 보낸 POST는 붙잡혀 서버에 닿지 않는다. */
 async function summaryAsk(t, page) {
   const { found, available, reason } = await uncached(2);
@@ -1829,7 +1868,7 @@ async function summaryRef(t, page) {
   const fake = `리마인더에서 오늘 노트의 구획을 다시 만든다.\n\n하는 일\n\`${first}\`로 오늘 항목을 모으고 \`note.todos\`를 바꾼다. \`${missing}\`는 그래프에 없다.\n\n앞뒤 흐름\n${second}가 노트가 있을 때 부른다.\n\`re.sub\`만 쓴다.`;
   await page.route(
     (at) => at.pathname === "/api/summary" && at.searchParams.get("node") === FUNCTION,
-    (route) => (route.request().method() === "GET" ? route.fulfill({ json: { summary: fake, available: true, reason: null } }) : route.fallback()),
+    (route) => (route.request().method() === "GET" ? route.fulfill({ json: { summary: fake, stale: false, available: true, reason: null } }) : route.fallback()),
   );
   await load(page);
   await pick(page, FILE);
@@ -2195,6 +2234,7 @@ const SCENARIOS = [
   ["zoom-keep", zoomKeep],
   ["summary-panel", summaryPanel],
   ["summary-busy", summaryBusy],
+  ["summary-stale", summaryStale],
   ["explain", explain],
   ["summary-ask", summaryAsk],
   ["summary-ref", summaryRef],

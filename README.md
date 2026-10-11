@@ -80,6 +80,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 
 - **모델**: `sonnet`. 응답이 120초 안에 없으면 요약 칸에 그 사실을 적는다.
 - **캐시**: `~/.cache/code-atlas/summaries.db`. 코드, 앞뒤 흐름, 서술 규약 문서, 모델 가운데 하나가 바뀌기 전까지 다시 만들지 않는다. "다시 생성"을 누르면 캐시에 있어도 새로 만든다.
+- **바뀌기 전에 만든 요약**: 요약을 만든 뒤 코드나 앞뒤 흐름, 서술 규약 문서가 바뀐 노드는 가장 최근에 만든 요약을 흐리게 보이고 "코드나 앞뒤 흐름이 바뀌기 전에 만든 요약"이라고 적는다. "다시 생성"을 누르거나 "자동 요약"을 켜 두면 새로 만든다.
 - **서술 규약 문서**: `--style-guide <경로>` 옵션이나 환경 변수 `CODE_ATLAS_STYLE_GUIDE`로 문체를 정한 문서를 주면 그 문서 전문을 시스템 프롬프트에 넣는다. 문서는 UTF-8이고 100KB 이하여야 한다. 주지 않으면 내장한 짧은 한국어 서술 지침을 쓴다.
 - **정의 표기**: 설명은 레포 안의 함수·메서드·클래스를 `{파일 경로}::{정의 이름}`으로 적고(`arbiter.py::arbiter_sync`), 그 표기를 누르면 그래프가 그 노드를 고른다.
 
@@ -152,9 +153,9 @@ node scripts/shots.mjs [주소] [--only 이름,이름] [--with-summary]
 
 떠 있는 서버의 주소를 받고(기본 `http://127.0.0.1:8766`) 서버를 띄우지 않는다. 시나리오마다 새 브라우저 컨텍스트에서 조작하고 확인 항목을 `통과`·`실패`·`건너뜀`과 함께 한 줄씩 출력한다. 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 `건너뜀`이고 실패로 세지 않는다. 실패한 확인 항목이나 페이지 오류·콘솔 오류가 있으면 종료 코드 1로 끝난다.
 
-- **시나리오**: `open`, `file`, `function`, `body`, `panel`, `hover`, `edge`, `minimap`, `region`, `folder`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `summary-busy`, `explain`, `summary-ask`, `summary-ref`, `summary` 29개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
+- **시나리오**: `open`, `file`, `function`, `body`, `panel`, `hover`, `edge`, `minimap`, `region`, `folder`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `summary-busy`, `summary-stale`, `explain`, `summary-ask`, `summary-ref`, `summary` 30개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
 - **기대값**: 노드 이름은 sync-engine을 연 서버가 기준이고, 노드 수·선 수·줄 범위는 서버 응답에서 읽는다.
-- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 28개 시나리오는 요약을 만드는 요청을 서버로 보내지 않는다.
+- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 29개 시나리오는 요약을 만드는 요청을 서버로 보내지 않는다.
 - **`changes`**: 대상 레포에서 `git status`·`git diff`를 직접 읽어 화면과 비교하므로 서버와 같은 컴퓨터에서 돌린다. 수정한 `.py` 파일이 없는 레포에서는 확인 항목을 건너뛴다.
 - **스크린샷**: `~/data/code-atlas/screenshots/s2-{이름}.png`(1700×1000, 배율 2)에 남긴다. `toolbar`는 창 폭 1700·1440·1280·1160·980·900·720px마다 `s2-toolbar-{폭}.png`를 더 남긴다.
 - **브라우저**: Playwright가 받은 chromium과 다른 실행 파일을 쓰려면 환경 변수 `CHROMIUM_PATH`에 경로를 넣는다.

@@ -340,7 +340,7 @@ async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects
 
 def test_summary_is_made_on_post_and_read_from_cache(client, generated):
     node = {"node": "app.core:run_engine"}
-    assert client.get("/api/summary", params=node).json() == {"summary": None, "available": True, "reason": None}
+    assert client.get("/api/summary", params=node).json() == {"summary": None, "stale": False, "available": True, "reason": None}
     assert generated == []
 
     assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 1"}
@@ -421,6 +421,30 @@ def test_explanations_of_unknown_file_is_not_found(client):
     assert client.get("/api/explanations", params={"path": "src/app/none.py"}).status_code == 404
 
 
+def test_summary_made_before_the_code_changed_is_returned_as_stale(client, generated):
+    node = {"node": "app.core:run_engine"}
+    path = "src/app/core.py"
+    client.post("/api/summary", params=node)
+    assert client.get("/api/summary", params=node).json()["stale"] is False
+
+    texts = client.app.state.analyzed.texts
+    before = texts[path]
+    texts[path] = before.replace("    engine.start(config)\n", "    engine.start(None)\n")
+    try:
+        changed = client.get("/api/summary", params=node).json()
+        assert (changed["summary"], changed["stale"]) == ("app/core.py::run_engine 요약 1", True)
+        assert len(generated) == 1
+        assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 2"}
+        again = client.get("/api/summary", params=node).json()
+        assert (again["summary"], again["stale"]) == ("app/core.py::run_engine 요약 2", False)
+    finally:
+        texts[path] = before
+    back = client.get("/api/summary", params=node).json()
+    assert (back["summary"], back["stale"]) == ("app/core.py::run_engine 요약 1", False)
+    other = client.get("/api/summary", params={"node": "app.core:helper"}).json()
+    assert (other["summary"], other["stale"]) == (None, False)
+
+
 def test_summary_of_method_and_file(client, generated):
     client.post("/api/summary", params={"node": "app.core:Engine.start"})
     client.post("/api/summary", params={"node": "app.core"})
@@ -464,13 +488,14 @@ def test_summary_reports_unreadable_style_guide_and_reads_it_for_every_request(g
     assert calls == []
 
     guide.write_text("문장은 서술어로 끝낸다.")
-    assert client.get("/api/summary", params=node).json() == {"summary": None, "available": True, "reason": None}
+    assert client.get("/api/summary", params=node).json() == {"summary": None, "stale": False, "available": True, "reason": None}
     assert client.post("/api/summary", params=node).json() == {"summary": "요약"}
     assert "<서술 규약 문서>\n문장은 서술어로 끝낸다.\n</서술 규약 문서>" in calls[0][0]
     assert client.get("/api/summary", params=node).json()["summary"] == "요약"
 
     guide.write_text("고친 규약")
-    assert client.get("/api/summary", params=node).json()["summary"] is None
+    changed = client.get("/api/summary", params=node).json()
+    assert (changed["summary"], changed["stale"]) == ("요약", True)
 
 
 def test_summary_reports_unavailable_cli(client, generated, monkeypatch):
@@ -479,7 +504,7 @@ def test_summary_reports_unavailable_cli(client, generated, monkeypatch):
 
     monkeypatch.setattr(summary, "unavailable", unavailable)
     body = client.get("/api/summary", params={"node": "app.core:helper"}).json()
-    assert body == {"summary": None, "available": False, "reason": "Claude Code CLI를 찾지 못했다"}
+    assert body == {"summary": None, "stale": False, "available": False, "reason": "Claude Code CLI를 찾지 못했다"}
 
 
 def test_summary_failure_is_503(client, generated, monkeypatch):

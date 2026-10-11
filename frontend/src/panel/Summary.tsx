@@ -12,12 +12,12 @@ const DELAY = 600;
 
 const READING: SummaryState = { phase: "reading" };
 
-function Explained({ summary }: { summary: string }) {
+function Explained({ summary, stale }: { summary: string; stale: boolean }) {
   const inline = useInline();
   const { lead, sections } = partsOf(summary);
 
   return (
-    <div className="summary-text">
+    <div className={stale ? "summary-text stale-text" : "summary-text"}>
       <p className="summary-lead">{inline(lead)}</p>
       {sections.map((section) => (
         <section key={section.title} className="summary-part">
@@ -39,7 +39,8 @@ export function Summary({ node }: { node: string }) {
 
   useEffect(() => read(node), [node, read]);
 
-  const waiting = state.phase === "empty" && auto;
+  /** "자동 요약"이 켜져 있으면 요약이 없는 노드와 요약을 만든 뒤 바뀐 노드의 요약을 만든다. */
+  const waiting = auto && (state.phase === "empty" || (state.phase === "done" && state.stale && state.available));
   useEffect(() => {
     if (!waiting) {
       return;
@@ -65,7 +66,8 @@ export function Summary({ node }: { node: string }) {
         </button>
       )}
       {state.phase === "making" && <span className="info-panel-hint">요약을 만드는 중</span>}
-      {state.phase === "done" && <Explained summary={state.summary} />}
+      {state.phase === "done" && state.stale && <p className="stale-note">코드나 앞뒤 흐름이 바뀌기 전에 만든 요약</p>}
+      {state.phase === "done" && <Explained summary={state.summary} stale={state.stale} />}
       {state.phase === "failed" && (
         <>
           <span className="info-panel-hint">{state.error}</span>

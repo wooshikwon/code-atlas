@@ -3,12 +3,12 @@
 import { create } from "zustand";
 import { getSummary, makeSummary } from "../api/client";
 
-/** refresh는 캐시에 있어도 다시 만든 요청이다. */
+/** stale은 요약을 만든 뒤 코드나 앞뒤 흐름이 바뀌었다는 뜻이고, refresh는 캐시에 있어도 다시 만든 요청이다. */
 export type SummaryState =
   | { phase: "reading" }
   | { phase: "empty" }
   | { phase: "making" }
-  | { phase: "done"; summary: string; available: boolean }
+  | { phase: "done"; summary: string; available: boolean; stale: boolean }
   | { phase: "failed"; error: string; refresh: boolean }
   | { phase: "unavailable"; reason: string };
 
@@ -42,7 +42,7 @@ export const useSummaries = create<SummaryStore>()((set, get) => {
             return;
           }
           if (cached.summary !== null) {
-            put(node, { phase: "done", summary: cached.summary, available: cached.available });
+            put(node, { phase: "done", summary: cached.summary, available: cached.available, stale: cached.stale });
           } else if (!cached.available) {
             put(node, { phase: "unavailable", reason: cached.reason ?? "Claude Code CLI를 부르지 못한다" });
           } else {
@@ -58,7 +58,7 @@ export const useSummaries = create<SummaryStore>()((set, get) => {
       }
       put(node, { phase: "making" });
       makeSummary(node, refresh).then(
-        (made) => put(node, { phase: "done", summary: made.summary, available: true }),
+        (made) => put(node, { phase: "done", summary: made.summary, available: true, stale: false }),
         (error: unknown) => put(node, { phase: "failed", error: message(error), refresh }),
       );
     },

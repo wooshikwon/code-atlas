@@ -113,8 +113,10 @@ export interface Definition {
 }
 
 export interface SummaryStatus {
-  /** 캐시에 있는 요약. 아직 만들지 않았으면 null이다. */
+  /** 보여 줄 요약. 한 번도 만들지 않았으면 null이다. */
   summary: string | null;
+  /** 요약을 만든 뒤 코드나 앞뒤 흐름, 서술 규약 문서가 바뀌었다 */
+  stale: boolean;
   /** Claude Code CLI를 부를 수 있는지 */
   available: boolean;
   /** 부를 수 없는 까닭 */
