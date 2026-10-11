@@ -208,11 +208,19 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
   return result;
 }
 
-/** 그린 선 edges에서 상자 id가 쓰는 상자 수(outgoing)와 그 상자를 쓰는 상자 수(incoming). */
-export function neighbors(edges: DrawnEdge[], id: string): { incoming: number; outgoing: number } {
+/**
+ * 그린 선 edges에서 상자 id가 쓰는 상자 수(outgoing), 그 상자가 쓰는 외부 모듈 수(external), 그 상자를 쓰는 상자 수(incoming).
+ * 외부 모듈은 outgoing에 세지 않는다.
+ */
+export function neighbors(
+  edges: DrawnEdge[],
+  nodes: Map<string, AtlasNode>,
+  id: string,
+): { incoming: number; outgoing: number; external: number } {
   const users = new Set(edges.filter((e) => e.target === id).map((e) => e.source));
-  const used = new Set(edges.filter((e) => e.source === id).map((e) => e.target));
-  return { incoming: users.size, outgoing: used.size };
+  const used = [...new Set(edges.filter((e) => e.source === id).map((e) => e.target))];
+  const external = used.filter((target) => nodes.get(target)?.kind === "external").length;
+  return { incoming: users.size, outgoing: used.length - external, external };
 }
 
 /**

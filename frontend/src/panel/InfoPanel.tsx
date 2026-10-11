@@ -92,14 +92,16 @@ export function InfoPanel() {
 
   /** 고른 파일 상자나 폴더 상자의 머리 줄 수치. 화면에 그린 선과 배지가 세는 범위에서 센다. */
   const box = useMemo(() => {
-    if (graph === null || scene === null || node === undefined || !UNITS.has(node.kind)) {
+    if (graph === null || index === null || scene === null || node === undefined || !UNITS.has(node.kind)) {
       return null;
     }
+    const { external, ...counts } = neighbors(drawn(graph, scene.shown, scene.flow, null), index.nodes, node.id);
     return {
-      ...neighbors(drawn(graph, scene.shown, scene.flow, null), node.id),
+      ...counts,
+      external: showExternal ? external : null,
       unresolved: unresolvedWithin(graph, scene.shown.hidden).get(node.id) ?? 0,
     };
-  }, [graph, scene, node]);
+  }, [graph, index, scene, node, showExternal]);
 
   let item: HeaderItem | null = null;
   if (file !== null) {
@@ -112,7 +114,7 @@ export function InfoPanel() {
             (n) => (n.kind === "function" || n.kind === "method") && n.id !== node.id && within(index.nodes, n.id, node.id),
           ).length
         : 0;
-    item = { type: "node", node, ...degree, unresolved: node.unresolved, ...box, functions };
+    item = { type: "node", node, ...degree, external: null, unresolved: node.unresolved, ...box, functions };
   } else if (edge !== null) {
     item = { type: "edge", edge };
   } else if (repo !== null) {
