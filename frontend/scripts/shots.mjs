@@ -957,9 +957,14 @@ async function hover(t, page) {
     await page.waitForSelector(".info-panel .code-link", { timeout: 3_000 }).catch(() => {});
     return page.evaluate(() => [...document.querySelectorAll(".info-panel .code-link")].map((element) => element.textContent).join(""));
   };
+  // Path에 올리면 뜨는 hover 상자가 아래 줄의 extract_today_items를 덮으므로, 상자가 사라진 뒤에 그 이름으로 옮긴다.
   const inside = await wordRect(page, "extract_today_items");
   await page.keyboard.down(MOD);
   const outer = await linked(await wordRect(page, "Path"));
+  await page.keyboard.up(MOD);
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(() => [...document.querySelectorAll(".monaco-hover")].every((box) => box.classList.contains("hidden") || box.getClientRects().length === 0), null, { timeout: 5_000 }).catch(() => {});
+  await page.keyboard.down(MOD);
   const inner = await linked(inside);
   t.check(
     "Mod를 누른 채 올리면 레포 안의 extract_today_items에는 밑줄이 그어지고 표준 라이브러리 Path에는 그어지지 않는다",
