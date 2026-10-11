@@ -359,7 +359,7 @@ export function midpoint(points: Point[]): Point {
 
 /**
  * 글자를 그리는 칸. 자식을 그리지 않는 노드는 상자에 배지가 나가는 폭을 더한 칸이고 접힌 파일 상자는 상자 아래
- * 함수 수 글자까지 더한다. 자식을 그리는 파일 상자·클래스 노드와 펼친 폴더 영역은 머리 줄만이다.
+ * 미사용 후보 수를 적는 줄까지 더한다. 자식을 그리는 파일 상자·클래스 노드와 펼친 폴더 영역은 머리 줄만이다.
  */
 export function letteredBoxes(layout: Layout, nodes: Map<string, AtlasNode>): Box[] {
   const parents = new Set([...layout.boxes.keys()].map((id) => nodes.get(id)?.parent));

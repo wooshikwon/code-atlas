@@ -58,7 +58,7 @@ function itemsOf(
       selected: id === selected,
       flow: false,
       local: false,
-      unresolved: node.unresolved,
+      inside: 0,
       busy: making.includes(id) ? 1 : 0,
       cycle: null,
       unused: unused.has(id),

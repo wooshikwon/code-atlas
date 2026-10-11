@@ -1,4 +1,4 @@
-// 탐색 이력. 한 단계는 뷰 종류, 선택, 접은 폴더 집합이다.
+// 탐색 이력. 한 단계는 뷰 종류, 선택, 접은 폴더 집합, 전부 펼친 상자 집합이다.
 import type { EdgeKey } from "../graph/scope";
 
 export type View = { kind: "structure" } | { kind: "function"; center: string; expanded: string[] };
@@ -19,6 +19,8 @@ export interface Place {
   selection: Selection;
   /** 접은 폴더의 패키지 노드 id. 같은 집합이 같은 배열이 되도록 정렬해 둔다. */
   collapsed: string[];
+  /** 전부 펼침 단계인 상자(파일·폴더 노드 id). 정렬해 둔다. */
+  unpacked: string[];
 }
 
 export interface History {

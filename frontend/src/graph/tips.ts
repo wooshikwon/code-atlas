@@ -9,21 +9,9 @@ export const CHANGE_TIPS: Record<Change, string> = {
   added: "추가: 마지막 커밋에 없음",
 };
 
-/** 접힌 파일 상자와 접힌 폴더 상자는 안에 든 노드의 수를 합쳐 적는다. */
-function merged(node: AtlasNode, expanded: boolean): string {
-  if (expanded || (node.kind !== "module" && node.kind !== "package")) {
-    return "";
-  }
-  return node.kind === "module" ? " · 이 파일 안의 함수에서 합친 수" : " · 이 폴더 안의 함수에서 합친 수";
-}
-
-/** 미확인 호출 수 배지 `?N` */
-export function unresolvedTip(node: AtlasNode, count: number, expanded: boolean): string {
-  return [
-    `대상을 확인하지 못한 호출 ${count}곳${merged(node, expanded)}`,
-    "getattr로 부르는 동적 호출이나 타입 힌트 없는 인자의 메서드 호출처럼",
-    "정적 분석으로 대상을 확인하지 못해 선으로 그리지 않은 호출이다",
-  ].join("\n");
+/** 접힌 상자의 오른쪽 위 배지. 파일 상자는 안에 든 함수·클래스 수, 폴더 상자는 안에 든 파일 수다. */
+export function insideTip(node: AtlasNode, count: number): string {
+  return node.kind === "package" ? `안에 든 파일 ${count}개 · 펼치면 보인다` : `안에 든 함수·클래스 ${count}개 · 고르면 보인다`;
 }
 
 /** 모듈 변수 변경 배지 `g`. 바꾸는 모듈 변수 이름을 적는다. */
@@ -43,7 +31,19 @@ export function locTip(node: AtlasNode): string {
   return `줄 수 ${node.loc}줄 · 빈 줄을 뺀 수`;
 }
 
-const CYCLE_NAMES_MAX = 5;
+const NAMES_MAX = 5;
+
+/** 이름을 쉼표로 잇고 여섯 개부터는 "외 k개"로 줄인다. */
+function listed(names: string[]): string {
+  const rest = names.length - NAMES_MAX;
+  return names.slice(0, NAMES_MAX).join(", ") + (rest > 0 ? ` 외 ${rest}개` : "");
+}
+
+/** 손잡이. 상자 밖과 선이 없는 자식의 수와 이름을 적는다. box는 손잡이를 단 상자이고 names는 그 자식의 이름표다. */
+export function packTip(box: AtlasNode, names: string[]): string {
+  const what = box.kind === "package" ? "이 폴더 안에서만 쓰이는 파일" : "이 파일 안에서만 쓰이는 정의";
+  return `${what} ${names.length}개 · ${listed(names)}`;
+}
 
 /**
  * 순환 아이콘. groups는 묶음마다 든 파일의 이름표다. 묶음마다 파일 이름을 한 줄에 적고 여섯 개부터는 "외 k개"로 줄인다.
@@ -51,14 +51,10 @@ const CYCLE_NAMES_MAX = 5;
  */
 export function cycleTip(node: AtlasNode, groups: string[][]): string {
   const inside = node.kind === "package" ? " · 이 폴더 안의 파일이 든 묶음" : "";
-  const names = (files: string[]) => {
-    const rest = files.length - CYCLE_NAMES_MAX;
-    return files.slice(0, CYCLE_NAMES_MAX).join(", ") + (rest > 0 ? ` 외 ${rest}개` : "");
-  };
   if (groups.length === 1) {
-    return `순환 묶음: 파일 ${groups[0].length}개가 서로를 import해 돌아온다${inside}\n${names(groups[0])}`;
+    return `순환 묶음: 파일 ${groups[0].length}개가 서로를 import해 돌아온다${inside}\n${listed(groups[0])}`;
   }
-  return [`순환 묶음 ${groups.length}개${inside}`, ...groups.map((files) => `파일 ${files.length}개: ${names(files)}`)].join("\n");
+  return [`순환 묶음 ${groups.length}개${inside}`, ...groups.map((files) => `파일 ${files.length}개: ${listed(files)}`)].join("\n");
 }
 
 export const UNUSED_TIP = "미사용 후보 · 들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다";

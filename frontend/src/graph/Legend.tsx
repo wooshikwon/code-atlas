@@ -1,4 +1,4 @@
-// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개와 합류, 찾은 경로의 선,
+// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시와 접힌 상자의 배지, 선 모양 세 개와 합류, 찾은 경로의 선,
 // 변경 표시 두 색을 보여 주고, 분석 덮개를 켜면 그 덮개의 표시를 끝에 덧붙인다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
@@ -15,6 +15,7 @@ const SHAPES = [
   { key: "function", name: "함수·메서드" },
   { key: "external", name: "외부 노드" },
   { key: "entry", name: "진입점" },
+  { key: "inside", name: "접힌 상자의 배지: 안에 든 정의·파일 수" },
   { key: "loc", name: "이름표 옆 숫자: 줄 수" },
 ];
 
@@ -50,6 +51,15 @@ function Shape({ kind }: { kind: string }) {
         <text x={11} y={12} textAnchor="middle" className="legend-entry">
           ▶
         </text>
+      );
+    case "inside":
+      return (
+        <g>
+          <rect x={3} y={1} width={16} height={14} rx={7} className="legend-inside" />
+          <text x={11} y={11.5} textAnchor="middle" className="legend-inside-count">
+            12
+          </text>
+        </g>
       );
     default:
       return (
@@ -121,7 +131,7 @@ export function Legend() {
               2
             </text>
           </svg>
-          합류: 같은 노드로 들어가는 선과 그 수
+          합류: 같은 노드로 가는 선의 수
         </li>
         <li>
           <svg width={30} height={16}>

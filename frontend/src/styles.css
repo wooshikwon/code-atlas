@@ -941,6 +941,32 @@ ul {
 }
 
 
+/* 손잡이. 펼친 상자가 그리지 않은 안쪽 자식의 수를 한 줄에 적는다. */
+.node-pack {
+  height: 100%;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.node-pack:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+
+.graph[data-pinned] .node-pack {
+  cursor: not-allowed;
+}
+
+.graph[data-pinned] .node-pack:hover {
+  color: var(--muted);
+  border-color: var(--line);
+}
+
 .shelf-name {
   position: absolute;
   top: 0;
@@ -1174,7 +1200,8 @@ ul {
   white-space: nowrap;
 }
 
-.badge-unresolved {
+/* 접힌 상자 안에 든 것의 수 */
+.badge-inside {
   top: -7px;
   right: calc(0px - var(--overhang));
   color: var(--surface);
@@ -1566,6 +1593,15 @@ ul {
   font-size: 11px;
 }
 
+
+.legend-inside {
+  fill: var(--muted);
+}
+
+.legend-inside-count {
+  fill: var(--surface);
+  font-size: 9px;
+}
 
 .legend-loc {
   fill: var(--loc);

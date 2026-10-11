@@ -6,9 +6,11 @@ import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { flow } from "../graph/flow";
 import { EDGE_KIND_NAMES, nameOf } from "../graph/names";
+import { markedBy } from "../graph/overlay";
 import { arriving, degrees, drawn, neighbors, picked, trunkTarget, type DrawnEdge } from "../graph/scope";
 import { hidden, nodeIndex, shown, unresolvedWithin, within } from "../graph/visible";
 import { focusOf } from "../state/history";
+import { useOverlay } from "../state/overlay";
 import { chosenOf, litOf, useAtlas, type Selection } from "../state/store";
 import { drag } from "./drag";
 import { Header, type HeaderItem, type PickedEdge } from "./Header";
@@ -58,6 +60,9 @@ export function InfoPanel() {
   const showTests = useAtlas((s) => s.showTests);
   const showExternal = useAtlas((s) => s.showExternal);
   const collapsed = useAtlas((s) => s.collapsed);
+  const unpacked = useAtlas((s) => s.unpacked);
+  const overlay = useOverlay((s) => s.kind);
+  const candidates = useOverlay((s) => s.unused);
   const depth = useAtlas((s) => s.depth);
   const finder = useAtlas((s) => s.finder);
   const split = useAtlas((s) => s.split);
@@ -85,14 +90,15 @@ export function InfoPanel() {
       return null;
     }
     const toggles = { showTests, showExternal };
-    if (lit !== null) {
-      return { flow: null, lit, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
-    }
     const off = hidden(graph, toggles);
+    const boxes = { collapsed, unpacked, marked: markedBy(overlay, graph, off, candidates), candidates };
+    if (lit !== null) {
+      return { flow: null, lit, shown: shown(graph, { ...toggles, ...boxes, flow: null, lit }) };
+    }
     const focus = focusOf(selection);
     const focused = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
-    return { flow: focused, lit, shown: shown(graph, { ...toggles, collapsed, flow: focused, lit }) };
-  }, [graph, index, selection, showTests, showExternal, collapsed, depth, lit]);
+    return { flow: focused, lit, shown: shown(graph, { ...toggles, ...boxes, flow: focused, lit }) };
+  }, [graph, index, selection, showTests, showExternal, collapsed, unpacked, overlay, candidates, depth, lit]);
 
   /** 고른 줄기의 도착 노드와 그 노드로 들어오는 그린 선 */
   const trunk = useMemo(() => {

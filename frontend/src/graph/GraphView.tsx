@@ -25,21 +25,22 @@ import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
 import { edgeTypes, flowEdges, isTrunk, Markers, type FlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
-import { functionCounts, HEADER, layout, REGION_HEAD, titleOf, type Layout, type Point, type RouteEnd } from "./layout";
+import { functionCounts, HEADER, layout, packId, packLabel, REGION_HEAD, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { GROUP_NAMES, KIND_NAMES, STEP_NAMES } from "./names";
 import { LAYER } from "./layers";
 import { flowNodes, parts, pointing, pressable, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
-import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
+import { isPack, type PackFlowNode } from "./nodes/PackNode";
+import { cycleLines, cycleMarks, markedBy, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
 import { drawn, type EdgeKey } from "./scope";
-import { nodeTip, tipOf, trunkTip } from "./tips";
+import { nodeTip, packTip, tipOf, trunkTip } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst, type Lines } from "./view";
 import { anchorOn, boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, headInto, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
-import { hidden, lift, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
+import { hidden, insideCounts, lift, local, nodeIndex, shown, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
 const SHELF_NAME_HEIGHT = 22;
@@ -54,10 +55,11 @@ interface Scene {
   lit: Lit | null;
   /** 초점을 둔 노드 */
   focus: string | null;
-  /** 토글, 접은 폴더, 초점을 둔 노드, 흐름 단계를 적은 글. 같은 그래프와 경로에서 이 글이 같으면 배치가 같다. */
+  /** 토글, 접은 폴더, 전부 펼친 상자, 덮개가 표시하는 노드, 초점을 둔 노드, 흐름 단계를 적은 글. 같은 그래프와 경로에서 이 글이 같으면 배치가 같다. */
   key: string;
-  /** 접은 폴더 */
+  /** 접은 폴더와 전부 펼친 상자 */
   collapsed: Set<string>;
+  unpacked: Set<string>;
   layout: Layout;
 }
 
@@ -94,7 +96,7 @@ function itemsOf(
   const parents = new Set(order.map((n) => n.parent));
   const dim = opacities(scene.graph, scene.flow, scene.lit);
   const ends = endsOf(scene.lit);
-  const unresolved = unresolvedWithin(scene.graph, scene.shown.hidden);
+  const inside = insideCounts(scene.graph, scene.shown.hidden);
   /** 화면에 보이는 노드마다, 그 노드로 올린 노드 가운데 요약을 만드는 중인 노드 수 */
   const busy = new Map<string | null, number>();
   for (const id of making) {
@@ -112,7 +114,7 @@ function itemsOf(
       selected: node.id === selected,
       flow: (scene.flow !== null || scene.lit !== null) && opacity > 0.2,
       local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
-      unresolved: node.kind !== "module" && node.kind !== "package" ? node.unresolved : expanded ? 0 : (unresolved.get(node.id) ?? 0),
+      inside: expanded ? 0 : (inside.get(node.id) ?? 0),
       busy: busy.get(node.id) ?? 0,
       route,
       cycle: cover.cycle.get(node.id)?.map((group) => group.map((id) => titleOf(nodes.get(id)!))) ?? null,
@@ -127,6 +129,34 @@ function itemsOf(
       face,
     };
   });
+}
+
+/**
+ * 손잡이마다 화면 기준 상자 at에 놓은 React Flow 노드. 글자와 같은 층에 그리고 불투명도는 손잡이를 단 상자의 값을 쓴다.
+ * covered는 미사용 덮개를 켰는지다.
+ */
+function packNodes(scene: Scene, nodes: Map<string, AtlasNode>, at: Map<string, Box>, opacity: Map<string, number>, covered: boolean, fresh: Set<string> | null): PackFlowNode[] {
+  const result: PackFlowNode[] = [];
+  for (const [box, pack] of scene.shown.packs) {
+    const id = packId(box);
+    const place = at.get(id);
+    if (place === undefined) {
+      continue;
+    }
+    result.push({
+      id,
+      type: "pack",
+      position: { x: place.x, y: place.y },
+      width: place.width,
+      height: place.height,
+      zIndex: LAYER.text,
+      draggable: false,
+      connectable: false,
+      style: { opacity: fresh?.has(box) === true ? 0 : (opacity.get(box) ?? 1) },
+      data: { box, label: packLabel(pack, covered), open: pack.open, tip: packTip(nodes.get(box)!, pack.ids.map((kid) => titleOf(nodes.get(kid)!))) },
+    });
+  }
+  return result;
 }
 
 /** 선반 단위 가운데 가장 왼쪽 위 상자의 왼쪽 위. 선반이 비었으면 null이다. */
@@ -160,6 +190,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const select = useAtlas((s) => s.select);
   const selectEdge = useAtlas((s) => s.selectEdge);
   const toggleFolder = useAtlas((s) => s.toggleFolder);
+  const togglePack = useAtlas((s) => s.togglePack);
+  const unpacked = useAtlas((s) => s.unpacked);
   const open = useAtlas((s) => s.open);
   const making = useSummaries(makingKey);
   const overlay = useOverlay((s) => s.kind);
@@ -170,6 +202,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
 
   const [scene, setScene] = useState<Scene | null>(null);
   const [nodes, setNodes] = useState<AtlasFlowNode[]>([]);
+  const [packs, setPacks] = useState<PackFlowNode[]>([]);
   const [shelf, setShelf] = useState<Point | null>(null);
   const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -188,8 +221,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const onScreen = useRef<Layout | null>(null);
   /** 화면에 그린 배치의 입력 */
   const arranged = useRef<Pick<Scene, "graph" | "columns" | "lit" | "key"> | null>(null);
-  /** 화면에 그린 배치의 그래프와 접은 폴더. 다음 배치에서 펼치거나 접은 폴더 하나를 찾는 데 쓴다. */
-  const folds = useRef<Pick<Scene, "graph" | "collapsed"> | null>(null);
+  /** 화면에 그린 배치의 그래프와 접은 폴더, 전부 펼친 상자. 다음 배치에서 펼치거나 접은 상자 하나를 찾는 데 쓴다. */
+  const folds = useRef<Pick<Scene, "graph" | "collapsed" | "unpacked"> | null>(null);
   /** 화면을 옮겨 둔 노드나 경로와 그때의 finder.aimed */
   const panned = useRef<{ aim: string | Lit | null; aimed: number }>({ aim: null, aimed: 0 });
   /** 직전에 한 번 누른 노드와 누르기 전의 이력. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
@@ -213,16 +246,17 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return null;
     }
     const toggles = { showTests, showExternal };
-    const folds = [...collapsed].sort();
-    if (lit !== null) {
-      const key = JSON.stringify([toggles, folds]);
-      return { flow: null, lit, focus: null, key, collapsed, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
-    }
     const off = hidden(graph, toggles);
+    const marked = markedBy(overlay, graph, off, candidates);
+    const boxes = { collapsed, unpacked, marked, candidates };
+    const state = [toggles, [...collapsed].sort(), [...unpacked].sort(), [...marked].sort(), [...candidates].sort()];
+    if (lit !== null) {
+      return { flow: null, lit, focus: null, key: JSON.stringify(state), collapsed, unpacked, shown: shown(graph, { ...toggles, ...boxes, flow: null, lit }) };
+    }
     const picked = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
-    const key = JSON.stringify([toggles, folds, picked === null ? null : [focus, depth]]);
-    return { flow: picked, lit, focus: picked === null ? null : focus, key, collapsed, shown: shown(graph, { ...toggles, collapsed, flow: picked, lit }) };
-  }, [graph, index, showTests, showExternal, collapsed, focus, depth, lit]);
+    const key = JSON.stringify([...state, picked === null ? null : [focus, depth]]);
+    return { flow: picked, lit, focus: picked === null ? null : focus, key, collapsed, unpacked, shown: shown(graph, { ...toggles, ...boxes, flow: picked, lit }) };
+  }, [graph, index, showTests, showExternal, collapsed, unpacked, overlay, candidates, focus, depth, lit]);
 
   // 느린 배치를 취소하면 입력이 화면에 그린 배치의 입력으로 돌아오므로 다시 계산하지 않는다.
   useEffect(() => {
@@ -283,13 +317,14 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
+    const dims = new Map(items.map((item) => [item.id, item.opacity]));
 
     // 고른 노드나 강조하는 경로가 바뀌면 아래에서 화면을 옮긴다.
-    // 폴더를 눌러 상자 하나를 펼치거나 접었으면 그 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 둔다. 확대 비율은 그대로다.
+    // 폴더나 손잡이를 눌러 상자 하나를 펼치거나 접었으면 그 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 둔다. 확대 비율은 그대로다.
     const last = folds.current;
     folds.current = scene;
     const differ = (a: Set<string>, b: Set<string>) => [...a].filter((id) => !b.has(id)).concat([...b].filter((id) => !a.has(id)));
-    const changed = last === null || last.graph !== scene.graph ? [] : differ(last.collapsed, scene.collapsed);
+    const changed = last === null || last.graph !== scene.graph ? [] : [...differ(last.collapsed, scene.collapsed), ...differ(last.unpacked, scene.unpacked)];
     const aim = scene.lit ?? scene.focus;
     const fresh = aim !== panned.current.aim;
     // 노드를 골라 그 노드를 품은 폴더가 펼쳐졌으면 고른 노드로 화면을 옮기므로 상자를 붙잡지 않는다.
@@ -300,6 +335,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const draw = (at: Layout, fresh: Set<string> | null) => {
       onScreen.current = at;
       setNodes(flowNodes(items, at.boxes, fresh));
+      setPacks(packNodes(scene, index.nodes, at.boxes, dims, overlay === "unused", fresh));
       setShelf(shelfCorner(scene, at));
       const box = held === null ? undefined : at.boxes.get(held.id);
       if (held !== null && box !== undefined) {
@@ -320,7 +356,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       }
     };
 
-    // 경로 고정 중에는 finder.focus를 정할 때마다 화면을 옮긴다. 강조하는 경로의 배치가 아직 오지 않았으면 그 배치가 올 때까지 기다린다.
+    // 고른 노드나 강조하는 경로가 바뀌면 화면을 옮긴다. 경로 고정 중에는 finder.focus를 정할 때마다 옮긴다.
+    // 강조하는 경로의 배치가 아직 오지 않았으면 그 배치가 올 때까지 기다린다.
     if (scene.lit === lit && (fresh || (lit !== null && aimed !== panned.current.aimed)) && root.current !== null) {
       panned.current = { aim, aimed };
       const { clear } = stageOf(root.current);
@@ -357,7 +394,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         reveal();
       },
     );
-  }, [scene, index, making, lit, pinFocus, aimed, cover, getViewport, setViewport]);
+  }, [scene, index, making, lit, pinFocus, aimed, cover, overlay, getViewport, setViewport]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
   /** 그릴 선과 그 가운데 순환 선의 키. 순환 덮개를 켠 동안에만 순환 선을 넣고 칠한다. */
@@ -384,7 +421,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     return new Set([trunk.key, ...members.map((v) => v.key)]);
   }, [views, pointed, scene]);
   const edges = useMemo(() => flowEdges(views, aimedLines, lines.keys), [views, aimedLines, lines]);
-  const drawnNodes = useMemo(() => pointing(nodes, aimedNode), [nodes, aimedNode]);
+  const drawnNodes = useMemo(() => [...pointing(nodes, aimedNode), ...packs], [nodes, aimedNode, packs]);
 
   /**
    * 연달아 누른 두 번째 클릭이면 처음 누른 노드를 열고 참을 돌려준다. 함수·메서드 노드는 함수 시점 뷰로 들어간다.
@@ -402,6 +439,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
 
   /**
    * 노드를 누른 동작. 접힌 폴더 상자는 한 단계 펼치고 펼친 폴더 영역의 머리 줄은 그 폴더를 접는다. 그 밖의 노드는 고른다.
+   * 손잡이는 `onNodeClick`이 따로 받아 전부 펼침과 펼침을 오간다.
    */
   const press = (id: string) => {
     if (index?.nodes.get(id)?.kind === "package") {
@@ -413,8 +451,13 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     select(id);
   };
 
-  const onNodeClick: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
+  const onNodeClick: NodeMouseHandler<AtlasFlowNode | PackFlowNode> = (event, node) => {
     tip.current?.hide();
+    if (isPack(node)) {
+      clicked.current = null;
+      togglePack(node.data.box);
+      return;
+    }
     if (repeated(event)) {
       return;
     }
@@ -461,13 +504,19 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
    * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 그 위치에서 눌리는 노드면 선의 hover처럼
    * 가장 진한 단계로 그린다. 경로 고정 중에는 경로 위 노드만 그렇게 그린다.
    */
-  const onNodeOver: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
+  const onNodeOver: NodeMouseHandler<AtlasFlowNode | PackFlowNode> = (event, node) => {
+    if (isPack(node)) {
+      tip.current?.show(node.data.tip, event.clientX, event.clientY);
+      return;
+    }
     setAimedNode((lit === null || node.data.route !== null) && pressable(node.data, event.target) ? node.data.node.id : null);
     const text = tipOf(event.target) ?? nodeTip(titleOf(node.data.node), KIND_NAMES[node.data.node.kind], node.data.unused);
     tip.current?.show(text, event.clientX, event.clientY);
   };
-  const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
-    setHover(node.data.node.id);
+  const onNodeEnter: NodeMouseHandler<AtlasFlowNode | PackFlowNode> = (event, node) => {
+    if (!isPack(node)) {
+      setHover(node.data.node.id);
+    }
     onNodeOver(event, node);
   };
   /** 경로 고정 중에는 경로의 걸음과 걸음이 지나는 줄기만 마우스를 올린 선으로 강조하고, 그 밖의 선은 말풍선만 띄운다. */

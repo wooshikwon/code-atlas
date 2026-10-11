@@ -75,7 +75,7 @@ export function Header({ item, nodes }: HeaderProps) {
           ]
         : [`들어오는 선 ${item.incoming}`, `나가는 선 ${item.outgoing}`]),
       node.kind === "module" ? `함수 ${item.functions}개` : null,
-      item.unresolved > 0 ? `미확인 호출 ${item.unresolved}` : null,
+      item.unresolved > 0 ? `미확인 호출 ${item.unresolved}곳` : null,
     ];
   } else if (item.type === "trunk") {
     const target = nodes.get(item.target);

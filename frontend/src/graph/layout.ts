@@ -6,7 +6,7 @@ import { entryUnits, siblings, type Columns } from "./columns";
 import { cycles } from "./cycles";
 import { cycleMarks } from "./overlay";
 import { aggKey, edgeKey, type EdgeKey } from "./scope";
-import { lift, nodeIndex, type Shown } from "./visible";
+import { lift, nodeIndex, type Pack, type Shown } from "./visible";
 
 export interface Point {
   x: number;
@@ -44,7 +44,7 @@ export const TABLE_ROW = 18;
 const HEX_HEIGHT = 28;
 export const MODULE_WIDTH = 320;
 export const MODULE_HEIGHT = 40;
-/** 접힌 파일 상자 아래에 적는 함수 수 글자의 높이 */
+/** 접힌 파일 상자와 접힌 폴더 상자 아래에 잡아 두는 줄의 높이 */
 export const CAPTION_HEIGHT = 16;
 export const CIRCLE = 16;
 export const LEAF_HEIGHT = 18;
@@ -55,7 +55,7 @@ export const CYCLE_MARK_WIDTH = 16;
 const LABEL_MAX = 36;
 const TABLE_ROWS_MAX = 5;
 /**
- * 배지는 노드 모양의 오른쪽 위 모서리(미확인 호출 수), 오른쪽 아래 모서리(모듈 변수 변경), 왼쪽 위 모서리(요약을 만드는 중인
+ * 배지는 노드 모양의 오른쪽 위 모서리(접힌 상자 안에 든 것의 수), 오른쪽 아래 모서리(모듈 변수 변경), 왼쪽 위 모서리(요약을 만드는 중인
  * 도는 원)에 단다. 배지의 세로 가운데를 모양의 위·아래 변에 맞추고 바깥쪽 끝을 모양의 그쪽 끝에서 BADGE_OVERHANG만큼 내보낸다.
  * 오른쪽 배지는 글자가 늘면 왼쪽으로 넓어지므로 모양 오른쪽으로 나온 폭은 글자 수와 관계없이 같다.
  */
@@ -220,17 +220,36 @@ export function moduleHeader(node: AtlasNode, functions: number): string {
   return node.kind === "module" ? `함수 ${functions}개` : "";
 }
 
-/** 접힌 폴더 상자 아래에 잡아 두는 줄의 글자. 미사용 덮개를 켜고 꺼도 배치가 같도록 후보 수와 관계없이 이 폭을 잡는다. */
-const FOLDER_CAPTION = "미사용 후보 999";
+/** 접힌 파일 상자와 접힌 폴더 상자 아래에 잡아 두는 줄의 글자. 미사용 덮개를 켜고 꺼도 배치가 같도록 후보 수와 관계없이 이 폭을 잡는다. */
+const BOX_CAPTION = "미사용 후보 999";
+
+/** 접힌 파일 상자와 접힌 폴더 상자 아래에 적는 글자. 안에 든 미사용 후보 수 unused가 0이면 적지 않는다. 상자 크기에 들지 않는다. */
+export function boxCaption(unused: number): string {
+  return unused === 0 ? "" : `미사용 후보 ${unused}`;
+}
+
+/** 손잡이 노드의 id. 손잡이는 상자 box의 자식으로 배치한다. */
+export function packId(box: string): string {
+  return `${box}#pack`;
+}
 
 /**
- * 접힌 파일 상자와 접힌 폴더 상자 아래에 적는 글자. 파일 상자는 함수 수를 적고, 안에 든 미사용 후보 수 unused가 0이 아니면
- * 그 수를 뒤에 붙인다. 상자 크기에 들지 않는다.
+ * 손잡이의 글. 펼침 단계에서는 그리지 않은 안쪽 자식 수를, 전부 펼침 단계에서는 같은 수와 "접기"를 적는다.
+ * 미사용 덮개가 꺼져 있고(covered가 거짓) 그리지 않은 자식에 미사용 후보가 있으면 그 수를 뒤에 붙인다.
  */
-export function boxCaption(node: AtlasNode, functions: number, unused: number): string {
-  const count = moduleHeader(node, functions);
-  const candidates = unused === 0 ? "" : `미사용 후보 ${unused}`;
-  return [count, candidates].filter((part) => part !== "").join(" · ");
+export function packLabel(pack: Pack, covered: boolean): string {
+  if (pack.open) {
+    return `안쪽 ${pack.ids.length}개 접기`;
+  }
+  return pack.unused > 0 && !covered ? `안쪽 ${pack.ids.length}개 · 미사용 후보 ${pack.unused}` : `안쪽 ${pack.ids.length}개`;
+}
+
+/** 손잡이의 좌우 안쪽 여백 */
+export const PACK_PAD = 6;
+
+/** 손잡이의 크기. 글자 폭에 여백을 더한 폭과 함수 노드의 한 줄 높이다. 덮개를 켜고 꺼도 배치가 같도록 미사용 후보 수를 적은 글의 폭을 잡는다. */
+function packSize(pack: Pack, measure: Measure): Size {
+  return { width: measure(packLabel(pack, false)) + 2 * PACK_PAD, height: LEAF_HEIGHT };
 }
 
 /** 이름표 둘레에 그리는 표시. cycle은 이름표 앞에 순환 아이콘을 다는지, end는 이름표 뒤에 적는 출발·도착 표지다. */
@@ -348,6 +367,7 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
  * 올려 그 부모에 선언하고, 자식을 그리지 않는 노드로 가는 선은 그 노드의 포트(`joined`)에 닿게 한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣어 그 순서를 `ordered`로 적는다.
  * ends는 강조하는 경로의 출발 노드와 도착 노드이고, 그 노드의 크기에 표지의 폭을 더한다.
  * 순환 아이콘을 다는 상자는 아이콘의 폭을 크기에 더한다. 접힌 파일 상자와 접힌 폴더 상자는 아래 글자의 줄을 상자 아래에 잡아 둔다.
+ * 손잡이를 다는 상자(`shown.packs`)는 자식 목록 끝에 손잡이 노드를 열0으로 넣는다. 손잡이에는 선이 없으므로 열0의 마지막에 놓인다.
  */
 export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure: Measure, ends: Map<string, RouteEnd>): ElkInput {
   const nodes = nodeIndex(graph);
@@ -377,9 +397,12 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
       "elk.alignment": "LEFT",
     };
     if (kids.length > 0) {
+      const pack = shown.packs.get(node.id);
+      const handle: ElkNode[] =
+        pack === undefined ? [] : [{ id: packId(node.id), ...packSize(pack, measure), layoutOptions: { "elk.partitioning.partition": "0", "elk.alignment": "LEFT" } }];
       return {
         id: node.id,
-        children: ordered(kids.map(build)),
+        children: ordered([...kids.map(build), ...handle]),
         edges: edgesOf(node.id),
         layoutOptions: { ...ELK_OPTIONS, ...options, ...boxOptions(node, functions.get(node.id) ?? 0, measure, marksOf(node.id)) },
       };
@@ -387,11 +410,10 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
     if (node.kind !== "module" && node.kind !== "package") {
       return joined({ id: node.id, ...leafSize(node, measure, marksOf(node.id)), layoutOptions: options });
     }
-    const caption = node.kind === "module" ? moduleHeader(node, functions.get(node.id) ?? 0) : FOLDER_CAPTION;
     return joined({
       id: node.id,
       ...leafSize(node, measure, marksOf(node.id)),
-      labels: [{ text: caption, width: measure(caption), height: CAPTION_HEIGHT }],
+      labels: [{ text: BOX_CAPTION, width: measure(BOX_CAPTION), height: CAPTION_HEIGHT }],
       layoutOptions: { ...options, "elk.nodeLabels.placement": "OUTSIDE V_BOTTOM H_LEFT" },
     });
   };

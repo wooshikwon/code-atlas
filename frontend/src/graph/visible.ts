@@ -3,12 +3,24 @@ import type { AtlasNode, Graph } from "../api/types";
 import type { Flow } from "./flow";
 import type { Lit } from "./route";
 
+/** 펼친 상자의 손잡이. 손잡이는 상자 밖과 선이 없는 자식(안쪽 자식)을 묶는다. */
+export interface Pack {
+  /** 안쪽 자식. 그래프의 노드 순서다. */
+  ids: string[];
+  /** 전부 펼침 단계여서 안쪽 자식을 그렸는지 */
+  open: boolean;
+  /** 안쪽 자식과 그 안에 든 미사용 후보 수 */
+  unused: number;
+}
+
 export interface Shown {
   nodes: Set<string>;
   /** 자식을 그리는 파일 상자 */
   open: Set<string>;
   /** 토글로 숨긴 노드 */
   hidden: Set<string>;
+  /** 손잡이를 다는 상자(파일·폴더 노드 id)와 그 손잡이 */
+  packs: Map<string, Pack>;
 }
 
 const UNIT_KINDS = new Set(["module", "package"]);
@@ -58,6 +70,30 @@ export function unresolvedWithin(graph: Graph, off: Set<string>): Map<string, nu
   return result;
 }
 
+/**
+ * 접힌 상자의 배지에 적는 수. 파일 상자는 바로 아래에 든 함수·클래스 수이고 폴더는 안에 든 파일 수다. off에 든 노드는 세지 않는다.
+ */
+export function insideCounts(graph: Graph, off: Set<string>): Map<string, number> {
+  const nodes = nodeIndex(graph);
+  const result = new Map<string, number>();
+  const add = (id: string) => result.set(id, (result.get(id) ?? 0) + 1);
+  for (const node of graph.nodes) {
+    if (off.has(node.id) || node.parent === null) {
+      continue;
+    }
+    if (node.kind !== "module") {
+      if (nodes.get(node.parent)?.kind === "module") {
+        add(node.parent);
+      }
+      continue;
+    }
+    for (let at = nodes.get(node.parent); at !== undefined; at = at.parent === null ? undefined : nodes.get(at.parent)) {
+      add(at.id);
+    }
+  }
+  return result;
+}
+
 /** 토글로 숨긴 노드. 테스트 코드와 외부 노드는 토글이 켜졌을 때만 보인다. */
 export function hidden(graph: Graph, opts: { showTests: boolean; showExternal: boolean }): Set<string> {
   return new Set(
@@ -67,33 +103,82 @@ export function hidden(graph: Graph, opts: { showTests: boolean; showExternal: b
   );
 }
 
-function folded(nodes: Map<string, AtlasNode>, collapsed: Set<string>, node: AtlasNode): boolean {
-  let parent = node.parent;
-  while (parent !== null) {
-    if (collapsed.has(parent)) {
-      return true;
+/**
+ * 상자(파일·폴더)마다 상자 밖과 선을 주고받는 바로 아래 자식. 파일 상자의 밖은 그 파일 밖의 노드이고 폴더의 밖은 그 폴더 밖의 노드다.
+ * 선은 종류와 무관하게 세고, off에 든 노드(토글로 숨긴 테스트 코드와 외부 노드)와의 선은 세지 않는다. 클래스는 자신이나 메서드에
+ * 밖과의 선이 있으면 밖과 이어진 자식이다.
+ */
+export function outward(graph: Graph, off: Set<string>): Map<string, Set<string>> {
+  const nodes = nodeIndex(graph);
+  const result = new Map<string, Set<string>>();
+  const mark = (id: string, other: string) => {
+    let child = nodes.get(id);
+    while (child !== undefined && child.parent !== null) {
+      const box = nodes.get(child.parent);
+      if (box === undefined) {
+        return;
+      }
+      if (UNIT_KINDS.has(box.kind) && !within(nodes, other, box.id)) {
+        result.set(box.id, (result.get(box.id) ?? new Set()).add(child.id));
+      }
+      child = box;
     }
-    parent = nodes.get(parent)?.parent ?? null;
+  };
+  for (const edge of graph.edges) {
+    if (off.has(edge.source) || off.has(edge.target)) {
+      continue;
+    }
+    mark(edge.source, edge.target);
+    mark(edge.target, edge.source);
   }
-  return false;
+  return result;
 }
 
 /**
- * 화면에 그리는 노드를 고른다.
- * 1. 접은 폴더는 폴더 노드만 남기고, 펼친 폴더는 폴더 노드와 파일 상자를 남긴다.
- * 2. 파일 상자 안의 노드는 흐름이 있을 때만 남긴다. 고른 노드가 든 파일 상자는 안의 노드를 모두 남기고,
- *    다른 파일 상자는 흐름 단위가 "node"일 때 나가는 흐름에 든 노드와 고른 노드로 선을 보내는 노드만 남긴다.
- * 3. 클래스 안 메서드가 남으면 그 클래스 노드도 남긴다.
- * 4. 강조하는 경로 lit이 있으면 흐름을 보지 않는다. 경로 위 노드를 품은 접은 폴더는 펼친 것으로 다루고,
- *    파일 상자 안의 노드는 경로 위 노드만 남긴다.
+ * 상자의 단계와 무관하게 꺼내 그리는 노드와 그 조상. 고른 노드, 고른 노드의 흐름에 든 노드(나가는 흐름, 고른 노드로 선을 보내는 노드),
+ * 강조하는 경로 위 노드다. 파일 상자나 폴더를 골랐으면 흐름의 단위가 파일이므로 고른 상자 안의 정의는 꺼내지 않는다.
+ * 꺼낼 자식의 새 조건은 여기에 더한다.
+ */
+export function drawnOut(graph: Graph, flow: Flow | null, lit: Lit | null): Set<string> {
+  const nodes = nodeIndex(graph);
+  const picked = lit !== null ? [...lit.nodes] : flow === null ? [] : [...(flow.unit === "node" ? flow.seeds : [flow.file]), ...flow.out.keys(), ...flow.incoming];
+  const result = new Set<string>();
+  for (const id of picked) {
+    for (let at = nodes.get(id); at !== undefined && !result.has(at.id); at = at.parent === null ? undefined : nodes.get(at.parent)) {
+      result.add(at.id);
+    }
+  }
+  return result;
+}
+
+/**
+ * 화면에 그리는 노드를 고른다. 상자(파일 상자, 폴더)는 접힘, 펼침, 전부 펼침 세 단계를 같은 규칙으로 밟는다.
+ * - 폴더는 collapsed에 있으면 접힘, 없으면 펼침, unpacked에도 있으면 전부 펼침이다. 파일 상자는 고른 노드가 그 파일이거나 그 파일
+ *   안에 있을 때(`flow.file`) 펼침이고, 그때 unpacked에 있으면 전부 펼침이며, 그 밖에는 접힘이다.
+ * - 상자 하나에서 그리는 바로 아래 자식은 `꺼낸 자식 ∪ (펼침 이상이면 밖과 이어진 자식 ∪ marked가 표시하는 노드를 품은 자식 ∪ 진입점)
+ *   ∪ (전부 펼침이면 나머지)`다. 꺼낸 자식은 `drawnOut`이 정하고, 접힌 폴더 안의 노드는 꺼내지 않는다.
+ * - 펼침 이상인 상자의 나머지 자식(안쪽 자식)은 손잡이 하나로 묶어 `packs`에 담는다. 안쪽 자식이 하나뿐이면 그 자식을 그리고,
+ *   밖과 이어진 자식이 하나도 없는 상자는 모든 자식을 그린다.
+ * - 펼침 이상인 파일 상자의 클래스는 그려지면 메서드를 모두 그린다. 접힌 파일 상자의 클래스는 꺼낸 메서드만 그린다.
+ * - 강조하는 경로 lit이 있으면 흐름을 보지 않는다. 경로 위 노드를 품은 접은 폴더는 펼친 것으로 다루고, 파일 상자는 모두 접힘이다.
+ * marked는 표시를 다는 노드(순환 묶음의 파일, 미사용 덮개를 켰을 때의 미사용 후보)이고 candidates는 덮개와 무관한 미사용 후보 전체다.
  */
 export function shown(
   graph: Graph,
-  opts: { showTests: boolean; showExternal: boolean; collapsed: Set<string>; flow: Flow | null; lit: Lit | null },
+  opts: {
+    showTests: boolean;
+    showExternal: boolean;
+    collapsed: Set<string>;
+    flow: Flow | null;
+    lit: Lit | null;
+    unpacked?: Set<string>;
+    marked?: Set<string>;
+    candidates?: Set<string>;
+  },
 ): Shown {
   const nodes = nodeIndex(graph);
   const off = hidden(graph, opts);
-  const { lit } = opts;
+  const { lit, unpacked = new Set<string>(), marked = new Set<string>(), candidates = new Set<string>() } = opts;
   const flow = lit === null ? opts.flow : null;
   const collapsed = new Set(opts.collapsed);
   for (const id of lit?.nodes ?? []) {
@@ -101,26 +186,67 @@ export function shown(
       collapsed.delete(at.id);
     }
   }
-  const result: Shown = { nodes: new Set(), open: new Set(), hidden: off };
+  const children = new Map<string | null, AtlasNode[]>();
   for (const node of graph.nodes) {
-    if (off.has(node.id) || folded(nodes, collapsed, node)) {
-      continue;
+    if (!off.has(node.id)) {
+      children.set(node.parent, [...(children.get(node.parent) ?? []), node]);
     }
-    if (node.kind === "external" || UNIT_KINDS.has(node.kind)) {
+  }
+  const linked = outward(graph, off);
+  const pulled = drawnOut(graph, flow, lit);
+  /** 노드와 그 안에 든 노드 가운데 set에 든 수 */
+  const countIn = (node: AtlasNode, set: Set<string>): number =>
+    (set.has(node.id) ? 1 : 0) + (children.get(node.id) ?? []).reduce((sum, child) => sum + countIn(child, set), 0);
+
+  const result: Shown = { nodes: new Set(), open: new Set(), hidden: off, packs: new Map() };
+  /** 클래스와 그 메서드. whole이 거짓이면 꺼낸 메서드만 그린다. */
+  const addDefinition = (node: AtlasNode, whole: boolean) => {
+    result.nodes.add(node.id);
+    for (const method of children.get(node.id) ?? []) {
+      if (whole || pulled.has(method.id)) {
+        result.nodes.add(method.id);
+      }
+    }
+  };
+  const visit = (box: AtlasNode) => {
+    result.nodes.add(box.id);
+    const kids = children.get(box.id) ?? [];
+    const folder = box.kind === "package";
+    if (kids.length === 0 || (folder && collapsed.has(box.id))) {
+      return;
+    }
+    const opened = folder || flow?.file === box.id;
+    const full = opened && unpacked.has(box.id);
+    const outer = linked.get(box.id);
+    /**
+     * 펼침 단계가 그리는 자식. 밖과 이어진 자식이 하나도 없는 상자(밖이 없는 껍데기 폴더, 안에서만 부르는 파일)는 가를 기준이 없으므로
+     * 모든 자식을 그린다. 선택과 덮개에 따라 달라지지 않게 밖과 이어진 자식만으로 판정한다.
+     */
+    const staged = outer === undefined ? kids : kids.filter((kid) => outer.has(kid.id) || kid.entry || countIn(kid, marked) > 0);
+    let drawn = kids.filter((kid) => pulled.has(kid.id) || (opened && staged.includes(kid)));
+    let inner = kids.filter((kid) => !drawn.includes(kid));
+    if (opened && inner.length === 1) {
+      [drawn, inner] = [kids, []];
+    }
+    if (opened && inner.length > 0) {
+      result.packs.set(box.id, { ids: inner.map((kid) => kid.id), open: full, unused: inner.reduce((sum, kid) => sum + countIn(kid, candidates), 0) });
+    }
+    for (const kid of full ? kids : drawn) {
+      if (UNIT_KINDS.has(kid.kind)) {
+        visit(kid);
+      } else {
+        addDefinition(kid, opened);
+      }
+    }
+    if (!folder && (full || drawn.length > 0)) {
+      result.open.add(box.id);
+    }
+  };
+  for (const node of children.get(null) ?? []) {
+    if (node.kind === "external") {
       result.nodes.add(node.id);
-      continue;
-    }
-    const inFlow = flow !== null && flow.unit === "node" && (flow.out.has(node.id) || flow.incoming.has(node.id));
-    if (lit !== null ? !lit.nodes.has(node.id) : flow === null || (!inFlow && !local(nodes, flow, node.id))) {
-      continue;
-    }
-    let inner: AtlasNode | undefined = node;
-    while (inner !== undefined && !UNIT_KINDS.has(inner.kind)) {
-      result.nodes.add(inner.id);
-      inner = inner.parent === null ? undefined : nodes.get(inner.parent);
-    }
-    if (inner !== undefined) {
-      result.open.add(inner.id);
+    } else {
+      visit(node);
     }
   }
   return result;

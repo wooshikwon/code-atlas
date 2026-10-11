@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { repoFixture, routeFixture } from "./fixture";
 import { flow } from "./flow";
 import { lit, route } from "./route";
-import { hidden, lift, nodeIndex, shown, unresolvedWithin } from "./visible";
+import { drawnOut, hidden, insideCounts, lift, nodeIndex, outward, shown, unresolvedWithin } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
 const toggles = { showTests: false, showExternal: false };
@@ -33,8 +33,8 @@ describe("shown", () => {
     expect(folded.nodes.has("app.web")).toBe(true);
   });
 
-  it("파일 상자를 고르면 그 파일 상자만 펼쳐 안의 노드를 모두 남긴다", () => {
-    const result = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: flow(repoFixture, "pkg.mod", 2, off), lit: null });
+  it("파일 상자를 고르고 전부 펼치면 그 파일 상자만 펼쳐 안의 노드를 모두 남긴다", () => {
+    const result = shown(repoFixture, { ...toggles, collapsed: new Set(), unpacked: new Set(["pkg.mod"]), flow: flow(repoFixture, "pkg.mod", 2, off), lit: null });
     expect([...result.open]).toEqual(["pkg.mod"]);
     expect([...result.nodes].filter((id) => id.includes(":")).sort()).toEqual([
       "pkg.mod:Row",
@@ -131,6 +131,119 @@ describe("lift", () => {
   });
 });
 
+describe("outward, insideCounts", () => {
+  it("상자마다 상자 밖과 선을 주고받는 바로 아래 자식을 낸다. 클래스는 메서드의 선으로도 밖과 이어진다", () => {
+    const linked = outward(repoFixture, off);
+    expect([...linked.get("pkg.mod")!]).toEqual(["pkg.mod:Store"]);
+    expect([...linked.get("main")!].sort()).toEqual(["main:helper", "main:run"]);
+    expect([...linked.get("pkg")!]).toEqual(["pkg.mod"]);
+    expect([...linked.get("app")!].sort()).toEqual(["app.__init__", "app.web"]);
+    expect(linked.has("scratch")).toBe(false);
+  });
+
+  it("토글로 숨긴 노드와의 선은 세지 않고, 토글을 켜면 그 선으로 이어진 자식이 는다", () => {
+    const all = hidden(repoFixture, { showTests: true, showExternal: true });
+    const more = (box: string) => [...(outward(repoFixture, all).get(box) ?? [])].filter((id) => !(outward(repoFixture, off).get(box)?.has(id) ?? false));
+    expect(repoFixture.edges.some((e) => off.has(e.source) || off.has(e.target))).toBe(true);
+    expect([...outward(repoFixture, all).keys()].flatMap(more).length).toBeGreaterThan(0);
+  });
+
+  it("접힌 상자의 배지는 파일 상자면 바로 아래 정의 수, 폴더면 안에 든 파일 수다", () => {
+    const counts = insideCounts(repoFixture, off);
+    expect(counts.get("pkg.mod")).toBe(3);
+    expect(counts.get("main")).toBe(2);
+    expect(counts.get("pkg")).toBe(2);
+    expect(counts.get("app")).toBe(3);
+    expect(insideCounts(repoFixture, hidden(repoFixture, { showTests: true, showExternal: false })).get("pkg")).toBe(3);
+  });
+});
+
+describe("shown: 세 단계 펼침", () => {
+  const at = (selection: string | null, more: Partial<Parameters<typeof shown>[1]> = {}) =>
+    shown(repoFixture, { ...toggles, collapsed: new Set(), flow: selection === null ? null : flow(repoFixture, selection, 1, off), lit: null, ...more });
+  const inside = (result: ReturnType<typeof shown>, box: string) => [...result.nodes].filter((id) => id.startsWith(`${box}:`)).sort();
+
+  it("펼침 단계의 파일 상자는 밖과 이어진 자식만 그리고 나머지를 손잡이에 담는다", () => {
+    const result = at("pkg.mod");
+    expect(inside(result, "pkg.mod")).toEqual(["pkg.mod:Store", "pkg.mod:Store.load", "pkg.mod:Store.save"]);
+    expect(result.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], open: false, unused: 0 });
+    expect(lift(nodes, result, "pkg.mod:parse")).toBe("pkg.mod");
+  });
+
+  it("전부 펼침 단계는 나머지 자식도 그리고 손잡이는 같은 자식을 열린 채로 담는다", () => {
+    const result = at("pkg.mod", { unpacked: new Set(["pkg.mod"]) });
+    expect(inside(result, "pkg.mod")).toEqual(["pkg.mod:Row", "pkg.mod:Store", "pkg.mod:Store.load", "pkg.mod:Store.save", "pkg.mod:parse"]);
+    expect(result.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], open: true, unused: 0 });
+  });
+
+  it("고른 노드가 그 파일에 없으면 unpacked에 있어도 접힘이고 손잡이가 없다", () => {
+    const result = at(null, { unpacked: new Set(["pkg.mod"]) });
+    expect(inside(result, "pkg.mod")).toEqual([]);
+    expect(result.packs.size).toBe(0);
+  });
+
+  it("손잡이에 든 함수를 고르면 꺼내 그리고, 손잡이에 하나만 남으면 그 자식도 그린다", () => {
+    const result = at("pkg.mod:parse");
+    expect(inside(result, "pkg.mod")).toEqual(["pkg.mod:Row", "pkg.mod:Store", "pkg.mod:Store.load", "pkg.mod:Store.save", "pkg.mod:parse"]);
+    expect(result.packs.has("pkg.mod")).toBe(false);
+  });
+
+  it("다른 파일의 접힌 상자에는 흐름에 든 노드만 그리고 손잡이를 달지 않는다", () => {
+    const result = at("main:run");
+    expect(inside(result, "pkg.mod")).toEqual(["pkg.mod:Store", "pkg.mod:Store.load"]);
+    expect(result.packs.has("pkg.mod")).toBe(false);
+    expect(inside(result, "main")).toEqual(["main:helper", "main:run"]);
+  });
+
+  it("선택을 풀면 선택 전과 같은 노드를 그린다", () => {
+    expect([...at(null).nodes].sort()).toEqual([...closed.nodes].sort());
+  });
+
+  it("밖과 이어진 자식이 하나도 없는 상자는 손잡이만 남으므로 모든 자식을 그린다", () => {
+    const result = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
+    expect(["flow.walk", "flow.build", "flow.sink"].every((id) => result.nodes.has(id))).toBe(true);
+    expect(result.packs.has("flow")).toBe(false);
+    const picked = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: flow(routeFixture, "flow.walk:begin", 1, hidden(routeFixture, toggles)), lit: null });
+    expect(["flow.walk", "flow.build", "flow.sink"].every((id) => picked.nodes.has(id))).toBe(true);
+  });
+
+  it("폴더는 펼침 단계에서 밖과 이어진 파일만 그리고, 안쪽 파일이 하나뿐이면 그 파일도 그린다", () => {
+    const result = at(null);
+    expect(["pkg.mod", "pkg.util", "app.web", "app.__init__", "app.text"].every((id) => result.nodes.has(id))).toBe(true);
+    expect(result.packs.size).toBe(0);
+  });
+
+  it("덮개가 표시하는 노드는 펼침 단계에서 그리고, 미사용 후보 수는 손잡이에 든 자식에서 센다", () => {
+    const candidates = new Set(["pkg.mod:parse", "pkg.mod:Row"]);
+    const off = at("pkg.mod", { candidates });
+    expect(off.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], open: false, unused: 2 });
+    const on = at("pkg.mod", { candidates, marked: candidates });
+    expect(inside(on, "pkg.mod")).toContain("pkg.mod:parse");
+    expect(on.packs.has("pkg.mod")).toBe(false);
+  });
+
+  it("진입점은 펼침 단계에서 그린다", () => {
+    expect(nodes.get("app.web:index")!.entry).toBe(true);
+    expect(at("app.web").nodes.has("app.web:index")).toBe(true);
+  });
+
+  it("경로 고정 중에는 파일 상자가 모두 접힘이어서 경로 위 노드만 그리고, 폴더의 단계는 그대로다", () => {
+    const none = hidden(routeFixture, toggles);
+    const path = lit(route(routeFixture, "flow.walk:begin", "flow.walk:finish", none), 0)!;
+    const result = shown(routeFixture, { ...toggles, collapsed: new Set(), unpacked: new Set(["flow.walk"]), flow: null, lit: path });
+    expect([...result.nodes].filter((id) => id.includes(":")).sort()).toEqual(["flow.walk:begin", "flow.walk:finish", "flow.walk:left"]);
+    expect(result.packs.has("flow.walk")).toBe(false);
+  });
+
+  it("drawnOut은 고른 노드와 흐름의 노드, 경로 위 노드와 그 조상을 낸다", () => {
+    const out = drawnOut(repoFixture, flow(repoFixture, "main:run", 1, off), null);
+    expect(["main:run", "main", "pkg.mod:Store.load", "pkg.mod:Store", "pkg.mod", "pkg", "cli:main"].every((id) => out.has(id))).toBe(true);
+    expect(out.has("pkg.mod:parse")).toBe(false);
+    expect([...drawnOut(repoFixture, flow(repoFixture, "pkg.mod", 1, off), null)].some((id) => id.startsWith("pkg.mod:"))).toBe(false);
+    expect(drawnOut(repoFixture, null, null).size).toBe(0);
+  });
+});
+
 describe("shown: 강조하는 경로", () => {
   const hiddenNodes = hidden(routeFixture, toggles);
   const pathOf = (from: string, to: string) => lit(route(routeFixture, from, to, hiddenNodes), 0)!;
@@ -141,7 +254,7 @@ describe("shown: 강조하는 경로", () => {
     const result = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: null, lit: walk });
     expect([...result.nodes].filter((id) => id.includes(":")).sort()).toEqual(["flow.walk:begin", "flow.walk:finish", "flow.walk:left"]);
     expect([...result.open]).toEqual(["flow.walk"]);
-    expect(result.nodes.has("flow.build")).toBe(true);
+    expect(result.nodes.has("flow.walk")).toBe(true);
     expect(result.nodes.has("ring.a")).toBe(true);
   });
 
@@ -160,7 +273,7 @@ describe("shown: 강조하는 경로", () => {
     const collapsed = new Set(["flow", "ring"]);
     const result = shown(routeFixture, { ...toggles, collapsed, flow: null, lit: walk });
     expect(result.nodes.has("flow.walk:left")).toBe(true);
-    expect(result.nodes.has("flow.build")).toBe(true);
+    expect(result.nodes.has("flow.walk")).toBe(true);
     expect(result.open.has("flow.build")).toBe(false);
     expect(result.nodes.has("ring")).toBe(true);
     expect(result.nodes.has("ring.a")).toBe(false);

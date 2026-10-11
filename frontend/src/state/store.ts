@@ -48,6 +48,11 @@ export interface AtlasStore {
   selection: Selection;
   /** 접은 폴더(패키지 노드 id). 레포를 열면 `startFolds`가 고른 폴더가 접혀 있다. */
   collapsed: Set<string>;
+  /**
+   * 전부 펼침 단계인 상자(파일·폴더 노드 id). 펼친 상자는 상자 밖과 선이 없는 자식을 손잡이로 묶고, 이 집합에 든 상자는 그 자식도 그린다.
+   * 파일 상자는 선택을 풀면 접히지만 이 집합에는 남아, 다시 고르면 전부 펼침으로 열린다.
+   */
+  unpacked: Set<string>;
   /** 흐름 단계 */
   depth: Depth;
   showTests: boolean;
@@ -84,7 +89,7 @@ export interface AtlasStore {
    */
   reopen(repo: Repo, graph: Graph, tree: Tree): void;
   /**
-   * 경로 고정 중에는 selectEdge, toggleFolder, setDepth, enterFunction, expandFunction, open, back, forward, jump,
+   * 경로 고정 중에는 selectEdge, toggleFolder, togglePack, setDepth, enterFunction, expandFunction, open, back, forward, jump,
    * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다(`barred`). select와 show는
    * 강조한 경로 위의 노드를 받으면 finder.focus만 그 노드로 바꾸고, 그 밖의 노드를 받으면 같은 방식으로 막힌다.
    * select(null)은 고정 중에 아무것도 하지 않는다.
@@ -99,6 +104,8 @@ export interface AtlasStore {
   selectEdge(key: EdgeKey): void;
   /** 폴더를 접거나 펼친다. 초점을 둔 노드가 든 폴더를 접거나 초점을 둔 폴더를 펼치면 선택을 푼다. */
   toggleFolder(id: string): void;
+  /** 상자의 손잡이를 눌러 전부 펼침과 펼침을 오간다. 선택과 초점은 바꾸지 않는다. */
+  togglePack(id: string): void;
   setDepth(depth: Depth): void;
   /** 함수 시점 뷰로 들어가 그 함수를 고른다. */
   enterFunction(id: string): void;
@@ -114,7 +121,7 @@ export interface AtlasStore {
   forward(): void;
   jump(index: number): void;
   /**
-   * 느린 배치를 취소한다. 뷰·선택·접은 폴더·탐색 이력을 화면에 그린 배치의 것(`arranged`)으로 되돌리고 참을 돌려준다.
+   * 느린 배치를 취소한다. 뷰·선택·접은 폴더·전부 펼친 상자·탐색 이력을 화면에 그린 배치의 것(`arranged`)으로 되돌리고 참을 돌려준다.
    * 되돌릴 조작이 없으면(`undoable`) 아무것도 하지 않고 거짓을 돌려준다.
    */
   cancelArranging(): boolean;
@@ -179,8 +186,8 @@ export function parseUi(raw: string | null, theme: Theme): Ui {
   };
 }
 
-function placeOf(state: Pick<AtlasStore, "view" | "selection" | "collapsed">): Place {
-  return { view: state.view, selection: state.selection, collapsed: [...state.collapsed].sort() };
+function placeOf(state: Pick<AtlasStore, "view" | "selection" | "collapsed" | "unpacked">): Place {
+  return { view: state.view, selection: state.selection, collapsed: [...state.collapsed].sort(), unpacked: [...state.unpacked].sort() };
 }
 
 /**
@@ -240,15 +247,16 @@ export function barred(): boolean {
   return true;
 }
 
-const START: Pick<AtlasStore, "view" | "selection" | "collapsed"> = {
+const START: Pick<AtlasStore, "view" | "selection" | "collapsed" | "unpacked"> = {
   view: { kind: "structure" },
   selection: null,
   collapsed: new Set(),
+  unpacked: new Set(),
 };
 
 const FINDER: Finder = { open: false, from: null, to: null, route: null, pick: 0, focus: null, blocked: 0, aimed: 0 };
 
-/** 받은 분석 결과와, 레포를 처음 열 때의 뷰·선택·접은 폴더·탐색 이력. 테스트 코드 토글이 showTests일 때의 화면이다. */
+/** 받은 분석 결과와, 레포를 처음 열 때의 뷰·선택·접은 폴더·전부 펼친 상자·탐색 이력. 테스트 코드 토글이 showTests일 때의 화면이다. */
 function opened(repo: Repo, graph: Graph, tree: Tree, showTests: boolean) {
   const collapsed = startFolds(graph, showTests);
   const place = placeOf({ ...START, collapsed });
@@ -261,8 +269,8 @@ function cover(graph: Graph, toggles: { showTests: boolean; showExternal: boolea
 }
 
 export const useAtlas = create<AtlasStore>()((set, get) => {
-  /** 뷰·선택·접은 폴더를 바꾸고 바뀐 뒤의 단계를 이력에 넣는다. */
-  const visit = (change: Partial<Pick<AtlasStore, "view" | "selection" | "collapsed">>) =>
+  /** 뷰·선택·접은 폴더·전부 펼친 상자를 바꾸고 바뀐 뒤의 단계를 이력에 넣는다. */
+  const visit = (change: Partial<Pick<AtlasStore, "view" | "selection" | "collapsed" | "unpacked">>) =>
     set((state) => ({ ...change, history: push(state.history, placeOf({ ...state, ...change })) }));
 
   /** 이력의 지금 단계를 화면에 되돌린다. 이력에 새 단계를 넣지 않는다. */
@@ -271,7 +279,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       return;
     }
     const place = history.entries[history.index];
-    set({ history, view: place.view, selection: place.selection, collapsed: new Set(place.collapsed) });
+    set({ history, view: place.view, selection: place.selection, collapsed: new Set(place.collapsed), unpacked: new Set(place.unpacked) });
   };
 
   /** 화면 설정을 바꾸고 localStorage에 쓴다. */
@@ -419,6 +427,13 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       })(),
     selectEdge: guarded((key) => visit({ selection: { type: "edge", key, focus: focusOf(get().selection) } })),
     toggleFolder: guarded(toggle),
+    togglePack: guarded((id) => {
+      const unpacked = new Set(get().unpacked);
+      if (!unpacked.delete(id)) {
+        unpacked.add(id);
+      }
+      visit({ unpacked });
+    }),
     setDepth: guarded((depth) => keep({ depth })),
     enterFunction: guarded((id) => {
       if (kindOf(id) !== undefined) {
@@ -438,7 +453,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       if (!centered && kind !== "function" && kind !== "method") {
         return;
       }
-      set({ history: from, view: place.view, selection: place.selection, collapsed: new Set(place.collapsed) });
+      set({ history: from, view: place.view, selection: place.selection, collapsed: new Set(place.collapsed), unpacked: new Set(place.unpacked) });
       if (!centered) {
         enter(id);
       }

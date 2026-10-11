@@ -6,6 +6,7 @@ import { ExternalNode } from "./ExternalNode";
 import { FunctionNode } from "./FunctionNode";
 import { ModuleNode } from "./ModuleNode";
 import { PackageNode } from "./PackageNode";
+import { PackNode } from "./PackNode";
 
 export const nodeTypes: NodeTypes = {
   package: PackageNode,
@@ -14,6 +15,7 @@ export const nodeTypes: NodeTypes = {
   dataclass: DataClassNode,
   function: FunctionNode,
   external: ExternalNode,
+  pack: PackNode,
 };
 
 /** 메서드는 함수와 같은 모양이다. */

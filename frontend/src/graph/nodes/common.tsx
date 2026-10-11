@@ -6,7 +6,7 @@ import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
 import { BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, ENTRY_MARK, labelOf, type Box, type RouteEnd } from "../layout";
-import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, locTip, unresolvedTip } from "../tips";
+import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, insideTip, locTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
@@ -21,8 +21,8 @@ export interface AtlasNodeData extends Record<string, unknown> {
   flow: boolean;
   /** 선택한 노드가 든 파일 상자 안의 노드다 */
   local: boolean;
-  /** 배지에 적는 미확인 호출 수. 접힌 파일 상자와 접힌 폴더 상자는 안에 든 노드의 수를 합친 값이고 펼친 파일 상자는 0이다. */
-  unresolved: number;
+  /** 접힌 파일 상자와 접힌 폴더 상자의 배지에 적는 수. 파일 상자는 안에 든 함수·클래스 수, 폴더 상자는 안에 든 파일 수다. 그 밖의 노드는 0이다. */
+  inside: number;
   /** 이 노드와 이 노드로 올린 안쪽 노드 가운데 LLM 요약을 만드는 중인 노드 수 */
   busy: number;
   /** 강조하는 경로 위의 노드면 출발 노드, 도착 노드, 그 사이의 노드 가운데 어느 것인지 */
@@ -202,7 +202,7 @@ export function Mark({ change }: { change: Change | null }) {
 }
 
 /**
- * 감싼 모양의 오른쪽 위 모서리에 미확인 호출 수를, 오른쪽 아래 모서리에 모듈 변수 변경을, 왼쪽 위 모서리에 LLM 요약을
+ * 감싼 모양의 오른쪽 위 모서리에 접힌 상자 안에 든 것의 수를, 오른쪽 아래 모서리에 모듈 변수 변경을, 왼쪽 위 모서리에 LLM 요약을
  * 만드는 중인 도는 원을 단다. 글자 요소에만 그린다. 배지의 바깥쪽 끝은 모양의 그쪽 끝에서 `BADGE_OVERHANG`만큼 나간다.
  * 배지마다 뜻을 적은 말풍선 글(`tips.ts`)을 `data-tip`에 담는다.
  */
@@ -214,9 +214,9 @@ export function Badges({ data }: { data: AtlasNodeData }) {
   return (
     <>
       {data.busy > 0 && <span className="badge badge-busy" style={style} role="img" aria-label="요약을 만드는 중" data-tip={busyTip(data.node, data.busy)} />}
-      {data.unresolved > 0 && (
-        <span className="badge badge-unresolved" style={style} data-tip={unresolvedTip(data.node, data.unresolved, data.expanded)}>
-          ?{data.unresolved}
+      {data.inside > 0 && (
+        <span className="badge badge-inside" style={style} data-tip={insideTip(data.node, data.inside)}>
+          {data.inside}
         </span>
       )}
       {data.node.global_write && (
@@ -237,11 +237,11 @@ export function Circle({ data }: { data: AtlasNodeData }) {
   );
 }
 
-/** 접힌 파일 상자와 접힌 폴더 상자 아래의 글자. 미사용 후보 수를 적었으면 그 뜻을 말풍선 글에 담는다. */
+/** 접힌 파일 상자와 접힌 폴더 상자 아래의 글자. 미사용 덮개를 켰을 때의 미사용 후보 수를 적고 그 뜻을 말풍선 글에 담는다. */
 export function Below({ data }: { data: AtlasNodeData }) {
-  const text = boxCaption(data.node, data.functions, data.candidates);
+  const text = boxCaption(data.candidates);
   return text === "" ? null : (
-    <span className="node-below" data-tip={data.candidates > 0 ? candidatesTip(data.node, data.candidates) : undefined}>
+    <span className="node-below" data-tip={candidatesTip(data.node, data.candidates)}>
       {text}
     </span>
   );

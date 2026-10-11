@@ -30,9 +30,15 @@ const run: RunElk = (graph) => elk.layout(graph);
 const nodes = nodeIndex(repoFixture);
 const cols = columns(repoFixture, toggles);
 
-function shownFor(selection: string | null, collapsed: string[] = []): Shown {
+/** 모든 상자를 전부 펼침 단계로 둔 화면. 고른 노드가 든 파일 상자가 안의 노드를 모두 그린다. unpacked를 주면 그 상자만 전부 펼침이다. */
+function shownFor(selection: string | null, collapsed: string[] = [], unpacked: string[] = repoFixture.nodes.map((n) => n.id)): Shown {
   const picked = selection === null ? null : flow(repoFixture, selection, 2, hidden(repoFixture, toggles));
-  return shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), flow: picked, lit: null });
+  return shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), unpacked: new Set(unpacked), flow: picked, lit: null });
+}
+
+/** 손잡이를 뺀 자식 */
+function kidsOf(node: ElkNode | undefined): ElkNode[] | undefined {
+  return node?.children?.filter((child) => !child.id.endsWith("#pack"));
 }
 
 function arranged(selection: string | null, collapsed: string[] = []): Promise<Layout> {
@@ -62,10 +68,10 @@ function onBorder(p: Point, box: Box): boolean {
   );
 }
 
-/** 형제 묶음마다 열 순서(x가 같은 노드끼리 한 열)와 열 안 y 순서를 문자열로 만든다. 열 없이 격자에 놓는 선반 단위 scratch는 뺀다. */
+/** 형제 묶음마다 열 순서(x가 같은 노드끼리 한 열)와 열 안 y 순서를 문자열로 만든다. 열 없이 격자에 놓는 선반 단위 scratch와 손잡이는 뺀다. */
 function arrangement(result: Layout, ids: string[], index = nodes): string {
   const groups = new Map<string | null, string[]>();
-  for (const id of ids.filter((id) => id !== "scratch")) {
+  for (const id of ids.filter((id) => id !== "scratch" && !id.endsWith("#pack"))) {
     const parent = index.get(id)!.parent;
     groups.set(parent, [...(groups.get(parent) ?? []), id]);
   }
@@ -112,9 +118,9 @@ describe("elkGraphs", () => {
   it("연결 묶음마다 뿌리 하나를 만들고 단위를 열 안 순서로 넣어 열 번호를 partition으로 준다", () => {
     expect(closed.components).toHaveLength(1);
     const root = closed.components[0];
-    expect(root.children?.map((c) => c.id)).toEqual(["app", "pkg", "cli", "common", "main"]);
-    expect(root.children?.map((c) => c.layoutOptions?.["elk.partitioning.partition"])).toEqual(["0", "1", "0", "2", "0"]);
-    expect(find(root, "app")?.children?.map((c) => c.id)).toEqual(["app.__init__", "app.text", "app.web"]);
+    expect(kidsOf(root)?.map((c) => c.id)).toEqual(["app", "pkg", "cli", "common", "main"]);
+    expect(kidsOf(root)?.map((c) => c.layoutOptions?.["elk.partitioning.partition"])).toEqual(["0", "1", "0", "2", "0"]);
+    expect(kidsOf(find(root, "app"))?.map((c) => c.id)).toEqual(["app.__init__", "app.text", "app.web"]);
     expect(find(root, "app.text")?.layoutOptions?.["elk.partitioning.partition"]).toBe("1");
     expect(closed.shelf.map((n) => n.id)).toEqual(["scratch"]);
   });
@@ -135,6 +141,19 @@ describe("elkGraphs", () => {
     expect(root.edges!.every((e) => !e.sources[0].endsWith("#in"))).toBe(true);
   });
 
+  it("손잡이를 다는 상자는 자식 목록 끝에 손잡이 노드를 열0으로 넣고, 이미 그리던 자식의 순서와 열은 그대로다", () => {
+    const part = find(elkGraphs(repoFixture, shownFor("pkg.mod", [], []), cols, measure, new Map()).components[0], "pkg.mod")!;
+    expect(part.children?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod#pack"]);
+    const handle = part.children!.at(-1)!;
+    expect(handle).toMatchObject({ width: measure("안쪽 2개") + 12, height: 18 });
+    expect(handle.layoutOptions?.["elk.partitioning.partition"]).toBe("0");
+    const full = find(opened.components[0], "pkg.mod")!;
+    expect(full.children?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse", "pkg.mod#pack"]);
+    expect(full.children!.at(-1)!.width).toBe(measure("안쪽 2개 접기") + 12);
+    const partition = (node: ElkNode, id: string) => find(node, id)!.layoutOptions?.["elk.partitioning.partition"];
+    expect(partition(part, "pkg.mod:Store")).toBe(partition(full, "pkg.mod:Store"));
+  });
+
   it("강조하는 경로의 출발 노드와 도착 노드는 표지의 폭만큼 넓고 그 밖의 노드는 크기가 같다", () => {
     const ends = new Map([["pkg.mod:Store.load", "from"], ["pkg.mod:parse", "to"]] as const);
     const tagged = elkGraphs(repoFixture, shownFor("pkg.mod"), cols, measure, ends);
@@ -145,9 +164,9 @@ describe("elkGraphs", () => {
     expect(find(tagged.components[0], "pkg.mod:Store.save")).toEqual(find(opened.components[0], "pkg.mod:Store.save"));
   });
 
-  it("접힌 파일 상자는 320×40이고 함수 수 글자를 상자 아래 이름표로 넘긴다", () => {
+  it("접힌 파일 상자는 320×40이고 미사용 후보 수를 적는 줄을 상자 아래 이름표로 잡아 둔다", () => {
     const main = find(closed.components[0], "main")!;
-    expect(main).toMatchObject({ width: 320, height: 40, labels: [{ text: "함수 2개", height: 16 }] });
+    expect(main).toMatchObject({ width: 320, height: 40, labels: [{ text: "미사용 후보 999", height: 16 }] });
     expect(main.children).toBeUndefined();
   });
 
@@ -181,19 +200,17 @@ describe("elkGraphs", () => {
     expect(pkg.layoutOptions?.["elk.nodeLabels.placement"]).toBe("OUTSIDE V_BOTTOM H_LEFT");
   });
 
-  it("접힌 상자 아래 글자는 미사용 후보가 있을 때만 그 수를 붙이고 폴더 상자는 후보 수만 적는다", () => {
-    expect(boxCaption(nodes.get("main")!, 13, 0)).toBe("함수 13개");
-    expect(boxCaption(nodes.get("main")!, 13, 3)).toBe("함수 13개 · 미사용 후보 3");
-    expect(boxCaption(nodes.get("pkg")!, 0, 0)).toBe("");
-    expect(boxCaption(nodes.get("pkg")!, 0, 2)).toBe("미사용 후보 2");
+  it("접힌 상자 아래 글자는 미사용 후보가 있을 때만 그 수를 적는다", () => {
+    expect(boxCaption(0)).toBe("");
+    expect(boxCaption(2)).toBe("미사용 후보 2");
   });
 
   it("펼친 파일 상자는 머리 줄 여백을 두고 안의 노드를 소스 정의 순서로 품는다", () => {
     const mod = find(opened.components[0], "pkg.mod")!;
     expect(mod.layoutOptions?.["elk.padding"]).toBe("[top=32,left=16,bottom=16,right=16]");
-    expect(mod.children?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse"]);
-    expect(mod.children?.map((c) => c.layoutOptions?.["elk.partitioning.partition"])).toEqual(["0", "1", "1"]);
-    expect(find(mod, "pkg.mod:Store")?.children?.map((c) => c.id)).toEqual(["pkg.mod:Store.load", "pkg.mod:Store.save"]);
+    expect(kidsOf(mod)?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse"]);
+    expect(kidsOf(mod)?.map((c) => c.layoutOptions?.["elk.partitioning.partition"])).toEqual(["0", "1", "1"]);
+    expect(kidsOf(find(mod, "pkg.mod:Store"))?.map((c) => c.id)).toEqual(["pkg.mod:Store.load", "pkg.mod:Store.save"]);
   });
 
   it("함수·메서드는 원, 배지가 나오는 폭과 그 뒤에 남기는 폭, 이름표, 줄 수 숫자를 담는 폭에 높이 18이다", () => {
@@ -240,7 +257,7 @@ describe("elkGraphs", () => {
 
   it("파일 상자를 펼쳐도 최상위 선과 partition이 같다", () => {
     const strip = (root: ElkNode) => ({
-      nodes: root.children?.map((c) => [c.id, c.layoutOptions?.["elk.partitioning.partition"]]),
+      nodes: kidsOf(root)?.map((c) => [c.id, c.layoutOptions?.["elk.partitioning.partition"]]),
       edges: root.edges?.map((e) => e.id),
     });
     expect(strip(opened.components[0])).toEqual(strip(closed.components[0]));
@@ -274,6 +291,20 @@ describe("arrange", async () => {
     for (const [, points] of into) {
       expect(points.at(-1)).toEqual({ x: box.x, y: box.y + box.height / 2 });
     }
+  });
+
+  it("손잡이는 상자 안 열0의 맨 아래에 놓이고, 단계를 바꿔도 상자 사이의 열과 순서는 그대로다", async () => {
+    const part = await arrange(elkGraphs(repoFixture, shownFor("pkg.mod", [], []), cols, measure, new Map()), run);
+    const full = await arranged("pkg.mod");
+    for (const result of [part, full]) {
+      const handle = result.boxes.get("pkg.mod#pack")!;
+      const store = result.boxes.get("pkg.mod:Store")!;
+      expect(handle.x).toBe(store.x);
+      expect(handle.y).toBeGreaterThan(store.y + store.height);
+    }
+    const boxes = [...shownFor(null).nodes];
+    expect(arrangement(part, boxes)).toBe(arrangement(full, boxes));
+    expect(arrangement(part, boxes)).toBe(arrangement(closed, boxes));
   });
 
   it("진입점 두 개가 서로 import해도 둘 다 가장 작은 x에 놓인다", () => {
@@ -322,7 +353,7 @@ describe("arrange", async () => {
     const routeCols = columns(routeFixture, toggles);
     const route = async (selection: string | null) => {
       const picked = selection === null ? null : flow(routeFixture, selection, 2, hidden(routeFixture, toggles));
-      const visible = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: picked, lit: null });
+      const visible = shown(routeFixture, { ...toggles, collapsed: new Set(), unpacked: new Set(routeFixture.nodes.map((n) => n.id)), flow: picked, lit: null });
       return lanes(await arrange(elkGraphs(routeFixture, visible, routeCols, measure, new Map()), run), routeNodes);
     };
     const regions = [

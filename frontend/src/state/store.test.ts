@@ -39,6 +39,34 @@ describe("select", () => {
   });
 });
 
+describe("togglePack", () => {
+  it("상자를 전부 펼침에 넣고 빼며 선택은 그대로 두고, 이력에 한 단계씩 넣어 뒤로·앞으로로 되돌아간다", () => {
+    store().select("pkg.mod");
+    const at = store().history.index;
+    store().togglePack("pkg.mod");
+    expect(store().unpacked).toEqual(new Set(["pkg.mod"]));
+    expect(store().selection).toEqual(node("pkg.mod"));
+    expect(store().history.index).toBe(at + 1);
+    expect(store().history.entries[at + 1].unpacked).toEqual(["pkg.mod"]);
+    store().togglePack("pkg.mod");
+    expect(store().unpacked).toEqual(new Set());
+    expect(store().history.index).toBe(at + 2);
+    store().back();
+    expect(store().unpacked).toEqual(new Set(["pkg.mod"]));
+    store().back();
+    expect(store().unpacked).toEqual(new Set());
+    store().forward();
+    expect(store().unpacked).toEqual(new Set(["pkg.mod"]));
+  });
+
+  it("선택을 풀어도 전부 펼침은 남는다", () => {
+    store().select("pkg.mod");
+    store().togglePack("pkg.mod");
+    store().select(null);
+    expect(store().unpacked).toEqual(new Set(["pkg.mod"]));
+  });
+});
+
 describe("selectEdge", () => {
   it("직전에 초점을 둔 노드를 선 선택에 담고, 선을 이어 골라도 그 노드를 유지한다", () => {
     store().select(a);
@@ -245,6 +273,7 @@ describe("이력", () => {
     expect(store().history.entries[4]).toEqual({
       view: { kind: "function", center: b, expanded: [c] },
       selection: node(b),
+      unpacked: [],
       collapsed: [folder],
     });
   });
@@ -306,7 +335,7 @@ describe("이력", () => {
   });
 
   it("push는 index 뒤를 버리고 100단계까지 둔다", () => {
-    const place = (id: string): Place => ({ view: { kind: "structure" }, selection: { type: "node", id }, collapsed: [] });
+    const place = (id: string): Place => ({ view: { kind: "structure" }, selection: { type: "node", id }, collapsed: [], unpacked: [] });
     let history: History = { entries: [place("0")], index: 0 };
     for (let i = 1; i <= 3; i++) {
       history = push(history, place(String(i)));
@@ -454,6 +483,7 @@ describe("경로 고정", () => {
     ["show", (state) => state.show(probe)],
     ["selectEdge", (state) => state.selectEdge("agg|x|y")],
     ["toggleFolder", (state) => state.toggleFolder("flow")],
+    ["togglePack", (state) => state.togglePack("flow")],
     ["enterFunction", (state) => state.enterFunction(begin)],
     ["expandFunction", (state) => state.expandFunction(left)],
     ["open", (state) => state.open(begin, { entries: [state.history.entries[0]], index: 0 })],
@@ -723,6 +753,7 @@ describe("reopen", () => {
     store().toggleExternal();
     store().select(a);
     store().enterFunction(b);
+    store().togglePack("pkg.mod");
     store().toggleFinder();
     useOverlay.getState().set("unused");
     useAtlas.setState({ reloadError: "앞의 실패" });
@@ -732,7 +763,8 @@ describe("reopen", () => {
     expect([now.depth, now.autoSummary, now.showTests, now.showExternal]).toEqual([2, false, false, false]);
     expect([now.view, now.selection]).toEqual([{ kind: "structure" }, null]);
     expect(now.collapsed).toEqual(new Set(["app", "pkg"]));
-    expect(now.history).toEqual({ entries: [{ view: { kind: "structure" }, selection: null, collapsed: ["app", "pkg"] }], index: 0 });
+    expect(now.unpacked).toEqual(new Set());
+    expect(now.history).toEqual({ entries: [{ unpacked: [], view: { kind: "structure" }, selection: null, collapsed: ["app", "pkg"] }], index: 0 });
     expect([now.arranging, now.arranged]).toEqual([false, null]);
     expect([now.finder.open, now.finder.from, now.finder.route]).toEqual([false, null, null]);
     expect([now.repo, now.graph, now.tree, now.epoch]).toEqual([repo, repoFixture, tree, 1]);

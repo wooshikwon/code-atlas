@@ -1,18 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture } from "./fixture";
-import { busyTip, cycleTip, globalTip, locTip, nodeTip, trunkTip, unresolvedTip } from "./tips";
+import { busyTip, cycleTip, globalTip, insideTip, locTip, nodeTip, packTip, trunkTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
 const [file, folder, fn] = [nodes.get("main")!, nodes.get("pkg")!, nodes.get("main:run")!];
 
 describe("배지 말풍선", () => {
-  it("미확인 호출 수는 수와 뜻을 적고, 접힌 파일·폴더 상자는 합친 수임을 밝힌다", () => {
-    expect(unresolvedTip(fn, 4, false).split("\n")[0]).toBe("대상을 확인하지 못한 호출 4곳");
-    expect(unresolvedTip(file, 9, false).split("\n")[0]).toBe("대상을 확인하지 못한 호출 9곳 · 이 파일 안의 함수에서 합친 수");
-    expect(unresolvedTip(folder, 30, false).split("\n")[0]).toBe("대상을 확인하지 못한 호출 30곳 · 이 폴더 안의 함수에서 합친 수");
-    expect(unresolvedTip(file, 2, true).split("\n")[0]).toBe("대상을 확인하지 못한 호출 2곳");
-    expect(unresolvedTip(fn, 4, false).split("\n")).toHaveLength(3);
+  it("접힌 상자의 배지는 파일 상자면 안에 든 함수·클래스 수, 폴더 상자면 안에 든 파일 수를 적는다", () => {
+    expect(insideTip(file, 9)).toBe("안에 든 함수·클래스 9개 · 고르면 보인다");
+    expect(insideTip(folder, 30)).toBe("안에 든 파일 30개 · 펼치면 보인다");
+  });
+
+  it("손잡이는 안에서만 쓰이는 자식의 수와 이름을 적고 여섯 개부터는 줄인다", () => {
+    expect(packTip(file, ["_parse()", "_merge()"])).toBe("이 파일 안에서만 쓰이는 정의 2개 · _parse(), _merge()");
+    expect(packTip(folder, ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py", "g.py"])).toBe("이 폴더 안에서만 쓰이는 파일 7개 · a.py, b.py, c.py, d.py, e.py 외 2개");
   });
 
   it("모듈 변수 변경은 바꾸는 모듈 변수 이름을 적고 self 속성은 뺀다", () => {
