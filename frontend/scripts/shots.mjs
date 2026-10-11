@@ -2,9 +2,11 @@
 // 사용: node scripts/shots.mjs [주소] [--only 이름,이름] [--with-summary]
 // 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름은 sync-engine을 연 서버가 기준이고 노드 수·선 수·줄 범위는 서버 응답에서 읽는다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
+// 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 "건너뜀"으로 출력하고 실패로 세지 않는다.
 // summary 시나리오는 Claude Code 구독 사용량을 쓰므로 --only로 지정하거나 --with-summary를 줬을 때만 돈다.
 // 다른 시나리오가 보내는 POST /api/summary는 서버로 보내지 않고 붙잡아 두었다가 버린다.
 // changes 시나리오는 /api/repo의 root에서 git status와 git diff를 읽기 전용으로 부르므로 서버와 같은 기계에서 돌린다.
+// 수정한 .py 파일이 없는 레포에서는 changes의 확인 항목을 건너뛴다.
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -24,7 +26,9 @@ const NAMED_ZOOM = 0.8;
 const INSET = 20;
 const DARK = { surface: "#1a1a19", ink: "#ffffff" };
 /** 좁은 창에서 상단 줄을 확인할 때 고르는 함수와 창 폭 */
-const NARROW = { owner: "parser.plan", id: "parser.plan:_parse_week_header", label: "_parse_week_header()", widths: [1440, 1280] };
+const NARROW = { owner: "parser.plan", id: "parser.plan:_parse_week_header", label: "_parse_week_header()", widths: [1700, 1440, 1280, 1160, 980, 900, 720] };
+/** 글자 요소가 그리는 글자와 배지. 이 요소의 가운데 점에서는 늘 그 노드가 눌린다. */
+const TEXTS = ".node-label, .loc, .change-mark, .badge, .node-aside, .node-below, .node-inflow, .node-field, .call-file";
 
 let url = "http://127.0.0.1:8766";
 let only = null;
@@ -42,7 +46,10 @@ for (let i = 2; i < process.argv.length; i += 1) {
 
 const near = (a, b, tolerance = 1) => Math.abs(a - b) <= tolerance;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** 노드의 바탕 요소(테두리와 채움)를 감싼 React Flow 노드 */
 const node = (id) => `.react-flow__node[data-id="${id}"]`;
+/** 노드의 글자 요소(이름표·줄 수 숫자·배지·선택 고리)를 감싼 React Flow 노드 */
+const face = (id) => `.react-flow__node[data-id="${id}#face"]`;
 const api = async (path) => (await fetch(new URL(path, url))).json();
 
 // ── 서버 응답에서 읽는 기대값 ─────────────────────────────────────
@@ -89,28 +96,29 @@ const headOf = (page) => page.evaluate(() => document.querySelector(".info-panel
 
 const count = (page, selector) => page.evaluate((sel) => document.querySelectorAll(sel).length, selector);
 
-/** 파일 상자마다 화면 위치와 확대하기 전 크기 */
+/** 파일 상자마다 화면 위치와 확대하기 전 크기. 이름표·배지·변경 상태 글자는 글자 요소에서 읽는다. */
 const boxes = (page) =>
   page.evaluate(() => {
     const transform = document.querySelector(".react-flow__viewport")?.style.transform ?? "";
     const zoom = Number(/scale\(([^)]+)\)/.exec(transform)?.[1] ?? 1);
     return [...document.querySelectorAll(".react-flow__node")]
-      .filter((wrapper) => wrapper.querySelector(":scope > .node-module") !== null)
+      .filter((wrapper) => wrapper.querySelector(":scope > .node-body.node-module") !== null)
       .map((wrapper) => {
         const rect = wrapper.getBoundingClientRect();
         const root = wrapper.querySelector(":scope > .node-module");
+        const text = document.querySelector(`.react-flow__node[data-id="${CSS.escape(wrapper.dataset.id)}#face"] > .node-module`);
         return {
           id: wrapper.dataset.id,
-          label: root.querySelector(".node-label")?.textContent ?? "",
+          label: text?.querySelector(".node-label")?.textContent ?? "",
           x: rect.left,
           y: rect.top,
           bottom: rect.bottom,
           width: rect.width / zoom,
           height: rect.height / zoom,
           open: root.classList.contains("node-module-open"),
-          inflow: root.querySelector(".node-inflow")?.textContent ?? null,
+          inflow: text?.querySelector(".node-inflow")?.textContent ?? null,
           change: root.dataset.change ?? null,
-          mark: root.querySelector(".change-mark")?.textContent ?? null,
+          mark: text?.querySelector(".change-mark")?.textContent ?? null,
         };
       });
   });
@@ -220,16 +228,19 @@ async function load(page) {
 
 /** 노드의 이름표(펼친 파일 상자는 머리 줄) 가운데를 마우스로 누른다. times가 2면 더블클릭이다. */
 async function clickNode(page, id, times = 1) {
-  const at = await page.evaluate((selector) => {
-    const wrapper = document.querySelector(selector);
-    if (wrapper === null) {
-      return null;
-    }
-    const rect = (wrapper.querySelector(".node-module-head, .node-module-name, .node-label") ?? wrapper).getBoundingClientRect();
-    const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
-    const hit = document.elementFromPoint(x, y);
-    return { x, y, hit: hit !== null && wrapper.contains(hit) };
-  }, node(id));
+  const at = await page.evaluate(
+    ([body, text]) => {
+      const wrappers = [document.querySelector(body), document.querySelector(text)];
+      if (wrappers[0] === null) {
+        return null;
+      }
+      const rect = (wrappers[1]?.querySelector(".node-module-head, .node-module-name, .node-label") ?? wrappers[0]).getBoundingClientRect();
+      const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
+      const hit = document.elementFromPoint(x, y);
+      return { x, y, hit: hit !== null && wrappers.some((wrapper) => wrapper?.contains(hit) === true) };
+    },
+    [node(id), face(id)],
+  );
   if (at === null) {
     throw new Error(`노드가 화면에 없다: ${id}`);
   }
@@ -238,6 +249,34 @@ async function clickNode(page, id, times = 1) {
   }
   await (times === 2 ? page.mouse.dblclick(at.x, at.y) : page.mouse.click(at.x, at.y));
 }
+
+/**
+ * 화면에 보이는 글자와 배지마다 가운데 점의 맨 위 요소가 그 노드의 글자 요소인지 본다.
+ * 관계 그래프 영역 밖에 있거나 정보 패널·범례 버튼 아래에 있는 글자는 세지 않는다.
+ */
+const coveredTexts = (page) =>
+  page.evaluate((selector) => {
+    const area = document.querySelector(".graph").getBoundingClientRect();
+    const result = { seen: 0, covered: [] };
+    for (const text of document.querySelectorAll(`.node-face :is(${selector})`)) {
+      const rect = text.getBoundingClientRect();
+      const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
+      if (getComputedStyle(text).visibility !== "visible" || x <= area.left || x >= area.right || y <= area.top || y >= area.bottom) {
+        continue;
+      }
+      const hit = document.elementFromPoint(x, y);
+      if (hit === null || hit.closest(".react-flow__viewport") === null) {
+        continue;
+      }
+      result.seen += 1;
+      const wrapper = text.closest(".react-flow__node");
+      if (!wrapper.contains(hit)) {
+        const over = hit.closest(".react-flow__node")?.dataset.id ?? hit.closest(".edge")?.dataset.key ?? hit.tagName;
+        result.covered.push(`${wrapper.dataset.id.replace(/#face$/, "")}의 "${text.textContent}" 위에 ${over}`);
+      }
+    }
+    return result;
+  }, TEXTS);
 
 async function waitSelected(page, id) {
   await page.waitForFunction(
@@ -346,7 +385,7 @@ async function file(t, page) {
   await pick(page, FILE);
   const graph = await api("/api/graph");
   const all = await boxes(page);
-  const [functions, defined] = [await count(page, ".react-flow__node .node-function"), definedIn(graph, FILE).filter((n) => n.kind === "function" || n.kind === "method").length];
+  const [functions, defined] = [await count(page, ".react-flow__node .node-body.node-function"), definedIn(graph, FILE).filter((n) => n.kind === "function" || n.kind === "method").length];
   t.check(`함수 노드 ${defined}개가 나타난다`, defined > 0 && functions === defined, `${functions}개`);
   const opened = all.filter((b) => b.open).map((b) => b.id);
   t.check("다른 파일 상자는 접혀 있다", same(opened, [FILE]), `펼친 상자 ${opened.join(", ")}`);
@@ -385,7 +424,7 @@ async function file(t, page) {
       box: document.querySelectorAll(`${sel} > .node-module > .badge-unresolved`).length,
       inner: numbers(document.querySelectorAll(".react-flow__node .node-function .badge-unresolved")),
     };
-  }, node(FILE));
+  }, face(FILE));
   t.check(
     "펼친 arbiter.py 상자는 미확인 호출 배지가 없고, 안의 함수 배지의 합과 머리 줄의 미확인 호출 수가 같다",
     unresolved > 0 && badges.box === 0 && badges.inner.reduce((sum, n) => sum + n, 0) === unresolved && title.includes(`미확인 호출 ${unresolved}`),
@@ -451,7 +490,7 @@ async function focused(t, page) {
     `확대 비율 ${before.toFixed(3)} → ${zoom.toFixed(3)}, 중심 차이 (${(at.x - middle.x).toFixed(1)}, ${(at.y - middle.y).toFixed(1)})`,
   );
   const local = await page.evaluate(() =>
-    [...document.querySelectorAll(".react-flow__node > [data-local]:not([data-flow])")].map((root) => ({
+    [...document.querySelectorAll(".react-flow__node > .node-face[data-local]:not([data-flow])")].map((root) => ({
       opacity: Number(getComputedStyle(root.closest(".react-flow__node")).opacity),
       label: getComputedStyle(root.querySelector(".node-label")).visibility,
     })),
@@ -642,6 +681,12 @@ async function callview(t, page) {
   await settle(page);
   const expanded = await count(page, ".node-call");
   t.check("+를 누르면 한 단계 더 펼친다", expanded > entered, `노드 ${entered}개 → ${expanded}개`);
+  const texts = await coveredTexts(page);
+  t.check(
+    "함수 시점 뷰의 글자와 배지 가운데 점에서 맨 위 요소가 그 노드의 글자 요소다",
+    texts.seen > 0 && texts.covered.length === 0,
+    `글자 ${texts.seen}개, 덮인 글자 ${texts.covered.length}개${texts.covered.length > 0 ? `: ${texts.covered.slice(0, 3).join(", ")}` : ""}`,
+  );
   await t.shot();
   await page.keyboard.press("Alt+ArrowLeft");
   await page.waitForFunction((n) => document.querySelectorAll(".node-call").length === n, entered, { timeout: 30_000 }).catch(() => {});
@@ -717,40 +762,58 @@ async function zoom(t, page) {
   t.check("확대 비율 구간 data-zoom이 0, 1, 2로 바뀐다", same(seen.map((s) => s.band), ["0", "1", "2"]), seen.map((s) => s.band).join(", "));
 }
 
-/** 테스트 코드를 켜고 클래스가 든 파일 가운데 노드가 가장 적은 파일을 펼쳐 육각형 위에 이름표가 그려지는지 본다. */
-async function classLabel(t, page) {
+/** 테스트 코드를 켜고 파일을 하나씩 펼쳐, 화면에 보이는 모든 글자와 배지의 가운데 점에서 그 노드가 눌리는지 센다. */
+async function labels(t, page) {
   await load(page);
   const graph = await api("/api/graph");
-  const holders = [...new Set(graph.nodes.filter((n) => n.kind === "class").map((n) => n.parent))]
-    .filter((id) => graph.nodes.some((n) => n.id === id && n.kind === "module"))
-    .sort((a, b) => definedIn(graph, a).length - definedIn(graph, b).length);
-  if (holders.length === 0) {
-    t.check("대상 레포에 클래스가 있다", false);
-    return;
-  }
+  const files = graph.nodes.filter((n) => n.kind === "module").map((n) => n.id);
+  const classes = new Set(graph.nodes.filter((n) => n.kind === "class").map((n) => n.id));
   await page.getByLabel("테스트 코드").check();
-  await page.click(`.tree-row.tree-file[data-node="${holders[0]}"]`);
-  await waitSelected(page, holders[0]);
-  const { free } = await stageOf(page);
-  const classes = await page.evaluate((area) => {
-    const result = [];
-    for (const root of document.querySelectorAll(".react-flow__node > .node-class")) {
-      const label = root.querySelector(".node-label");
-      const rect = label.getBoundingClientRect();
-      const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
-      if (x > area.x && x < area.x + area.width && y > area.y && y < area.y + area.height) {
-        // 그 점에 겹쳐 그린 요소를 위부터 늘어놓아 이름표가 같은 노드의 육각형보다 앞에 있는지 본다.
-        const stack = document.elementsFromPoint(x, y);
-        const [text, shape] = [stack.indexOf(label), stack.indexOf(root.querySelector(".node-hexagon polygon"))];
-        result.push({ name: label.textContent, expanded: root.classList.contains("node-class-expanded"), top: text >= 0 && shape > text });
-      }
+  await settle(page);
+  const total = { files: 0, seen: 0, classes: 0, covered: [], blocked: [] };
+  let layers = null;
+  for (const id of files) {
+    const row = `.tree-row.tree-file[data-node="${id}"]`;
+    if ((await count(page, row)) === 0) {
+      continue;
     }
-    return result;
-  }, free);
+    await page.click(row);
+    await waitSelected(page, id);
+    const found = await coveredTexts(page);
+    total.files += 1;
+    total.seen += found.seen;
+    total.covered.push(...found.covered);
+    if (found.covered.length > 0) {
+      total.blocked.push(id);
+    }
+    // 클래스가 든 파일 가운데 처음 만난 파일의 화면을 남긴다.
+    const shown = await page.evaluate(() => [...document.querySelectorAll(".node-body.node-class")].map((root) => root.closest(".react-flow__node").dataset.id));
+    if (total.classes === 0 && shown.some((shownId) => classes.has(shownId))) {
+      await t.shot();
+      layers = await page.evaluate(() => {
+        const of = (selector) =>
+          [...new Set([...document.querySelectorAll(selector)].map((element) => getComputedStyle(element.closest(".react-flow__node, svg")).zIndex))].sort().join("·");
+        return [
+          of(".react-flow__node > .node-body:is(.node-module, .node-package)"),
+          of(".react-flow__node > .node-body:is(.node-class, .node-dataclass)"),
+          of(".react-flow__edges .edge"),
+          of(".react-flow__node > .node-body:is(.node-function, .node-external)"),
+          of(".react-flow__node > .node-face"),
+        ];
+      });
+    }
+    total.classes += shown.length;
+  }
   t.check(
-    "클래스 육각형의 이름표가 육각형 채움 위에 그려진다",
-    classes.length > 0 && classes.every((c) => c.top),
-    `${holders[0]}의 클래스 ${classes.length}개(메서드를 품은 클래스 ${classes.filter((c) => c.expanded).length}개), 가려진 이름표 ${classes.filter((c) => !c.top).map((c) => c.name).join("·") || "없음"}`,
+    `파일 ${files.length}개를 차례로 펼쳤을 때 글자와 배지 가운데 점의 맨 위 요소가 모두 그 노드의 글자 요소다`,
+    total.files === files.length && total.seen > 0 && total.covered.length === 0,
+    `펼친 파일 ${total.files}개, 글자 ${total.seen}개, 덮인 글자 ${total.covered.length}개(파일 ${total.blocked.length}개)${total.covered.length > 0 ? `: ${total.covered.slice(0, 3).join(", ")}` : ""}`,
+  );
+  t.check("클래스 노드가 든 화면을 하나 이상 확인했다", total.classes > 0, `클래스 노드 ${total.classes}개`);
+  t.check(
+    "상자, 클래스, 선, 함수 원, 글자의 z-index가 1, 2, 3, 4, 5다",
+    same(layers, ["1", "2", "3", "4", "5"]),
+    JSON.stringify(layers),
   );
 }
 
@@ -870,9 +933,21 @@ async function changes(t, page) {
     .map((line) => line.slice(3).slice(prefix.length))
     .sort();
   const served = reply.files.filter((f) => f.status === "modified").map((f) => f.path).sort();
+  if (modified.length === 0) {
+    for (const label of [
+      "/api/changes의 수정 파일이 git status --porcelain의 수정 .py 파일과 같다",
+      'git이 수정으로 내는 .py 파일과 같은 수의 파일 상자에 [data-change="modified"]와 M이 있다',
+      "파일트리의 같은 행에 수정 색 점과 M이 있다",
+      "수정 파일을 펼치면 git diff -U0 HEAD의 바뀐 줄과 겹치는 함수만 표시된다",
+    ]) {
+      t.skip(label, "대상 레포에 수정한 .py 파일이 없다");
+    }
+    t.check("수정 파일이 없으면 /api/changes도 수정 파일을 내지 않는다", served.length === 0, `서버 ${served.length}개`);
+    return;
+  }
   t.check(
-    "대상 레포에 수정한 .py 파일이 있고 /api/changes의 수정 파일이 git status --porcelain의 수정 .py 파일과 같다",
-    modified.length > 0 && same(served, modified),
+    "/api/changes의 수정 파일이 git status --porcelain의 수정 .py 파일과 같다",
+    same(served, modified),
     `git ${modified.length}개, 서버 ${served.length}개`,
   );
 
@@ -881,7 +956,7 @@ async function changes(t, page) {
   const boxed = (await boxes(page)).filter((b) => b.change === "modified");
   t.check(
     `git이 수정으로 내는 .py 파일과 같은 수(${modified.length}개)의 파일 상자에 [data-change="modified"]와 M이 있다`,
-    modified.length > 0 && same(boxed.map((b) => pathOf.get(b.id)).sort(), modified) && boxed.every((b) => b.mark === "M"),
+    same(boxed.map((b) => pathOf.get(b.id)).sort(), modified) && boxed.every((b) => b.mark === "M"),
     boxed.map((b) => b.label).join(", "),
   );
   const rows = await page.evaluate(() =>
@@ -894,7 +969,7 @@ async function changes(t, page) {
   const changed = (await colorOf(page, "--changed")).rgb;
   t.check(
     "파일트리의 같은 행에 수정 색 점과 M이 있다",
-    modified.length > 0 && same(rows.map((row) => pathOf.get(row.node)).sort(), modified) && rows.every((row) => row.letter === "M" && row.dot === changed),
+    same(rows.map((row) => pathOf.get(row.node)).sort(), modified) && rows.every((row) => row.letter === "M" && row.dot === changed),
     `${rows.length}행, 점 색 ${[...new Set(rows.map((row) => row.dot))].join("·")}`,
   );
 
@@ -921,7 +996,7 @@ async function changes(t, page) {
   await pick(page, target.id);
   const marked = await page.evaluate(
     (file) =>
-      [...document.querySelectorAll(".react-flow__node > [data-change]")]
+      [...document.querySelectorAll(".react-flow__node > .node-body[data-change]")]
         .map((root) => root.closest(".react-flow__node").dataset.id)
         .filter((id) => id.startsWith(`${file}:`))
         .sort(),
@@ -1104,7 +1179,7 @@ async function folderSelect(t, page) {
   await page.click('.trail-step[data-node="parser"]');
   await waitSelected(page, "parser");
   const all = await boxes(page);
-  const functions = await count(page, ".react-flow__node .node-function");
+  const functions = await count(page, ".react-flow__node .node-body.node-function");
   t.check(
     "parser/ 안의 파일 상자가 parser/ 상자 하나로 접히고 그 상자가 선택되며 펼친 파일 상자가 없다",
     (await count(page, `${node("parser")} > .node-package.node-selected`)) === 1 &&
@@ -1257,55 +1332,108 @@ async function toolbar(t, page) {
     `목록 접힘 ${folded}, 버튼 포커스 ${focused}, 선택 ${await selectedOf(page)}`,
   );
 
-  // 좁은 창에서도 통계 문구, 탐색 경로의 마지막 단계, 버튼이 겹치거나 사라지지 않는다.
-  await page.click(`.tree-row.tree-file[data-node="${NARROW.owner}"]`);
-  await page.waitForSelector(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`, { timeout: 10_000 });
-  await page.click(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`);
-  await waitSelected(page, NARROW.id);
-  for (const width of NARROW.widths) {
-    await page.setViewportSize({ width, height: 900 });
-    await settle(page);
-    const bar = await page.evaluate(() => {
-      const shown = (element) => {
-        const rect = element.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-      };
-      const toolbar = document.querySelector(".toolbar");
-      const area = toolbar.getBoundingClientRect();
-      const parts = [...toolbar.children].filter(shown).map((element) => element.getBoundingClientRect());
-      const last = document.querySelector(".trail-last");
-      const stats = [...document.querySelectorAll(".toolbar-stats > span")].find(shown);
-      return {
-        apart: parts.every((rect, i) => rect.left >= area.left && rect.right <= area.right && (i === 0 || rect.left >= parts[i - 1].right)),
-        buttons: [...toolbar.querySelectorAll(":scope > .toolbar-button")].filter(shown).map((button) => button.textContent.trim()),
-        last: last === null ? null : { text: last.textContent, whole: shown(last) && last.scrollWidth <= last.clientWidth },
-        cut: document.querySelector(".trail-cut")?.title ?? null,
-        stats: stats === undefined ? null : { text: stats.textContent, whole: stats.parentElement.scrollWidth <= stats.parentElement.clientWidth },
-        toggles: [...toolbar.querySelectorAll(".toolbar-toggles-list .toolbar-toggle")].filter(shown).length,
-        menu: shown(toolbar.querySelector(".toolbar-toggles-button")),
-      };
-    });
+  // 창 폭마다 파일트리 폭이 기본값인 새 화면을 열어 상단 줄의 모든 버튼과 입력이 창 안에서 눌리는지 본다.
+  // "분석 뒤 바뀐 파일 N개"는 /api/changes 응답에 분석 뒤 바뀐 파일 하나를 더해 띄운다.
+  const extra = { path: graph.nodes.find((n) => n.kind === "module" && !n.test).path, status: "unchanged", stale: true, test: false };
+  let stale = false;
+  await page.route(
+    (at) => at.pathname === "/api/changes",
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, json: stale ? { ...body, files: [...body.files, extra] } : body });
+    },
+  );
+  for (const width of NARROW.widths.flatMap((w) => [w, -w])) {
+    stale = width < 0;
+    const name = `창 폭 ${Math.abs(width)}px${stale ? ', "분석 뒤 바뀐 파일" 표시' : ""}`;
+    await page.setViewportSize({ width: Math.abs(width), height: 900 });
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+    await page.click(`.tree-row.tree-file[data-node="${NARROW.owner}"]`);
+    await page.waitForSelector(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`, { timeout: 10_000 });
+    await page.click(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`);
+    await waitSelected(page, NARROW.id);
+    if (stale) {
+      await page.waitForSelector(".toolbar-stale", { timeout: 10_000 }).catch(() => {});
+    }
+    /** 상단 줄 안에 보이는 버튼과 입력 가운데 창이나 상단 줄 밖에 있거나 가운데 점에서 눌리지 않는 것 */
+    const read = () =>
+      page.evaluate(() => {
+        const shown = (element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        const title = (control) => control.textContent.trim() || control.closest("label")?.textContent.trim() || control.type;
+        const toolbar = document.querySelector(".toolbar");
+        const area = toolbar.getBoundingClientRect();
+        const controls = [...toolbar.querySelectorAll("button, input")].filter(shown);
+        const missed = controls.filter((control) => {
+          const rect = control.getBoundingClientRect();
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          return rect.left < area.left || rect.right > Math.min(area.right, window.innerWidth) || rect.top < area.top || hit === null || !control.contains(hit);
+        });
+        const last = document.querySelector(".trail-last");
+        const stats = [...document.querySelectorAll(".toolbar-stats > span")].find(shown);
+        const [stage, panel] = [document.querySelector(".stage").getBoundingClientRect(), document.querySelector(".info-panel").getBoundingClientRect()];
+        return {
+          fit: toolbar.dataset.fit,
+          width: Math.round(area.width),
+          height: Math.round(area.height),
+          controls: controls.map(title),
+          missed: missed.map(title),
+          last: last === null ? null : { text: last.textContent, whole: shown(last) && last.scrollWidth <= last.clientWidth && last.getBoundingClientRect().right <= area.right },
+          cut: document.querySelector(".trail-cut")?.title ?? null,
+          stats: stats === undefined ? null : { text: stats.textContent, inside: stats.getBoundingClientRect().right <= area.right },
+          stale: document.querySelector(".toolbar-stale")?.textContent ?? null,
+          gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom],
+        };
+      });
+    const bar = await read();
+    const menu = bar.controls.includes("설정");
+    const depth = await page.evaluate(() => document.querySelector('.toolbar input[type="range"]').closest("label").textContent.trim());
+    const wanted = ["←", "→", `진입점 ${entries.length}`, depth, "화면 맞춤", "어두운 화면", ...(menu ? ["설정"] : ["테스트 코드", "외부 노드", "자동 요약"])];
     t.check(
-      `창 폭 ${width}px: 상단 줄의 요소가 겹치지 않고 통계 문구와 탐색 경로의 마지막 단계가 잘리지 않으며 뒤로·앞으로 버튼이 보인다`,
-      bar.apart &&
-        bar.stats?.whole === true &&
-        bar.stats.text.includes("호출 확인") &&
-        bar.last?.whole === true &&
-        bar.last.text === NARROW.label &&
-        ["←", "→", "화면 맞춤"].every((name) => bar.buttons.includes(name)),
-      `통계 문구 "${bar.stats?.text}", 마지막 단계 "${bar.last?.text}", 줄인 단계 "${bar.cut ?? "없음"}", 버튼 ${bar.buttons.join("·")}`,
+      `${name}: 상단 줄의 버튼·슬라이더·토글이 모두 창 안에 있고 가운데 점에서 눌린다`,
+      bar.missed.length === 0 && wanted.every((title) => bar.controls.includes(title)) && (!stale || bar.stale !== null),
+      `단계 ${bar.fit}, 상단 줄 ${bar.width}×${bar.height}, 눌리지 않는 요소 ${bar.missed.join("·") || "없음"}, 요소 ${bar.controls.join("·")}`,
     );
-    await page.click(".toolbar-toggles-button");
-    const listed = await page.evaluate(() =>
-      [...document.querySelectorAll(".toolbar-toggles-list[data-open] .toolbar-toggle")].map((label) => label.textContent.trim()),
-    );
-    await page.screenshot({ path: join(OUT, `s2-toolbar-${width}.png`) });
-    await page.keyboard.press("Escape");
     t.check(
-      `창 폭 ${width}px: 토글 세 개가 "설정" 버튼 아래 목록에 있고 Esc에 목록만 접힌다`,
-      bar.menu && bar.toggles === 0 && same(listed, ["테스트 코드", "외부 노드", "자동 요약"]) && (await count(page, ".toolbar-toggles-list[data-open]")) === 0 && (await selectedOf(page)) === NARROW.id,
-      `목록 ${listed.join("·") || "없음"}, 선택 ${await selectedOf(page)}`,
+      `${name}: 통계 문구와 탐색 경로의 마지막 단계가 잘리지 않고, 탐색 경로를 줄였으면 통계 문구가 짧은 형태다`,
+      bar.stats?.inside === true && bar.stats.text.includes("호출 확인") && bar.last?.whole === true && bar.last.text === NARROW.label && (bar.cut === null || bar.fit !== "full"),
+      `통계 문구 "${bar.stats?.text}", 마지막 단계 "${bar.last?.text}", 줄인 단계 "${bar.cut ?? "없음"}"`,
     );
+    t.check(
+      `${name}: 관계 그래프 영역이 상단 줄 바로 아래에서 시작하고 정보 패널의 위아래 여백이 같다`,
+      near(bar.gaps[2], 0) && bar.gaps[0] > 0 && near(bar.gaps[0], bar.gaps[1]),
+      `패널 위 ${bar.gaps[0]}, 아래 ${bar.gaps[1]}, 상단 줄과 영역 사이 ${bar.gaps[2]}`,
+    );
+    if (width === NARROW.widths[0]) {
+      t.check(`${name}: 통계 문구 전체와 토글 세 개를 한 줄에 그린다`, bar.fit === "full" && bar.height < 40 && !menu, `단계 ${bar.fit}`);
+    }
+    if (menu) {
+      await page.click(".toolbar-toggles-button");
+      const listed = await page.evaluate(() =>
+        [...document.querySelectorAll(".toolbar-toggles-list[data-open] .toolbar-toggle")].map((label) => label.textContent.trim()),
+      );
+      const opened = await read();
+      if (!stale) {
+        await page.screenshot({ path: join(OUT, `s2-toolbar-${width}.png`) });
+      }
+      await page.keyboard.press("Escape");
+      t.check(
+        `${name}: 토글 세 개가 "설정" 버튼 아래 목록에서 눌리고 Esc에 목록만 접힌다`,
+        same(listed, ["테스트 코드", "외부 노드", "자동 요약"]) &&
+          listed.every((title) => opened.controls.includes(title)) &&
+          opened.missed.length === 0 &&
+          (await count(page, ".toolbar-toggles-list[data-open]")) === 0 &&
+          (await selectedOf(page)) === NARROW.id,
+        `목록 ${listed.join("·") || "없음"}, 눌리지 않는 요소 ${opened.missed.join("·") || "없음"}, 선택 ${await selectedOf(page)}`,
+      );
+    } else if (!stale) {
+      await page.screenshot({ path: join(OUT, `s2-toolbar-${width}.png`) });
+    }
   }
 }
 
@@ -1323,7 +1451,7 @@ const SCENARIOS = [
   ["callview", callview],
   ["search", search],
   ["zoom", zoom],
-  ["class-label", classLabel],
+  ["labels", labels],
   ["external", external],
   ["dark", dark],
   ["tree", tree],
@@ -1354,6 +1482,8 @@ async function run(browser, name, scenario) {
     /** 이 시나리오가 서버로 보내도 되는 POST /api/summary의 노드 id */
     summaries: new Set(),
     check: (label, ok, actual = "") => results.push({ label, ok: Boolean(ok), actual }),
+    /** 대상 레포에 입력이 없어 볼 수 없는 확인 항목을 적는다. 통과로도 실패로도 세지 않는다. */
+    skip: (label, reason) => results.push({ label, ok: null, actual: reason }),
     /** 조작 도중의 화면을 남긴다. 부르지 않으면 시나리오가 끝난 화면을 찍는다. */
     shot: async () => {
       shot = true;
@@ -1397,7 +1527,7 @@ async function run(browser, name, scenario) {
 
   console.log(`[${name}]`);
   for (const { label, ok, actual } of results) {
-    console.log(`  ${ok ? "통과" : "실패"}  ${label}${actual === "" ? "" : ` — ${actual}`}`);
+    console.log(`  ${ok === null ? "건너뜀" : ok ? "통과" : "실패"}  ${label}${actual === "" ? "" : ` — ${actual}`}`);
   }
   console.log(`  스크린샷  ${path}`);
   return results;
@@ -1419,6 +1549,9 @@ for (const [name, scenario] of chosen) {
 }
 await browser.close();
 
-const failed = all.filter((result) => !result.ok).length;
-console.log(`시나리오 ${chosen.length}개, 확인 항목 ${all.length}개 가운데 통과 ${all.length - failed}개, 실패 ${failed}개`);
+const failed = all.filter((result) => result.ok === false).length;
+const skipped = all.filter((result) => result.ok === null).length;
+console.log(
+  `시나리오 ${chosen.length}개, 확인 항목 ${all.length}개 가운데 통과 ${all.length - failed - skipped}개, 실패 ${failed}개, 건너뜀 ${skipped}개`,
+);
 process.exit(failed === 0 ? 0 : 1);
