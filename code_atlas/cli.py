@@ -1,4 +1,4 @@
-"""code-atlas 명령. `code-atlas <레포>`는 분석 뒤 화면 서버를 띄우고, `code-atlas analyze <레포>`는 결과만 출력한다."""
+"""code-atlas 명령. `code-atlas <레포>`는 화면 서버를 띄워 분석을 뒤에서 돌리고, `code-atlas analyze <레포>`는 결과만 출력한다."""
 
 from __future__ import annotations
 
@@ -32,7 +32,8 @@ def _print_summary(analysis) -> None:
     rate = s["resolved"] / s["call_sites"] * 100 if s["call_sites"] else 0.0
     print(
         f"노드 {s['nodes']} · 선 {s['edges']} · 지점 {len(analysis.sites)} · "
-        f"호출 해석률 {rate:.1f}% ({s['resolved']}/{s['call_sites']}) · {s['elapsed_ms']}ms"
+        f"호출 해석률 {rate:.1f}% ({s['resolved']}/{s['call_sites']}) · {s['elapsed_ms']}ms",
+        flush=True,
     )
     if s["timed_out"]:
         print(f"정의 요청 {s['timed_out']}개가 시간 안에 응답받지 못했다", file=sys.stderr)
@@ -52,7 +53,7 @@ def _analyze_command(args: argparse.Namespace) -> int:
 
 
 def _bind_or_exit(port: int) -> socket.socket:
-    """분석에 수십 초가 걸리므로 포트를 먼저 잡아 둔다."""
+    """포트를 잡는다. 잡지 못하면 서버를 만들기 전에 끝낸다."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -70,22 +71,18 @@ def _serve_command(args: argparse.Namespace) -> int:
     python = _python_or_exit(args.repo, args.python)
     url = f"http://{HOST}:{args.port}"
 
-    def on_ready(analysis) -> None:
-        _print_summary(analysis)
-        if args.no_open or (sys.platform.startswith("linux") and not os.environ.get("DISPLAY")):
-            print(f"주소: {url}", flush=True)
-        else:
-            threading.Timer(1.0, webbrowser.open, [url]).start()
-
-    app = create_app(args.repo, python, on_ready, find_style_guide(args.style_guide), cache=not args.no_cache)
+    app = create_app(args.repo, python, _print_summary, find_style_guide(args.style_guide), cache=not args.no_cache)
 
     class Server(uvicorn.Server):
-        def handle_exit(self, sig, frame) -> None:
-            """분석이 끝나기 전에 받은 첫 종료 신호에 분석을 끊는다."""
-            starting = app.state.starting
-            if starting is not None and not self.should_exit and not self.started:
-                starting.get_loop().call_soon_threadsafe(starting.cancel)
-            super().handle_exit(sig, frame)
+        async def startup(self, sockets=None) -> None:
+            """서버가 요청을 받기 시작하면 분석을 기다리지 않고 브라우저를 연다."""
+            await super().startup(sockets)
+            if self.should_exit:
+                return
+            if args.no_open or (sys.platform.startswith("linux") and not os.environ.get("DISPLAY")):
+                print(f"주소: {url}", flush=True)
+            else:
+                threading.Thread(target=webbrowser.open, args=[url], daemon=True).start()
 
     Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
     return 0

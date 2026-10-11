@@ -422,6 +422,7 @@ async def refresh(
             if drafted is not None and previous is None and len(judging.changed) < len(facts):
                 report(Progress("build"))
                 drafted(await asyncio.to_thread(analyzed, {}, 0))
+            report(Progress("resolve", 0, len(todo)))
             live = await session(files) if callable(session) else session
             live.sync_files(texts)
             await live.wait_ready(probe)

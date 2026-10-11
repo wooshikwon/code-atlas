@@ -59,9 +59,11 @@ def test_sigint_ends_the_server_and_the_language_server(sample_repo, tmp_path, m
         env=env,
     )
     try:
+        if mode != "analyze":
+            assert "주소:" in server.stdout.readline()  # 분석을 기다리지 않고 서버가 뜬다
         pid = int(server.stdout.readline().split()[1])
         if mode == "serve":
-            assert "주소:" in server.stdout.readline() + server.stdout.readline()
+            assert server.stdout.readline().startswith("노드 ")
         for _ in range(signals):
             server.send_signal(signal.SIGINT)
             time.sleep(0.3)
