@@ -67,7 +67,7 @@ export function Trail() {
   return (
     <nav className="toolbar-trail" aria-label="탐색 경로" ref={nav}>
       {hidden > 0 && (
-        <span className="trail-cut" title={names.slice(0, hidden).join(" > ")}>
+        <span className="trail-cut" data-tip={names.slice(0, hidden).join(" > ")}>
           …
         </span>
       )}
@@ -84,7 +84,7 @@ export function Trail() {
               <button
                 className={index === steps.length - 1 ? "trail-step trail-last" : "trail-step"}
                 data-node={node.id}
-                title={titleOf(node)}
+                data-full={titleOf(node)}
                 onClick={() => show(node.id)}
               >
                 {stepName(node)}

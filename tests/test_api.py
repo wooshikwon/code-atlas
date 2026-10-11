@@ -14,7 +14,7 @@ from conftest import FIXTURE, git, group_ended
 
 from code_atlas import api, lsp, runner, summary
 from code_atlas.api import create_app
-from code_atlas.summary import Summaries, SummaryError
+from code_atlas.summary import Subject, Summaries, SummaryError
 
 RUN_ENGINE_CALL = {"path": "src/app/cli.py", "line": 10, "col": 21}  # 한글 문자열 뒤의 run_engine
 
@@ -538,6 +538,25 @@ def test_summary_is_made_on_post_and_read_from_cache(client, generated):
 
     assert client.post("/api/summary", params={**node, "refresh": "true"}).json() == {"summary": "app/core.py::run_engine 요약 2"}
     assert client.get("/api/summary", params=node).json()["summary"] == "app/core.py::run_engine 요약 2"
+
+
+def test_summaries_list_the_lead_of_every_kept_summary(client, generated, monkeypatch):
+    assert client.get("/api/summaries").json() == {"summaries": []}
+
+    async def generate(system, prompt):
+        return f"{name_in(prompt)}의 요지\n\n하는 일\n첫 문단\n\n앞뒤 흐름\n둘째 문단"
+
+    monkeypatch.setattr(summary, "generate", generate)
+    client.post("/api/summary", params={"node": "app.core:run_engine"})
+    client.post("/api/summary", params={"node": "app.core"})
+    client.app.state.summaries.latest.put(Subject(client.app.state.repo["root"], "node", "app.core:gone", "d"), "없는 노드")
+    client.post("/api/explanation", params={"path": "src/app/core.py", "start": 32, "end": 33})
+    assert client.get("/api/summaries").json() == {
+        "summaries": [
+            {"node": "app.core", "lead": "src/app/core.py의 요지"},
+            {"node": "app.core:run_engine", "lead": "app/core.py::run_engine의 요지"},
+        ]
+    }
 
 
 def test_explanation_is_made_listed_and_deleted(client, generated):

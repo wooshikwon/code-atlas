@@ -29,7 +29,7 @@ export function useInline(): (text: string) => ReactNode[] {
       let piece: ReactNode = span.text;
       if (target !== undefined) {
         piece = (
-          <button className="summary-ref" data-node={target} title="그래프에서 고르기" onClick={() => show(target)}>
+          <button className="summary-ref" data-node={target} data-tip="그래프에서 고르기" onClick={() => show(target)}>
             <code>{refText(span.text)}</code>
           </button>
         );

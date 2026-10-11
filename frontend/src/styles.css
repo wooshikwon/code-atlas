@@ -1664,10 +1664,12 @@ ul {
   max-height: 50vh;
   margin: 0;
   padding: 3px 0;
+  border: 1px solid var(--line);
   border-radius: 4px;
   overflow: auto;
-  color: var(--surface);
-  background: var(--ink);
+  color: var(--ink);
+  background: var(--panel-bg);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -1682,21 +1684,26 @@ ul {
 }
 
 .line-menu-item:hover {
-  background: color-mix(in srgb, var(--surface) 20%, transparent);
+  background: var(--active-bg);
 }
 
+/* 앱의 말풍선. 칸 바탕과 경계선의 색을 써서 밝은 화면과 어두운 화면을 따른다. 긴 글은 폭 안에서 줄을 바꾼다. */
 .tooltip {
   position: fixed;
   top: 0;
   left: 0;
   z-index: var(--z-tooltip);
+  max-width: min(420px, calc(100vw - 16px));
   padding: 3px 8px;
+  border: 1px solid var(--line);
   border-radius: 4px;
-  color: var(--surface);
-  background: var(--ink);
+  color: var(--ink);
+  background: var(--panel-bg);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
   font-size: 11px;
   line-height: 1.5;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
 

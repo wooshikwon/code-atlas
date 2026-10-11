@@ -11,6 +11,7 @@ import type {
   MadeSummary,
   Repo,
   Status,
+  Summaries,
   SummaryStatus,
   Tree,
   Unused,
@@ -94,6 +95,11 @@ export function getDefinition(path: string, line: number, col: number): Promise<
 /** 캐시에 있는 요약만 읽는다. */
 export function getSummary(node: string): Promise<SummaryStatus> {
   return request(`/api/summary?node=${encodeURIComponent(node)}`);
+}
+
+/** 레포의 노드마다 남겨 둔 요약의 요지 */
+export function getSummaries(): Promise<Summaries> {
+  return request("/api/summaries");
 }
 
 /** 캐시에 없으면 요약을 만들게 한다. refresh면 캐시에 있어도 다시 만든다. */

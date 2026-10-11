@@ -675,6 +675,11 @@ def shaped(result: str) -> str:
     return "\n\n".join([" ".join(lead.split("\n")), *(f"{mark}\n{body}" for mark, body in zip(MARKS, bodies))])
 
 
+def lead_of(summary: str) -> str:
+    """`shaped`가 맞춘 노드 설명의 요지. 첫 빈 줄 앞의 글이다."""
+    return summary.split("\n\n", 1)[0]
+
+
 async def _run(cli: str, args: tuple[str, ...], stdin: str, timeout: float) -> tuple[int, str, str]:
     """빈 임시 폴더에서 CLI를 띄워 종료 코드, 표준 출력, 표준 오류를 돌려준다. 시간 안에 끝나지 않으면 프로세스 묶음을 끝낸다."""
     with tempfile.TemporaryDirectory(prefix="code-atlas-summary-") as cwd:

@@ -1,9 +1,7 @@
 // 상단 줄의 새로고침 버튼. 누르면 레포를 다시 분석해 그래프를 바꾸고 화면을 레포를 처음 연 상태로 되돌린다(`state/reload.ts`).
 // 분석한 뒤 바뀐 파일이 있으면 새로고침 기호를 수정 표시의 색으로 그리고 그 수를 적는다. 분석하는 동안에는 기호 대신 도는 원과
 // 분석 단계의 이름을 그린다.
-import { useRef } from "react";
 import type { Status } from "../api/types";
-import { Tooltip, type TooltipHandle } from "../graph/Tooltip";
 import { reload } from "../state/reload";
 import { phaseName, phaseText, running, staleLines, useStatus } from "../state/status";
 import { useAtlas } from "../state/store";
@@ -29,7 +27,6 @@ export function Reload() {
   const status = useStatus((s) => s.status);
   const busy = reloading || running(status);
   const stale = busy ? 0 : (status?.stale.count ?? 0);
-  const tip = useRef<TooltipHandle | null>(null);
   return (
     <div className="toolbar-reload">
       <button
@@ -38,13 +35,8 @@ export function Reload() {
         aria-busy={busy}
         aria-disabled={busy}
         data-stale={stale > 0 ? "" : undefined}
-        onClick={() => {
-          tip.current?.hide();
-          void reload();
-        }}
-        onMouseEnter={(event) => tip.current?.show(reloadTip(busy, status), event.clientX, event.clientY)}
-        onMouseMove={(event) => tip.current?.move(event.clientX, event.clientY)}
-        onMouseLeave={() => tip.current?.hide()}
+        data-tip={reloadTip(busy, status)}
+        onClick={() => void reload()}
       >
         {busy ? (
           <span className="reload-spin" aria-hidden />
@@ -61,9 +53,8 @@ export function Reload() {
           </span>
         )}
       </button>
-      <Tooltip ref={tip} />
       {error !== null && (
-        <button className="reload-error" role="alert" title="닫기" onClick={() => useAtlas.setState({ reloadError: null })}>
+        <button className="reload-error" role="alert" data-tip="닫기" onClick={() => useAtlas.setState({ reloadError: null })}>
           {error}
         </button>
       )}

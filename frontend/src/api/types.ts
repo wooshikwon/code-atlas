@@ -127,6 +127,11 @@ export interface MadeSummary {
   summary: string;
 }
 
+/** 요약이 있는 노드와 그 요약의 요지 */
+export interface Summaries {
+  summaries: { node: string; lead: string }[];
+}
+
 /** 코드 범위 하나의 설명. start와 end는 1부터 세는 파일 줄 번호다. */
 export interface Explanation {
   start: number;

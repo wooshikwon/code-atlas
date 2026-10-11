@@ -495,6 +495,12 @@ const within = (inner, outer) =>
   inner.x >= outer.x - 0.5 && inner.y >= outer.y - 0.5 && inner.x + inner.width <= outer.x + outer.width + 0.5 && inner.y + inner.height <= outer.y + outer.height + 0.5;
 
 const tipText = (page) => page.evaluate(() => document.querySelector(".tooltip")?.textContent ?? "");
+/** 선의 말풍선이 관계를 적는 글: 종류 이름과 수, 단위를 종류마다 나눠 적는다. 예: `호출 2곳 · import 1줄` */
+const RELATIONS = String.raw`\S+ \d+(?:곳|줄)(?: · \S+ \d+(?:곳|줄))*`;
+/** 화면이 선 종류를 적는 이름과 순서(`graph/names.ts`) */
+const KIND_NAMES = { call: "호출", construct: "생성", import: "import", pass: "전달", decorate: "데코레이터", type: "타입", inherit: "상속", override: "오버라이드" };
+/** 브라우저 기본 말풍선을 띄우는 요소: `title` 속성과 SVG의 `<title>` */
+const nativeTips = (page) => page.evaluate(() => [...document.querySelectorAll("[title], svg title")].map((element) => `${element.tagName.toLowerCase()}.${element.getAttribute("class") ?? ""} "${element.getAttribute("title") ?? element.textContent}"`));
 
 /** 요소 가운데에 마우스를 올리고 말풍선 글을 읽는다. */
 async function tipOver(page, selector) {
@@ -1199,16 +1205,265 @@ async function badgeTip(t, page) {
     inside.replaceAll("\n", " / "),
   );
   await t.shot();
-  const name = await over(`${face(id)} .node-label`);
-  t.check("같은 상자의 이름표로 옮기면 말풍선이 그 파일의 이름과 종류로 바뀐다", name.endsWith(" · 파일") && !name.includes("안에 든"), name);
+  const label = await rectOf(page, `${face(id)} .node-label`);
+  await page.mouse.move(label.x + label.width / 2, label.y + label.height / 2);
+  await page.waitForFunction(() => !(document.querySelector(".tooltip")?.textContent ?? "").includes("안에 든"), null, { timeout: 3_000 }).catch(() => {});
+  const name = await tipText(page);
+  t.check("같은 상자의 이름표로 옮기면 배지의 말풍선이 사라진다", !name.includes("안에 든") && !name.includes(" · 파일"), `말풍선 "${name}"`);
   const loc = await over(`${face(id)} .loc`);
   t.check("이름표 옆 숫자에 올리면 줄 수임을 적는다", /^줄 수 \d+줄 · 빈 줄을 뺀 수$/.test(loc), loc);
   const entry = await over(`${face(FILE)} .node-entry`);
   t.check("진입점 표시에 올리면 진입점임을 적는다", entry.startsWith("진입점"), entry);
-  t.check("배지와 표시가 브라우저 기본 말풍선(title)을 쓰지 않는다", (await count(page, ".react-flow__node [title]")) === 0, `title 속성 ${await count(page, ".react-flow__node [title]")}개`);
+  t.check("화면이 브라우저 기본 말풍선(title)을 쓰지 않는다", (await nativeTips(page)).length === 0, (await nativeTips(page)).join(", "));
   await page.mouse.move(5, 5);
   await page.waitForFunction(() => document.querySelector(".tooltip") === null, null, { timeout: 3_000 }).catch(() => {});
   t.check("노드 밖으로 나가면 말풍선이 사라진다", (await count(page, ".tooltip")) === 0);
+}
+
+/**
+ * 말풍선. 노드는 LLM 요약의 요지와 잘린 이름만 적고, 선은 관계의 종류와 수를 적으며, 그래프 밖의 버튼과 행도 같은 말풍선을 쓴다.
+ * 요지 목록과 요약은 서버 대신 답한다. 사진은 `hf2-tip-{이름}.png`로 남긴다.
+ */
+async function tips(t, page) {
+  const LEAD = "노트의 구역을 다시 지어 바뀐 구역만 파일에 쓴다.";
+  const MADE = "새로 만든 요약의 요지다.";
+  const leads = [
+    { node: FILE, lead: "plan과 reminders, 일일 노트를 서로 맞춘다." },
+    { node: FUNCTION, lead: LEAD },
+  ];
+  await page.route((at) => at.pathname === "/api/summaries", (route) => route.fulfill({ json: { summaries: leads } }));
+  await page.route(
+    (at) => at.pathname === "/api/summary",
+    (route) => {
+      const node = new URL(route.request().url()).searchParams.get("node");
+      if (route.request().method() === "POST") {
+        return route.fulfill({ json: { summary: `${MADE}\n\n하는 일\n문단\n\n앞뒤 흐름\n문단` } });
+      }
+      const lead = leads.find((each) => each.node === node)?.lead ?? null;
+      return route.fulfill({ json: { summary: lead === null ? null : `${lead}\n\n하는 일\n문단\n\n앞뒤 흐름\n문단`, stale: false, available: true, reason: null } });
+    },
+  );
+  const shot = (name) => page.screenshot({ path: join(OUT, `hf2-tip-${name}.png`) });
+  /** 요소 가운데에 마우스를 올리고 잠시 뒤의 말풍선 글. 말풍선이 없으면 빈 글이다. */
+  const settled = async (selector) => {
+    const rect = await rectOf(page, selector);
+    await page.mouse.move(5, 5);
+    await page.mouse.move(rect.x + rect.width / 2 - 1, rect.y + rect.height / 2);
+    await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.waitForTimeout(400);
+    return tipText(page);
+  };
+  const styleOf = () =>
+    page.evaluate(() => {
+      const style = getComputedStyle(document.querySelector(".tooltip"));
+      const panel = document.createElement("span");
+      panel.style.color = "var(--panel-bg)";
+      document.body.append(panel);
+      const expected = getComputedStyle(panel).color;
+      panel.remove();
+      return { background: style.backgroundColor, color: style.color, border: style.borderTopWidth, expected };
+    });
+
+  await load(page);
+  const graph = await api("/api/graph");
+  const withLead = await settled(`${face(FILE)} .node-label`);
+  t.check("요약이 있는 파일 상자에 올리면 말풍선이 그 요약의 요지만 적는다", withLead === leads[0].lead, withLead);
+  const ink = await colorOf(page, "--ink");
+  const light = await styleOf();
+  t.check(
+    "밝은 화면의 말풍선은 칸 바탕색에 본문 잉크로 글자를 적고 경계선을 두른다",
+    light.background === light.expected && light.color === ink.rgb && light.border === "1px",
+    `바탕 ${light.background}, 글자 ${light.color}, 경계선 ${light.border}`,
+  );
+  await shot("node-light");
+
+  const plain = await page.evaluate(
+    ([taken]) => {
+      for (const wrapper of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
+        const label = wrapper.querySelector(":scope > .node-module .node-label");
+        const id = wrapper.dataset.id.replace(/#face$/, "");
+        if (label === null || taken.includes(id) || label.textContent.includes("…") || label.scrollWidth > label.clientWidth) {
+          continue;
+        }
+        const rect = label.getBoundingClientRect();
+        if (wrapper.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))) {
+          return id;
+        }
+      }
+      return null;
+    },
+    [leads.map((each) => each.node)],
+  );
+  const without = await settled(`${face(plain)} .node-label`);
+  t.check("요약이 없고 이름표가 잘리지 않은 파일 상자에 올리면 말풍선이 뜨지 않는다", plain !== null && without === "" && (await count(page, ".tooltip")) === 0, `${plain}: "${without}"`);
+
+  // 선: 접힌 파일 상자 사이의 집계 선 하나의 관계를 /api/graph에서 센다.
+  const index = new Map(graph.nodes.map((n) => [n.id, n]));
+  const fileOf = (id) => {
+    let found = index.get(id);
+    while (found !== undefined && found.kind !== "module") {
+      found = found.parent === null ? undefined : index.get(found.parent);
+    }
+    return found?.id ?? null;
+  };
+  const aggregates = (await linesOf(page)).filter((line) => {
+    const [kind, source, target] = line.key.split("|");
+    return kind === "agg" && index.get(source)?.kind === "module" && index.get(target)?.kind === "module";
+  });
+  const found = await hittable(page, aggregates);
+  if (found === null) {
+    t.skip("집계 선에 올리면 말풍선이 관계의 종류와 수를 적는다", "파일 상자 사이에 누를 점이 있는 집계 선이 없다");
+  } else {
+    const [, source, target] = found.line.key.split("|");
+    const kinds = {};
+    for (const each of graph.edges) {
+      if (fileOf(each.source) === source && fileOf(each.target) === target && !index.get(each.source).test && !index.get(each.target).test) {
+        kinds[each.kind] = (kinds[each.kind] ?? 0) + each.sites.length;
+      }
+    }
+    const relations = Object.keys(KIND_NAMES)
+      .filter((kind) => kinds[kind] !== undefined)
+      .map((kind) => `${KIND_NAMES[kind]} ${kinds[kind]}${kind === "import" ? "줄" : "곳"}`)
+      .join(" · ");
+    const title = (id) => `${id.replaceAll(".", "/")}.py`;
+    await page.mouse.move(found.at.x, found.at.y - 1);
+    await page.mouse.move(found.at.x, found.at.y);
+    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+    const rows = (await tipText(page)).split("\n");
+    t.check(
+      "집계 선에 올리면 말풍선이 출발과 도착, 그 선에 든 관계의 종류마다 수와 단위를 적는다",
+      rows.includes(`${title(source)} → ${title(target)} · ${relations}`) && rows.every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
+      rows.join(" / "),
+    );
+    t.check("선의 말풍선에 분류 이름(실행, 사용, 계승)과 단위 없는 수가 없다", rows.every((row) => !/· (실행|사용|계승)( ·|$)/.test(row) && !/· \d+곳$/.test(row)), rows.join(" / "));
+    await shot("line");
+  }
+
+  // 정의 노드: 요지가 있는 함수, 그리고 화면에서 만든 요약.
+  await pickInTree(page, { id: FUNCTION, owner: FILE });
+  await settle(page);
+  const onFunction = await settled(`${face(FUNCTION)} .node-label`);
+  t.check("요약이 있는 함수 노드에 올리면 말풍선이 그 요지를 적는다", onFunction === LEAD, onFunction);
+  const sibling = definedIn(graph, FILE).find((n) => n.kind === "function" && n.id !== FUNCTION && n.name.length < 30);
+  const treeRow = `.tree-row.tree-symbol[data-node="${sibling.id}"]`;
+  const before = await settled(`${treeRow} .tree-label`);
+  await page.click(treeRow);
+  await waitSelected(page, sibling.id);
+  await page.getByRole("button", { name: "요약 생성" }).click();
+  await page.waitForSelector(".summary-lead", { timeout: 5_000 });
+  const after = await settled(`${treeRow} .tree-label`);
+  t.check(
+    "요약이 없는 함수의 파일트리 행은 말풍선이 없고, 요약을 만들면 그 행의 말풍선이 바로 새 요지를 적는다",
+    before === "" && after === MADE,
+    `만들기 전 "${before}", 만든 뒤 "${after}"`,
+  );
+  await shot("tree");
+  await settle(page);
+  const made = await settled(`${face(sibling.id)} .node-label`);
+  t.check("그래프의 그 노드에 올려도 새 요지가 뜬다", made === MADE, made);
+
+  // 그래프 밖: 버튼의 말풍선, 키보드 초점, 잘린 파일트리 행.
+  const legend = await settled(".legend-button");
+  t.check('범례 버튼에 올리면 앱의 말풍선이 "범례"를 적고 접근성 이름이 남아 있다', legend === "범례" && (await page.getAttribute(".legend-button", "aria-label")) === "범례", legend);
+  await shot("button");
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(() => document.querySelector(".tooltip") === null, null, { timeout: 3_000 }).catch(() => {});
+  const gone = await count(page, ".tooltip");
+  await page.focus(".minimap-button");
+  await page.keyboard.press("Tab");
+  await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+  const focused = await page.evaluate(() => ({ label: document.activeElement?.getAttribute("aria-label") ?? "", tip: document.querySelector(".tooltip")?.textContent ?? "" }));
+  t.check("버튼에서 마우스를 떼면 말풍선이 사라지고, Tab으로 초점을 옮긴 버튼에도 말풍선이 뜬다", gone === 0 && focused.tip !== "" && focused.tip === focused.label, `초점 "${focused.label}", 말풍선 "${focused.tip}"`);
+  await page.evaluate(() => document.activeElement?.blur());
+
+  const separator = center(await rectOf(page, ".separator"));
+  await drag(page, separator, -200, 0);
+  await rest(page);
+  const clippedRow = await page.evaluate(() => {
+    const row = [...document.querySelectorAll(".tree-row.tree-symbol")].find((each) => {
+      const label = each.querySelector(".tree-label");
+      return label.scrollWidth > label.clientWidth;
+    });
+    return row === undefined ? null : { node: row.dataset.node, full: row.dataset.full };
+  });
+  if (clippedRow === null) {
+    t.skip("이름이 잘린 파일트리 행에 올리면 말풍선이 전체 이름을 적는다", "파일트리를 좁혀도 잘린 행이 없다");
+  } else {
+    const row = await settled(`.tree-row.tree-symbol[data-node="${clippedRow.node}"] .tree-label`);
+    t.check("이름이 잘린 파일트리 행에 올리면 말풍선 첫 줄에 전체 이름을 적는다", row.split("\n")[0] === clippedRow.full, row.replaceAll("\n", " / "));
+  }
+  await drag(page, center(await rectOf(page, ".separator")), 200, 0);
+  await rest(page);
+
+  // 창과 패널을 모두 연 화면에 브라우저 기본 말풍선이 없다.
+  await page.click(".legend-button");
+  await page.click(".finder-button");
+  await page.click(".filter-button");
+  await page.waitForSelector(".filter-panel", { timeout: 5_000 });
+  await page.fill(".tree-search-input", "note");
+  await page.waitForSelector(".tree-result", { timeout: 5_000 });
+  const groups = [];
+  for (const group of ["run", "use", "derive"]) {
+    groups.push(await settled(`.legend li:has(.edge-${group})`));
+  }
+  t.check(
+    "범례의 선 분류에 올리면 말풍선이 그 분류에 드는 선 종류를 적는다",
+    same(groups, ["실행 선: 호출, 생성", "사용 선: import, 전달, 데코레이터, 타입", "계승 선: 상속, 오버라이드"]),
+    groups.join(" / "),
+  );
+  const native = await nativeTips(page);
+  t.check("범례, 경로 탐색 창, 필터 창, 정보 패널, 파일트리 검색을 연 화면에 title 속성과 SVG title이 없다", native.length === 0, native.join(", "));
+  await page.fill(".tree-search-input", "");
+  await page.click(".filter-button");
+  await page.click(".finder-button");
+  await page.click(".legend-button");
+
+  // 어두운 화면
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  const darkLead = await settled(`${face(sibling.id)} .node-label`);
+  const dark = await styleOf();
+  const darkInk = await colorOf(page, "--ink");
+  t.check(
+    "어두운 화면의 말풍선은 어두운 칸 바탕색에 밝은 글자로 요지를 적는다",
+    darkLead === MADE && dark.background === dark.expected && dark.color === darkInk.rgb && darkInk.value === DARK.ink && dark.background !== light.background,
+    `바탕 ${dark.background}, 글자 ${dark.color}`,
+  );
+  await shot("node-dark");
+  const darkButton = await settled(".minimap-button");
+  t.check("어두운 화면에서 버튼의 말풍선도 같은 색이다", darkButton === "미니맵" && same(await styleOf(), dark), darkButton);
+  await shot("button-dark");
+
+  // 이름표가 잘린 노드: 폴더가 여러 겹인 레포.
+  if (wideUrl === null) {
+    t.skip("이름표가 잘린 노드에 올리면 말풍선이 전체 이름을 적는다", "sync-engine에는 이름표가 잘린 노드가 없다 — --wide-url을 주지 않았다");
+    return;
+  }
+  const wide = await api("/api/graph", wideUrl);
+  const long = wide.nodes.find((n) => n.kind === "module" && !n.test && `${n.id.replaceAll(".", "/")}.py`.length > 36 && !n.id.endsWith(".__init__"));
+  await page.goto(wideUrl);
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  const chain = [];
+  for (let parent = long.parent; parent !== null; parent = wide.nodes.find((n) => n.id === parent).parent) {
+    chain.unshift(parent);
+  }
+  for (const folder of chain) {
+    await openFolder(page, folder);
+  }
+  await page.click(`.tree-row.tree-file[data-node="${long.id}"]`);
+  await waitSelected(page, long.id);
+  await settle(page);
+  await page.keyboard.press("Escape");
+  await settle(page);
+  const label = await page.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", `${face(long.id)} .node-label`);
+  const full = await settled(`${face(long.id)} .node-label`);
+  t.check(
+    "이름표가 잘린 파일 상자에 올리면 요약이 없어도 말풍선이 줄이지 않은 경로를 적는다",
+    label.includes("…") && full === `${long.id.replaceAll(".", "/")}.py`,
+    `이름표 "${label}", 말풍선 "${full}"`,
+  );
+  await shot("clipped");
 }
 
 async function minimap(t, page) {
@@ -2572,7 +2827,7 @@ async function folderSelect(t, page) {
 async function initFile(t, page) {
   await load(page);
   await pick(page, FILE);
-  const row = '.tree-row.tree-file[title$="parser/__init__.py"]';
+  const row = '.tree-row.tree-file[data-full$="parser/__init__.py"]';
   const before = { selected: await selectedOf(page), functions: await count(page, ".node-function"), packages: await count(page, ".node-package") };
   await page.click(row);
   await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 }).catch(() => {});
@@ -2637,7 +2892,7 @@ async function initFile(t, page) {
   t.check("연 파일이 든 폴더를 접으면 닫힌다", (await count(page, row)) === 0 && (await count(page, ".info-panel .code")) === 0, (await headOf(page)).replaceAll("\n", " / "));
 
   // 소스 루트의 __init__.py는 모듈 노드가 있으므로 그 행이 그래프의 상자를 고른다.
-  const root = '.tree-row.tree-file[title="src/__init__.py"]';
+  const root = '.tree-row.tree-file[data-full="src/__init__.py"]';
   await page.click(root);
   await waitSelected(page, "__init__").catch(() => {});
   t.check(
@@ -2813,7 +3068,7 @@ async function toolbar(t, page) {
           controls: controls.map(title),
           missed: missed.map(title),
           last: last === null ? null : { text: last.textContent, width: Math.round(last.getBoundingClientRect().width), whole: last.scrollWidth <= last.clientWidth, inside: last.getBoundingClientRect().right <= area.right },
-          cut: document.querySelector(".trail-cut")?.title ?? null,
+          cut: document.querySelector(".trail-cut")?.dataset.tip ?? null,
           stale: document.querySelector(".toolbar-stale")?.textContent ?? null,
           gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom],
           filters: filters === undefined ? null : { inside: filters.left >= area.left && filters.right <= Math.min(area.right, window.innerWidth) && filters.bottom <= window.innerHeight },
@@ -3516,7 +3771,7 @@ const picksOf = (page) =>
     [...document.querySelectorAll(".finder-pick")].map((button) => ({
       number: button.querySelector("b").textContent,
       steps: button.querySelector("span").textContent,
-      tip: button.title,
+      tip: button.dataset.tip,
       pressed: button.getAttribute("aria-pressed") === "true",
     })),
   );
@@ -3674,8 +3929,8 @@ async function setOverlay(page, kind) {
 async function finderOpen(t, page) {
   await load(page);
   t.check("경로 탐색 창이 접힌 채로 열리고 왼쪽 아래 버튼 줄이 미니맵, 범례, 경로 찾기 순서다", (await count(page, ".finder")) === 0 &&
-    same(await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label") ?? b.title)), ["미니맵", "범례", "경로 찾기"]),
-    (await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label") ?? b.title))).join("·"));
+    same(await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label"))), ["미니맵", "범례", "경로 찾기"]),
+    (await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label")))).join("·"));
   await page.click(".finder-button");
   await page.waitForSelector(".finder", { timeout: 5_000 });
   await page.click(".legend-button");
@@ -3993,7 +4248,7 @@ async function finderStep(t, page) {
     return;
   }
   const path = route.paths[index];
-  const initRow = '.tree-row.tree-file[title$="parser/__init__.py"]';
+  const initRow = '.tree-row.tree-file[data-full$="parser/__init__.py"]';
   await load(page);
   // 노드 없는 __init__.py를 정보 패널에 연 채 고정에 들어간다.
   await page.click(initRow);
@@ -4374,7 +4629,7 @@ async function finderPin(t, page) {
   await page.waitForSelector(".finder", { state: "detached", timeout: 5_000 }).catch(() => {});
   const button = await page.evaluate(() => {
     const element = document.querySelector(".finder-button");
-    return { pinned: element.hasAttribute("data-pinned"), background: getComputedStyle(element).backgroundColor, title: element.title };
+    return { pinned: element.hasAttribute("data-pinned"), background: getComputedStyle(element).backgroundColor, title: element.dataset.tip };
   });
   const ink = await colorOf(page, "--ink");
   t.check(
@@ -4647,7 +4902,7 @@ async function unusedScenario(t, page) {
     `선 ${[...new Set(edges.map((e) => e.stroke))].join(", ")}, 테두리 ${borders.join(", ")}`,
   );
   const hovered = await tipOver(page, `${face(inFile[0])} .node-label`);
-  t.check("후보 노드에 올리면 말풍선 둘째 줄에 미사용 후보의 뜻을 적는다", hovered.split("\n").length === 2 && hovered.split("\n")[1].startsWith("미사용 후보"), hovered.replaceAll("\n", " / "));
+  t.check("후보 노드에 올리면 말풍선 마지막 줄에 미사용 후보의 뜻을 적는다", hovered.split("\n").at(-1).startsWith("미사용 후보 · "), hovered.replaceAll("\n", " / "));
   await t.shot();
   await page.mouse.move(5, 5);
 
@@ -5543,7 +5798,7 @@ async function mergeHover(t, page) {
       lines.filter((line) => line.key !== over.key).every((line) => !line.pointed) && (await trunksOf(page)).every((each) => !each.pointed),
     `올린 선 ${over.key}, 전체 경로 ${whole}, 층 ${over.layer}`,
   );
-  t.check("가지의 말풍선은 그 선의 출발·도착과 분류, 지점 수다", /^.+ → .+ · .+ · \d+곳$/.test(branchTip) && !branchTip.startsWith("노드 "), branchTip);
+  t.check("가지의 말풍선은 그 선의 출발·도착과 종류마다의 수다", new RegExp(`^.+ → .+ · ${RELATIONS}$`).test(branchTip) && !branchTip.startsWith("노드 "), branchTip);
 
   const spot = await trunkPoint(page, trunk.key);
   await page.mouse.move(spot.x, spot.y - 1);
@@ -5561,8 +5816,8 @@ async function mergeHover(t, page) {
   const sources = new Set(trunk.branches.map((key) => endsOfKey(key)[0])).size;
   const tipRows = trunkTipText.split("\n");
   t.check(
-    "도착 노드 앞 줄기의 말풍선은 첫 줄에 선을 내보내는 노드 수와 도착 노드, 지점 수 합을, 그 아래에 그 구간을 지나는 선을 한 줄씩 적는다",
-    new RegExp(`^노드 ${sources}개 → .+ · \\d+곳$`).test(tipRows[0]) && tipRows.length === 1 + trunk.count && tipRows.slice(1).every((row) => / → .+ · \d+곳$/.test(row)),
+    "도착 노드 앞 줄기의 말풍선은 첫 줄에 선을 내보내는 노드 수와 도착 노드, 종류마다 합친 수를, 그 아래에 그 구간을 지나는 선을 한 줄씩 적는다",
+    new RegExp(`^노드 ${sources}개 → .+ · ${RELATIONS}$`).test(tipRows[0]) && tipRows.length === 1 + trunk.count && tipRows.slice(1).every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
     trunkTipText.replaceAll("\n", " / "),
   );
   await t.shot();
@@ -6602,8 +6857,8 @@ async function overlap(t, page) {
     `강조한 선 ${part.pointed.length}개, 말풍선 ${part.rows.length}줄`,
   );
   t.check(
-    "말풍선의 줄 수가 그 구간을 지나는 선의 수와 같고(도착이 같은 여럿이면 합계 한 줄을 더한다) 선마다 출발 → 도착 · 분류 · M곳을 적는다",
-    part.rows.length === (part.pointed.length === 1 ? 1 : part.pointed.length + 1) && part.rows.slice(-part.pointed.length).every((row) => / → .+ · \d+곳$/.test(row)),
+    "말풍선의 줄 수가 그 구간을 지나는 선의 수와 같고(도착이 같은 여럿이면 합계 한 줄을 더한다) 선마다 출발 → 도착 · 종류마다의 수를 적는다",
+    part.rows.length === (part.pointed.length === 1 ? 1 : part.pointed.length + 1) && part.rows.slice(-part.pointed.length).every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
     part.rows.join(" / "),
   );
   await page.screenshot({ path: join(OUT, "s4-u7-fix-overlap-part.png") });
@@ -6630,7 +6885,7 @@ async function overlap(t, page) {
   const shared = { pointed: await pointedLines(page), rows: (await tipText(page)).split("\n") };
   t.check(
     `도착이 다른 선 ${spot.keys.length}개가 함께 지나는 구간에 올리면 그 선들만 강조하고 말풍선에 한 줄씩 적는다`,
-    same(shared.pointed, spot.keys) && shared.rows.length === spot.keys.length && shared.rows.every((row) => / → .+ · \d+곳$/.test(row)),
+    same(shared.pointed, spot.keys) && shared.rows.length === spot.keys.length && shared.rows.every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
     `강조 ${shared.pointed.length}개, 말풍선 ${shared.rows.join(" / ")}`,
   );
   await page.screenshot({ path: join(OUT, "s4-u7-fix-overlap-hover.png") });
@@ -6835,6 +7090,7 @@ const SCENARIOS = [
   ["hover", hover],
   ["edge", edge],
   ["badge-tip", badgeTip],
+  ["tips", tips],
   ["minimap", minimap],
   ["region", region],
   ["folder", folder],

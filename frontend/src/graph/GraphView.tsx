@@ -27,19 +27,18 @@ import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
 import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
-import { functionCounts, layout, packId, packLabel, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
+import { functionCounts, labelOf, layout, packId, packLabel, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
-import { GROUP_NAMES, KIND_NAMES, STEP_NAMES } from "./names";
-import { LAYER } from "./layers";
+import { faceId, LAYER } from "./layers";
 import { flowNodes, parts, pointing, pressable, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
 import { isPack, type PackFlowNode } from "./nodes/PackNode";
 import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
 import { drawn, type EdgeKey } from "./scope";
-import { nodeTip, packTip, tipOf } from "./tips";
-import { Tooltip, type TooltipHandle } from "./Tooltip";
+import { clipped, nodeTip, packTip, tipOf } from "./tips";
+import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
 import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, type Shown } from "./visible";
@@ -236,7 +235,6 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   /** 이 컴포넌트를 그리기 시작할 때의 화면 */
   const [start] = useState(() => home.current ?? undefined);
   const root = useRef<HTMLDivElement | null>(null);
-  const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
   const onScreen = useRef<Layout | null>(null);
   /** 화면에 그린 배치의 입력 */
@@ -469,10 +467,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const aim = useAim({
     lines: views,
     boxes: scene?.layout.boxes ?? NO_BOXES,
-    tip,
     name: nameOf,
-    describe: ({ source, target, group, sites, route }) =>
-      `${nameOf(source)} → ${nameOf(target)} · ${sites === 0 && route !== null ? STEP_NAMES[route] : `${GROUP_NAMES[group]} · ${sites}곳`}`,
     only: lit === null ? null : (view) => view.route !== null,
     skip: (event) => {
       const again = repeated(event);
@@ -538,7 +533,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   };
 
   const onNodeClick: NodeMouseHandler<AtlasFlowNode | PackFlowNode> = (event, node) => {
-    tip.current?.hide();
+    tooltip.hide();
     if (isPack(node)) {
       clicked.current = null;
       togglePack(node.data.box);
@@ -555,7 +550,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     press(node.data.node.id);
   };
   const onPaneClick = (event: ReactMouseEvent) => {
-    tip.current?.hide();
+    tooltip.hide();
     if (repeated(event)) {
       return;
     }
@@ -567,7 +562,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
   };
   /**
-   * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 그 위치에서 눌리는 노드면 선의 hover처럼
+   * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 말풍선(`nodeTip`)을 띄운다. 그 위치에서 눌리는 노드면 선의 hover처럼
    * 가장 진한 단계로 그린다. 경로 고정 중에는 경로 위 노드만 그렇게 그린다. 마우스 버튼을 누른 동안(화면을 끄는 동안)에는
    * 아무것도 하지 않는다.
    */
@@ -576,13 +571,16 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return;
     }
     if (isPack(node)) {
-      tip.current?.show(node.data.tip, event.clientX, event.clientY);
+      tooltip.show(node.data.tip, event.clientX, event.clientY);
       return;
     }
     setHover(node.data.node.id);
     setAimedNode((lit === null || node.data.route !== null) && pressable(node.data, event.target) ? node.data.node.id : null);
-    const text = tipOf(event.target) ?? nodeTip(titleOf(node.data.node), KIND_NAMES[node.data.node.kind], node.data.unused);
-    tip.current?.show(text, event.clientX, event.clientY);
+    const { id } = node.data.node;
+    const title = titleOf(node.data.node);
+    const cut = labelOf(node.data.node) !== title || clipped(root.current?.querySelector(`[data-id="${CSS.escape(faceId(id))}"] .node-label`) ?? null);
+    const text = tipOf(event.target) ?? nodeTip(cut ? title : null, useSummaries.getState().leads[id] ?? null, node.data.unused);
+    tooltip.show(text, event.clientX, event.clientY);
   };
   /** 사용자가 화면을 끌거나 확대·축소하면 전체 맞춤 상태를 끈다. 코드가 옮긴 화면은 event가 null이다. */
   const released: OnMove = (event) => {
@@ -593,7 +591,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const onNodeLeave = () => {
     setHover(null);
     setAimedNode(null);
-    tip.current?.hide();
+    tooltip.hide();
   };
   if (scene === null) {
     return (
@@ -662,7 +660,6 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       </ReactFlow>
       <Dock />
       <Arranging />
-      <Tooltip ref={tip} />
       {aim.menu}
     </div>
   );

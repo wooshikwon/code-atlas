@@ -1,5 +1,5 @@
 // 그릴 선과 배치를 합쳐 노드와 선 컴포넌트가 그대로 그리는 값을 만든다.
-import type { AtlasNode, EdgeGroup, Graph } from "../api/types";
+import type { AtlasNode, EdgeGroup, EdgeKind, Graph } from "../api/types";
 import { siblings } from "./columns";
 import {
   ARROW_LENGTH,
@@ -44,6 +44,8 @@ export type EdgeView = {
 
   /** 합친 선의 sites 수 합 */
   sites: number;
+  /** 합친 선의 종류마다 sites 수 합 */
+  kinds: Partial<Record<EdgeKind, number>>;
   /** 강조하는 경로의 걸음을 그리는 선이면 그 걸음의 종류 */
   route: StepKind | null;
   /** 도착이나 출발이 같은 선과 합류하는 선인지. 함수 안 import 선, 한쪽이 다른 쪽을 품은 선, 실행 선이 없는 이음은 합류하지 않는다. */
@@ -316,6 +318,7 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       opacity: edge.opacity,
       into: null,
       sites: edge.weight,
+      kinds: edge.kinds,
       route: edge.route,
       joins,
       below,
