@@ -1,10 +1,11 @@
-// 상단 줄의 탐색 경로 표시. 고른 노드(함수 시점 뷰에서는 가운데 함수)까지의 폴더·파일·클래스·함수를 단계로 그린다.
+// 상단 줄의 탐색 경로 표시. 고른 노드(함수 시점 뷰에서는 가운데 함수, 경로 고정 중에는 정보 패널이 보이는 경로 위 노드)까지의
+// 폴더·파일·클래스·함수를 단계로 그린다.
 // 줄 폭이 모자라면 앞 단계부터 `…`로 줄이고 마지막 단계는 늘 남긴다. 상단 줄을 줄이는 단계(`fit.ts`)는 이 폭을 보지 않는다.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AtlasNode } from "../api/types";
 import { labelOf, titleOf } from "../graph/layout";
 import { nodeIndex } from "../graph/visible";
-import { useAtlas } from "../state/store";
+import { pinned, useAtlas } from "../state/store";
 import type { Fit } from "./fit";
 
 /** 한 단계의 이름. 폴더와 파일은 경로의 마지막 마디만 적는다. */
@@ -24,10 +25,17 @@ export function Trail({ fit }: { fit: Fit }) {
   const graph = useAtlas((s) => s.graph);
   const view = useAtlas((s) => s.view);
   const selection = useAtlas((s) => s.selection);
+  const finder = useAtlas((s) => s.finder);
   const show = useAtlas((s) => s.show);
   const nodes = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
 
-  const target = view.kind === "function" ? view.center : selection?.type === "node" ? selection.id : null;
+  const target = pinned(finder)
+    ? finder.focus
+    : view.kind === "function"
+      ? view.center
+      : selection?.type === "node"
+        ? selection.id
+        : null;
   const steps: AtlasNode[] = [];
   for (let node = target === null ? undefined : nodes?.get(target); node !== undefined; ) {
     steps.unshift(node);
