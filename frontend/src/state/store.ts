@@ -2,7 +2,9 @@
 import { create } from "zustand";
 import { getGraph, getRepo, getTree } from "../api/client";
 import type { Graph, Repo, Tree } from "../api/types";
+import { lit, route, type Lit, type Route } from "../graph/route";
 import type { EdgeKey } from "../graph/scope";
+import { hidden } from "../graph/visible";
 import { applyTheme, preferredTheme, type Theme } from "../theme";
 import { back, focusOf, forward, jump, push, type History, type Place, type Selection, type View } from "./history";
 
@@ -15,6 +17,22 @@ export interface Rect {
   y: number;
   width: number;
   height: number;
+}
+
+/** 경로 탐색 창과 경로 고정 상태. 탐색 이력에 넣지 않고 localStorage에 저장하지 않는다. */
+export interface Finder {
+  /** 경로 탐색 창을 폈는지 */
+  open: boolean;
+  from: string | null;
+  to: string | null;
+  /** 두 칸이 찼을 때 찾은 결과 */
+  route: Route | null;
+  /** 강조하는 경로의 번호(0부터) */
+  pick: number;
+  /** 정보 패널에 보이는 경로 위 노드 */
+  focus: string | null;
+  /** 고정 중에 막힌 액션이 불린 횟수 */
+  blocked: number;
 }
 
 export interface AtlasStore {
@@ -34,6 +52,7 @@ export interface AtlasStore {
   autoSummary: boolean;
   theme: Theme;
   history: History;
+  finder: Finder;
   /** 정보 패널의 사각형. null이면 기본 위치(오른쪽 위)다. */
   panel: Rect | null;
   legendOpen: boolean;
@@ -43,6 +62,11 @@ export interface AtlasStore {
   /** 저장해 둔 화면 설정을 되살리고 레포·그래프·파일트리를 받는다. */
   load(): void;
   /**
+   * 경로 고정 중에는 selectEdge, toggleFolder, setDepth, enterFunction, expandFunction, open, back, forward, jump,
+   * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다. select와 show는
+   * 강조한 경로 위의 노드를 받으면 finder.focus만 그 노드로 바꾸고, 그 밖의 노드를 받으면 같은 방식으로 막힌다.
+   * select(null)은 고정 중에 아무것도 하지 않는다.
+   *
    * 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 폴더를 고르면 그 폴더를 접는다.
    * 같은 id를 다시 고르거나 null을 넘기면 선택을 푼다.
    */
@@ -66,8 +90,22 @@ export interface AtlasStore {
   back(): void;
   forward(): void;
   jump(index: number): void;
+  /** 두 칸이 차 있으면 바뀐 토글로 경로를 다시 찾는다. */
   toggleTests(): void;
   toggleExternal(): void;
+  /** 경로 탐색 창을 펴거나 접는다. 고정 상태는 바꾸지 않는다. */
+  toggleFinder(): void;
+  /**
+   * 출발 칸이나 도착 칸을 채우거나 비운다. 그래프에 없는 id와 폴더는 받지 않는다. 두 칸이 차면 경로를 찾아 첫 경로를
+   * 강조하고 focus를 그 경로의 도착 노드에 둔다. 경로가 나왔는데 함수 시점 뷰면 구조 뷰로 돌아가는 단계를 이력에 넣는다.
+   */
+  setEnd(end: "from" | "to", id: string | null): void;
+  /** 출발과 도착을 맞바꾸고 경로를 다시 찾는다. */
+  swapEnds(): void;
+  /** 강조할 경로를 고르고 focus를 그 경로의 도착 노드로 돌린다. 찾은 경로에 없는 번호는 넘긴다. */
+  pickPath(index: number): void;
+  /** 출발·도착·찾은 경로를 비워 경로 고정을 끈다. */
+  clearFinder(): void;
   toggleAutoSummary(): void;
   setTheme(theme: Theme): void;
   setPanel(rect: Rect | null): void;
@@ -120,6 +158,16 @@ export function nestedFolders(graph: Graph): Set<string> {
   return new Set(graph.nodes.filter((n) => n.kind === "package" && n.parent !== null).map((n) => n.id));
 }
 
+/** 경로 고정 상태인지. 찾은 경로가 하나라도 있으면 고정이다. */
+export function pinned(finder: Finder): boolean {
+  return finder.route !== null && finder.route.paths.length > 0;
+}
+
+/** 고정 중에 강조하는 경로. 고정이 아니면 null이다. */
+export function litOf(finder: Finder): Lit | null {
+  return finder.route === null ? null : lit(finder.route, finder.pick);
+}
+
 const START: Pick<AtlasStore, "view" | "selection" | "collapsed"> = {
   view: { kind: "structure" },
   selection: null,
@@ -145,6 +193,43 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     set(change);
     const { panel, legendOpen, minimapOpen, theme, depth, autoSummary } = get();
     localStorage.setItem(UI_KEY, JSON.stringify({ panel, legendOpen, minimapOpen, theme, depth, autoSummary }));
+  };
+
+  /** 경로 고정 중에는 액션을 실행하지 않고 막힌 횟수를 늘리며 경로 탐색 창을 편다. */
+  const guarded =
+    <Args extends unknown[]>(action: (...args: Args) => void) =>
+    (...args: Args) => {
+      if (pinned(get().finder)) {
+        set((state) => ({ finder: { ...state.finder, open: true, blocked: state.finder.blocked + 1 } }));
+        return;
+      }
+      action(...args);
+    };
+
+  /** 경로 고정 중에 null이나 강조한 경로 위의 노드를 받았는지. 경로 위의 노드면 finder.focus를 그 노드로 바꾼다. */
+  const focused = (id: string | null): boolean => {
+    const finder = get().finder;
+    if (!pinned(finder) || (id !== null && litOf(finder)?.nodes.has(id) !== true)) {
+      return false;
+    }
+    if (id !== null) {
+      set({ finder: { ...finder, focus: id } });
+    }
+    return true;
+  };
+
+  /** 출발과 도착을 finder에 담고 두 칸이 찼으면 경로를 찾는다. 경로가 나왔는데 함수 시점 뷰면 구조 뷰로 돌아간다. */
+  const seek = (from: string | null, to: string | null) => {
+    const { graph, showTests, showExternal, view } = get();
+    const found =
+      graph !== null && from !== null && to !== null ? route(graph, from, to, hidden(graph, { showTests, showExternal })) : null;
+    const first = found?.paths[0];
+    if (first !== undefined && view.kind === "function") {
+      visit({ view: { kind: "structure" } });
+    }
+    set((state) => ({
+      finder: { ...state.finder, from, to, route: found, pick: 0, focus: first?.[first.length - 1] ?? null },
+    }));
   };
 
   const kindOf = (id: string) => get().graph?.nodes.find((n) => n.id === id)?.kind;
@@ -195,6 +280,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     autoSummary: false,
     theme: "light",
     history: { entries: [placeOf(START)], index: 0 },
+    finder: { open: false, from: null, to: null, route: null, pick: 0, focus: null, blocked: 0 },
     panel: null,
     legendOpen: false,
     minimapOpen: true,
@@ -213,41 +299,45 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         .catch((caught: unknown) => set({ error: caught instanceof Error ? caught.message : String(caught) }));
     },
 
-    select: (id) => {
-      if (id === null) {
-        visit({ selection: null });
-        return;
-      }
-      if (kindOf(id) === undefined) {
-        return;
-      }
-      const selection = get().selection;
-      if (selection?.type === "node" && selection.id === id) {
-        visit({ selection: null });
-        return;
-      }
-      visit({ selection: { type: "node", id }, collapsed: revealed(id) });
-    },
-    show: (id) => {
-      if (kindOf(id) !== undefined) {
-        visit({ view: { kind: "structure" }, selection: { type: "node", id }, collapsed: revealed(id) });
-      }
-    },
-    selectEdge: (key) => visit({ selection: { type: "edge", key, focus: focusOf(get().selection) } }),
-    toggleFolder: toggle,
-    setDepth: (depth) => keep({ depth }),
-    enterFunction: (id) => {
+    select: (id) =>
+      focused(id) ||
+      guarded(() => {
+        if (id === null) {
+          visit({ selection: null });
+          return;
+        }
+        if (kindOf(id) === undefined) {
+          return;
+        }
+        const selection = get().selection;
+        if (selection?.type === "node" && selection.id === id) {
+          visit({ selection: null });
+          return;
+        }
+        visit({ selection: { type: "node", id }, collapsed: revealed(id) });
+      })(),
+    show: (id) =>
+      focused(id) ||
+      guarded(() => {
+        if (kindOf(id) !== undefined) {
+          visit({ view: { kind: "structure" }, selection: { type: "node", id }, collapsed: revealed(id) });
+        }
+      })(),
+    selectEdge: guarded((key) => visit({ selection: { type: "edge", key, focus: focusOf(get().selection) } })),
+    toggleFolder: guarded(toggle),
+    setDepth: guarded((depth) => keep({ depth })),
+    enterFunction: guarded((id) => {
       if (kindOf(id) !== undefined) {
         enter(id);
       }
-    },
-    expandFunction: (id) => {
+    }),
+    expandFunction: guarded((id) => {
       const view = get().view;
       if (view.kind === "function" && !view.expanded.includes(id)) {
         visit({ view: { ...view, expanded: [...view.expanded, id] } });
       }
-    },
-    open: (id, from) => {
+    }),
+    open: guarded((id, from) => {
       const kind = kindOf(id);
       const place = from.entries[from.index];
       const centered = place.view.kind === "function" && place.view.center === id;
@@ -258,12 +348,36 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       if (!centered) {
         enter(id);
       }
+    }),
+    back: guarded(() => restore(back(get().history))),
+    forward: guarded(() => restore(forward(get().history))),
+    jump: guarded((index) => restore(jump(get().history, index))),
+    toggleTests: guarded(() => {
+      set((state) => ({ showTests: !state.showTests }));
+      seek(get().finder.from, get().finder.to);
+    }),
+    toggleExternal: guarded(() => {
+      set((state) => ({ showExternal: !state.showExternal }));
+      seek(get().finder.from, get().finder.to);
+    }),
+    toggleFinder: () => set((state) => ({ finder: { ...state.finder, open: !state.finder.open } })),
+    setEnd: (end, id) => {
+      const kind = id === null ? null : kindOf(id);
+      if (kind === undefined || kind === "package") {
+        return;
+      }
+      const { from, to } = get().finder;
+      seek(end === "from" ? id : from, end === "to" ? id : to);
     },
-    back: () => restore(back(get().history)),
-    forward: () => restore(forward(get().history)),
-    jump: (index) => restore(jump(get().history, index)),
-    toggleTests: () => set((state) => ({ showTests: !state.showTests })),
-    toggleExternal: () => set((state) => ({ showExternal: !state.showExternal })),
+    swapEnds: () => seek(get().finder.to, get().finder.from),
+    pickPath: (index) => {
+      const finder = get().finder;
+      const path = finder.route?.paths[index];
+      if (path !== undefined) {
+        set({ finder: { ...finder, pick: index, focus: path[path.length - 1] } });
+      }
+    },
+    clearFinder: () => seek(null, null),
     toggleAutoSummary: () => keep({ autoSummary: !get().autoSummary }),
     setTheme: (theme) => {
       keep({ theme });

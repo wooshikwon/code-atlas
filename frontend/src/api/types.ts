@@ -163,6 +163,13 @@ export interface Changes {
   nodes: Record<string, Change>;
 }
 
+/** 미사용 후보. candidates는 `/api/graph`에 있는 노드 id이고 파일 경로, 시작 줄 순서다. */
+export interface Unused {
+  /** 판정 대상 정의 수(테스트 코드가 아닌 함수·메서드·클래스·데이터 클래스) */
+  definitions: number;
+  candidates: string[];
+}
+
 export interface ApiErrorBody {
   error: string;
 }

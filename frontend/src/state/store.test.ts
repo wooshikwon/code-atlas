@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { repoFixture } from "../graph/fixture";
+import { repoFixture, routeFixture } from "../graph/fixture";
 import { back, jump, push, type History, type Place } from "./history";
-import { nestedFolders, parseUi, useAtlas } from "./store";
+import { litOf, nestedFolders, parseUi, pinned, useAtlas, type AtlasStore } from "./store";
 
 const [a, b, c] = repoFixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
 const folder = repoFixture.nodes.find((n) => n.kind === "package")!.id;
@@ -297,6 +297,276 @@ describe("이력", () => {
     expect(history.index).toBe(99);
     expect(history.entries[99].selection).toEqual(node("n119"));
     expect(jump(history, 100)).toBe(history);
+  });
+});
+
+describe("경로 고정", () => {
+  const [begin, left, mid, right, finish] = ["begin", "left", "mid", "right", "finish"].map((name) => `flow.walk:${name}`);
+  const [probe, lone] = ["flow.walk:probe", "flow.walk:lone"];
+  const paths = [
+    [begin, left, finish],
+    [begin, right, finish],
+    [begin, mid, left, finish],
+  ];
+
+  /** 경로 고정 중에 바뀌지 않는 상태 */
+  const kept = ({ selection, collapsed, view, history, showTests, showExternal, depth }: AtlasStore) => ({
+    selection,
+    collapsed,
+    view,
+    history,
+    showTests,
+    showExternal,
+    depth,
+  });
+
+  /** 뒤로·앞으로 갈 단계가 모두 있는 이력을 만든 뒤 begin에서 finish까지의 경로로 고정에 들어간다. */
+  const pin = () => {
+    store().toggleFolder("ring");
+    store().select(probe);
+    store().select(lone);
+    store().back();
+    store().setEnd("from", begin);
+    store().setEnd("to", finish);
+  };
+
+  beforeEach(() => {
+    useAtlas.setState({ graph: routeFixture });
+  });
+
+  it("칸 하나만 차면 고정이 아니고, 두 칸이 차면 경로를 찾아 첫 경로를 강조하며 도착 노드를 focus에 둔다", () => {
+    store().setEnd("from", begin);
+    expect(store().finder).toMatchObject({ from: begin, to: null, route: null, focus: null });
+    expect(pinned(store().finder)).toBe(false);
+    expect(litOf(store().finder)).toBeNull();
+    store().setEnd("to", finish);
+    expect(store().finder).toMatchObject({ from: begin, to: finish, pick: 0, focus: finish, blocked: 0 });
+    expect(store().finder.route?.paths).toEqual(paths);
+    expect(pinned(store().finder)).toBe(true);
+    expect(litOf(store().finder)?.path).toEqual(paths[0]);
+  });
+
+  it("그래프에 없는 id와 폴더는 칸에 넣지 않는다", () => {
+    store().setEnd("from", "없는:노드");
+    store().setEnd("to", "flow");
+    expect(store().finder).toMatchObject({ from: null, to: null });
+    store().setEnd("from", "flow.build");
+    store().setEnd("to", "flow.build:Engine");
+    expect(store().finder).toMatchObject({ from: "flow.build", to: "flow.build:Engine" });
+  });
+
+  it("고정에 들어가도 선택·접은 폴더·뷰·이력이 그대로다", () => {
+    store().toggleFolder("ring");
+    store().select(probe);
+    const before = kept(store());
+    store().setEnd("from", begin);
+    store().setEnd("to", finish);
+    expect(kept(store())).toEqual(before);
+    expect(store().history).toBe(before.history);
+  });
+
+  it.each<[string, (state: AtlasStore) => void]>([
+    ["select", (state) => state.select(probe)],
+    ["show", (state) => state.show(probe)],
+    ["selectEdge", (state) => state.selectEdge("agg|x|y")],
+    ["toggleFolder", (state) => state.toggleFolder("flow")],
+    ["enterFunction", (state) => state.enterFunction(begin)],
+    ["expandFunction", (state) => state.expandFunction(left)],
+    ["open", (state) => state.open(begin, { entries: [state.history.entries[0]], index: 0 })],
+    ["back", (state) => state.back()],
+    ["forward", (state) => state.forward()],
+    ["jump", (state) => state.jump(0)],
+    ["toggleTests", (state) => state.toggleTests()],
+    ["toggleExternal", (state) => state.toggleExternal()],
+    ["setDepth", (state) => state.setDepth(3)],
+  ])("고정 중에 %s는 상태를 바꾸지 않고 blocked만 늘리며 접은 창을 편다", (_name, act) => {
+    pin();
+    const before = store();
+    act(before);
+    expect(kept(store())).toEqual(kept(before));
+    expect(store().history).toBe(before.history);
+    expect(store().collapsed).toBe(before.collapsed);
+    expect(store().finder).toEqual({ ...before.finder, open: true, blocked: 1 });
+    act(store());
+    expect(store().finder.blocked).toBe(2);
+  });
+
+  it("같은 액션이 고정 밖에서는 상태를 바꾼다", () => {
+    store().enterFunction(begin);
+    store().expandFunction(left);
+    store().show(probe);
+    store().selectEdge("agg|x|y");
+    store().toggleFolder("flow");
+    store().back();
+    store().forward();
+    store().jump(0);
+    store().toggleTests();
+    store().toggleExternal();
+    expect(store().history).toMatchObject({ index: 0, entries: { length: 6 } });
+    expect(store()).toMatchObject({ showTests: true, showExternal: true });
+    expect(store().finder.blocked).toBe(0);
+  });
+
+  it("경로 위 노드의 select와 show는 focus만 바꾸고 다시 골라도 focus가 풀리지 않는다", () => {
+    pin();
+    const before = store();
+    store().select(left);
+    expect(store().finder).toEqual({ ...before.finder, focus: left });
+    store().select(left);
+    expect(store().finder.focus).toBe(left);
+    store().show(begin);
+    expect(store().finder).toEqual({ ...before.finder, focus: begin });
+    expect(kept(store())).toEqual(kept(before));
+    expect(store().history).toBe(before.history);
+  });
+
+  it("강조하지 않은 경로에만 있는 노드는 경로 밖 노드로 막는다", () => {
+    pin();
+    store().select(right);
+    expect(store().finder).toMatchObject({ focus: finish, blocked: 1 });
+    store().pickPath(1);
+    store().select(right);
+    expect(store().finder).toMatchObject({ focus: right, blocked: 1 });
+    store().select(left);
+    expect(store().finder).toMatchObject({ focus: right, blocked: 2 });
+  });
+
+  it("select(null)은 고정을 풀지 않고 blocked도 늘리지 않는다", () => {
+    pin();
+    store().select(left);
+    const before = store();
+    store().select(null);
+    expect(store()).toBe(before);
+    expect(pinned(store().finder)).toBe(true);
+  });
+
+  it("pickPath는 고정을 유지한 채 강조할 경로를 바꾸고 focus를 도착 노드로 돌린다", () => {
+    pin();
+    store().select(left);
+    const before = store();
+    store().pickPath(2);
+    expect(store().finder).toEqual({ ...before.finder, pick: 2, focus: finish });
+    expect(litOf(store().finder)?.path).toEqual(paths[2]);
+    expect(kept(store())).toEqual(kept(before));
+    store().pickPath(3);
+    store().pickPath(-1);
+    expect(store().finder.pick).toBe(2);
+  });
+
+  it("고정 중에 setEnd로 끝점을 바꾸면 고정을 유지한 채 경로를 다시 찾고 첫 경로로 돌아간다", () => {
+    pin();
+    store().pickPath(2);
+    const before = store();
+    store().setEnd("from", mid);
+    expect(store().finder).toMatchObject({ from: mid, to: finish, pick: 0, focus: finish });
+    expect(store().finder.route?.paths).toEqual([[mid, left, finish]]);
+    expect(pinned(store().finder)).toBe(true);
+    expect(kept(store())).toEqual(kept(before));
+    store().setEnd("to", "flow.walk");
+    expect(store().finder.route?.paths).toEqual([]);
+    expect(store().finder.focus).toBeNull();
+  });
+
+  it("새 결과에 경로가 없으면 고정이 풀려 액션이 다시 동작하고, swapEnds로 되돌리면 다시 고정이다", () => {
+    pin();
+    store().swapEnds();
+    expect(store().finder).toMatchObject({ from: finish, to: begin, pick: 0, focus: null });
+    expect(store().finder.route).toMatchObject({ paths: [], reverse: true });
+    expect(pinned(store().finder)).toBe(false);
+    expect(litOf(store().finder)).toBeNull();
+    store().select(left);
+    expect(store().selection).toEqual(node(left));
+    expect(store().finder.blocked).toBe(0);
+    store().swapEnds();
+    expect(pinned(store().finder)).toBe(true);
+    expect(store().finder.focus).toBe(finish);
+    store().select(probe);
+    expect(store().selection).toEqual(node(left));
+    expect(store().finder.blocked).toBe(1);
+  });
+
+  it("칸을 비우면 고정이 풀린다", () => {
+    pin();
+    store().setEnd("to", null);
+    expect(store().finder).toMatchObject({ from: begin, to: null, route: null, pick: 0, focus: null });
+    expect(pinned(store().finder)).toBe(false);
+  });
+
+  it("clearFinder는 출발·도착·경로를 비우고 선택·접은 폴더·뷰·이력·토글을 고정 전 그대로 돌려준다", () => {
+    store().toggleFolder("ring");
+    store().select(probe);
+    const before = store();
+    store().toggleFinder();
+    store().setEnd("from", begin);
+    store().setEnd("to", finish);
+    store().select(left);
+    store().select(lone);
+    store().toggleFolder("flow");
+    store().enterFunction(begin);
+    store().back();
+    store().toggleTests();
+    store().select(null);
+    store().pickPath(1);
+    store().clearFinder();
+    expect(store().finder).toEqual({ open: true, from: null, to: null, route: null, pick: 0, focus: null, blocked: 5 });
+    expect(kept(store())).toEqual(kept(before));
+    expect(store().history).toBe(before.history);
+    expect(store().collapsed).toBe(before.collapsed);
+    store().select(lone);
+    expect(store().selection).toEqual(node(lone));
+  });
+
+  it("toggleFinder는 창만 펴고 접으며, 고정 중에 접어도 고정이 유지된다", () => {
+    store().toggleFinder();
+    expect(store().finder.open).toBe(true);
+    pin();
+    const before = store().finder;
+    store().toggleFinder();
+    expect(store().finder).toEqual({ ...before, open: false });
+    expect(pinned(store().finder)).toBe(true);
+    expect(litOf(store().finder)?.path).toEqual(paths[0]);
+    store().select(left);
+    expect(store().finder).toMatchObject({ open: false, focus: left });
+  });
+
+  it("함수 시점 뷰에서 경로가 나오면 구조 뷰로 돌아가는 단계를 이력에 넣고, 경로가 없으면 뷰를 그대로 둔다", () => {
+    store().enterFunction(finish);
+    store().setEnd("from", finish);
+    store().setEnd("to", begin);
+    expect(store().view).toEqual({ kind: "function", center: finish, expanded: [] });
+    expect(store().history.entries).toHaveLength(2);
+    store().swapEnds();
+    expect(pinned(store().finder)).toBe(true);
+    expect(store().view).toEqual({ kind: "structure" });
+    expect(store().selection).toEqual(node(finish));
+    expect(store().history).toMatchObject({ index: 2, entries: { length: 3 } });
+    store().clearFinder();
+    store().back();
+    expect(store().view).toEqual({ kind: "function", center: finish, expanded: [] });
+  });
+
+  it("경로는 토글로 숨긴 노드를 거치지 않고, 두 칸이 찬 채 토글을 바꾸면 경로를 다시 찾는다", () => {
+    store().setEnd("from", probe);
+    store().setEnd("to", lone);
+    expect(store().finder.route?.paths).toEqual([]);
+    store().toggleTests();
+    expect(store().showTests).toBe(true);
+    expect(store().finder.route?.paths).toEqual([[probe, "tests.fakes:relay", lone]]);
+    expect(store().finder).toMatchObject({ pick: 0, focus: lone });
+    store().toggleTests();
+    expect(store().showTests).toBe(true);
+    expect(store().finder.blocked).toBe(1);
+  });
+
+  it("finder를 localStorage에 쓰지 않는다", () => {
+    const saved = new Map<string, string>();
+    vi.stubGlobal("localStorage", { setItem: (key: string, value: string) => saved.set(key, value) });
+    store().toggleFinder();
+    store().setEnd("from", begin);
+    store().toggleLegend();
+    vi.unstubAllGlobals();
+    expect(Object.keys(JSON.parse(saved.get("code-atlas:ui:v1")!) as object)).not.toContain("finder");
+    expect(saved.size).toBe(1);
   });
 });
 
