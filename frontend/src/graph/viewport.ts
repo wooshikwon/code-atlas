@@ -17,31 +17,44 @@ const INSET = 20;
 const FIT_MARGIN = 24;
 
 /**
- * 관계 그래프 영역에서 정보 패널을 뺀 왼쪽·오른쪽·위·아래 네 사각형 가운데 가장 넓은 사각형.
- * 패널이 없거나 영역과 겹치지 않으면 영역 전체다.
+ * 관계 그래프 영역 area 안에서 가리는 칸 covers와 겹치지 않는 사각형 가운데 가장 넓은 사각형.
+ * 사각형의 변은 영역의 변이나 가리는 칸의 변에 맞춘다. 가리는 칸이 없거나 영역과 겹치지 않으면 영역 전체다.
  */
-export function freeRect(area: Rect, panel: Rect | null): Rect {
-  if (panel === null) {
-    return area;
+export function freeRect(area: Rect, covers: Rect[]): Rect {
+  const right = area.x + area.width;
+  const bottom = area.y + area.height;
+  const inside = covers
+    .map((c) => ({
+      left: Math.max(area.x, Math.min(c.x, right)),
+      right: Math.max(area.x, Math.min(c.x + c.width, right)),
+      top: Math.max(area.y, Math.min(c.y, bottom)),
+      bottom: Math.max(area.y, Math.min(c.y + c.height, bottom)),
+    }))
+    .filter((c) => c.left < c.right && c.top < c.bottom);
+  const cuts = (values: number[]) => [...new Set(values)].sort((a, b) => a - b);
+  const xs = cuts([area.x, right, ...inside.flatMap((c) => [c.left, c.right])]);
+  const ys = cuts([area.y, bottom, ...inside.flatMap((c) => [c.top, c.bottom])]);
+  let best = inside.length === 0 ? area : null;
+  for (const [i, x] of xs.entries()) {
+    for (const far of xs.slice(i + 1)) {
+      for (const [j, y] of ys.entries()) {
+        for (const low of ys.slice(j + 1)) {
+          const size = (far - x) * (low - y);
+          if (best !== null && size <= best.width * best.height) {
+            continue;
+          }
+          if (inside.every((c) => c.right <= x || c.left >= far || c.bottom <= y || c.top >= low)) {
+            best = { x, y, width: far - x, height: low - y };
+          }
+        }
+      }
+    }
   }
-  const left = Math.max(area.x, Math.min(panel.x, area.x + area.width));
-  const right = Math.max(area.x, Math.min(panel.x + panel.width, area.x + area.width));
-  const top = Math.max(area.y, Math.min(panel.y, area.y + area.height));
-  const bottom = Math.max(area.y, Math.min(panel.y + panel.height, area.y + area.height));
-  if (left >= right || top >= bottom) {
-    return area;
-  }
-  const sides: Rect[] = [
-    { ...area, width: left - area.x },
-    { ...area, x: right, width: area.x + area.width - right },
-    { ...area, height: top - area.y },
-    { ...area, y: bottom, height: area.y + area.height - bottom },
-  ];
-  return sides.reduce((best, side) => (side.width * side.height > best.width * best.height ? side : best));
+  return best ?? area;
 }
 
 /**
- * 상자의 중심이 free의 중심에 오는 화면 이동 좌표. 확대한 상자가 free보다 긴 축은 상자의 시작 끝을
+ * 상자의 중심이 빈 사각형 free의 중심에 오는 화면 이동 좌표. 확대한 상자가 free보다 긴 축은 상자의 시작 끝을
  * free의 시작 끝에서 20px 안쪽에 맞춘다.
  */
 export function centerOn(box: Box, free: Rect, zoom: number): Point {
@@ -51,18 +64,24 @@ export function centerOn(box: Box, free: Rect, zoom: number): Point {
 }
 
 /**
- * 강조하는 경로의 출발 노드 from과 도착 노드 to가 함께 보이는 화면 위치와 확대 비율. 확대 비율은 zoom을 줄이지 않고
- * `NAMED_ZOOM`보다 작으면 그 값으로 키운다. 두 상자를 품는 사각형이 정보 패널이 가리지 않는 영역에 20px씩 남기고
- * 들어가면 그 사각형을 영역의 가운데에 두고, 들어가지 않으면 출발 노드를 영역의 왼쪽 끝에서 20px 안쪽, 세로 가운데에 둔다.
+ * 강조하는 경로를 보이는 화면 위치와 확대 비율. path는 경로 위 노드의 상자이고 focus는 정보 패널이 보이는 경로 위 노드의 상자다.
+ * 확대 비율은 zoom을 줄이지 않고 `NAMED_ZOOM`보다 작으면 그 값으로 키운다. 경로 위 노드를 모두 품는 사각형을 `centerOn`으로
+ * clear에 맞춘 뒤, focus가 clear의 20px 안쪽을 벗어난 축은 focus가 그 안에 들어올 만큼만 옮긴다.
  */
-export function frameOn([from, to]: [Box, Box], { free }: Stage, zoom: number): Point & { zoom: number } {
+export function frameOn(path: Box[], focus: Box, clear: Rect, zoom: number): Point & { zoom: number } {
   const scale = Math.max(zoom, NAMED_ZOOM);
-  const both = boundsOf([from, to]);
-  const fits = both.width * scale + 2 * INSET <= free.width && both.height * scale + 2 * INSET <= free.height;
-  const at = fits
-    ? centerOn(both, free, scale)
-    : { x: free.x + INSET - from.x * scale, y: free.y + free.height / 2 - (from.y + from.height / 2) * scale };
-  return { ...at, zoom: scale };
+  const at = centerOn(boundsOf(path), clear, scale);
+  /** 화면 좌표 from에서 시작하는 길이 length의 구간이 room의 안쪽에 들어오도록 옮길 거리. 구간이 더 길면 시작 끝을 맞춘다. */
+  const shift = (from: number, length: number, start: number, room: number) => {
+    const low = start + INSET;
+    const high = start + room - INSET - length;
+    return from < low || high < low ? low - from : from > high ? high - from : 0;
+  };
+  return {
+    x: at.x + shift(focus.x * scale + at.x, focus.width * scale, clear.x, clear.width),
+    y: at.y + shift(focus.y * scale + at.y, focus.height * scale, clear.y, clear.height),
+    zoom: scale,
+  };
 }
 
 /** 상자를 모두 품는 가장 작은 사각형 */
@@ -80,10 +99,15 @@ export function boundsOf(boxes: Iterable<Box>): Box {
   return left > right ? { x: 0, y: 0, width: 0, height: 0 } : { x: left, y: top, width: right - left, height: bottom - top };
 }
 
-/** 관계 그래프 영역과 그 안에서 정보 패널이 가리지 않는 사각형 */
+/**
+ * 관계 그래프 영역과 그 안의 빈 사각형 두 개. free는 정보 패널이 가리지 않는 사각형이고 그래프 전체를 맞출 때 쓴다.
+ * clear는 정보 패널과 왼쪽 아래 칸(펼친 미니맵·범례·경로 탐색 창, 버튼 줄)이 모두 가리지 않는 사각형이고
+ * 노드나 그래프의 한 점으로 화면을 옮길 때 쓴다.
+ */
 export interface Stage {
   area: Rect;
   free: Rect;
+  clear: Rect;
 }
 
 /** "화면 맞춤"의 여백. 그래프를 free 안에 24px를 두고 맞추도록 area의 네 변에서 비울 폭을 낸다. */
@@ -97,18 +121,15 @@ export function fitPadding({ area, free }: Stage) {
   };
 }
 
-/** 화면에서 관계 그래프 영역 root와 정보 패널의 사각형을 읽는다. */
+/** 화면에서 관계 그래프 영역 root와 정보 패널, 왼쪽 아래 칸의 사각형을 읽는다. */
 export function stageOf(root: Element): Stage {
   const outer = root.getBoundingClientRect();
-  const panel = document.querySelector(".info-panel")?.getBoundingClientRect();
-  const area = { x: 0, y: 0, width: outer.width, height: outer.height };
-  return {
-    area,
-    free: freeRect(
-      area,
-      panel === undefined
-        ? null
-        : { x: panel.left - outer.left, y: panel.top - outer.top, width: panel.width, height: panel.height },
-    ),
+  const within = (element: Element): Rect => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left - outer.left, y: rect.top - outer.top, width: rect.width, height: rect.height };
   };
+  const area = { x: 0, y: 0, width: outer.width, height: outer.height };
+  const panel = [...document.querySelectorAll(".info-panel")].map(within);
+  const dock = [...root.querySelectorAll(".dock-panels > *, .dock-buttons")].map(within);
+  return { area, free: freeRect(area, panel), clear: freeRect(area, [...panel, ...dock]) };
 }

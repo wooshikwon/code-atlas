@@ -29,16 +29,16 @@ export function Minimap() {
   if (!open) {
     return null;
   }
-  /** 누른 그래프 좌표가 정보 패널이 가리지 않는 영역의 가운데에 오도록 옮긴다. */
+  /** 누른 그래프 좌표가 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역의 가운데에 오도록 옮긴다. */
   const onClick = (event: ReactMouseEvent, at: XYPosition) => {
     const root = (event.target as Element).closest(".graph");
     if (root === null) {
       return;
     }
-    const { free } = stageOf(root);
+    const { clear } = stageOf(root);
     const zoom = getViewport().zoom;
     void setViewport(
-      { x: free.x + free.width / 2 - at.x * zoom, y: free.y + free.height / 2 - at.y * zoom, zoom },
+      { x: clear.x + clear.width / 2 - at.x * zoom, y: clear.y + clear.height / 2 - at.y * zoom, zoom },
       { duration: reducedMotion() ? 0 : PAN_MS },
     );
   };

@@ -271,13 +271,17 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const aim = scene.lit ?? scene.focus;
     if (aim !== panned.current && root.current !== null) {
       panned.current = aim;
-      const stage = stageOf(root.current);
+      const { clear } = stageOf(root.current);
       const zoom = getViewport().zoom;
-      const boxes = typeof aim === "string" ? [to.boxes.get(aim)] : aim === null ? [] : [to.boxes.get(aim.path[0]), to.boxes.get(aim.path[aim.path.length - 1])];
-      const [first, last] = boxes;
-      if (first !== undefined) {
+      const path = typeof aim === "string" ? null : (aim?.path ?? null);
+      const id = typeof aim === "string" ? aim : path === null ? null : (pinFocus ?? path[path.length - 1]);
+      const box = id === null ? undefined : to.boxes.get(id);
+      if (box !== undefined) {
         const scale = Math.max(zoom, NAMED_ZOOM);
-        const view = last === undefined ? { ...centerOn(first, stage.free, scale), zoom: scale } : frameOn([first, last], stage, zoom);
+        const view =
+          path === null
+            ? { ...centerOn(box, clear, scale), zoom: scale }
+            : frameOn(path.map((each) => to.boxes.get(each)).filter((each) => each !== undefined), box, clear, zoom);
         void setViewport(view, { duration: still ? 0 : PAN_MS });
       }
     }

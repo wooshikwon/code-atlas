@@ -4,7 +4,7 @@ import { useReactFlow } from "@xyflow/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { reducedMotion } from "../graph/motion";
 import { PATH_LIMIT } from "../graph/route";
-import { centerOn, PAN_MS, stageOf } from "../graph/viewport";
+import { frameOn, PAN_MS, stageOf } from "../graph/viewport";
 import { nodeIndex } from "../graph/visible";
 import { build } from "../search/index";
 import { pinned, useAtlas } from "../state/store";
@@ -73,17 +73,20 @@ export function Finder() {
   const { route, pick, focus } = finder;
   const path = route?.paths[pick];
 
-  /** 단계의 노드를 정보 패널에 보이고 확대 비율을 그대로 둔 채 그 노드로 화면을 옮긴다. */
+  /** 단계의 노드를 정보 패널에 보이고 확대 비율을 그대로 둔 채 그 노드가 가리지 않는 영역에 들어오게 화면을 옮긴다. */
   const reveal = (event: ReactMouseEvent, id: string) => {
     show(id);
     const root = event.currentTarget.closest(".graph");
-    const at = getInternalNode(id);
-    if (root === null || at === undefined) {
+    const boxOf = (each: string) => {
+      const at = getInternalNode(each);
+      return at === undefined ? undefined : { ...at.internals.positionAbsolute, width: at.measured.width ?? 0, height: at.measured.height ?? 0 };
+    };
+    const focused = boxOf(id);
+    if (root === null || focused === undefined || path === undefined) {
       return;
     }
-    const box = { ...at.internals.positionAbsolute, width: at.measured.width ?? 0, height: at.measured.height ?? 0 };
-    const zoom = getViewport().zoom;
-    void setViewport({ ...centerOn(box, stageOf(root).free, zoom), zoom }, { duration: reducedMotion() ? 0 : PAN_MS });
+    const boxes = path.map(boxOf).filter((each) => each !== undefined);
+    void setViewport(frameOn(boxes, focused, stageOf(root).clear, getViewport().zoom), { duration: reducedMotion() ? 0 : PAN_MS });
   };
 
   return (
