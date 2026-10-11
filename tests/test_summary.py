@@ -213,15 +213,19 @@ def test_outline_lists_signatures_docstrings_and_methods():
         '    """값을 돌려준다.\n\n    둘째 문단.\n    """\n    return value\n\n'
         "class Engine(Base):\n    def start(self):\n        pass\n\n    async def stop(self, now: bool):\n        pass\n"
     )
-    assert summary.outline(source).splitlines() == [
-        "def helper(value, other=1) -> int:",
+    assert summary.outline(source, "pkg/engine.py").splitlines() == [
+        "pkg/engine.py::helper",
+        "    def helper(value, other=1) -> int:",
         '    """값을 돌려준다."""',
-        "class Engine(Base):",
-        "    def start(self):",
-        "    async def stop(self, now: bool):",
+        "pkg/engine.py::Engine",
+        "    class Engine(Base):",
+        "    pkg/engine.py::Engine.start",
+        "        def start(self):",
+        "    pkg/engine.py::Engine.stop",
+        "        async def stop(self, now: bool):",
     ]
-    assert summary.outline("LIMIT = 3\n") == "LIMIT = 3\n"
-    assert summary.outline("def broken(:\n    pass\n") == "def broken(:\n    pass\n"
+    assert summary.outline("LIMIT = 3\n", "a.py") == "LIMIT = 3\n"
+    assert summary.outline("def broken(:\n    pass\n", "a.py") == "def broken(:\n    pass\n"
 
 
 CORE = '''"""엔진을 만들고 돌린다.
@@ -340,11 +344,11 @@ def sections(prompt: str) -> dict[str, str]:
 
 def test_prompt_of_function_holds_code_callers_callees_and_data_fields():
     got = sections(summary.prompt_of(NODES, EDGES, TEXTS, "core:run_engine"))
-    assert got["대상"] == "종류: 함수\n이름: run_engine\n위치: src/core.py 29~32줄"
+    assert got["대상"] == "종류: 함수\n이름: core.py::run_engine\n위치: src/core.py 29~32줄"
     assert got["코드"] == "\n".join(CORE.splitlines()[28:32])
     assert got["대상이 든 파일의 문서 문자열"] == "엔진을 만들고 돌린다.\n\n둘째 문단."
     assert got["대상을 호출하는 쪽"].splitlines() == [
-        "- main (src/cli.py) · 호출",
+        "- cli.py::main · 호출",
         "    5:     config = load()",
         "    6>     engine = run_engine(config)",
         "    7:     return engine",
@@ -355,21 +359,21 @@ def test_prompt_of_function_holds_code_callers_callees_and_data_fields():
         "    1> run_engine(1)",
     ]
     assert got["대상이 호출하는 쪽"].splitlines() == [
-        "- Engine (src/core.py)",
+        "- core.py::Engine",
         "    class Engine:",
         '    """설정으로 도는 엔진."""',
-        "- Engine.start (src/core.py)",
+        "- core.py::Engine.start",
         "    def start(self, label):",
     ]
-    assert got["대상이 쓰는 데이터 클래스와 필드"] == "- Config (src/models.py): name: str, retries: int, RED"
+    assert got["대상이 쓰는 데이터 클래스와 필드"] == "- models.py::Config: name: str, retries: int, RED"
     assert got["내기 전에 확인"] == summary.PROMPT_TAIL.split("\n", 1)[1].strip("\n")
     assert not {"진입점", "분석기가 대상을 확인하지 못한 호출", "대상이 읽고 바꾸는 모듈 변수의 정의"} & set(got)
 
 
 def test_prompt_of_method_holds_owner_class_externals_and_unresolved_calls():
     got = sections(summary.prompt_of(NODES, EDGES, TEXTS, "core:Engine.stop"))
-    assert got["대상"].splitlines()[:2] == ["종류: 메서드", "이름: Engine.stop"]
-    assert got["대상이 든 클래스"] == 'class Engine:\n    """설정으로 도는 엔진."""'
+    assert got["대상"].splitlines()[:2] == ["종류: 메서드", "이름: core.py::Engine.stop"]
+    assert got["대상이 든 클래스"] == 'core.py::Engine\n    class Engine:\n    """설정으로 도는 엔진."""'
     assert got["대상을 호출하는 쪽"] == got["대상이 호출하는 쪽"] == "없음"
     assert got["대상이 호출하는 외부 패키지"] == "os"
     assert got["대상이 읽고 바꾸는 모듈 변수의 정의"] == "LIMIT = compute(\n    3)"
@@ -377,7 +381,7 @@ def test_prompt_of_method_holds_owner_class_externals_and_unresolved_calls():
 
     start = sections(summary.prompt_of(NODES, EDGES, TEXTS, "core:Engine.start"))
     assert start["대상이 호출하는 쪽"].splitlines() == [
-        "- helper (src/core.py)",
+        "- core.py::helper",
         "    def helper(value, other=1):",
         '    """값을 그대로 돌려준다."""',
     ]
@@ -386,11 +390,11 @@ def test_prompt_of_method_holds_owner_class_externals_and_unresolved_calls():
 def test_prompt_of_class_gathers_calls_of_its_methods():
     got = sections(summary.prompt_of(NODES, EDGES, TEXTS, "core:Engine"))
     assert [line for line in got["대상을 호출하는 쪽"].splitlines() if line.startswith("- ")] == [
-        "- run_engine (src/core.py) · 생성",
-        "- run_engine (src/core.py) → start · 호출",
+        "- core.py::run_engine · 생성",
+        "- core.py::run_engine → core.py::Engine.start · 호출",
     ]
     assert got["대상이 읽고 바꾸는 모듈 변수의 정의"] == "LIMIT = compute(\n    3)"
-    assert got["대상이 호출하는 쪽"].splitlines()[0] == "- helper (src/core.py)"
+    assert got["대상이 호출하는 쪽"].splitlines()[0] == "- core.py::helper"
     assert "Engine.start" not in got["대상이 호출하는 쪽"]
     assert got["대상이 호출하는 외부 패키지"] == "os"
 
@@ -398,13 +402,13 @@ def test_prompt_of_class_gathers_calls_of_its_methods():
 def test_prompt_of_file_holds_outline_and_files_on_both_sides():
     got = sections(summary.prompt_of(NODES, EDGES, TEXTS, "core"))
     assert got["대상"] == "종류: 파일\n이름: src/core.py\n위치: src/core.py"
-    assert got["최상위 정의의 시그니처 목록"] == summary.outline(CORE)
+    assert got["최상위 정의의 시그니처 목록"] == summary.outline(CORE, "core.py")
     assert got["파일의 문서 문자열"].startswith("엔진을 만들고 돌린다.")
     assert got["이 파일을 쓰는 파일과 가져다 쓰는 이름"].splitlines() == [
-        "- src/cli.py: run_engine",
-        "- tests/test_core.py: run_engine",
+        "- src/cli.py: core.py::run_engine",
+        "- tests/test_core.py: core.py::run_engine",
     ]
-    assert got["이 파일이 쓰는 파일과 가져다 쓰는 이름"] == "- src/models.py: Config"
+    assert got["이 파일이 쓰는 파일과 가져다 쓰는 이름"] == "- src/models.py: models.py::Config"
     assert got["이 파일이 쓰는 외부 패키지"] == "os"
     entry = sections(summary.prompt_of(NODES, EDGES, TEXTS, "cli"))
     assert entry["진입점"].startswith("분석기가 대상을 진입점으로 판정했다")

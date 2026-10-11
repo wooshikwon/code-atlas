@@ -28,7 +28,7 @@ from .model import Edge, Node
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = 2
+PROMPT_VERSION = 3
 MODEL = "sonnet"
 GENERATE_TIMEOUT = 120.0
 STATUS_TIMEOUT = 10.0
@@ -49,11 +49,13 @@ KIND_NAMES = {
     "method": "메서드",
 }
 MARKS = ("하는 일", "앞뒤 흐름")
+# 설명에서 레포 안의 정의를 `파일 경로::정의 이름`으로 적을 때 둘 사이에 넣는 글자
+REF_MARK = "::"
 
 PROMPT_INTRO = """\
 파이썬 코드베이스를 처음 보는 개발자에게 코드 한 덩어리를 설명하는 글을 쓴다. 독자는 파이썬 문법은 알지만 이 코드베이스의 함수 이름, 자료 구조, 업무 용어는 모른다.
 
-사용자 메시지에는 설명할 대상의 종류·이름·위치, 대상의 코드, 정적 분석기가 모은 앞뒤 흐름 자료가 구획별로 들어 있다. 대상이 함수·메서드·클래스면 앞뒤 흐름 자료는 대상을 호출하는 코드 줄, 대상이 호출하는 함수의 시그니처와 문서 문자열, 대상이 쓰는 데이터 클래스의 필드, 대상이 읽고 바꾸는 모듈 변수의 정의, 대상이 든 파일의 문서 문자열이다. 대상이 파일이면 코드 대신 최상위 정의의 시그니처 목록이 있고, 앞뒤 흐름 자료는 이 파일을 쓰는 파일과 이 파일이 쓰는 파일이다.
+사용자 메시지에는 설명할 대상의 종류·이름·위치, 대상의 코드, 정적 분석기가 모은 앞뒤 흐름 자료가 구획별로 들어 있다. 자료는 레포 안의 함수·메서드·클래스를 `파일 경로::정의 이름` 표기로 적는다. 대상이 함수·메서드·클래스면 앞뒤 흐름 자료는 대상을 호출하는 코드 줄, 대상이 호출하는 함수의 시그니처와 문서 문자열, 대상이 쓰는 데이터 클래스의 필드, 대상이 읽고 바꾸는 모듈 변수의 정의, 대상이 든 파일의 문서 문자열이다. 대상이 파일이면 코드 대신 최상위 정의의 시그니처 목록이 있고, 앞뒤 흐름 자료는 이 파일을 쓰는 파일과 이 파일이 쓰는 파일이다.
 """
 
 STYLE_GUIDE_HEAD = """# 서술 규약
@@ -89,11 +91,13 @@ PROMPT_RULES = """# 출력 형식
 - 앞뒤 흐름: 문단 둘로 쓰고, 문단 하나는 세 문장까지 쓴다. 앞 문단에는 누가 어떤 상황에서 대상을 부르는지, 어떤 값을 넘기고 돌려받은 값을 어디에 쓰는지를 호출하는 코드 줄을 읽어 적는다. 뒤 문단에는 대상이 무엇을 불러 어떤 값을 넘겨받는지를 적는다. 대상이 파일이면 앞 문단에 어느 파일이 이 파일의 무엇을 가져다 쓰는지를, 뒤 문단에 이 파일이 어느 파일의 무엇을 가져다 쓰는지를 적는다.
 - 문단은 줄을 바꿔 나누고 문단 안에서는 줄을 바꾸지 않는다. 표지 줄에는 `하는 일`, `앞뒤 흐름` 글자만 쓴다. 제목 기호, 굵은 글씨, 목록 기호, 번호, 코드 울타리, 표를 쓰지 않는다.
 - 코드에 있는 식별자(함수·클래스·변수·필드 이름, 파일 이름)와 코드에 적힌 짧은 문자열 값은 백틱으로 감싼다. 인자를 붙인 호출식, 괄호를 붙인 함수 이름, 여러 식별자를 이은 코드 조각은 백틱에 넣지 않는다.
+- 레포 안의 함수·메서드·클래스·데이터 클래스를 가리킬 때는 늘 `파일 경로::정의 이름` 표기를 백틱으로 감싸 적는다. 표기는 사용자 메시지의 `[대상]`과 앞뒤 흐름 자료에 적힌 글자를 그대로 옮긴다. 함수는 `arbiter.py::arbiter_sync`, 메서드는 `note_common.py::ExtractedTodo.to_note_line`, 클래스는 `parser/plan.py::Plan`처럼 적고 괄호를 붙이지 않는다. 같은 정의를 다시 가리킬 때, 파일 경로를 앞에 적은 문장에서 그 파일의 정의를 가리킬 때, 대상 자신을 이름으로 부를 때도 표기 전체를 적고 이름만 따로 적지 않는다. "`parser/plan.py`에서 `Plan`을 받는다"가 아니라 "`parser/plan.py::Plan`을 받는다"로 쓴다. 여러 클래스에 있는 같은 이름의 메서드를 함께 말할 때도 메서드마다 표기를 적는다.
+- 자료에 이 표기로 적히지 않은 정의에는 `::`를 붙이지 않는다. 매개변수, 지역 변수, 필드, 모듈 변수, 외부 라이브러리의 함수(`re.sub`, `Path.glob`)는 이름만 백틱으로 감싼다. 파일은 경로만 적는다.
 
 # 설명하는 법
 
 - 식별자를 나열하지 않는다. 식별자를 처음 적을 때 그 값이 무엇이고 왜 필요한지를 함께 풀어 쓴다. 호출하는 함수가 많으면 하는 일이 같은 함수를 묶어 그 일을 적고, 대표가 되는 이름만 든다.
-- 대상을 문장의 주어로 쓰지 않는다. 대상의 이름, "이 함수는", "이 메서드는", "이 클래스는", "이 파일은"으로 문장을 시작하지 않고 주어를 생략한다. "이 함수는 `today`로 날짜를 구한다"가 아니라 "`today`로 오늘 날짜를 구한다"로, "`f`는 다른 함수를 호출하지 않는다"가 아니라 "다른 함수를 호출하지 않는다"로 쓴다. 주어가 필요한 문장에는 그 문장에서 실제로 동작하거나 바뀌는 값의 이름을 쓴다.
+- 대상을 문장의 주어로 쓰지 않는다. 대상의 이름, "이 함수는", "이 메서드는", "이 클래스는", "이 파일은"으로 문장을 시작하지 않고 주어를 생략한다. "이 함수는 `date_engine.py::today`로 날짜를 구한다"가 아니라 "`date_engine.py::today`로 오늘 날짜를 구한다"로, "`util.py::f`는 다른 함수를 호출하지 않는다"가 아니라 "다른 함수를 호출하지 않는다"로 쓴다. 주어가 필요한 문장에는 그 문장에서 실제로 동작하거나 바뀌는 값의 이름을 쓴다.
 - 코드와 자료에 있는 사실만 쓴다. 코드에 없는 동작과 목적, 자료에 없는 호출 관계를 추측해 적지 않는다. 시그니처와 문서 문자열만 주어진 함수는 그 둘이 말하는 범위까지만 적는다.
 - 설명에는 코드가 하는 일만 적는다. "자료에 없다", "제공된 자료", "코드만으로는 확인하지 못한다"처럼 받은 자료를 말하는 문장을 쓰지 않고, 확인하지 못한 내용은 적지 않는다.
 - 호출하는 쪽 자료가 "없음"이면 정적 분석에서 호출하는 곳을 찾지 못했다고 적는다. 자료에 진입점이라고 적혀 있으면 명령이나 요청으로 바깥에서 실행하는 코드라고 적는다. 테스트 코드만 대상을 호출하면 그렇게 적는다. 대상이 호출하는 쪽 자료가 "없음"이면 뒤 문단에 다른 함수를 호출하지 않는다고 적는다.
@@ -107,6 +111,7 @@ PROMPT_TAIL = """[내기 전에 확인]
 - 하는 일이 문단 셋, 문단마다 네 문장을 넘으면 단계로 묶어 줄인다.
 - 앞뒤 흐름이 대상을 부르는 쪽 문단과 대상이 부르는 쪽 문단 둘인가.
 - 백틱 안에 호출식이나 코드 조각이 있으면 식별자만 남긴다.
+- 레포 안의 함수·메서드·클래스를 가리킨 곳이 모두 자료에 적힌 `파일 경로::정의 이름` 표기인가. 백틱 안의 이름이 자료에 표기로 적힌 정의의 이름이면 두 번째로 적은 곳도 표기 전체로 바꾸고, 자료에 없는 표기와 변수·필드·외부 함수에 붙인 `::`는 지운다.
 - "~에 대해", "~를 통해", "~에 의해", 행위자가 있는 피동, "첫째·둘째", 줄표가 있으면 고친다.
 """
 
@@ -181,8 +186,8 @@ def _lead(doc: str | None) -> str | None:
     return first[:MAX_DOC] + ("…" if len(first) > MAX_DOC else "")
 
 
-def outline(source: str) -> str:
-    """파일의 최상위 정의의 시그니처 목록. 정의마다 문서 문자열 첫 문단을, 클래스는 메서드 시그니처를 아래에 적는다.
+def outline(source: str, file: str) -> str:
+    """파일의 최상위 정의의 시그니처 목록. 정의마다 `file::이름` 표기와 시그니처, 문서 문자열 첫 문단을, 클래스는 메서드의 표기와 시그니처를 아래에 적는다.
 
     구문 오류가 있거나 정의가 없는 파일은 본문을 그대로 낸다.
     """
@@ -195,12 +200,16 @@ def outline(source: str) -> str:
     for node in tree.body:
         if not isinstance(node, defs):
             continue
-        lines.append(_signature(node))
+        lines.append(f"{file}{REF_MARK}{node.name}\n    {_signature(node)}")
         doc = _lead(ast.get_docstring(node))
         if doc:
             lines.append(f'    """{doc}"""')
         if isinstance(node, ast.ClassDef):
-            lines += [f"    {_signature(m)}" for m in node.body if isinstance(m, defs[:2])]
+            lines += [
+                f"    {file}{REF_MARK}{node.name}.{m.name}\n        {_signature(m)}"
+                for m in node.body
+                if isinstance(m, defs[:2])
+            ]
     return "\n".join(lines) if lines else source
 
 
@@ -217,11 +226,16 @@ def _head_of(lines: list[str], span: tuple[int, int]) -> tuple[str, str | None]:
     return first or (body[0].strip() if body else ""), None
 
 
-def _title(node: Node) -> str:
-    """자료에 적는 노드 이름. 파일은 경로, 그 밖의 정의는 `이름 (경로)`다."""
+def file_labels(nodes: Mapping[str, Node]) -> dict[str, str]:
+    """레포 루트 기준 경로 → 그래프의 파일 상자 이름표(소스 루트 기준 경로)."""
+    return {n.path: n.id.replace(".", "/") + ".py" for n in nodes.values() if n.kind == "module" and n.path}
+
+
+def _title(node: Node, files: Mapping[str, str]) -> str:
+    """자료와 설명에 적는 노드 이름. 파일은 레포 루트 기준 경로, 그 밖의 정의는 `파일 상자 이름표::정의 이름`이다."""
     if node.kind == "module" or ":" not in node.id:
         return node.path or node.id
-    return f"{node.id.partition(':')[2]} ({node.path})"
+    return f"{files.get(node.path, node.path)}{REF_MARK}{node.id.partition(':')[2]}"
 
 
 def _fields(node: Node) -> str:
@@ -293,6 +307,7 @@ def _variables(text: str, names: set[str]) -> list[str]:
 
 
 def _file_flow(nodes: Mapping[str, Node], edges: Iterable[Edge], node: Node) -> Flow:
+    files = file_labels(nodes)
     flow = Flow(entry=node.entry)
     users: dict[str, list[str]] = {}
     used: dict[str, list[str]] = {}
@@ -301,7 +316,7 @@ def _file_flow(nodes: Mapping[str, Node], edges: Iterable[Edge], node: Node) -> 
         source, target = nodes.get(edge.source), nodes.get(edge.target)
         if source is None or target is None or source.path == target.path:
             continue
-        name = None if target.kind in ("module", "package") else target.id.partition(":")[2]
+        name = None if target.kind in ("module", "package", "external") else _title(target, files)
         if source.path == node.path:
             if target.kind == "external":
                 if target.name not in flow.externals:
@@ -323,12 +338,18 @@ def _file_flow(nodes: Mapping[str, Node], edges: Iterable[Edge], node: Node) -> 
 
 def _def_flow(nodes: Mapping[str, Node], edges: Iterable[Edge], texts: Mapping[str, str], node: Node) -> Flow:
     lines = {path: text.splitlines() for path, text in texts.items()}
+    files = file_labels(nodes)
     flow = Flow(entry=node.entry, unresolved=node.unresolved)
     owner = nodes.get(node.parent) if node.kind == "method" and node.parent else None
     if owner is not None and owner.range is not None and owner.path in lines:
         signature, doc = _head_of(lines[owner.path], owner.range)
         flow.owner = "\n".join(
-            [signature, *([f'    """{doc}"""'] if doc else []), *([f"    필드: {_fields(owner)}"] if owner.fields else [])]
+            [
+                _title(owner, files),
+                f"    {signature}",
+                *([f'    """{doc}"""'] if doc else []),
+                *([f"    필드: {_fields(owner)}"] if owner.fields else []),
+            ]
         )
     inside = node.id + "." if node.kind in ("class", "dataclass") else None
 
@@ -351,9 +372,9 @@ def _def_flow(nodes: Mapping[str, Node], edges: Iterable[Edge], texts: Mapping[s
         if source is None or target is None:
             continue
         if within(edge.target) and not within(edge.source) and edge.kind in CALLER_KINDS:
-            title = f"{source.path}의 최상위 코드" if source.kind == "module" else _title(source)
+            title = f"{source.path}의 최상위 코드" if source.kind == "module" else _title(source, files)
             if edge.target != node.id:
-                title += f" → {target.name}"
+                title += f" → {_title(target, files)}"
             for site in edge.sites:
                 caller = callers.setdefault(
                     (edge.source, edge.target, edge.kind), Caller(title, edge.kind, site.path, [], source.test)
@@ -364,13 +385,13 @@ def _def_flow(nodes: Mapping[str, Node], edges: Iterable[Edge], texts: Mapping[s
             continue
         if target.kind == "dataclass" and target.fields:
             seen.add(edge.target)
-            flow.data.append(f"{_title(target)}: {_fields(target)}")
+            flow.data.append(f"{_title(target, files)}: {_fields(target)}")
         elif edge.kind in ("call", "construct"):
             seen.add(edge.target)
             if target.kind == "external":
                 flow.externals.append(target.name)
             elif target.range is not None and target.path in lines:
-                flow.callees.append(Callee(_title(target), *_head_of(lines[target.path], target.range)))
+                flow.callees.append(Callee(_title(target, files), *_head_of(lines[target.path], target.range)))
     flow.callers = sorted(callers.values(), key=lambda caller: caller.test)
     return flow
 
@@ -475,10 +496,11 @@ def prompt_of(nodes: Mapping[str, Node], edges: Iterable[Edge], texts: Mapping[s
         return None
     edges = list(edges)
     if node.kind == "module":
-        name, where, label, code = node.path, node.path, "최상위 정의의 시그니처 목록", outline(text)
+        name, where, label = node.path, node.path, "최상위 정의의 시그니처 목록"
+        code = outline(text, file_labels(nodes).get(node.path, node.path))
     else:
         start, end = node.range
-        name, where, label = node.id.partition(":")[2], f"{node.path} {start}~{end}줄", "코드"
+        name, where, label = _title(node, file_labels(nodes)), f"{node.path} {start}~{end}줄", "코드"
         code = "\n".join(text.splitlines()[start - 1 : end])
     flow = flow_of(nodes, edges, texts, node)
     head = f"[대상]\n종류: {KIND_NAMES[node.kind]}\n이름: {name}\n위치: {where}\n\n[{label}]\n"

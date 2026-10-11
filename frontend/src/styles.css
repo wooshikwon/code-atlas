@@ -1425,6 +1425,24 @@ ul {
   background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 
+/* 정의 표기 가운데 그래프의 노드와 대응하는 것은 누를 수 있게 밑줄을 긋는다. */
+.summary-ref {
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  user-select: text;
+}
+
+.summary-ref code {
+  text-decoration: underline dotted var(--muted);
+  text-underline-offset: 2px;
+}
+
+.summary-ref:hover code {
+  background: var(--active-bg);
+  text-decoration-color: var(--ink);
+}
+
 .summary-action {
   margin-left: 6px;
   padding: 0 6px;

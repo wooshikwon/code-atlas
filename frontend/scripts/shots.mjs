@@ -1130,6 +1130,57 @@ async function summaryAsk(t, page) {
   t.check('새로고침 뒤에도 "자동 요약" 토글이 켜져 있다', await page.getByLabel("자동 요약").isChecked());
 }
 
+/** 캐시에서 읽은 설명을 가짜 설명으로 바꿔, 정의 표기가 누를 수 있는 등폭 글자로 그려지고 누르면 그 노드를 고르는지 본다. 요약을 만들지 않는다. */
+async function summaryRef(t, page) {
+  const graph = await api("/api/graph");
+  const callee = graph.edges.find((e) => e.source === FUNCTION && e.kind === "call" && graph.nodes.some((n) => n.id === e.target && n.kind === "function" && !n.test));
+  const caller = graph.edges.find((e) => e.target === FUNCTION && e.kind === "call");
+  if (callee === undefined || caller === undefined) {
+    t.check(`${FUNCTION}을 호출하는 함수와 그 함수가 호출하는 함수가 있다`, false);
+    return;
+  }
+  /** 노드 id를 `파일 상자 이름표::정의 이름`으로 적는다. */
+  const refOf = (id) => {
+    const [file, name] = id.split(":");
+    return `${file.replaceAll(".", "/")}.py::${name}`;
+  };
+  const [first, second, missing] = [refOf(callee.target), refOf(caller.source), `${refOf(FUNCTION).split("::")[0]}::no_such_function`];
+  const fake = `리마인더에서 오늘 노트의 구획을 다시 만든다.\n\n하는 일\n\`${first}\`로 오늘 항목을 모으고 \`note.todos\`를 바꾼다. \`${missing}\`는 그래프에 없다.\n\n앞뒤 흐름\n${second}가 노트가 있을 때 부른다.\n\`re.sub\`만 쓴다.`;
+  await page.route(
+    (at) => at.pathname === "/api/summary" && at.searchParams.get("node") === FUNCTION,
+    (route) => (route.request().method() === "GET" ? route.fulfill({ json: { summary: fake, available: true, reason: null } }) : route.fallback()),
+  );
+  await load(page);
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 10_000 });
+  const drawn = await page.evaluate(() => ({
+    refs: [...document.querySelectorAll(".summary-text .summary-ref")].map((button) => ({
+      text: button.textContent,
+      node: button.dataset.node,
+      font: getComputedStyle(button.querySelector("code")).fontFamily,
+      tag: button.tagName,
+    })),
+    codes: [...document.querySelectorAll(".summary-text code")].filter((code) => code.closest(".summary-ref") === null).map((code) => code.textContent),
+    body: getComputedStyle(document.querySelector(".summary-text")).fontFamily,
+  }));
+  t.check(
+    "백틱으로 감싼 정의 표기와 감싸지 않은 정의 표기가 그래프 노드를 가리키는 등폭 글꼴 버튼으로 그려진다",
+    same(drawn.refs.map((ref) => [ref.text, ref.node, ref.tag]), [[first, callee.target, "BUTTON"], [second, caller.source, "BUTTON"]]) &&
+      drawn.refs.every((ref) => ref.font !== drawn.body && /mono/i.test(ref.font)),
+    drawn.refs.map((ref) => `${ref.text} → ${ref.node}`).join(", "),
+  );
+  t.check(
+    "그래프에 없는 정의 표기와 그 밖의 백틱 식별자는 누를 수 없는 등폭 글자다",
+    same(drawn.codes, ["note.todos", missing, "re.sub"]),
+    drawn.codes.join(", "),
+  );
+  await t.shot();
+  await page.click(`.summary-text .summary-ref[data-node="${callee.target}"]`);
+  await waitSelected(page, callee.target).catch(() => {});
+  t.check("정의 표기를 누르면 그래프가 그 노드를 고른다", (await selectedOf(page)) === callee.target, `선택 ${await selectedOf(page)}`);
+}
+
 async function summary(t, page) {
   const { found, available, reason } = await uncached(1);
   if (found.length === 0 || !available) {
@@ -1459,6 +1510,7 @@ const SCENARIOS = [
   ["changes", changes],
   ["zoom-keep", zoomKeep],
   ["summary-ask", summaryAsk],
+  ["summary-ref", summaryRef],
   ["summary", summary],
 ];
 
