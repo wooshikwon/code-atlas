@@ -1052,7 +1052,6 @@ async function region(t, page) {
     return null;
   }, area);
   const before = columnsOf(await boxes(page), inside);
-  await pick(page, FILE);
   const view = await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
   const spot = await page.evaluate((sel) => {
     const around = document.querySelector(sel).getBoundingClientRect();
@@ -1066,14 +1065,14 @@ async function region(t, page) {
     return null;
   }, area);
   if (spot === null) {
-    t.skip("영역의 빈 곳을 누르면 폴더는 펼친 채로 선택만 풀린다", "화면에 보이는 영역에 빈 곳이 없다");
+    t.skip("영역의 빈 곳을 누르면 폴더가 접히지 않는다", "화면에 보이는 영역에 빈 곳이 없다");
   } else {
     await page.mouse.click(spot.x, spot.y);
-    await page.waitForFunction(() => document.querySelector(".react-flow__node .node-selected") === null, null, { timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(600);
     await settle(page);
     t.check(
-      "영역의 빈 곳을 누르면 폴더는 펼친 채로 선택만 풀린다",
-      blank !== null && (await selectedOf(page)) === null && (await count(page, area)) === 1,
+      "영역의 빈 곳을 누르면 폴더가 접히지 않는다",
+      blank !== null && (await selectedOf(page)) === null && (await count(page, area)) === 1 && same(columnsOf(await boxes(page), inside), before),
       `선택 ${await selectedOf(page)}, 영역 ${await count(page, area)}개`,
     );
     const from = await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);

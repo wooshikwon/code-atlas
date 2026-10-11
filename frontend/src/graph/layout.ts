@@ -72,6 +72,15 @@ const SHELF_GAP = 64;
 const GRID_GAP = 24;
 const SHELF_COLUMNS = 4;
 
+/**
+ * 배치가 경로를 내지 않는 선(`sideRoute`)이 상자 옆에서 세로로 꺾는 줄의 거리. 배치가 내는 선의 세로 줄기는 상자에서
+ * `LANE_CLEAR` 넘게 떨어뜨려 이 줄과 겹치지 않게 한다.
+ */
+const ROUTE_GAP = 10;
+const LANE_CLEAR = 2 * ROUTE_GAP;
+/** 같은 열의 두 상자를 잇는 선이 상자의 옆면에서 드나드는 높이. 마주 보는 쪽 모서리에서 이만큼 안쪽이다. */
+const CORNER_INSET = 6;
+
 /** 열은 partition으로, 열 안 순서는 children 배열 순서로 고정한다. 교차 최소화는 children 순서를 바꾸므로 끈다. */
 const ELK_OPTIONS = {
   "elk.algorithm": "layered",
@@ -85,6 +94,7 @@ const ELK_OPTIONS = {
   "elk.separateConnectedComponents": "false",
   "elk.spacing.nodeNode": "24",
   "elk.layered.spacing.nodeNodeBetweenLayers": "48",
+  "elk.layered.spacing.edgeNodeBetweenLayers": String(LANE_CLEAR),
 };
 
 const ROOT_OPTIONS = { ...ELK_OPTIONS, "elk.padding": "[top=0,left=0,bottom=0,right=0]" };
@@ -405,8 +415,6 @@ export async function arrange(input: ElkInput, run: RunElk): Promise<Layout> {
   return result;
 }
 
-const ROUTE_GAP = 12;
-
 /** 함수 안 import 선의 경로. 출발 노드 아래로 내려가 두 노드 아래를 지나 도착 노드 아래로 들어간다. */
 export function belowRoute(source: Box, target: Box): Point[] {
   const sx = source.x + source.width / 2;
@@ -422,26 +430,32 @@ export function belowRoute(source: Box, target: Box): Point[] {
 
 /**
  * 배치가 경로를 내지 않은 선의 경로. 진입점 단위 사이 선이 이 경로를 쓴다. 화면에 보이는 양 끝 상자의 위치로 정한다.
- * 도착 상자가 오른쪽에 있으면 출발 상자의 오른쪽 변에서 나와 도착 상자 바로 앞에서 세로로 꺾어 왼쪽 변으로 들어간다.
- * 도착 상자가 왼쪽에 있으면 좌우를 뒤집은 경로다. 두 상자가 가로로 겹치면 같은 열이므로 두 상자의 오른쪽으로 나가
- * 도착 상자의 오른쪽 변으로 들어간다.
+ * 도착 상자가 오른쪽에 있으면 출발 상자의 오른쪽 변 가운데에서 나와 도착 상자 `ROUTE_GAP` 앞에서 세로로 꺾어 왼쪽 변 가운데로
+ * 들어간다. 도착 상자가 왼쪽에 있으면 좌우를 뒤집은 경로다. 두 상자가 가로로 겹치면 같은 열이므로 두 상자의 오른쪽
+ * `ROUTE_GAP` 밖으로 돌아 도착 상자의 오른쪽 변으로 들어가고, 배치가 낸 선이 드나드는 옆면 가운데를 피해 서로 마주 보는 쪽
+ * 모서리에서 `CORNER_INSET` 안쪽 높이로 드나든다.
  */
 export function sideRoute(source: Box, target: Box): Point[] {
-  const sy = source.y + source.height / 2;
-  const ty = target.y + target.height / 2;
+  const middle = (box: Box) => box.y + box.height / 2;
   const [sr, tr] = [source.x + source.width, target.x + target.width];
-  const [sx, x, tx] =
-    sr + ROUTE_GAP <= target.x
-      ? [sr, target.x - ROUTE_GAP, target.x]
-      : tr + ROUTE_GAP <= source.x
-        ? [source.x, tr + ROUTE_GAP, tr]
-        : [sr, Math.max(sr, tr) + ROUTE_GAP, tr];
-  return [
+  const route = (sx: number, sy: number, x: number, tx: number, ty: number): Point[] => [
     { x: sx, y: sy },
     { x, y: sy },
     { x, y: ty },
     { x: tx, y: ty },
   ];
+  if (sr + ROUTE_GAP <= target.x) {
+    return route(sr, middle(source), target.x - ROUTE_GAP, target.x, middle(target));
+  }
+  if (tr + ROUTE_GAP <= source.x) {
+    return route(source.x, middle(source), tr + ROUTE_GAP, tr, middle(target));
+  }
+  /** 상대 상자 쪽 모서리에서 안쪽으로 들어온 높이 */
+  const facing = (box: Box, other: Box) => {
+    const inset = Math.min(CORNER_INSET, box.height / 2);
+    return middle(other) < middle(box) ? box.y + inset : box.y + box.height - inset;
+  };
+  return route(sr, facing(source, target), Math.max(sr, tr) + ROUTE_GAP, tr, facing(target, source));
 }
 
 let canvas: CanvasRenderingContext2D | null = null;
