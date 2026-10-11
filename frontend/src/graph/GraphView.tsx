@@ -30,7 +30,7 @@ import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { GROUP_NAMES, KIND_NAMES, STEP_NAMES } from "./names";
 import { LAYER } from "./layers";
-import { flowNodes, parts, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
+import { flowNodes, parts, pointing, pressable, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
 import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
@@ -177,6 +177,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const [hover, setHover] = useState<string | null>(null);
   /** 마우스를 올린 선 */
   const [pointed, setPointed] = useState<EdgeKey | null>(null);
+  /** 마우스를 올린 노드 가운데 그 위치에서 눌리는 노드 id. 경로 고정 중에는 경로 위 노드만이다. */
+  const [aimedNode, setAimedNode] = useState<string | null>(null);
 
   /** 이 컴포넌트를 그리기 시작할 때의 화면 */
   const [start] = useState(() => home.current ?? undefined);
@@ -337,6 +339,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     [scene, index, lines],
   );
   const edges = useMemo(() => flowEdges(views, pointed, lines.keys), [views, pointed, lines]);
+  const drawnNodes = useMemo(() => pointing(nodes, aimedNode), [nodes, aimedNode]);
 
   /**
    * 연달아 누른 두 번째 클릭이면 처음 누른 노드를 열고 참을 돌려준다. 함수·메서드 노드는 함수 시점 뷰로 들어간다.
@@ -406,8 +409,12 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
   };
 
-  /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. */
+  /**
+   * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 그 위치에서 눌리는 노드면 선의 hover처럼
+   * 가장 진한 단계로 그린다. 경로 고정 중에는 경로 위 노드만 그렇게 그린다.
+   */
   const onNodeOver: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
+    setAimedNode((lit === null || node.data.route !== null) && pressable(node.data, event.target) ? node.data.node.id : null);
     const text = tipOf(event.target) ?? nodeTip(titleOf(node.data.node), KIND_NAMES[node.data.node.kind], node.data.unused);
     tip.current?.show(text, event.clientX, event.clientY);
   };
@@ -433,6 +440,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const onMove = (event: ReactMouseEvent) => tip.current?.move(event.clientX, event.clientY);
   const onNodeLeave = () => {
     setHover(null);
+    setAimedNode(null);
     tip.current?.hide();
   };
   const onEdgeLeave = () => {
@@ -459,7 +467,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     >
       <Markers />
       <ReactFlow
-        nodes={nodes}
+        nodes={drawnNodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}

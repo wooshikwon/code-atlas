@@ -4766,6 +4766,134 @@ async function arranging(t, page) {
   await settle(page);
 }
 
+/**
+ * 노드의 hover. 마우스를 올린 노드는 선의 hover처럼 가장 진한 단계(불투명도 1)로 그리고 이름표를 굵게, 모양에 옅은 빛을 준다.
+ * 이름표와 상자의 위치·폭은 그대로이고, 옆 노드와 부모·자식 상자의 단계는 바뀌지 않는다.
+ */
+async function nodeHover(t, page) {
+  /** 화면에서 이름표의 가운데가 그 노드로 눌리는 노드마다 종류, 불투명도, 이름표 가운데 점 */
+  const candidates = () =>
+    page.evaluate(() => {
+      const area = document.querySelector(".graph").getBoundingClientRect();
+      const covers = [...document.querySelectorAll(".info-panel, .dock-panels > *, .dock-buttons")].map((element) => element.getBoundingClientRect());
+      const kinds = ["node-region", "node-module-open", "node-module", "node-package", "node-class", "node-dataclass", "node-function"];
+      const list = [];
+      for (const face of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
+        const root = face.firstElementChild;
+        const label = face.querySelector(".node-label");
+        const kind = kinds.find((name) => root?.classList.contains(name));
+        if (kind === undefined || label === null || getComputedStyle(label).visibility !== "visible") {
+          continue;
+        }
+        const rect = label.getBoundingClientRect();
+        const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
+        const inside = x > area.left && x < area.right && y > area.top && y < area.bottom && covers.every((c) => x < c.left || x > c.right || y < c.top || y > c.bottom);
+        if (inside && face.contains(document.elementFromPoint(x, y))) {
+          list.push({ id: face.dataset.id.replace(/#face$/, ""), kind: kind.replace("node-", ""), opacity: Number(face.style.opacity), route: root.dataset.route ?? null, x, y });
+        }
+      }
+      return list;
+    });
+  /** 노드의 두 요소가 받은 불투명도와 클래스, 이름표의 외곽선·위치·폭, 모양의 빛, 상자의 사각형 */
+  const look = (id) =>
+    page.evaluate((id) => {
+      const body = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+      const face = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}#face"]`);
+      const label = face.querySelector(".node-label");
+      const round = (rect) => [rect.left, rect.top, rect.width, rect.height].map((n) => Math.round(n * 100) / 100).join(",");
+      return {
+        opacity: [Number(getComputedStyle(body).opacity), Number(getComputedStyle(face).opacity)],
+        pointed: [body.classList.contains("pointed"), face.classList.contains("pointed")],
+        stroke: parseFloat(getComputedStyle(label).webkitTextStrokeWidth),
+        glow: getComputedStyle(body.firstElementChild).filter !== "none",
+        shadow: getComputedStyle(label).textShadow !== "none",
+        layers: `${body.style.zIndex},${face.style.zIndex}`,
+        place: [round(label.getBoundingClientRect()), round(body.getBoundingClientRect()), round((face.querySelector(".loc") ?? label).getBoundingClientRect())].join(" / "),
+      };
+    }, id);
+  const over = async (at) => {
+    await page.mouse.move(at.x, at.y);
+    await page.waitForTimeout(500);
+  };
+  const away = async () => {
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(500);
+  };
+
+  await load(page);
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await away();
+  await settle(page);
+  const list = await candidates();
+  const leaf = (item) => item.kind !== "region" && item.kind !== "module-open";
+  const levels = [
+    ["활성 노드", list.find((item) => leaf(item) && item.opacity === 1 && item.id !== FUNCTION)],
+    ["불투명도 50%인 흐름 노드", list.find((item) => leaf(item) && item.opacity === 0.5)],
+    ["흐린 노드", list.find((item) => leaf(item) && item.opacity === DIM)],
+  ];
+  for (const [name, at] of levels) {
+    if (at === undefined) {
+      t.skip(`${name}에 마우스를 올리면 가장 진한 단계로 그린다`, "이 화면에 그 단계의 노드가 없다");
+      continue;
+    }
+    const other = list.find((item) => item.id !== at.id && item.opacity === at.opacity && leaf(item)) ?? list.find((item) => item.id !== at.id);
+    const [before, aside] = [await look(at.id), await look(other.id)];
+    await over(at);
+    const [on, beside] = [await look(at.id), await look(other.id)];
+    if (name === "흐린 노드") {
+      await t.shot();
+    }
+    await away();
+    const after = await look(at.id);
+    t.check(
+      `${name}에 마우스를 올리면 불투명도 1, 굵은 이름표, 옅은 빛으로 그리고 떠나면 돌아온다`,
+      same(before.opacity, [at.opacity, at.opacity]) && same(on.opacity, [1, 1]) && before.stroke === 0 && on.stroke > 0 && !before.glow && on.glow && same(after, before),
+      `${at.id}: 불투명도 ${before.opacity} → ${on.opacity} → ${after.opacity}, 외곽선 ${before.stroke} → ${on.stroke}px, 빛 ${before.glow} → ${on.glow}`,
+    );
+    t.check(`${name}: 이름표·상자·줄 수 숫자의 위치와 폭, 층이 그대로다`, on.place === before.place && on.layers === before.layers, `${before.place} → ${on.place}, 층 ${on.layers}`);
+    t.check(`${name}: 옆 노드의 단계는 그대로다`, same(beside, aside), `${other.id} 불투명도 ${aside.opacity} → ${beside.opacity}`);
+  }
+
+  // 펼친 파일 상자는 머리 줄만, 그 안의 함수는 함수만 진해진다.
+  const inner = list.find((item) => item.kind === "function" && item.id !== FUNCTION && list.some((box) => box.kind === "module-open" && item.id.startsWith(`${box.id}:`)));
+  const opened = list.find((box) => box.kind === "module-open" && inner?.id.startsWith(`${box.id}:`));
+  if (opened === undefined) {
+    t.skip("펼친 파일 상자의 머리 줄에 올리면 머리 줄의 이름표만 굵어진다", "머리 줄과 안의 함수가 함께 보이는 펼친 파일 상자가 화면에 없다");
+  } else {
+    await over(opened);
+    const [box, child] = [await look(opened.id), await look(inner.id)];
+    t.check(
+      "펼친 파일 상자의 머리 줄에 올리면 머리 줄의 이름표만 굵어지고 상자의 바탕과 안의 함수는 그대로다",
+      same(box.pointed, [false, true]) && box.stroke > 0 && box.shadow && !box.glow && same(child.pointed, [false, false]),
+      `${opened.id} ${box.pointed}, 안의 함수 ${inner.id} ${child.pointed}`,
+    );
+    await over(inner);
+    const [boxed, aimed] = [await look(opened.id), await look(inner.id)];
+    t.check("그 안의 함수에 올리면 함수만 진해지고 파일 상자는 그대로다", same(aimed.pointed, [true, true]) && same(boxed.pointed, [false, false]), `함수 ${aimed.pointed}, 파일 상자 ${boxed.pointed}`);
+  }
+  await away();
+  t.check("마우스가 떠나면 진해진 노드가 없다", (await count(page, ".react-flow__node.pointed")) === 0);
+
+  // 경로 고정 중에는 경로 위 노드만 진해진다.
+  await page.keyboard.press("Escape");
+  await pin(page);
+  await away();
+  const pinned = await candidates();
+  const [off, onPath] = [pinned.find((item) => item.route === null && leaf(item)), pinned.find((item) => item.route !== null && leaf(item))];
+  await over(off);
+  const blocked = await look(off.id);
+  await over(onPath);
+  const lit = await look(onPath.id);
+  await away();
+  t.check(
+    "경로 고정 중에 경로 밖 노드에 올리면 바뀌지 않고 경로 위 노드에 올리면 진해진다",
+    same(blocked.pointed, [false, false]) && blocked.opacity[0] === off.opacity && same(lit.pointed, [true, true]),
+    `경로 밖 ${off.id} ${blocked.pointed} 불투명도 ${blocked.opacity}, 경로 위 ${onPath.id} ${lit.pointed}`,
+  );
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -4819,12 +4947,13 @@ const SCENARIOS = [
   ["cycles-pin", cyclesPin],
   ["start", start],
   ["arranging", arranging],
+  ["node-hover", nodeHover],
 ];
 
 /** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
 const STAGE3 = new Set(SCENARIOS.slice(SCENARIOS.findIndex(([name]) => name === "finder-open")).map(([name]) => name));
 /** 4단계 시나리오. 스크린샷 이름이 s4-로 시작한다. */
-const STAGE4 = new Set(["start", "arranging"]);
+const STAGE4 = new Set(["start", "arranging", "node-hover"]);
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 
