@@ -3,8 +3,8 @@ import { useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from
 import { createPortal } from "react-dom";
 
 export interface TooltipHandle {
-  /** 내용을 바꾸고 마우스 위치 옆에 보인다. */
-  show(text: string, x: number, y: number): void;
+  /** 내용을 바꾸고 마우스 위치 옆에 보인다. text가 null이면 감춘다. */
+  show(text: string | null, x: number, y: number): void;
   move(x: number, y: number): void;
   hide(): void;
 }

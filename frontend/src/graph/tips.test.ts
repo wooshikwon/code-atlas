@@ -44,10 +44,13 @@ describe("배지 말풍선", () => {
     ]);
   });
 
-  it("미사용 후보는 노드의 말풍선 둘째 줄에 뜻을 적는다", () => {
-    expect(nodeTip("run()", "함수", false)).toBe("run() · 함수");
-    expect(nodeTip("run()", "함수", true).split("\n")).toEqual([
-      "run() · 함수",
+  it("노드의 말풍선은 잘린 이름, 요약의 요지, 미사용 후보의 뜻을 줄마다 적고 적을 줄이 없으면 띄우지 않는다", () => {
+    expect(nodeTip(null, null, false)).toBeNull();
+    expect(nodeTip(null, "주문 목록을 받아 품목별 수량을 더한다", false)).toBe("주문 목록을 받아 품목별 수량을 더한다");
+    expect(nodeTip("pkg/parser/common_helpers.py", null, false)).toBe("pkg/parser/common_helpers.py");
+    expect(nodeTip("run_everything()", "설정을 읽어 엔진을 띄운다", true)!.split("\n")).toEqual([
+      "run_everything()",
+      "설정을 읽어 엔진을 띄운다",
       "미사용 후보 · 들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다",
     ]);
   });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MadeSummary, SummaryStatus } from "../api/types";
+import type { MadeSummary, Summaries, SummaryStatus } from "../api/types";
 
 /** 시험이 끝내는 요청 하나 */
 interface Pending<T> {
@@ -12,7 +12,10 @@ interface Pending<T> {
 const reads: Pending<SummaryStatus>[] = [];
 const makes: Pending<MadeSummary>[] = [];
 
+const lists: Pending<Summaries>[] = [];
+
 vi.mock("../api/client", () => ({
+  getSummaries: () => new Promise<Summaries>((resolve, reject) => lists.push({ node: "", resolve, reject })),
   getSummary: (node: string) => new Promise<SummaryStatus>((resolve, reject) => reads.push({ node, resolve, reject })),
   makeSummary: (node: string, refresh: boolean) =>
     new Promise<MadeSummary>((resolve, reject) => makes.push({ node, refresh, resolve, reject })),
@@ -26,7 +29,8 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 beforeEach(() => {
   reads.length = 0;
   makes.length = 0;
-  useSummaries.setState({ states: {} });
+  lists.length = 0;
+  useSummaries.setState({ states: {}, leads: {} });
 });
 
 describe("read", () => {
@@ -83,6 +87,32 @@ describe("make", () => {
     reads[0].resolve({ summary: null, stale: false, available: true, reason: null });
     await settle();
     expect(store().states.a).toEqual({ phase: "making" });
+  });
+});
+
+describe("leads", () => {
+  it("받은 목록으로 요지를 바꾸고, 요약을 읽거나 만들면 그 노드의 요지를 바꾼다", async () => {
+    store().list();
+    lists[0].resolve({ summaries: [{ node: "a", lead: "옛 요지" }, { node: "b", lead: "b의 요지" }] });
+    await settle();
+    expect(store().leads).toEqual({ a: "옛 요지", b: "b의 요지" });
+    store().make("a", true);
+    makes[0].resolve({ summary: "새 요지\n\n하는 일\n문단\n\n앞뒤 흐름\n문단" });
+    store().read("c");
+    reads[0].resolve({ summary: "c의 요지\n\n하는 일\n문단", stale: true, available: true, reason: null });
+    await settle();
+    expect(store().leads).toEqual({ a: "새 요지", b: "b의 요지", c: "c의 요지" });
+  });
+
+  it("목록을 받는 동안 만든 요약의 요지는 늦게 온 목록이 덮지 않고, 목록에 없는 노드의 요지는 지운다", async () => {
+    useSummaries.setState({ leads: { a: "옛 요지", gone: "지워진 노드의 요지" } });
+    store().list();
+    store().make("a", true);
+    makes[0].resolve({ summary: "새 요지" });
+    await settle();
+    lists[0].resolve({ summaries: [{ node: "a", lead: "옛 요지" }] });
+    await settle();
+    expect(store().leads).toEqual({ a: "새 요지" });
   });
 });
 

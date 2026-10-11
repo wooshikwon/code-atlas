@@ -10,10 +10,10 @@ const changes = vi.hoisted(() => ({ load: vi.fn() }));
 vi.mock("../api/client", () => ({ getStatus: vi.fn(), getRepo: vi.fn(), getGraph: vi.fn(), getTree: vi.fn(), forgetFiles: vi.fn() }));
 vi.mock("../panel/opened", () => ({ useOpened: { getState: () => ({ close: vi.fn() }) } }));
 vi.mock("./changes", () => ({ useChanges: { getState: () => changes } }));
-vi.mock("./explanations", () => ({ useExplanations: { getState: () => ({ forget: vi.fn() }) } }));
+vi.mock("./explanations", () => ({ useExplanations: { getState: () => ({ forget: vi.fn(), list: vi.fn() }) } }));
 vi.mock("./overlay", () => ({ useOverlay: { getState: () => overlay } }));
 vi.mock("./store", () => ({ useAtlas: { getState: () => atlas } }));
-vi.mock("./summaries", () => ({ useSummaries: { getState: () => ({ forget: vi.fn() }) } }));
+vi.mock("./summaries", () => ({ useSummaries: { getState: () => ({ forget: vi.fn(), list: vi.fn() }) } }));
 
 const received = vi.mocked(getStatus);
 
