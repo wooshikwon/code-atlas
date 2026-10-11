@@ -519,8 +519,8 @@ async function focused(t, page) {
   await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
   const [panel, summary, code] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-summary"), await rectOf(page, ".info-panel .code")];
   t.check(
-    "함수를 골라도 패널의 사각형이 처음과 같고, LLM 요약 칸이 패널 높이의 반을 넘지 않으며 코드 뷰어가 나머지 높이를 쓴다",
-    sameRect(panel, opened) && summary.height <= panel.height / 2 + 1 && near(code.y + code.height, panel.y + panel.height - 1),
+    "함수를 골라도 패널의 사각형이 처음과 같고, LLM 요약 칸이 패널 높이의 4분의 1을 넘지 않으며 코드 뷰어가 나머지 높이를 쓴다",
+    sameRect(panel, opened) && summary.height <= panel.height / 4 + 1 && near(code.y + code.height, panel.y + panel.height - 1),
     `패널 ${rectText(opened)} → ${rectText(panel)}, 요약 칸 ${summary.height}, 코드 뷰어 ${code.height}`,
   );
   const graph = await api("/api/graph");
@@ -1440,6 +1440,55 @@ async function pickInTree(page, target) {
 
 const summaryHint = (page) => page.evaluate(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent ?? "");
 
+/** 요약 세 부분을 문단 count개씩으로 채운 글 */
+function longSummary(count) {
+  const paragraph = "주문 목록을 받아 품목마다 수량을 더하고, 수량이 0인 품목을 뺀 뒤 품목 이름순으로 정렬한 표를 만든다. ".repeat(3).trim();
+  const body = Array.from({ length: count }, () => paragraph).join("\n");
+  return `주문 목록을 받아 품목별 수량을 더한 표를 돌려준다.\n\n하는 일\n${body}\n\n앞뒤 흐름\n${body}`;
+}
+
+/** GET /api/summary에 서버 대신 답한다. reply는 노드 id를 받아 응답 본문을 돌려준다. */
+async function answerSummaryReads(page, reply) {
+  await page.route(
+    (at) => at.pathname === "/api/summary",
+    (route) => {
+      const request = route.request();
+      if (request.method() !== "GET") {
+        return route.fallback();
+      }
+      return route.fulfill({ json: reply(new URL(request.url()).searchParams.get("node")) });
+    },
+  );
+}
+
+/** 요약을 만들지 않고 서버 대신 답해 요약 칸의 크기를 본다. */
+async function summaryPanel(t, page) {
+  await answerSummaryReads(page, () => ({ summary: longSummary(6), available: true, reason: null }));
+  await load(page);
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+  await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 10_000 });
+  const [panel, summary, code] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-summary"), await rectOf(page, ".info-panel .code")];
+  const scrolls = await page.evaluate(() => {
+    const box = document.querySelector(".info-panel-summary");
+    return box.scrollHeight > box.clientHeight + 1 && getComputedStyle(box).overflowY === "auto";
+  });
+  t.check(
+    "긴 요약이 있어도 LLM 요약 칸의 높이가 패널 높이의 4분의 1이고 넘치는 글은 칸 안에서 스크롤한다",
+    near(summary.height, panel.height / 4, 1.5) && scrolls && near(code.y + code.height, panel.y + panel.height - 1),
+    `패널 ${panel.height.toFixed(0)}, 요약 칸 ${summary.height.toFixed(1)}, 코드 뷰어 ${code.height.toFixed(0)}`,
+  );
+  await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="s"]')), 0, -300);
+  await page.waitForTimeout(300);
+  const [smaller, shrunk] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-summary")];
+  t.check(
+    "패널의 높이를 줄이면 요약 칸의 높이도 패널 높이의 4분의 1로 줄어든다",
+    smaller.height < panel.height - 100 && near(shrunk.height, smaller.height / 4, 1.5),
+    `패널 ${smaller.height.toFixed(0)}, 요약 칸 ${shrunk.height.toFixed(1)}`,
+  );
+}
+
 /** 요약을 실제로 만들지 않고 "요약 생성" 버튼과 "자동 요약" 토글이 POST를 언제 보내는지만 본다. 보낸 POST는 붙잡혀 서버에 닿지 않는다. */
 async function summaryAsk(t, page) {
   const { found, available, reason } = await uncached(2);
@@ -1874,6 +1923,7 @@ const SCENARIOS = [
   ["tree-search", treeSearch],
   ["changes", changes],
   ["zoom-keep", zoomKeep],
+  ["summary-panel", summaryPanel],
   ["summary-ask", summaryAsk],
   ["summary-ref", summaryRef],
   ["summary", summary],
