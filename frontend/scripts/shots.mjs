@@ -2301,14 +2301,16 @@ async function summaryStale(t, page) {
   t.check('"자동 요약"을 켜 두면 바뀌기 전에 만든 요약을 고른 채 머물 때 POST를 보낸다', held.length === 2 && held[1].node === target.id, `POST ${held.length}번`);
 }
 
-/** 요약을 실제로 만들지 않고 "요약 생성" 버튼과 "자동 요약" 토글이 POST를 언제 보내는지만 본다. 보낸 POST는 붙잡혀 서버에 닿지 않는다. */
+/**
+ * 요약을 실제로 만들지 않고 "요약 생성" 버튼과 "자동 요약" 토글이 POST를 언제 보내는지만 본다. GET /api/summary에는 서버 대신
+ * 요약이 없고 만들 수 있다고 답하고, 보낸 POST는 붙잡혀 서버에 닿지 않는다.
+ */
 async function summaryAsk(t, page) {
-  const { found, available, reason } = await uncached(2);
-  if (found.length < 2 || !available) {
-    t.check("캐시에 요약이 없는 함수가 두 개 있고 Claude Code CLI를 부를 수 있다", false, found.length < 2 ? `캐시에 없는 함수 ${found.length}개` : `${reason}`);
-    return;
-  }
-  const [first, second] = found;
+  const graph = await api("/api/graph");
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const ownerOf = (n) => (n.kind === "module" || n.parent === null ? n : ownerOf(byId.get(n.parent)));
+  const [first, second] = graph.nodes.filter((n) => n.kind === "function" && !n.test).slice(0, 2).map((n) => ({ id: n.id, owner: ownerOf(n).id }));
+  await answerSummaryReads(page, () => ({ summary: null, stale: false, available: true, reason: null }));
   const posts = summaryPosts(page);
   const aborted = summaryAborts(page);
   await load(page);
@@ -5828,14 +5830,7 @@ async function packPin(t, page) {
     onPath && definitions.every((id) => path.includes(id) || path.some((step) => step.startsWith(`${id}.`))),
     `그린 정의 ${definitions.length}개, 경로 ${path.length}단계`,
   );
-  const shownPacks = (await packsOf(page)).filter((each) => each.open === false);
-  await watchFlashes(page);
-  if (shownPacks.length === 0) {
-    t.skip("고정 중에 손잡이를 눌러도 단계가 바뀌지 않고 안내 줄이 뒤집힌다", "고정 중의 화면에 손잡이가 없다(파일 상자는 고정 중에 접힘이다)");
-  } else {
-    await clickPack(page, shownPacks[0].box);
-    t.check("고정 중에 손잡이를 눌러도 단계가 바뀌지 않고 안내 줄이 뒤집힌다", (await packOf(page, shownPacks[0].box))?.open === false && (await flashesOf(page)) === 1, `뒤집힘 ${await flashesOf(page)}번`);
-  }
+  t.check("고정 중의 화면에 손잡이가 없다", (await packsOf(page)).length === 0, `손잡이 ${(await packsOf(page)).length}개`);
   await t.shot();
   await page.click(".finder-clear");
   await page.click(".finder-button");
@@ -5922,17 +5917,29 @@ async function packHistory(t, page) {
   t.check("페이지를 다시 열면 전부 펼침이 비워져 파일을 고르면 펼침 단계로 열린다", (await packOf(page, file.id))?.open === false, `"${(await packOf(page, file.id))?.text}"`);
 }
 
-/** 외부 노드 토글이 밖과 이어진 자식을 바꾸는지 본다. */
+/**
+ * "외부 노드" 토글이 외부 패키지를 부르는 안쪽 정의를 손잡이에서 꺼내는지 본다. 주소 url의 레포에 그런 정의가 없으면
+ * --wide-url의 레포에서 본다.
+ */
 async function packToggle(t, page) {
-  const graph = await api("/api/graph");
-  const moved = (file) => stagesOf(graph, file.id, true).inner.length;
-  const file = packedFile(graph, (each) => moved(each) < each.inner.length);
+  const pickedIn = async (at) => {
+    const graph = await api("/api/graph", at);
+    const moved = (file) => stagesOf(graph, file.id, true).inner.length;
+    return { at, graph, moved, file: packedFile(graph, (each) => moved(each) < each.inner.length) };
+  };
+  let found = await pickedIn(url);
+  if (found.file === undefined && wideUrl !== null) {
+    found = await pickedIn(wideUrl);
+  }
+  const { at, graph, moved, file } = found;
   if (file === undefined) {
-    t.skip("외부 노드를 켜면 외부 패키지를 부르는 정의가 손잡이에서 나온다", "안쪽 자식 가운데 외부 노드와 선이 있는 정의가 없다");
+    t.skip("외부 노드를 켜면 외부 패키지를 부르는 정의가 손잡이에서 나온다", `안쪽 자식 가운데 외부 노드와 선이 있는 정의가 없다${wideUrl === null ? "(--wide-url을 주지 않았다)" : ""}`);
     return;
   }
-  await load(page, url, false);
-  await pickFile(page, file.id);
+  await load(page, at, false);
+  await palettePick(page, graph.nodes.find((n) => n.id === file.id).name, file.id);
+  await waitSelected(page, file.id);
+  await rest(page);
   const before = await packOf(page, file.id);
   await setToggle(page, "외부 노드", true);
   await rest(page);
