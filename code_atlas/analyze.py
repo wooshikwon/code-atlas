@@ -20,8 +20,8 @@ from .unused import Unused, candidates
 
 logger = logging.getLogger(__name__)
 
-CONCURRENCY = 32
-HEAD_RETRIES = 2
+# basedpyright는 요청을 하나씩 처리한다. 처리 중인 요청 하나와 기다리는 요청 하나가 있으면 서버가 쉬지 않는다.
+CONCURRENCY = 2
 
 
 class PythonNotFound(Exception):
@@ -102,46 +102,30 @@ def _probe(facts: list[FileFacts]) -> tuple[str, int, int] | None:
 async def _request_all(
     session: Session, sites: list[Site], timeout: float = REQUEST_TIMEOUT
 ) -> tuple[dict[int, list[Location]], int]:
-    """동적이 아닌 지점마다 정의 위치를 묻는다. 지점 번호별 응답과, 끝까지 응답이 없는 지점 수를 돌려준다.
+    """동적이지 않고 내장 이름으로 판정하지 않은 지점마다 정의 위치를 묻는다.
 
-    시간 제한에 걸린 지점만 다시 묻는다. 첫 묶음이 시간 제한에 걸리면 동시 요청 수를 반으로 줄여 그 지점을 다시 묻고,
-    나머지 지점은 줄인 동시 요청 수로 물은 뒤 시간 제한에 걸린 지점을 한 번 더 묻는다.
+    지점 번호별 응답과, 끝까지 응답이 없는 지점 수를 돌려준다. 시간 제한에 걸린 지점은 한 번 다시 묻는다.
     """
     found: dict[int, list[Location]] = {}
+    limit = asyncio.Semaphore(CONCURRENCY)
 
-    async def ask(batch: list[int], concurrency: int) -> list[int]:
-        """묶음을 물어 `found`에 응답을 담고 시간 제한에 걸린 지점을 돌려준다."""
-        limit = asyncio.Semaphore(concurrency)
-
-        async def one(i: int) -> bool:
-            site = sites[i]
-            async with limit:
+    async def one(i: int) -> bool:
+        """지점 하나를 물어 `found`에 응답을 담는다. 두 번 모두 시간 제한에 걸리면 참이다."""
+        site = sites[i]
+        found[i] = []
+        async with limit:
+            for _ in range(2):
                 try:
                     found[i] = await session.definition(site.path, site.request_line, site.request_col, timeout)
                 except asyncio.TimeoutError:
-                    return True
+                    continue
                 except Exception:
                     logger.debug("definition failed: %s:%s", site.path, site.request_line, exc_info=True)
-                    found[i] = []
                 return False
+        return True
 
-        late = await asyncio.gather(*(one(i) for i in batch))
-        return [i for i, timed_out in zip(batch, late) if timed_out]
-
-    pending = [i for i, s in enumerate(sites) if not s.dynamic]
-    concurrency = CONCURRENCY
-    late = await ask(pending[:concurrency], concurrency)
-    for _ in range(HEAD_RETRIES):
-        if not late:
-            break
-        concurrency = max(1, concurrency // 2)
-        late = await ask(late, concurrency)
-    late += await ask(pending[CONCURRENCY:], concurrency)
-    if late:
-        late = await ask(late, concurrency)
-    for i in late:
-        found[i] = []
-    return found, len(late)
+    late = await asyncio.gather(*(one(i) for i, s in enumerate(sites) if not (s.dynamic or s.builtin)))
+    return found, sum(late)
 
 
 async def analyze_async(repo: RepoFiles, session: Session) -> Analyzed:

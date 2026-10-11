@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import signal
 import sys
@@ -6,6 +7,8 @@ import time
 
 import pytest
 from lsprotocol import types
+
+from concurrent.futures import Future
 
 from conftest import group_ended
 
@@ -68,6 +71,67 @@ async def test_timed_out_request_is_cancelled_on_the_server(sample_repo, monkeyp
 
         [loc] = await session.definition_at("src/app/cli.py", 10, 21)
         assert loc.line == 31 and len(cancelled) == 1
+
+
+class SilentClient:
+    """요청을 받아 두기만 하는 서버. `answer`가 가장 먼저 받은 요청에 응답한다."""
+
+    def __init__(self, session: Session, monkeypatch):
+        self.pending: list[Future] = []
+        self.cancelled: list[types.CancelParams] = []
+        monkeypatch.setattr(session.client.protocol, "send_request", self.send)
+        monkeypatch.setattr(session.client, "cancel_request", self.cancelled.append)
+
+    def send(self, method, params, msg_id) -> Future:
+        self.pending.append(Future())
+        return self.pending[-1]
+
+    def answer(self, result) -> None:
+        self.pending.pop(0).set_result(result)
+
+
+@pytest.mark.asyncio
+async def test_request_waits_past_its_timeout_while_the_server_answers_other_requests(tmp_path, monkeypatch):
+    session = Session(tmp_path, None, [])
+    server = SilentClient(session, monkeypatch)
+    first = asyncio.create_task(session._request("first", None, 0.3))
+    second = asyncio.create_task(session._request("second", None, 0.3))
+    await asyncio.sleep(0.2)
+    server.answer("a")
+    await asyncio.sleep(0.2)
+    assert await first == "a" and not second.done()  # 보낸 지 0.4초, 서버의 마지막 응답에서 0.2초
+    server.answer("b")
+    assert await second == "b" and server.cancelled == []
+
+
+@pytest.mark.asyncio
+async def test_request_times_out_when_the_server_answers_nothing(tmp_path, monkeypatch):
+    session = Session(tmp_path, None, [])
+    server = SilentClient(session, monkeypatch)
+    started = time.monotonic()
+    late = await asyncio.gather(*(session._request(name, None, 0.2) for name in "ab"), return_exceptions=True)
+    assert all(isinstance(e, asyncio.TimeoutError) for e in late) and len(server.cancelled) == 2
+    assert 0.2 <= time.monotonic() - started < 0.4
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_asks_the_probe_once(tmp_path, monkeypatch, caplog):
+    session = Session(tmp_path, None, [])
+    asked: list[tuple] = []
+
+    async def definition(*probe):
+        asked.append(probe)
+        if len(asked) == 2:
+            raise asyncio.TimeoutError
+        return []
+
+    monkeypatch.setattr(session, "definition", definition)
+    await session.wait_ready(None)
+    await session.wait_ready(("a.py", 1, 0))
+    assert asked == [("a.py", 1, 0)] and not caplog.records
+    with caplog.at_level(logging.WARNING):
+        await session.wait_ready(("a.py", 1, 0))
+    assert len(asked) == 2 and "readiness probe timed out" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -145,3 +209,10 @@ def test_namedtuple_and_enum_are_dataclasses(analyzed):
     assert nodes["app.models:Point"].fields == [{"name": "x", "type": "int"}, {"name": "y", "type": "int"}]
     assert nodes["app.models:Color"].kind == "dataclass"
     assert nodes["app.models:Config"].kind == "dataclass"
+
+
+def test_builtin_name_defined_in_the_repo_resolves_to_the_repo(analyzed):
+    analysis, _ = analyzed
+    assert ("app.shadow:announce", "app.shadow:print") in edge_set(analysis, "call")
+    statuses = {s.text: s.status for s in analysis.sites if s.path == "src/app/shadow.py"}
+    assert statuses == {"message.upper()": "unresolved", "print(message)": "resolved", "len(message)": "builtin"}

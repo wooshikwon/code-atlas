@@ -74,7 +74,7 @@ def test_sigint_ends_the_server_and_the_language_server(sample_repo, tmp_path, m
 def test_analyze_prints_the_unused_count_only_in_the_summary(sample_repo, capsys):
     assert cli.main(["analyze", str(sample_repo), "--python", sys.executable]) == 0
     summary = capsys.readouterr().out.splitlines()
-    assert summary[0].startswith("노드 ") and summary[1:] == ["미사용 후보 3개"]
+    assert summary[0].startswith("노드 ") and summary[1:] == ["미사용 후보 4개"]
 
     assert cli.main(["analyze", str(sample_repo), "--python", sys.executable, "--json"]) == 0
     printed = capsys.readouterr().out

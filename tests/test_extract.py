@@ -173,3 +173,59 @@ def test_syntax_error_yields_module_only(facts):
     broken = facts["src/app/broken.py"]
     assert [n.id for n in broken.nodes] == ["app.broken"]
     assert broken.error and broken.sites == []
+
+
+def test_expression_too_deep_yields_module_only_with_an_error():
+    file = SourceFile(path="src/pkg/table.py", module_id="pkg.table", test=False, is_init=False)
+    text = "def lookup():\n    return " + " + ".join(["f()"] * 5000) + "\n"
+    found = extract(file, text, frozenset())
+    assert [n.id for n in found.nodes] == ["pkg.table"]
+    assert found.error == "식이 너무 깊다" and found.sites == []
+
+
+def test_builtin_name_bound_in_the_file_is_not_prejudged(facts):
+    calls = {s.text: s for s in sites(facts, "src/app/shadow.py", "call")}
+    assert not calls["print(message)"].builtin
+    assert calls["len(message)"].builtin
+    assert not calls["message.upper()"].builtin
+    getattr_call = next(s for s in sites(facts, "src/app/cli.py", "call") if s.text == "getattr(config, 'name')()")
+    assert getattr_call.dynamic and not getattr_call.builtin
+
+
+BINDINGS = {
+    "대입": "len = 3\n",
+    "함수 정의": "def len(x):\n    return 0\n",
+    "클래스 정의": "class len:\n    pass\n",
+    "import": "from pkg.core import len\n",
+    "별칭 import": "import pkg.core as len\n",
+    "모든 이름 import": "from pkg.core import *\n",
+    "매개변수": "def g(len):\n    return len\n",
+    "for의 대상": "for len in ():\n    pass\n",
+    "with의 대상": "with open('a') as len:\n    pass\n",
+    "except의 대상": "try:\n    pass\nexcept ValueError as len:\n    pass\n",
+    "컴프리헨션의 대상": "sizes = [len for len in ()]\n",
+    "match의 캡처": "match sizes:\n    case [len, *_]:\n        pass\n",
+    "global": "def g():\n    global len\n",
+    "nonlocal": "def g():\n    def h():\n        nonlocal len\n",
+}
+
+
+@pytest.mark.parametrize("binding", BINDINGS.values(), ids=BINDINGS.keys())
+def test_builtin_prejudging_stops_wherever_the_file_binds_the_name(binding):
+    file = SourceFile(path="src/pkg/m.py", module_id="pkg.m", test=False, is_init=False)
+    text = "sizes = []\n" + binding + "def f(x):\n    return len(x), sorted(x)\n"
+    calls = {s.text: s for s in extract(file, text, frozenset()).sites if s.kind == "call"}
+    assert not calls["len(x)"].builtin
+    assert calls["sorted(x)"].builtin != ("import *" in binding)
+
+
+def test_builtin_prejudging_covers_decorators_bases_and_passed_names():
+    file = SourceFile(path="src/pkg/m.py", module_id="pkg.m", test=False, is_init=False)
+    text = "class Bad(ValueError):\n    @staticmethod\n    def f(x):\n        return map(str, x)\n"
+    found = {(s.kind, s.text): s.builtin for s in extract(file, text, frozenset({"str"})).sites}
+    assert found == {
+        ("inherit", "ValueError"): True,
+        ("decorate", "staticmethod"): True,
+        ("call", "map(str, x)"): True,
+        ("pass", "str"): True,
+    }
