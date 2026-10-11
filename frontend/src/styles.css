@@ -651,7 +651,7 @@ ul {
   font-size: 11px;
 }
 
-.code-note-body .summary-text p:last-child {
+.code-note-body .summary-text > :last-child {
   margin-bottom: 0;
 }
 
@@ -1673,30 +1673,77 @@ ul {
   font-size: 11px;
 }
 
+/* 설명 본문. 요지를 가장 크게, 구역 제목을 굵게 그리고 문단 사이를 띄운다. */
 .summary-text p {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
 }
 
 .summary-text .summary-lead {
+  margin-bottom: 0;
+  font-size: 13px;
   font-weight: 600;
+  line-height: 1.55;
 }
 
 .summary-part {
-  margin-top: 8px;
+  margin-top: 12px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
 }
 
-.summary-part p:last-child {
+.summary-title {
+  margin: 0 0 5px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.summary-part > :last-child {
   margin-bottom: 0;
 }
 
-.summary-text code {
-  padding: 0 3px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--ink) 6%, transparent);
+.summary-list {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  list-style: disc;
 }
 
-/* 정의 표기 가운데 그래프의 노드와 대응하는 것은 누를 수 있게 밑줄을 긋는다. */
+ol.summary-list {
+  list-style: decimal;
+}
+
+.summary-list li + li {
+  margin-top: 3px;
+}
+
+.summary-code {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* 코드 칩. 백틱으로 감싼 식별자와 정의 표기를 옅은 바탕의 등폭 글자로 그리고, 긴 표기는 칩 안에서 줄을 바꾼다. */
+.summary-text code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.summary-text .ref-path {
+  color: var(--muted);
+}
+
+/* 정의 표기 가운데 그래프의 노드와 대응하는 것은 누를 수 있다. 테두리와 밑줄을 긋고 마우스를 올리면 진해진다. */
 .summary-ref {
+  display: inline;
   padding: 0;
   font: inherit;
   text-align: left;
@@ -1704,12 +1751,15 @@ ul {
 }
 
 .summary-ref code {
-  text-decoration: underline dotted var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+  text-decoration: underline var(--muted);
   text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .summary-ref:hover code {
   background: var(--active-bg);
+  box-shadow: inset 0 0 0 1px var(--muted);
   text-decoration-color: var(--ink);
 }
 

@@ -1,10 +1,10 @@
 // LLM 요약 칸. 고른 노드의 설명을 캐시에서 읽어 요지, 하는 일, 앞뒤 흐름 세 부분으로 보이고, 캐시에 없으면 "요약 생성" 버튼을 눌렀을 때 만든다.
-// 상단 줄의 "자동 요약"이 켜져 있으면 노드를 고른 채 잠시 머문 뒤에 만든다. 요약 상태와 요청은 `state/summaries.ts`가 가지므로
+// 필터 창의 "자동 요약"이 켜져 있으면 노드를 고른 채 잠시 머문 뒤에 만든다. 요약 상태와 요청은 `state/summaries.ts`가 가지므로
 // 노드를 떠나도 만들고 있던 요약은 끝까지 만든다.
 import { useEffect } from "react";
 import { useAtlas } from "../state/store";
 import { useSummaries, type SummaryState } from "../state/summaries";
-import { useInline } from "./inline";
+import { Blocks, useInline } from "./inline";
 import { partsOf } from "./parts";
 
 /** "자동 요약"이 켜져 있을 때 캐시에 없는 요약은 노드를 고른 채 이만큼 머문 뒤에 만든다. */
@@ -21,10 +21,8 @@ function Explained({ summary, stale }: { summary: string; stale: boolean }) {
       <p className="summary-lead">{inline(lead)}</p>
       {sections.map((section) => (
         <section key={section.title} className="summary-part">
-          <h4 className="info-panel-label">{section.title}</h4>
-          {section.paragraphs.map((paragraph, i) => (
-            <p key={i}>{inline(paragraph)}</p>
-          ))}
+          <h4 className="summary-title">{section.title}</h4>
+          <Blocks blocks={section.blocks} />
         </section>
       ))}
     </div>

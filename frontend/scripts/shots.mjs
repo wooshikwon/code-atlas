@@ -2290,7 +2290,7 @@ async function summaryRef(t, page) {
     return `${file.replaceAll(".", "/")}.py::${name}`;
   };
   const [first, second, missing] = [refOf(callee.target), refOf(caller.source), `${refOf(FUNCTION).split("::")[0]}::no_such_function`];
-  const fake = `리마인더에서 오늘 노트의 구획을 다시 만든다.\n\n하는 일\n\`${first}\`로 오늘 항목을 모으고 \`note.todos\`를 바꾼다. \`${missing}\`는 그래프에 없다.\n\n앞뒤 흐름\n${second}가 노트가 있을 때 부른다.\n\`re.sub\`만 쓴다.`;
+  const fake = `리마인더에서 오늘 노트의 구획을 다시 만든다.\n\n하는 일\n\`${first}\`로 오늘 항목을 모으고 \`note.todos\`를 바꾼다. \`${missing}\`는 그래프에 없다.\n- **먼저** 오늘 항목을 모은다\n- 모은 항목을 적는다\n\`\`\`\nkey = item.key\n    return key\n\`\`\`\n\n앞뒤 흐름\n${second}가 노트가 있을 때 부른다.\n\`re.sub\`만 쓴다.`;
   await page.route(
     (at) => at.pathname === "/api/summary" && at.searchParams.get("node") === FUNCTION,
     (route) => (route.request().method() === "GET" ? route.fulfill({ json: { summary: fake, stale: false, available: true, reason: null } }) : route.fallback()),
@@ -2319,6 +2319,38 @@ async function summaryRef(t, page) {
     "그래프에 없는 정의 표기와 그 밖의 백틱 식별자는 누를 수 없는 등폭 글자다",
     same(drawn.codes, ["note.todos", missing, "re.sub"]),
     drawn.codes.join(", "),
+  );
+  const styled = await page.evaluate(() => {
+    const text = document.querySelector(".summary-text");
+    const style = (element) => getComputedStyle(element);
+    const [chip, link] = [[...text.querySelectorAll("code")].find((code) => code.closest(".summary-ref") === null), text.querySelector(".summary-ref code")];
+    const [lead, title, body] = [text.querySelector(".summary-lead"), text.querySelector(".summary-title"), text.querySelector(".summary-part p")];
+    return {
+      titles: [...text.querySelectorAll(".summary-title")].map((element) => element.textContent),
+      sizes: [lead, title, body].map((element) => parseFloat(style(element).fontSize)),
+      weights: [lead, title, body].map((element) => Number(style(element).fontWeight)),
+      chip: { filled: style(chip).backgroundColor !== "rgba(0, 0, 0, 0)", line: style(chip).textDecorationLine, cursor: style(chip).cursor },
+      link: { filled: style(link).backgroundColor !== "rgba(0, 0, 0, 0)", line: style(link).textDecorationLine, cursor: style(link).cursor },
+      path: [link.querySelector(".ref-path").textContent, style(link.querySelector(".ref-path")).color !== style(link).color],
+      items: [...text.querySelectorAll("ul.summary-list > li")].map((item) => item.textContent),
+      strong: [...text.querySelectorAll("strong")].map((element) => element.textContent),
+      code: text.querySelector("pre.summary-code")?.textContent ?? null,
+    };
+  });
+  t.check(
+    "구역 제목이 본문보다 굵고, 요지가 본문보다 크고 굵다",
+    same(styled.titles, ["하는 일", "앞뒤 흐름"]) && styled.weights[1] >= 600 && styled.weights[0] >= 600 && styled.weights[2] < 600 && styled.sizes[0] > styled.sizes[2] && styled.sizes[1] >= styled.sizes[2],
+    `크기 ${styled.sizes.join("·")}, 굵기 ${styled.weights.join("·")}`,
+  );
+  t.check(
+    "코드 칩은 바탕을 칠하고, 누를 수 있는 정의 표기 칩만 밑줄을 긋고 손 모양 커서를 쓰며 파일 경로를 흐리게 적는다",
+    styled.chip.filled && styled.link.filled && styled.chip.line === "none" && styled.link.line === "underline" && styled.link.cursor === "pointer" && styled.chip.cursor !== "pointer" && styled.path[0] === `${first.split("::")[0]}::` && styled.path[1],
+    JSON.stringify({ chip: styled.chip, link: styled.link }),
+  );
+  t.check(
+    "목록 기호로 시작하는 줄은 목록으로, `**`로 감싼 글은 굵게, 코드 울타리 사이의 줄은 들여쓰기를 둔 코드 블록으로 그린다",
+    same(styled.items, ["먼저 오늘 항목을 모은다", "모은 항목을 적는다"]) && same(styled.strong, ["먼저"]) && styled.code === "key = item.key\n    return key",
+    `목록 ${styled.items.join(" / ")}, 굵은 글씨 ${styled.strong.join(", ")}, 코드 블록 ${JSON.stringify(styled.code)}`,
   );
   await t.shot();
   await page.click(`.summary-text .summary-ref[data-node="${callee.target}"]`);

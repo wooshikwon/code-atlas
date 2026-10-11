@@ -3,7 +3,8 @@
 import type { OnMount } from "@monaco-editor/react";
 import * as monaco from "monaco-editor/editor";
 import { useEffect, useReducer, useRef, useState } from "react";
-import { useInline } from "../panel/inline";
+import { Blocks } from "../panel/inline";
+import { blocksOf } from "../panel/parts";
 import { noteKey, useExplanations, type Note } from "../state/explanations";
 
 type CodeEditor = Parameters<OnMount>[0];
@@ -42,7 +43,6 @@ function pickedOf(editor: CodeEditor): Picked | null {
 function Window({ note, path, top, close }: { note: Note; path: string; top: number; close: () => void }) {
   const make = useExplanations((s) => s.make);
   const remove = useExplanations((s) => s.remove);
-  const inline = useInline();
   const { start, end, state } = note;
   return (
     <div className="code-note-window" style={{ top }} data-range={noteKey(note)}>
@@ -70,9 +70,7 @@ function Window({ note, path, top, close }: { note: Note; path: string; top: num
           <>
             {state.stale && <p className="stale-note">코드가 바뀌기 전에 만든 설명</p>}
             <div className={state.stale ? "summary-text stale-text" : "summary-text"}>
-              {state.text.split("\n").map((paragraph, i) => (
-                <p key={i}>{inline(paragraph)}</p>
-              ))}
+              <Blocks blocks={blocksOf(state.text)} />
             </div>
           </>
         )}
