@@ -13,7 +13,7 @@ import {
   CIRCLE_GAP,
   elkGraphs,
   labelOf,
-  moduleCaption,
+  boxCaption,
   sideRoute,
   titleOf,
   type Box,
@@ -158,9 +158,11 @@ describe("elkGraphs", () => {
     expect(find(open, "ring")!.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("ring/") + 32}, 44)`);
   });
 
-  it("접힌 파일 상자 아래 글자는 미사용 후보가 있을 때만 그 수를 붙인다", () => {
-    expect(moduleCaption(nodes.get("main")!, 13, 0)).toBe("함수 13개");
-    expect(moduleCaption(nodes.get("main")!, 13, 3)).toBe("함수 13개 · 미사용 후보 3");
+  it("접힌 상자 아래 글자는 미사용 후보가 있을 때만 그 수를 붙이고 폴더 상자는 후보 수만 적는다", () => {
+    expect(boxCaption(nodes.get("main")!, 13, 0)).toBe("함수 13개");
+    expect(boxCaption(nodes.get("main")!, 13, 3)).toBe("함수 13개 · 미사용 후보 3");
+    expect(boxCaption(nodes.get("pkg")!, 0, 0)).toBe("");
+    expect(boxCaption(nodes.get("pkg")!, 0, 2)).toBe("미사용 후보 2");
   });
 
   it("펼친 파일 상자는 머리 줄 여백을 두고 안의 노드를 소스 정의 순서로 품는다", () => {

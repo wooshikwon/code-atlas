@@ -102,8 +102,8 @@ describe("경로 고정 중의 순환 선", () => {
 });
 
 describe("unusedCounts", () => {
-  it("파일마다 그 안의 후보를 세고 그래프에 없는 id는 세지 않는다", () => {
+  it("파일과 그 파일을 품은 폴더마다 안의 후보를 세고 그래프에 없는 id는 세지 않는다", () => {
     const counts = unusedCounts(routeFixture, new Set(["flow.walk:lone", "flow.walk:probe", "flow.build:Child.step", "flow.gone:f"]));
-    expect(Object.fromEntries(counts)).toEqual({ "flow.walk": 2, "flow.build": 1 });
+    expect(Object.fromEntries(counts)).toEqual({ "flow.walk": 2, "flow.build": 1, flow: 3 });
   });
 });

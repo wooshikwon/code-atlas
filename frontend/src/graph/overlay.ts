@@ -1,4 +1,4 @@
-// 분석 덮개가 그래프에 더하는 표시. 순환 아이콘을 다는 상자, 순환 선, 파일마다의 미사용 후보 수를 정한다.
+// 분석 덮개가 그래프에 더하는 표시. 순환 아이콘을 다는 상자, 순환 선, 파일과 폴더마다의 미사용 후보 수를 정한다.
 // 배치는 순환 아이콘의 폭만 쓰고, 덮개를 켜고 꺼도 결과가 같은 `cycleMarks`만 부른다.
 import type { AtlasNode, Graph } from "../api/types";
 import type { Cycles } from "./cycles";
@@ -66,14 +66,17 @@ export function cycleLines(
   return { edges: [...edges, ...added].map((e) => (keys.has(e.key) ? { ...e, opacity } : e)), keys };
 }
 
-/** 파일마다 그 안에 든 미사용 후보 수. 그래프에 없는 id는 세지 않는다. */
+/** 파일과 그 파일을 품은 폴더마다 그 안에 든 미사용 후보 수. 그래프에 없는 id는 세지 않는다. */
 export function unusedCounts(graph: Graph, unused: Set<string>): Map<string, number> {
   const nodes = nodeIndex(graph);
   const counts = new Map<string, number>();
   for (const id of unused) {
     const file: AtlasNode | undefined = nodes.get(unitOf(nodes, id));
-    if (nodes.has(id) && file?.kind === "module") {
-      counts.set(file.id, (counts.get(file.id) ?? 0) + 1);
+    if (!nodes.has(id) || file?.kind !== "module") {
+      continue;
+    }
+    for (let at: AtlasNode | undefined = file; at !== undefined; at = at.parent === null ? undefined : nodes.get(at.parent)) {
+      counts.set(at.id, (counts.get(at.id) ?? 0) + 1);
     }
   }
   return counts;

@@ -182,10 +182,14 @@ export function moduleHeader(node: AtlasNode, functions: number): string {
   return node.kind === "module" ? `함수 ${functions}개` : "";
 }
 
-/** 접힌 파일 상자 아래에 적는 글자. 파일 안의 미사용 후보 수 unused가 0이 아니면 함수 수 뒤에 붙인다. 상자 크기에 들지 않는다. */
-export function moduleCaption(node: AtlasNode, functions: number, unused: number): string {
+/**
+ * 접힌 파일 상자와 접힌 폴더 상자 아래에 적는 글자. 파일 상자는 함수 수를 적고, 안에 든 미사용 후보 수 unused가 0이 아니면
+ * 그 수를 뒤에 붙인다. 상자 크기에 들지 않는다.
+ */
+export function boxCaption(node: AtlasNode, functions: number, unused: number): string {
   const count = moduleHeader(node, functions);
-  return unused === 0 ? count : `${count} · 미사용 후보 ${unused}`;
+  const candidates = unused === 0 ? "" : `미사용 후보 ${unused}`;
+  return [count, candidates].filter((part) => part !== "").join(" · ");
 }
 
 /** 이름표 둘레에 그리는 표시. cycle은 이름표 앞에 순환 아이콘을 다는지, end는 이름표 뒤에 적는 출발·도착 표지다. */

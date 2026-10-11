@@ -68,6 +68,12 @@ export function cycleTip(node: AtlasNode, groups: string[][]): string {
 
 export const UNUSED_TIP = "미사용 후보 · 들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다";
 
+/** 접힌 상자 아래 글자의 미사용 후보 수. 상자 안의 후보를 합친 수다. */
+export function candidatesTip(node: AtlasNode, count: number): string {
+  const inside = node.kind === "package" ? "이 폴더 안의 정의에서 합친 수" : "이 파일 안의 정의에서 합친 수";
+  return `미사용 후보 ${count}개 · ${inside}\n들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다`;
+}
+
 /** 노드의 말풍선. 이름과 종류를 적고, 미사용 덮개가 표시한 후보면 둘째 줄에 그 뜻을 적는다. */
 export function nodeTip(title: string, kind: string, unused: boolean): string {
   return unused ? `${title} · ${kind}\n${UNUSED_TIP}` : `${title} · ${kind}`;

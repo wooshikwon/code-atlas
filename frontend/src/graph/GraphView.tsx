@@ -62,7 +62,7 @@ interface Cover {
   cycle: Map<string, string[][]>;
   /** 미사용 덮개가 표시하는 후보. 덮개를 껐으면 비어 있다. */
   unused: Set<string>;
-  /** 파일마다 미사용 후보 수. 덮개를 껐으면 비어 있다. */
+  /** 파일과 폴더마다 미사용 후보 수. 덮개를 껐으면 비어 있다. */
   candidates: Map<string, number>;
 }
 

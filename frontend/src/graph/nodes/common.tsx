@@ -5,8 +5,8 @@ import type { CSSProperties } from "react";
 import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
-import { BADGE_OVERHANG, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, ENTRY_MARK, labelOf, type Box, type RouteEnd } from "../layout";
-import { busyTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, inflowTip, locTip, unresolvedTip } from "../tips";
+import { BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, ENTRY_MARK, labelOf, type Box, type RouteEnd } from "../layout";
+import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, inflowTip, locTip, unresolvedTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
@@ -33,7 +33,7 @@ export interface AtlasNodeData extends Record<string, unknown> {
   cycle: string[][] | null;
   /** 미사용 덮개가 표시하는 후보다 */
   unused: boolean;
-  /** 접힌 파일 상자 아래에 적는 미사용 후보 수. 미사용 덮개를 껐으면 0이다. */
+  /** 접힌 파일 상자와 접힌 폴더 상자 아래에 적는 미사용 후보 수. 미사용 덮개를 껐으면 0이다. */
   candidates: number;
 }
 
@@ -212,6 +212,16 @@ export function Circle({ data }: { data: AtlasNodeData }) {
   return (
     <span className="node-circle" style={{ marginRight: CIRCLE_GAP }}>
       <Badges data={data} />
+    </span>
+  );
+}
+
+/** 접힌 파일 상자와 접힌 폴더 상자 아래의 글자. 미사용 후보 수를 적었으면 그 뜻을 말풍선 글에 담는다. */
+export function Below({ data }: { data: AtlasNodeData }) {
+  const text = boxCaption(data.node, data.functions, data.candidates);
+  return text === "" ? null : (
+    <span className="node-below" data-tip={data.candidates > 0 ? candidatesTip(data.node, data.candidates) : undefined}>
+      {text}
     </span>
   );
 }
