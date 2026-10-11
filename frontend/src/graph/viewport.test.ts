@@ -101,8 +101,8 @@ describe("fitTarget", () => {
   const free = { x: 0, y: 0, width: 912, height: 900 };
   const clear = { x: 0, y: 0, width: 912, height: 500 };
 
-  it("강조하는 경로가 없으면 그래프 전체를 free에 맞춘다", () => {
-    expect(fitTarget({ area, free, clear }, null)).toEqual({ padding: fitPadding(area, free) });
+  it("강조하는 경로가 없으면 그래프 전체를 free에 맞추고 확대 비율을 100%보다 키우지 않는다", () => {
+    expect(fitTarget({ area, free, clear }, null)).toEqual({ padding: fitPadding(area, free), maxZoom: 1 });
   });
 
   it("경로 고정 중에는 경로 위 노드를 clear에 맞추고 확대 비율을 100%보다 키우지 않는다", () => {

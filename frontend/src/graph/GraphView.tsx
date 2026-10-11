@@ -37,7 +37,7 @@ import { concealed, drawn, type EdgeKey } from "./scope";
 import { nodeTip, tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst } from "./view";
-import { boundsOf, centerOn, fitPadding, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, lift, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -233,7 +233,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const stage = stageOf(root.current);
     const { width, height } = stage.area;
     const bounds = boundsOf(scene.layout.boxes.values());
-    home.current = getViewportForBounds(bounds, width, height, ZOOM_MIN, ZOOM_MAX, fitPadding(stage.area, stage.free));
+    home.current = getViewportForBounds(bounds, width, height, ZOOM_MIN, FRAME_ZOOM, fitPadding(stage.area, stage.free));
     void setViewport(home.current);
   }, [scene, home, setViewport]);
   useEffect(

@@ -325,10 +325,37 @@ async function settle(page, quiet = 500) {
   );
 }
 
-async function load(page, at = url) {
+/** 접힌 폴더를 파일트리의 폴더 행으로 펼친다. 이미 펼친 폴더는 그대로 둔다. */
+async function openFolder(page, id) {
+  if ((await count(page, `${node(id)} > .node-package`)) === 0) {
+    return;
+  }
+  await page.click(`.tree-row.tree-dir[data-node="${id}"]`);
+  await page.waitForSelector(`${node(id)} > .node-region`, { timeout: 30_000 });
+  await settle(page);
+}
+
+/**
+ * 화면을 연다. 레포는 폴더를 접은 채로 열리므로, unfold가 참이면 소스 루트 바로 아래의 접힌 폴더를 파일트리의 폴더 행으로 차례로
+ * 펼치고 "화면 맞춤"으로 그래프 전체를 맞춘다. 폴더 안의 파일 상자를 보는 시나리오는 이 화면에서 시작한다.
+ */
+async function load(page, at = url, unfold = true) {
   await page.goto(at);
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
   await settle(page);
+  if (!unfold) {
+    return;
+  }
+  const graph = await api("/api/graph", at);
+  for (const folder of graph.nodes.filter((n) => n.kind === "package" && n.parent === null && !n.test)) {
+    if ((await count(page, `${node(folder.id)} > .node-package`)) === 0) {
+      continue;
+    }
+    await openFolder(page, folder.id);
+    await page.getByRole("button", { name: "화면 맞춤" }).click();
+    await page.mouse.move(1, 1);
+    await settle(page);
+  }
 }
 
 /** 노드의 이름표(펼친 파일 상자는 머리 줄) 가운데를 마우스로 누른다. times가 2면 더블클릭이다. */
@@ -2654,6 +2681,7 @@ async function toolbar(t, page) {
     await page.evaluate(() => localStorage.clear());
     await page.reload();
     await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+    await openFolder(page, NARROW.owner.split(".")[0]);
     await page.click(`.tree-row.tree-file[data-node="${NARROW.owner}"]`);
     await page.waitForSelector(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`, { timeout: 10_000 });
     await page.click(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`);
@@ -4517,6 +4545,81 @@ async function cyclesPin(t, page) {
   t.check("덮개를 끄면 폴더 상자 아래 글자가 없다", (await belowOf(page, "a")) === "");
 }
 
+/** 화면에 그린 파일 상자와 폴더 상자(접힌 상자와 펼친 영역)의 노드 id를 정렬한 목록 */
+const boxIds = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".react-flow__node")]
+      .filter((wrapper) => wrapper.querySelector(":scope > .node-body:is(.node-module, .node-package, .node-region)") !== null)
+      .map((wrapper) => wrapper.dataset.id)
+      .sort(),
+  );
+
+/**
+ * 레포를 연 화면. 모든 폴더를 접어 열고, 그 층에 보이는 상자가 폴더 하나뿐인 폴더만 펼친다. 그 폴더가 있는 화면은
+ * --reload-url의 고정 레포(`src/app/` 하나와 숨은 `tests/`)에서 본다.
+ */
+async function start(t, page) {
+  const expected = async (base) => {
+    const graph = await api("/api/graph", base);
+    const boxes = graph.nodes.filter((n) => (n.kind === "module" || n.kind === "package") && !n.test);
+    const under = (parent) => boxes.filter((n) => n.parent === parent);
+    const opened = [];
+    let layer = under(null);
+    while (layer.length === 1 && layer[0].kind === "package") {
+      opened.push(layer[0].id);
+      layer = under(layer[0].id);
+    }
+    return { graph, opened, shown: [...opened, ...layer.map((n) => n.id)].sort() };
+  };
+  const folded = (id) => count(page, `${node(id)} > .node-package`);
+
+  await load(page, url, false);
+  const sync = await expected(url);
+  const shown = await boxIds(page);
+  const files = sync.graph.nodes.filter((n) => n.kind === "module" && !n.test && n.parent === null).length;
+  t.check(
+    `레포를 열면 parser/가 접힌 폴더 상자이고 소스 루트 바로 아래의 파일 상자 ${files}개가 보인다`,
+    sync.opened.length === 0 && same(shown, sync.shown) && (await folded("parser")) === 1 && (await boxes(page)).length === files,
+    shown.join(", "),
+  );
+  t.check('"뒤로" 버튼을 누를 수 없다', await page.getByRole("button", { name: "뒤로" }).isDisabled());
+  const { free } = await stageOf(page);
+  const rects = await Promise.all(shown.map((id) => rectOf(page, node(id))));
+  const zoom = await zoomOf(page);
+  t.check(
+    "그래프 전체가 정보 패널이 가리지 않는 영역에 들어오고 확대 비율이 100%를 넘지 않는다",
+    zoom <= 1 && rects.every((r) => r.x >= free.x && r.y >= free.y && r.x + r.width <= free.x + free.width && r.y + r.height <= free.y + free.height),
+    `확대 비율 ${zoom.toFixed(3)}`,
+  );
+  await t.shot();
+
+  await clickNode(page, "parser");
+  await page.waitForSelector(`${node("parser")} > .node-region`, { timeout: 30_000 });
+  await settle(page);
+  const inside = sync.graph.nodes.filter((n) => n.parent === "parser" && n.kind === "module" && !n.test).map((n) => n.id);
+  const after = await boxIds(page);
+  t.check(`parser/를 누르면 안의 파일 상자 ${inside.length}개가 폴더 영역 안에 나타난다`, inside.length > 0 && inside.every((id) => after.includes(id)), after.join(", "));
+
+  if (reloadUrl === null) {
+    t.skip("그 층에 보이는 상자가 폴더 하나뿐이면 그 폴더를 펼쳐 연다", "--reload-url을 주지 않았다");
+    return;
+  }
+  await load(page, reloadUrl, false);
+  const sample = await expected(reloadUrl);
+  const seen = await boxIds(page);
+  const nested = sample.graph.nodes.filter((n) => n.kind === "package" && !n.test && !sample.opened.includes(n.id) && seen.includes(n.id)).map((n) => n.id);
+  const closed = await Promise.all(nested.map(folded));
+  t.check(
+    "그 층에 보이는 상자가 폴더 하나뿐이면 그 폴더를 펼쳐 열고 그 아래의 폴더는 접어 둔다",
+    sample.opened.length > 0 &&
+      same(seen, sample.shown) &&
+      (await count(page, `${node(sample.opened[0])} > .node-region`)) === 1 &&
+      nested.length > 0 &&
+      closed.every((n) => n === 1),
+    `펼친 폴더 ${sample.opened.join(", ")}, 접힌 폴더 ${nested.join(", ")}, 상자 ${seen.join(", ")}`,
+  );
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -4568,10 +4671,13 @@ const SCENARIOS = [
   ["cycles", cyclesScenario],
   ["cycles-change", cyclesChange],
   ["cycles-pin", cyclesPin],
+  ["start", start],
 ];
 
 /** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
 const STAGE3 = new Set(SCENARIOS.slice(SCENARIOS.findIndex(([name]) => name === "finder-open")).map(([name]) => name));
+/** 4단계 시나리오. 스크린샷 이름이 s4-로 시작한다. */
+const STAGE4 = new Set(["start"]);
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 
@@ -4596,7 +4702,7 @@ async function run(browser, name, scenario) {
   });
   const results = [];
   const errors = [];
-  const path = join(OUT, `${STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
+  const path = join(OUT, `${STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
   const page = await context.newPage();
   let shot = false;
   const t = {

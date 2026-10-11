@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { repoFixture, routeFixture } from "../graph/fixture";
+import { node as made, repoFixture, routeFixture } from "../graph/fixture";
 import { back, jump, push, type History, type Place } from "./history";
 import { useOverlay } from "./overlay";
-import { barred, chosenOf, litOf, nestedFolders, parseUi, pinned, useAtlas, type AtlasStore } from "./store";
+import { barred, chosenOf, litOf, parseUi, pinned, startFolds, useAtlas, type AtlasStore } from "./store";
 
 const [a, b, c] = repoFixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
 const folder = repoFixture.nodes.find((n) => n.kind === "package")!.id;
@@ -144,11 +144,33 @@ describe("접은 폴더와 선택", () => {
   });
 });
 
-describe("nestedFolders", () => {
-  it("소스 루트 바로 아래 폴더는 빼고 그 아래의 폴더만 고른다", () => {
-    const inner = { ...repoFixture.nodes.find((n) => n.id === "pkg")!, id: "pkg.inner", parent: "pkg" };
-    expect(nestedFolders(repoFixture)).toEqual(new Set());
-    expect(nestedFolders({ ...repoFixture, nodes: [...repoFixture.nodes, inner] })).toEqual(new Set(["pkg.inner"]));
+describe("startFolds", () => {
+  const graph = (...nodes: ReturnType<typeof made>[]) => ({ nodes, edges: [] });
+  const lib = [made("lib", "package", null), made("lib.a", "module", "lib"), made("lib.sub", "package", "lib"), made("lib.sub.b", "module", "lib.sub")];
+
+  it("최상위에 상자가 둘 이상이면 모든 폴더를 접는다", () => {
+    const inner = made("pkg.inner", "package", "pkg");
+    expect(startFolds(repoFixture, false)).toEqual(new Set(["pkg", "app"]));
+    expect(startFolds({ ...repoFixture, nodes: [...repoFixture.nodes, inner] }, false)).toEqual(new Set(["pkg", "pkg.inner", "app"]));
+  });
+
+  it("그 층에 보이는 상자가 폴더 하나뿐이면 그 폴더를 펼치고 한 층 더 내려가 같은 판정을 한다", () => {
+    expect(startFolds(graph(...lib), false)).toEqual(new Set(["lib.sub"]));
+    const deep = [made("top", "package", null), made("top.core", "package", "top"), made("top.core.a", "module", "top.core"), made("top.core.sub", "package", "top.core")];
+    expect(startFolds(graph(...deep), false)).toEqual(new Set(["top.core.sub"]));
+    const chain = [made("one", "package", null), made("one.two", "package", "one"), made("one.two.three", "package", "one.two"), made("one.two.three.a", "module", "one.two.three")];
+    expect(startFolds(graph(...chain), false)).toEqual(new Set());
+  });
+
+  it("테스트 코드 토글이 꺼져 숨는 폴더와 파일은 세지 않는다", () => {
+    const tests = [made("tests", "package", null, { test: true }), made("tests.test_a", "module", "tests", { test: true }), made("conftest", "module", null, { test: true })];
+    expect(startFolds(graph(...lib, ...tests), false)).toEqual(new Set(["lib.sub", "tests"]));
+    expect(startFolds(graph(...lib, ...tests), true)).toEqual(new Set(["lib", "lib.sub", "tests"]));
+  });
+
+  it("그 층에 파일 상자가 있으면 폴더를 펼치지 않고, 외부 노드는 상자로 세지 않는다", () => {
+    expect(startFolds(graph(...lib, made("setup", "module", null)), false)).toEqual(new Set(["lib", "lib.sub"]));
+    expect(startFolds(graph(...lib, made("ext:json", "external", null)), false)).toEqual(new Set(["lib.sub"]));
   });
 });
 
@@ -648,8 +670,8 @@ describe("reopen", () => {
     const now = store();
     expect([now.depth, now.autoSummary, now.showTests, now.showExternal]).toEqual([2, false, false, false]);
     expect([now.view, now.selection]).toEqual([{ kind: "structure" }, null]);
-    expect(now.collapsed).toEqual(nestedFolders(repoFixture));
-    expect(now.history).toEqual({ entries: [{ view: { kind: "structure" }, selection: null, collapsed: [...nestedFolders(repoFixture)].sort() }], index: 0 });
+    expect(now.collapsed).toEqual(new Set(["app", "pkg"]));
+    expect(now.history).toEqual({ entries: [{ view: { kind: "structure" }, selection: null, collapsed: ["app", "pkg"] }], index: 0 });
     expect([now.finder.open, now.finder.from, now.finder.route]).toEqual([false, null, null]);
     expect([now.repo, now.graph, now.tree, now.epoch]).toEqual([repo, repoFixture, tree, 1]);
     expect(useOverlay.getState().kind).toBe("cycles");

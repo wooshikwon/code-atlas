@@ -1,7 +1,7 @@
 // 분석 결과와 화면 상태를 파일트리·그래프·정보 패널이 함께 쓴다. 컴포넌트는 선택자로 필요한 필드만 구독한다.
 import { create } from "zustand";
 import { getGraph, getRepo, getTree } from "../api/client";
-import type { Graph, Repo, Tree } from "../api/types";
+import type { AtlasNode, Graph, Repo, Tree } from "../api/types";
 import { cycles } from "../graph/cycles";
 import { lit, route, type Lit, type Route } from "../graph/route";
 import type { EdgeKey } from "../graph/scope";
@@ -46,7 +46,7 @@ export interface AtlasStore {
   error: string | null;
   view: View;
   selection: Selection;
-  /** 접은 폴더(패키지 노드 id). 레포를 열면 `nestedFolders`가 고른 폴더가 접혀 있다. */
+  /** 접은 폴더(패키지 노드 id). 레포를 열면 `startFolds`가 고른 폴더가 접혀 있다. */
   collapsed: Set<string>;
   /** 흐름 단계 */
   depth: Depth;
@@ -173,9 +173,23 @@ function placeOf(state: Pick<AtlasStore, "view" | "selection" | "collapsed">): P
   return { view: state.view, selection: state.selection, collapsed: [...state.collapsed].sort() };
 }
 
-/** 레포를 열 때 접어 두는 폴더. 소스 루트 바로 아래 폴더는 펼치고 그 아래의 폴더는 모두 접는다. */
-export function nestedFolders(graph: Graph): Set<string> {
-  return new Set(graph.nodes.filter((n) => n.kind === "package" && n.parent !== null).map((n) => n.id));
+/**
+ * 레포를 열 때 접어 두는 폴더. 모든 폴더를 접되, 소스 루트부터 내려가며 그 층에 보이는 상자(파일 상자와 폴더 상자)가 폴더 하나뿐인
+ * 동안 그 폴더를 펼친다. 테스트 코드 토글이 꺼져 숨는 파일과 폴더는 세지 않는다.
+ */
+export function startFolds(graph: Graph, showTests: boolean): Set<string> {
+  const off = hidden(graph, { showTests, showExternal: false });
+  const boxes = new Map<string | null, AtlasNode[]>();
+  for (const node of graph.nodes) {
+    if ((node.kind === "module" || node.kind === "package") && !off.has(node.id)) {
+      boxes.set(node.parent, [...(boxes.get(node.parent) ?? []), node]);
+    }
+  }
+  const folds = new Set(graph.nodes.filter((n) => n.kind === "package").map((n) => n.id));
+  for (let layer = boxes.get(null) ?? []; layer.length === 1 && layer[0].kind === "package"; layer = boxes.get(layer[0].id) ?? []) {
+    folds.delete(layer[0].id);
+  }
+  return folds;
 }
 
 /** 경로 고정 상태인지. 찾은 경로가 하나라도 있으면 고정이다. */
@@ -216,9 +230,9 @@ const START: Pick<AtlasStore, "view" | "selection" | "collapsed"> = {
 
 const FINDER: Finder = { open: false, from: null, to: null, route: null, pick: 0, focus: null, blocked: 0, aimed: 0 };
 
-/** 받은 분석 결과와, 레포를 처음 열 때의 뷰·선택·접은 폴더·탐색 이력 */
-function opened(repo: Repo, graph: Graph, tree: Tree) {
-  const collapsed = nestedFolders(graph);
+/** 받은 분석 결과와, 레포를 처음 열 때의 뷰·선택·접은 폴더·탐색 이력. 테스트 코드 토글이 showTests일 때의 화면이다. */
+function opened(repo: Repo, graph: Graph, tree: Tree, showTests: boolean) {
+  const collapsed = startFolds(graph, showTests);
   const place = placeOf({ ...START, collapsed });
   return { repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 } };
 }
@@ -348,13 +362,13 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       applyTheme(ui.theme);
       Promise.all([getRepo(), getGraph(), getTree()])
         .then(([repo, graph, tree]) => {
-          set(opened(repo, graph, tree));
+          set(opened(repo, graph, tree, get().showTests));
           cover(graph, get());
         })
         .catch((caught: unknown) => set({ error: caught instanceof Error ? caught.message : String(caught) }));
     },
     reopen: (repo, graph, tree) => {
-      set({ ...opened(repo, graph, tree), showTests: false, showExternal: false, finder: FINDER, paletteOpen: false, epoch: get().epoch + 1 });
+      set({ ...opened(repo, graph, tree, false), showTests: false, showExternal: false, finder: FINDER, paletteOpen: false, epoch: get().epoch + 1 });
       keep({ depth: 2, autoSummary: false });
       cover(graph, get());
     },

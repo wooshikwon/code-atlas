@@ -2,7 +2,7 @@ import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { GraphView } from "./graph/GraphView";
-import { fitTarget, FRAME_ZOOM, stageOf } from "./graph/viewport";
+import { fitTarget, stageOf } from "./graph/viewport";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
 import { bind } from "./nav/keys";
@@ -15,7 +15,6 @@ import { litOf, pinned, useAtlas } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
 function Toolbar() {
-  const functionView = useAtlas((s) => s.view.kind === "function");
   const canBack = useAtlas((s) => s.history.index > 0);
   const canForward = useAtlas((s) => s.history.index < s.history.entries.length - 1);
   /** 경로 고정 중에는 뒤로·앞으로 버튼을 누를 수 없다. */
@@ -27,14 +26,14 @@ function Toolbar() {
   const { fitView } = useReactFlow();
 
   /**
-   * 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. 함수 시점 뷰에서는 확대 비율을 100%보다 키우지 않는다.
+   * 정보 패널이 가리지 않는 영역에 그래프 전체를 맞추고 확대 비율을 100%보다 키우지 않는다.
    * 경로 고정 중에는 강조하는 경로를 맞춘다.
    */
   const fitGraph = () => {
     const graph = document.querySelector(".graph");
     if (graph !== null) {
       const path = litOf(useAtlas.getState().finder)?.path ?? null;
-      void fitView({ maxZoom: functionView ? FRAME_ZOOM : undefined, ...fitTarget(stageOf(graph), path) });
+      void fitView(fitTarget(stageOf(graph), path));
     }
   };
 
