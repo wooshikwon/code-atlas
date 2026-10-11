@@ -1,6 +1,7 @@
 // 정보 패널 머리 줄. 첫 줄에 이름과 종류 칩을, 둘째 줄에 위치와 수치, 변경 상태를 적는다.
 import type { AtlasNode, EdgeGroup, EdgeKind, SiteRef } from "../api/types";
 import { EDGE_KIND_NAMES, GROUP_NAMES, KIND_NAMES } from "../graph/names";
+import { EntryMark } from "../graph/nodes/common";
 import { CHANGE_NAMES, useChange } from "../state/changes";
 
 /** 고른 선. 집계 선이면 kind가 null이고 kinds에 종류마다 지점 수를 담는다. */
@@ -103,7 +104,7 @@ export function Header({ item, nodes }: HeaderProps) {
     <>
       <div className="info-panel-title">
         <b>
-          {entry && "▶ "}
+          {entry && <EntryMark />}
           {name}
         </b>
         <span className="info-panel-chip">{chip}</span>

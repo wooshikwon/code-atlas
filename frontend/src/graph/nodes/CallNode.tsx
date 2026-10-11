@@ -2,8 +2,7 @@ import type { Node, NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { useChange } from "../../state/changes";
 import { counted, type Side } from "../calls";
-import { ENTRY_MARK } from "../layout";
-import { Badges, Handles, Loc, nodeProps, sameNode, type AtlasNodeData } from "./common";
+import { Badges, EntryMark, Handles, Loc, nodeProps, sameNode, type AtlasNodeData } from "./common";
 
 export interface CallNodeData extends AtlasNodeData {
   /** 메서드면 `클래스.이름()` */
@@ -59,7 +58,7 @@ export const CallNode = memo(function CallNode({ data }: NodeProps<CallFlowNode>
       <span className="call-text">
         <span className="call-name">
           <span className="node-label">
-            {data.node.entry && <span className="node-entry">{ENTRY_MARK}</span>}
+            {data.node.entry && <EntryMark className="node-entry" />}
             {data.label}
           </span>
           {counted(data.node) && <Loc data={data} />}
