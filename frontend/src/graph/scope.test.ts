@@ -3,7 +3,7 @@ import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { repoFixture } from "./fixture";
 import { flow } from "./flow";
 import { concealed, degrees, drawn, neighbors, picked, ubiquitous, type DrawnEdge } from "./scope";
-import { hidden, shown } from "./visible";
+import { hidden, nodeIndex, shown, unitOf } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
 const off = hidden(repoFixture, toggles);
@@ -60,19 +60,32 @@ describe("degrees", () => {
 });
 
 describe("neighbors", () => {
-  const count = (selection: string, collapsed: string[] = []) => neighbors([...draw(selection, collapsed).values()], selection);
+  const nodes = nodeIndex(repoFixture);
+  const count = (selection: string, collapsed: string[] = []) => neighbors([...draw(selection, collapsed).values()], nodes, selection);
 
   it("파일 상자는 경계를 넘는 선을 올린 집계 선으로 이어진 상자를 센다", () => {
     // main은 pkg.mod, cli, common을 쓰고 pkg.mod와 cli가 main을 쓴다. degrees는 import 선 세 개만 센다.
-    expect(count("main")).toEqual({ incoming: 2, outgoing: 3 });
+    expect(count("main")).toEqual({ incoming: 2, outgoing: 3, external: 0 });
     expect(degrees(repoFixture).get("main")).toEqual({ incoming: 1, outgoing: 3 });
   });
 
   it("접힌 폴더 상자는 안에 든 노드의 선을 올려 세고, 상대 상자가 접힌 폴더면 그 폴더를 하나로 센다", () => {
-    expect(count("pkg", ["pkg"])).toEqual({ incoming: 1, outgoing: 2 });
+    expect(count("pkg", ["pkg"])).toEqual({ incoming: 1, outgoing: 2, external: 0 });
     expect(degrees(repoFixture).has("pkg")).toBe(false);
-    expect(count("main", ["pkg"])).toEqual({ incoming: 2, outgoing: 3 });
-    expect(count("common", ["app"])).toEqual({ incoming: 4, outgoing: 0 });
+    expect(count("main", ["pkg"])).toEqual({ incoming: 2, outgoing: 3, external: 0 });
+    expect(count("common", ["app"])).toEqual({ incoming: 4, outgoing: 0, external: 0 });
+  });
+
+  it("외부 모듈은 쓰는 상자 수에 넣지 않고 따로 센다", () => {
+    const on = { showTests: false, showExternal: true };
+    const hiddenOn = hidden(repoFixture, on);
+    const user = repoFixture.edges.find((e) => e.target === "ext:json")!.source;
+    const box = unitOf(nodes, user);
+    const focus = flow(repoFixture, box, 2, hiddenOn);
+    const visible = shown(repoFixture, { ...on, collapsed: new Set(), flow: focus });
+    const withExternal = neighbors(drawn(repoFixture, visible, focus, null), nodes, box);
+    expect(withExternal.external).toBe(1);
+    expect(withExternal.outgoing).toBe(count(box).outgoing);
   });
 });
 

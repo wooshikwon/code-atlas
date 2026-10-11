@@ -6,9 +6,13 @@ import { Handles, Inflow, Label, nodeProps, sameNode, type AtlasFlowNode } from 
 export const ExternalNode = memo(function ExternalNode({ data }: NodeProps<AtlasFlowNode>) {
   return (
     <div {...nodeProps("node-external", data, null)}>
-      <Handles />
-      <Label data={data} />
-      <Inflow data={data} />
+      <Handles data={data} />
+      {data.part === "face" && (
+        <>
+          <Label data={data} />
+          <Inflow data={data} />
+        </>
+      )}
     </div>
   );
 }, sameNode);

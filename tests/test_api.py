@@ -318,17 +318,17 @@ async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects
             for node, left in zip(nodes, gone)
         ]
         await asyncio.sleep(0.1)
-        assert made == ["helper", "run_engine"]
+        assert made == ["app/core.py::helper", "app/core.py::run_engine"]
 
         gone[0].set()
         gone[2].set()
         assert (await posts[0])[0] == (await posts[2])[0] == 499
         release.set()
-        assert await posts[1] == (200, {"summary": "run_engine 요약"})
+        assert await posts[1] == (200, {"summary": "app/core.py::run_engine 요약"})
         await asyncio.sleep(0.1)
-        assert made == ["helper", "run_engine"]
+        assert made == ["app/core.py::helper", "app/core.py::run_engine"]
         _, cached = await call(app, "GET", "/api/summary", {"node": nodes[0]})
-        assert cached["summary"] == "helper 요약"
+        assert cached["summary"] == "app/core.py::helper 요약"
         _, skipped = await call(app, "GET", "/api/summary", {"node": nodes[2]})
         assert skipped["summary"] is None
 
@@ -338,35 +338,35 @@ def test_summary_is_made_on_post_and_read_from_cache(client, generated):
     assert client.get("/api/summary", params=node).json() == {"summary": None, "available": True, "reason": None}
     assert generated == []
 
-    assert client.post("/api/summary", params=node).json() == {"summary": "run_engine 요약 1"}
+    assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 1"}
     system, prompt = generated[0]
     assert system == summary.system_prompt_of(None)
     assert prompt.startswith(
-        "[대상]\n종류: 함수\n이름: run_engine\n위치: src/app/core.py 31~35줄\n\n[코드]\ndef run_engine(config: Config) -> Engine:"
+        "[대상]\n종류: 함수\n이름: app/core.py::run_engine\n위치: src/app/core.py 31~35줄\n\n[코드]\ndef run_engine(config: Config) -> Engine:"
     )
-    assert '- main (src/app/cli.py) · 호출\n    9:     config = Config("x")\n    10>     label = "엔진 시작"; run_engine(config)' in prompt
-    assert "- Engine.start (src/app/core.py)\n    def start(self, label: 'Config') -> Optional[Config]:" in prompt
-    assert "- Config (src/app/models.py): name: str, retries: int" in prompt
+    assert '- app/cli.py::main · 호출\n    9:     config = Config("x")\n    10>     label = "엔진 시작"; run_engine(config)' in prompt
+    assert "- app/core.py::Engine.start\n    def start(self, label: 'Config') -> Optional[Config]:" in prompt
+    assert "- app/models.py::Config: name: str, retries: int" in prompt
 
-    assert client.post("/api/summary", params=node).json() == {"summary": "run_engine 요약 1"}
-    assert client.get("/api/summary", params=node).json()["summary"] == "run_engine 요약 1"
+    assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 1"}
+    assert client.get("/api/summary", params=node).json()["summary"] == "app/core.py::run_engine 요약 1"
     assert len(generated) == 1
 
-    assert client.post("/api/summary", params={**node, "refresh": "true"}).json() == {"summary": "run_engine 요약 2"}
-    assert client.get("/api/summary", params=node).json()["summary"] == "run_engine 요약 2"
+    assert client.post("/api/summary", params={**node, "refresh": "true"}).json() == {"summary": "app/core.py::run_engine 요약 2"}
+    assert client.get("/api/summary", params=node).json()["summary"] == "app/core.py::run_engine 요약 2"
 
 
 def test_summary_of_method_and_file(client, generated):
     client.post("/api/summary", params={"node": "app.core:Engine.start"})
     client.post("/api/summary", params={"node": "app.core"})
     (_, method), (_, file) = generated
-    assert name_in(method) == "Engine.start" and "\n[코드]\n    def start(self" in method
-    assert "[대상이 든 클래스]\nclass Engine:" in method
+    assert name_in(method) == "app/core.py::Engine.start" and "\n[코드]\n    def start(self" in method
+    assert "[대상이 든 클래스]\napp/core.py::Engine\n    class Engine:" in method
     assert file.startswith(
-        "[대상]\n종류: 파일\n이름: src/app/core.py\n위치: src/app/core.py\n\n[최상위 정의의 시그니처 목록]\ndef helper(value):\nclass Engine:\n"
+        "[대상]\n종류: 파일\n이름: src/app/core.py\n위치: src/app/core.py\n\n[최상위 정의의 시그니처 목록]\napp/core.py::helper\n    def helper(value):\napp/core.py::Engine\n    class Engine:\n"
     )
     assert "[이 파일을 쓰는 파일과 가져다 쓰는 이름]\n- src/app/" in file
-    assert "[이 파일이 쓰는 파일과 가져다 쓰는 이름]\n- src/app/models.py: Config" in file
+    assert "[이 파일이 쓰는 파일과 가져다 쓰는 이름]\n- src/app/models.py: app/models.py::Config" in file
 
 
 @pytest.fixture

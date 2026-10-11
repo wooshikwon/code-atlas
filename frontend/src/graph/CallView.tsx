@@ -15,18 +15,17 @@ import { useAtlas } from "../state/store";
 import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
 import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
+import { LAYER } from "./layers";
 import { Legend } from "./Legend";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
+import { flowNodes, parts, type Drawn } from "./nodes/common";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { GROUP_NAMES, KIND_NAMES } from "./names";
 import { boundsOf, fitPadding, FRAME_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, nodeIndex } from "./visible";
 
 const nodeTypes: NodeTypes = { call: CallNode };
-
-const EDGE_Z = 0;
-const NODE_Z = 1;
 
 /** 배치 한 번과 그 배치를 만든 입력. 노드와 선은 늘 같은 Scene에서 만든다. */
 interface Scene {
@@ -36,26 +35,24 @@ interface Scene {
 }
 
 /** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. */
-function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string | null): { id: string; data: CallNodeData }[] {
+function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string | null): Drawn<CallNodeData>[] {
   return scene.calls.nodes.map((id) => {
     const node = nodes.get(id)!;
-    return {
-      id,
-      data: {
-        node,
-        functions: 0,
-        expanded: false,
-        selected: id === selected,
-        flow: false,
-        local: false,
-        inflow: null,
-        unresolved: node.unresolved,
-        label: callLabel(nodes, node),
-        file: fileLabel(nodes, node),
-        side: scene.calls.side.get(id)!,
-        more: scene.calls.more.has(id),
-      },
-    };
+    const data = parts({
+      node,
+      functions: 0,
+      expanded: false,
+      selected: id === selected,
+      flow: false,
+      local: false,
+      inflow: null,
+      unresolved: node.unresolved,
+      label: callLabel(nodes, node),
+      file: fileLabel(nodes, node),
+      side: scene.calls.side.get(id)!,
+      more: scene.calls.more.has(id),
+    });
+    return { id, type: "call", opacity: 1, inert: false, ...data };
   });
 }
 
@@ -114,18 +111,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     const still = reducedMotion();
     const draw = (at: Layout, fresh: Set<string> | null) => {
       onScreen.current = at;
-      setNodes(
-        items.map((item) => ({
-          ...item,
-          type: "call",
-          position: at.positions.get(item.id) ?? { x: 0, y: 0 },
-          ...(at.sizes.get(item.id) ?? { width: 0, height: 0 }),
-          zIndex: NODE_Z,
-          draggable: false,
-          connectable: false,
-          style: { opacity: fresh?.has(item.id) === true ? 0 : 1 },
-        })),
-      );
+      setNodes(flowNodes(items, at.boxes, fresh));
     };
 
     if (scene.center !== framed.current && root.current !== null) {
@@ -164,7 +150,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       target: view.target,
       type: "orthogonal",
       data: view,
-      zIndex: EDGE_Z,
+      zIndex: LAYER.edge,
     }));
   }, [scene]);
 
@@ -186,14 +172,14 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     tip.current?.hide();
     if ((event.target as Element).closest(".call-more") !== null) {
       clicked.current = null;
-      expandFunction(node.id);
+      expandFunction(node.data.node.id);
       return;
     }
     if (repeated(event)) {
       return;
     }
-    clicked.current = { id: node.id, from: useAtlas.getState().history };
-    select(node.id);
+    clicked.current = { id: node.data.node.id, from: useAtlas.getState().history };
+    select(node.data.node.id);
   };
   const onPaneClick = (event: ReactMouseEvent) => {
     tip.current?.hide();

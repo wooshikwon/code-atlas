@@ -18,7 +18,7 @@ export type EdgeView = {
   sites: number;
 };
 
-/** 부모가 자식보다 앞에 오는 순서. React Flow는 parentId가 가리키는 노드가 먼저 나와야 한다. */
+/** 부모가 자식보다 앞에 오는 순서. 같은 층의 바탕 요소는 이 순서로 그리므로 부모 위에 자식이 놓인다. */
 export function parentFirst(graph: Graph, visible: Set<string>): AtlasNode[] {
   const nodes = graph.nodes.filter((n) => visible.has(n.id));
   const parents = new Map(nodes.map((n) => [n.id, n.parent]));

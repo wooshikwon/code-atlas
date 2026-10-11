@@ -20,9 +20,10 @@ export type HeaderItem =
   | { type: "file"; path: string }
   /**
    * 파일 상자와 폴더 상자의 incoming·outgoing은 화면에 그린 선으로 이어진 상대 상자 수이고 unresolved는 안에 든 노드까지 합친 값이다.
+   * external은 그 상자가 쓰는 외부 모듈 수이고, 외부 노드를 껐거나 상자가 아니면 null이다.
    * 그 밖의 노드는 그 노드에 닿는 선 수와 그 노드의 미확인 호출 수다.
    */
-  | { type: "node"; node: AtlasNode; incoming: number; outgoing: number; unresolved: number; functions: number }
+  | { type: "node"; node: AtlasNode; incoming: number; outgoing: number; external: number | null; unresolved: number; functions: number }
   | { type: "edge"; edge: PickedEdge };
 
 interface HeaderProps {
@@ -79,11 +80,13 @@ export function Header({ item, nodes }: HeaderProps) {
     facts = [
       whereOf(node),
       node.kind === "external" ? null : `${node.loc}줄`,
-      ...(node.kind === "module"
-        ? [`쓰는 파일 ${item.outgoing}`, `이 파일을 쓰는 파일 ${item.incoming}`]
-        : node.kind === "package"
-          ? [`쓰는 파일 ${item.outgoing}`, `이 폴더를 쓰는 파일 ${item.incoming}`]
-          : [`들어오는 선 ${item.incoming}`, `나가는 선 ${item.outgoing}`]),
+      ...(node.kind === "module" || node.kind === "package"
+        ? [
+            `쓰는 파일 ${item.outgoing}`,
+            item.external === null ? null : `외부 모듈 ${item.external}`,
+            `${node.kind === "module" ? "이 파일을" : "이 폴더를"} 쓰는 파일 ${item.incoming}`,
+          ]
+        : [`들어오는 선 ${item.incoming}`, `나가는 선 ${item.outgoing}`]),
       node.kind === "module" ? `함수 ${item.functions}개` : null,
       item.unresolved > 0 ? `미확인 호출 ${item.unresolved}` : null,
     ];

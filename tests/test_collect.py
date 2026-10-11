@@ -1,4 +1,4 @@
-from code_atlas.collect import collect, collected, find_source_root, is_test_path, module_id
+from code_atlas.collect import collect, collected, disk_path, find_source_root, is_test_path, module_id
 
 
 def test_collect_skips_ignored_and_venv(sample_repo):
@@ -69,3 +69,25 @@ def test_module_id():
     assert module_id("src/id_map.py", "src") == "id_map"
     assert module_id("tests/test_x.py", "src") == "tests.test_x"
     assert module_id("__init__.py", "") == "__init__"
+
+
+def test_disk_path_follows_symlinks_and_keeps_missing_paths(sample_repo, tmp_path):
+    link = tmp_path / "link"
+    link.symlink_to(sample_repo)
+    assert disk_path(link) == sample_repo.resolve()
+    assert disk_path(link / "src/app/core.py") == (sample_repo / "src/app/core.py").resolve()
+    assert collect(link).root == collect(sample_repo).root
+    assert disk_path(tmp_path / "missing" / "a.py") == (tmp_path / "missing" / "a.py").resolve()
+
+
+def test_disk_path_uses_the_names_written_on_disk(sample_repo, tmp_path):
+    shouted = tmp_path / "SAMPLE_REPO"
+    if shouted.exists():
+        # 대소문자를 구분하지 않는 파일 시스템: 대소문자가 다른 경로가 디스크의 이름으로 바뀐다.
+        assert disk_path(shouted / "SRC/APP/Core.py") == (sample_repo / "src/app/core.py").resolve()
+        assert collect(shouted).root == collect(sample_repo).root
+    else:
+        # 대소문자를 구분하는 파일 시스템: 대소문자가 다른 경로는 다른 파일이므로 그대로 둔다.
+        assert disk_path(shouted / "SRC/APP/Core.py") == (shouted / "SRC/APP/Core.py").resolve()
+        shouted.mkdir()
+        assert disk_path(shouted) != disk_path(sample_repo)

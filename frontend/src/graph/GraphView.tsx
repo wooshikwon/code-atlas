@@ -24,7 +24,8 @@ import { functionCounts, layout, titleOf, type Layout, type Point } from "./layo
 import { Legend } from "./Legend";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { GROUP_NAMES, KIND_NAMES } from "./names";
-import type { AtlasFlowNode, AtlasNodeData } from "./nodes/common";
+import { LAYER } from "./layers";
+import { flowNodes, parts, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
 import { concealed, drawn } from "./scope";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
@@ -32,9 +33,6 @@ import { edgeViews, parentFirst } from "./view";
 import { boundsOf, centerOn, fitPadding, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
 
-/** 선은 자식을 그리는 상자(깊이만큼 0부터)보다 위에, 그 밖의 노드보다 아래에 놓는다. */
-const EDGE_Z = 50;
-const LEAF_Z = 100;
 const SHELF_NAME = "연결 없음";
 const SHELF_NAME_HEIGHT = 22;
 
@@ -49,73 +47,28 @@ interface Scene {
   layout: Layout;
 }
 
-/** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. */
-interface Item {
-  id: string;
-  type: string;
-  parent: string | undefined;
-  opacity: number;
-  /** 자식을 그리는 상자는 선 아래에, 그 밖의 노드는 선 위에 그린다. */
-  z: number;
-  /** 펼친 폴더는 상자를 그리지 않으므로 마우스를 받지 않는다. */
-  inert: boolean;
-  data: AtlasNodeData;
-}
-
-function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<string, number>): Item[] {
+function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<string, number>): Drawn<AtlasNodeData>[] {
   const order = parentFirst(scene.graph, scene.shown.nodes);
   const parents = new Set(order.map((n) => n.parent));
   const dim = opacities(scene.graph, scene.flow);
   const marks = concealed(scene.graph, scene.shown, scene.flow);
   const unresolved = unresolvedWithin(scene.graph, scene.shown.hidden);
-  const depths = new Map<string, number>();
   return order.map((node) => {
     const opacity = dim.get(node.id) ?? 1;
     const expanded = parents.has(node.id);
-    const parent = node.parent !== null && scene.shown.nodes.has(node.parent) ? node.parent : undefined;
-    const depth = parent === undefined ? 0 : depths.get(parent)! + 1;
-    depths.set(node.id, depth);
-    return {
-      id: node.id,
-      type: nodeType(node.kind),
-      parent,
-      opacity,
-      z: expanded ? depth : LEAF_Z,
-      inert: expanded && node.kind === "package",
-      data: {
-        node,
-        functions: functions.get(node.id) ?? 0,
-        expanded,
-        selected: node.id === scene.focus,
-        flow: scene.flow !== null && opacity > 0.2,
-        local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
-        inflow: marks.get(node.id) ?? null,
-        unresolved: node.kind !== "module" && node.kind !== "package" ? node.unresolved : expanded ? 0 : (unresolved.get(node.id) ?? 0),
-      },
-    };
-  });
-}
-
-/** 배치 at의 좌표로 React Flow 노드를 만든다. fresh에 든 노드는 불투명도 0으로 그린다. */
-function flowNodes(items: Item[], at: Layout, fresh: Set<string> | null): AtlasFlowNode[] {
-  return items.map((item) => {
-    const size = at.sizes.get(item.id) ?? { width: 0, height: 0 };
-    return {
-      id: item.id,
-      type: item.type,
-      parentId: item.parent,
-      position: at.positions.get(item.id) ?? { x: 0, y: 0 },
-      width: size.width,
-      height: size.height,
-      zIndex: item.z,
-      draggable: false,
-      connectable: false,
-      style: {
-        opacity: fresh?.has(item.id) === true ? 0 : item.opacity,
-        pointerEvents: item.inert ? "none" : undefined,
-      },
-      data: item.data,
-    };
+    /** 펼친 폴더는 상자를 그리지 않으므로 마우스를 받지 않고 글자 요소도 없다. */
+    const inert = expanded && node.kind === "package";
+    const { body, face } = parts({
+      node,
+      functions: functions.get(node.id) ?? 0,
+      expanded,
+      selected: node.id === scene.focus,
+      flow: scene.flow !== null && opacity > 0.2,
+      local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
+      inflow: marks.get(node.id) ?? null,
+      unresolved: node.kind !== "module" && node.kind !== "package" ? node.unresolved : expanded ? 0 : (unresolved.get(node.id) ?? 0),
+    });
+    return { id: node.id, type: nodeType(node.kind), opacity, inert, body, face: inert ? null : face };
   });
 }
 
@@ -235,7 +188,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const still = reducedMotion();
     const draw = (at: Layout, fresh: Set<string> | null) => {
       onScreen.current = at;
-      setNodes(flowNodes(items, at, fresh));
+      setNodes(flowNodes(items, at.boxes, fresh));
       setShelf(shelfCorner(scene, at));
     };
 
@@ -276,7 +229,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       target: view.target,
       type: "orthogonal",
       data: view,
-      zIndex: EDGE_Z,
+      zIndex: LAYER.edge,
     }));
   }, [scene, index, hovered]);
 
@@ -304,8 +257,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       clicked.current = null;
       return;
     }
-    clicked.current = { id: node.id, from: useAtlas.getState().history };
-    select(node.id);
+    clicked.current = { id: node.data.node.id, from: useAtlas.getState().history };
+    select(node.data.node.id);
   };
   const onPaneClick = (event: ReactMouseEvent) => {
     tip.current?.hide();
@@ -322,7 +275,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => selectEdge(edge.id);
 
   const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
-    setHover(node.id);
+    setHover(node.data.node.id);
     tip.current?.show(`${titleOf(node.data.node)} · ${KIND_NAMES[node.data.node.kind]}`, event.clientX, event.clientY);
   };
   const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
@@ -381,7 +334,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
           <ViewportPortal>
             <span
               className="shelf-name"
-              style={{ transform: `translate(${shelf.x}px, ${shelf.y - SHELF_NAME_HEIGHT}px)` }}
+              style={{ zIndex: LAYER.text, transform: `translate(${shelf.x}px, ${shelf.y - SHELF_NAME_HEIGHT}px)` }}
             >
               {SHELF_NAME}
             </span>
