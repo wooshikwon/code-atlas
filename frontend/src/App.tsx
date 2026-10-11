@@ -29,13 +29,17 @@ function Toolbar() {
 
   /**
    * 정보 패널이 가리지 않는 영역에 그래프 전체를 맞추고 확대 비율을 100%보다 키우지 않는다.
-   * 경로 고정 중에는 강조하는 경로를 맞춘다.
+   * 경로 고정 중에는 강조하는 경로를 맞춘다. 구조 뷰의 그래프 전체를 맞췄으면 전체 맞춤 상태를 켠다.
    */
   const fitGraph = () => {
     const graph = document.querySelector(".graph");
     if (graph !== null) {
-      const path = litOf(useAtlas.getState().finder)?.path ?? null;
+      const { finder, view } = useAtlas.getState();
+      const path = litOf(finder)?.path ?? null;
       void fitView(fitTarget(stageOf(graph), path));
+      if (view.kind === "structure") {
+        useAtlas.setState({ fitted: path === null });
+      }
     }
   };
 

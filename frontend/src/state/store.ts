@@ -79,6 +79,12 @@ export interface AtlasStore {
   arranging: boolean;
   /** 화면에 그린 배치를 계산하기 시작한 때의 탐색 이력. 그린 배치가 없으면 null이다. */
   arranged: History | null;
+  /**
+   * 구조 뷰의 화면이 그래프 전체를 맞춘 상태다(전체 맞춤 상태). 레포를 연 처음 화면과 "화면 맞춤"이 켜고, 사용자가 화면을 끌거나
+   * 확대·축소하거나 미니맵으로 옮길 때와 고른 노드나 강조하는 경로로 화면이 옮겨질 때 꺼진다. 켜져 있는 동안 구조 뷰는 배치가
+   * 바뀔 때마다 그래프 전체를 다시 맞춘다.
+   */
+  fitted: boolean;
 
   /** 저장해 둔 화면 설정을 되살린다. */
   restore(): void;
@@ -385,6 +391,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     epoch: 0,
     arranging: false,
     arranged: null,
+    fitted: false,
 
     restore: () => {
       const ui = parseUi(localStorage.getItem(UI_KEY), preferredTheme());

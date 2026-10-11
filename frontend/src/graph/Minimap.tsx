@@ -1,8 +1,8 @@
 // 그래프 왼쪽 아래의 미니맵. 전체 그래프의 축소 그림 위에 지금 화면에 보이는 영역을 사각형으로 그리고,
-// 누르거나 끌면 확대 비율을 그대로 둔 채 그 위치로 화면을 옮긴다. 범례처럼 둥근 버튼으로 접고 편다.
+// 누르거나 끌면 확대 비율을 그대로 둔 채 그 위치로 화면을 옮기고 전체 맞춤 상태를 끈다. 범례처럼 둥근 버튼으로 접고 편다.
 // 경로 고정 중에는 강조하는 경로를 그 위에 그린다.
 import { MiniMap, useReactFlow, useStore, type Node, type XYPosition } from "@xyflow/react";
-import { useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAtlas } from "../state/store";
 import { reducedMotion } from "./motion";
@@ -66,6 +66,13 @@ export function Minimap() {
   const open = useAtlas((s) => s.minimapOpen);
   const path = useAtlas((s) => s.finder.route?.paths[s.finder.pick]);
   const { getViewport, setViewport } = useReactFlow();
+  // 미니맵을 누르거나 끌면 화면이 옮겨지므로 전체 맞춤 상태를 끈다. React Flow의 MiniMap은 pointerdown 처리기를 받지 않는다.
+  useEffect(() => {
+    const element = open ? document.querySelector(".graph-minimap") : null;
+    const release = () => useAtlas.setState({ fitted: false });
+    element?.addEventListener("pointerdown", release);
+    return () => element?.removeEventListener("pointerdown", release);
+  }, [open]);
   if (!open) {
     return null;
   }
