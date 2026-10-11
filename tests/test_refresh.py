@@ -138,6 +138,113 @@ async def test_incremental_results_equal_a_full_analysis(sample_repo, tmp_path, 
     assert draft.texts == expected.texts and draft.answers == {}
 
 
+def swap(repo: Path, path: str, old: str, new: str) -> None:
+    file = repo / path
+    text = file.read_text()
+    assert old in text
+    file.write_text(text.replace(old, new))
+
+
+ENCODE = "\n    def encode(self, o):\n        return ''\n"
+
+
+def override_external_method(repo: Path) -> None:
+    swap(repo, "pkg/base.py", '        return "x"\n', '        return "x"\n' + ENCODE)
+
+
+def reexport_from_another_file(repo: Path) -> None:
+    swap(repo, "pkg/__init__.py", "from .base import Thing", "from .alt import Thing")
+
+
+def override_in_subclass(repo: Path) -> None:
+    swap(repo, "pkg/mid.py", "class Mid(Thing):\n    pass\n", "class Mid(Thing):" + ENCODE)
+
+
+def swap_parent(repo: Path) -> None:
+    swap(repo, "pkg/mid.py", "from pkg.base import Thing", "from pkg.alt import Thing")
+
+
+def switch_branch(repo: Path) -> None:
+    reexport_from_another_file(repo)
+    swap(repo, "pkg/mid.py", "class Mid(Thing):\n    pass\n", "class Mid(Thing):\n    def name(self):\n        return 'mid'\n")
+    swap(repo, "pkg/far.py", "m.encode({})", "m.encode({})\n    m.name()")
+
+
+def reexport_repo_class_under_external_name(repo: Path) -> None:
+    swap(repo, "pkg/__init__.py", "from json import JSONDecoder as Reader", "from .alt import Thing as Reader")
+
+
+def reexport_another_external_class(repo: Path) -> None:
+    swap(repo, "pkg/__init__.py", "from json import JSONDecoder as Reader", "from string import Formatter as Reader")
+
+
+def shadow_external_module(repo: Path) -> None:
+    (repo / "json.py").write_text("VERSION = 1\n")
+
+
+EXTERNAL_EDITS = {
+    "외부 부모의 메서드를 덮는 메서드": override_external_method,
+    "재내보내기": reexport_from_another_file,
+    "자식 클래스의 메서드": override_in_subclass,
+    "부모 교체": swap_parent,
+    "여러 변경": switch_branch,
+    "외부 클래스를 재내보내던 이름에 레포 클래스": reexport_repo_class_under_external_name,
+    "재내보내는 외부 클래스 교체": reexport_another_external_class,
+    "외부 모듈과 이름이 같은 파일": shadow_external_module,
+}
+
+
+@pytest.mark.parametrize("edit", EXTERNAL_EDITS.values(), ids=EXTERNAL_EDITS.keys())
+@pytest.mark.asyncio
+async def test_external_verdicts_follow_the_repo_definitions(external_repo, tmp_path, edit):
+    store = Cache(external_repo, tmp_path / "cache")
+    async with started() as live, started() as reopened, started() as full:
+        first = await refresh(external_repo, sys.executable, live, cache=store)
+        asked_first = len(live.asked)
+        edit(external_repo)
+        from_cache = await refresh(external_repo, sys.executable, reopened, cache=store)
+        from_previous = await refresh(external_repo, sys.executable, live, previous=first)
+        expected = await refresh(external_repo, sys.executable, full)
+    store.close()
+    assert judged(expected)["edges"] != judged(first)["edges"]
+    assert judged(from_cache) == judged(expected)
+    assert judged(from_previous) == judged(expected)
+    assert len(reopened.asked) < len(full.asked)
+    assert len(live.asked) - asked_first < len(full.asked)
+
+
+def change_return_type(repo: Path) -> None:
+    swap(repo, "pkg/base.py", "def make():\n    return {}", "def make():\n    return Thing()")
+
+
+def delete_reexporting_file(repo: Path) -> None:
+    (repo / "pkg" / "__init__.py").unlink()
+
+
+# 선을 만들지 않는 지점의 판정만 남는 편집과, 그 지점의 (식, 증분 분석의 상태, 전체 분석의 상태)
+KEPT_VERDICTS = {
+    "반환 타입": (change_return_type, [("make().get('a')", "builtin", "unresolved")]),
+    "재내보내던 파일 삭제": (
+        delete_reexporting_file,
+        [("Parser()", "external", "unresolved"), ("t.encode({})", "external", "unresolved")],
+    ),
+}
+
+
+@pytest.mark.parametrize(("edit", "kept"), KEPT_VERDICTS.values(), ids=KEPT_VERDICTS.keys())
+@pytest.mark.asyncio
+async def test_edits_that_only_move_types_keep_the_edges_and_some_external_verdicts(external_repo, edit, kept):
+    async with started() as live, started() as full:
+        first = await refresh(external_repo, sys.executable, live)
+        edit(external_repo)
+        again = await refresh(external_repo, sys.executable, live, previous=first)
+        expected = await refresh(external_repo, sys.executable, full)
+    assert judged(again)["edges"] == judged(expected)["edges"]
+    assert {n.id for n in again.analysis.nodes} == {n.id for n in expected.analysis.nodes}
+    differ = [(a.text, a.status, b.status) for a, b in zip(again.analysis.sites, expected.analysis.sites) if a != b]
+    assert sorted(differ) == sorted(kept)
+
+
 @pytest.mark.asyncio
 async def test_draft_leaves_the_sites_of_a_changed_file_unresolved(sample_repo, tmp_path):
     store = Cache(sample_repo, tmp_path / "cache")

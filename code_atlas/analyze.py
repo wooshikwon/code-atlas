@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import venv
 from .cache import Answers, Cache, Stored, environment
-from .collect import RepoFiles, SourceFile, collect, config_texts
+from .collect import RepoFiles, SourceFile, collect, config_texts, module_id
 from .extract import FileFacts, defined_names, extract, read_source
 from .graph import build
 from .lsp import REQUEST_TIMEOUT, Location, Session
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # basedpyright는 요청을 하나씩 처리한다. 처리 중인 요청 하나와 기다리는 요청 하나가 있으면 서버가 쉬지 않는다.
 CONCURRENCY = 2
 _IDENTIFIER = re.compile(r"[^\W\d]\w*")
+_ALIAS = re.compile(r"([^\W\d]\w*)\s+as\s+([^\W\d]\w*)")
 
 
 class PythonNotFound(Exception):
@@ -236,17 +237,23 @@ def _extracted(
 class _Judging:
     """파일마다 지점의 판정을 모으고 다시 물을 지점을 고른다.
 
-    `base`의 판정이 지금 추출 결과에서 나온 파일은 판정을 그대로 쓰고 아래 세 가지 지점만 다시 묻는다. 그 밖의 파일은
+    `base`의 판정이 지금 추출 결과에서 나온 파일은 판정을 그대로 쓰고 아래 네 가지 지점만 다시 묻는다. 그 밖의 파일은
     바뀐 파일이고 모든 지점을 묻는다.
 
     1. 판정의 대상이 바뀐 파일이나 없어진 파일의 노드인 지점
     2. 바뀐 파일이나 없어진 파일을 import로 따라 들여오는 파일의 지점 가운데 판정이 레포 안이거나 미확인인 지점
-    3. 파일이 새로 생겼을 때, 판정이 미확인인 import 지점
+    3. 2의 파일의 지점 가운데 판정이 외부·내장이고 레포 안 정의나 다른 외부 노드로 바뀔 수 있는 지점. 물을 위치의 이름이
+       바뀐 파일과 그 파일이 import로 따라 들여오는 파일이 정의한 이름, 바뀐 파일이 `from … import`로 가져오는 이름,
+       `as`로 그 이름에 묶은 이름 가운데 하나인 지점과, 판정이 외부인 상속 지점, 레포 모듈이나 없어진 파일의 모듈에서
+       가져오는데 판정이 외부인 import 지점이다
+    4. 파일이 새로 생겼을 때, 판정이 미확인인 import 지점
 
-    판정이 내장·외부인 지점은 환경 지문이 같은 동안 다시 묻지 않는다.
+    그 밖의 판정이 내장·외부인 지점은 환경 지문이 같은 동안 다시 묻지 않는다.
     """
 
-    def __init__(self, files: RepoFiles, stored: dict[str, Stored], base: dict[str, Answers]):
+    def __init__(self, files: RepoFiles, texts: dict[str, str], stored: dict[str, Stored], base: dict[str, Answers]):
+        self.texts = texts
+        self.names = {path: kept.names for path, kept in stored.items()}
         self.facts = {f.path: stored[f.path].facts for f in files.files}
         self.index = Index(files.root, list(self.facts.values()))
         self.owner = {node.id: path for path, facts in self.facts.items() for node in facts.nodes}
@@ -256,8 +263,11 @@ class _Judging:
         self.changed: set[str] = set()
         self.asked: set[tuple[str, int]] = set()  # 판정을 그대로 쓰는 파일에서 다시 물은 지점
         self.gone = set(base) - set(self.facts)
+        self._gone_modules = {module_id(path, files.source_root) for path in self.gone}
         self.added = bool(base) and not set(self.facts) <= set(base)
         self._imported = {path: sorted(base[path].imports) if path in base else [] for path in self.facts}
+        self._aliases: dict[str, set[str]] | None = None  # 이름 → 레포 어느 파일에서든 `as`로 그 이름에 묶은 이름
+        self._lines: dict[str, list[bytes]] = {}
         for path, facts in self.facts.items():
             kept = base.get(path)
             if kept is not None and (kept.text_hash, kept.known) == (stored[path].text_hash, stored[path].known):
@@ -289,24 +299,67 @@ class _Judging:
         found.discard(path)
         return found
 
-    def _importers(self) -> set[str]:
-        """바뀐 파일이나 없어진 파일을 import로 따라 들여오는 파일. 판정을 그대로 쓰는 파일은 저장해 둔 import 목록도 따른다."""
+    def _linked(self) -> tuple[set[str], set[str]]:
+        """(바뀐 파일이나 없어진 파일을 import로 따라 들여오는 파일, 바뀐 파일과 그 파일이 import로 따라 들여오는 파일).
+
+        판정을 그대로 쓰는 파일은 저장해 둔 import 목록도 따른다.
+        """
+        imports = {path: self.imports(path).union(self._imported[path]) for path in self.facts}
         importers: dict[str, set[str]] = {}
-        for path in self.facts:
-            for imported in self.imports(path).union(self._imported[path]):
+        for path, found in imports.items():
+            for imported in found:
                 importers.setdefault(imported, set()).add(path)
-        reached: set[str] = set()
-        queue = [*self.changed, *self.gone]
+
+        def reached(start: set[str], links: dict[str, set[str]]) -> set[str]:
+            found: set[str] = set()
+            queue = list(start)
+            while queue:
+                for path in links.get(queue.pop(), ()):
+                    if path not in found:
+                        found.add(path)
+                        queue.append(path)
+            return found
+
+        return reached(self.changed | self.gone, importers), self.changed | reached(self.changed, imports)
+
+    def _defined(self, paths: set[str]) -> set[str]:
+        """`paths`의 파일이 정의한 이름, 바뀐 파일이 `from … import`로 가져오는 이름, 레포 어느 파일에서든 `as`로 그 이름에 묶은 이름."""
+        names = {name for path in paths for name in self.names.get(path, ())}
+        for path in self.changed:
+            for site in self.facts[path].sites:
+                if site.kind == "import" and " import " in site.text:
+                    names.add(site.text.rsplit(" import ", 1)[1])
+        if self._aliases is None:
+            self._aliases = {}
+            for text in self.texts.values():
+                for name, alias in _ALIAS.findall(text):
+                    self._aliases.setdefault(name, set()).add(alias)
+        queue = list(names)
         while queue:
-            for path in importers.get(queue.pop(), ()):
-                if path not in reached:
-                    reached.add(path)
-                    queue.append(path)
-        return reached
+            for alias in self._aliases.get(queue.pop(), ()):
+                if alias not in names:
+                    names.add(alias)
+                    queue.append(alias)
+        return names
+
+    def _redirected(self, path: str, site: ResolvedSite, names: set[str]) -> bool:
+        """판정이 외부·내장인 지점이 레포 안 정의나 다른 외부 노드로 바뀔 수 있다."""
+        if site.status == "external" and site.kind == "inherit":
+            return True
+        if site.status == "external" and site.kind == "import":
+            module = _named_module(site, self.facts[path].file)
+            if module in self.paths or module in self._gone_modules:
+                return True
+        if path not in self._lines:
+            self._lines[path] = [line.encode() for line in self.texts[path].splitlines()]
+        asked = self._lines[path][site.request_line - 1][site.request_col :].decode(errors="ignore")
+        name = _IDENTIFIER.match(asked)
+        return name is not None and name.group() in names
 
     def pending(self) -> list[tuple[str, int]]:
         """다시 물을 지점 가운데 아직 묻지 않은 (경로, 지점 번호)."""
-        importers = self._importers() if self.changed or self.gone else set()
+        importers, sources = self._linked() if self.changed or self.gone else (set(), set())
+        names = self._defined(sources) if importers else set()
         found: list[tuple[str, int]] = []
         for path, judged in self.sites.items():
             if path in self.changed:
@@ -317,7 +370,9 @@ class _Judging:
                     continue
                 moved = site.status == "resolved" and self.owner.get(site.target, path) in self.changed
                 lost = site.status == "resolved" and site.target not in self.owner
-                followed = path in importers and site.status in ("resolved", "unresolved")
+                followed = path in importers and (
+                    site.status in ("resolved", "unresolved") or self._redirected(path, site, names)
+                )
                 missing = self.added and site.kind == "import" and site.status == "unresolved"
                 if moved or lost or followed or missing:
                     found.append((path, i))
@@ -406,7 +461,7 @@ async def refresh(
             base = previous.answers if previous.env == env else {}
         else:
             base = cache.answers(snapshot, env) if cache is not None and not rebuild else {}
-        judging = _Judging(files, stored, base)
+        judging = _Judging(files, texts, stored, base)
         facts = list(judging.facts.values())
         probe = _probe(facts)
 

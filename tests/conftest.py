@@ -9,6 +9,7 @@ import pytest
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_repo"
 CYCLE_FIXTURE = Path(__file__).parent / "fixtures" / "cycle_repo"
+EXTERNAL_FIXTURE = Path(__file__).parent / "fixtures" / "external_repo"
 
 collect_ignore_glob = ["fixtures/*"]
 
@@ -70,6 +71,12 @@ def _commit_fixture(tmp_path: Path) -> Path:
 @pytest.fixture
 def sample_repo(tmp_path: Path) -> Path:
     return _copy_fixture(tmp_path)
+
+
+@pytest.fixture
+def external_repo(tmp_path: Path) -> Path:
+    """외부 클래스를 상속한 클래스와 외부 클래스의 재내보내기가 있는 고정 레포의 사본."""
+    return Path(shutil.copytree(EXTERNAL_FIXTURE, tmp_path / "external_repo"))
 
 
 @pytest.fixture
