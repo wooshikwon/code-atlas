@@ -1038,7 +1038,7 @@ async function summary(t, page) {
   const started = Date.now();
   await page.waitForFunction(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent === "요약을 만드는 중", null, { timeout: 5_000 }).catch(() => {});
   const making = await summaryHint(page);
-  await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 90_000 }).catch(() => {});
+  await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 130_000 }).catch(() => {});
   const seconds = (Date.now() - started) / 1000;
   const made = await page.evaluate(() => document.querySelector(".info-panel-summary .summary-text")?.textContent ?? null);
   t.check(

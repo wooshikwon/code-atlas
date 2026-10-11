@@ -13,6 +13,7 @@ import webbrowser
 from .analyze import PythonNotFound, analyze, require_python
 from .api import HOST, PORT, create_app
 from .model import to_dict
+from .summary import STYLE_GUIDE_ENV, find_style_guide
 
 
 def _python_or_exit(repo: str, python: str | None) -> str:
@@ -72,7 +73,7 @@ def _serve_command(args: argparse.Namespace) -> int:
         else:
             threading.Timer(1.0, webbrowser.open, [url]).start()
 
-    app = create_app(args.repo, python, on_ready)
+    app = create_app(args.repo, python, on_ready, find_style_guide(args.style_guide))
 
     class Server(uvicorn.Server):
         def handle_exit(self, sig, frame) -> None:
@@ -100,6 +101,10 @@ def _serve_parser() -> argparse.ArgumentParser:
     p.add_argument("--python", help="대상 레포의 파이썬 인터프리터 경로")
     p.add_argument("--port", type=int, default=PORT)
     p.add_argument("--no-open", action="store_true", help="브라우저를 열지 않는다")
+    p.add_argument(
+        "--style-guide",
+        help=f"LLM 요약의 문체를 정하는 서술 규약 문서 경로. 주지 않으면 환경 변수 {STYLE_GUIDE_ENV}를 읽는다",
+    )
     return p
 
 

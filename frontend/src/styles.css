@@ -1287,17 +1287,22 @@ ul {
   vertical-align: 1px;
 }
 
+/* 코드 뷰어가 있으면 요약 칸은 패널 높이의 반까지만 쓴다. 넘치는 설명은 칸 안에서 스크롤한다. */
 .info-panel-summary {
-  flex: none;
+  flex: 0 1 auto;
+  min-height: 0;
   padding: 7px 12px;
   border-top: 1px solid var(--line);
-  line-height: 1.5;
+  line-height: 1.6;
+  overflow-y: auto;
 }
 
 .info-panel-label {
   display: block;
+  margin: 0;
   color: var(--muted);
   font-size: 10px;
+  font-weight: 400;
   letter-spacing: 0.04em;
 }
 
@@ -1310,18 +1315,48 @@ ul {
   min-height: 3em;
 }
 
+.summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .summary-make {
   margin-left: 0;
 }
 
 .info-panel-summary:has(+ .code) {
-  max-height: 40%;
-  overflow-y: auto;
+  flex: none;
+  max-height: 50%;
 }
 
 .info-panel-summary code {
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+.summary-text p {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+
+.summary-text .summary-lead {
+  color: var(--ink);
+}
+
+.summary-part {
+  margin-top: 8px;
+}
+
+.summary-part p:last-child {
+  margin-bottom: 0;
+}
+
+.summary-text code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink);
 }
 
 .summary-action {

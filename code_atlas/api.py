@@ -21,7 +21,7 @@ from .collect import RepoFiles, collect, collected, is_test_path
 from .lsp import Location, Session
 from .model import Analysis, to_dict
 from .resolve import EXTERNAL_PREFIX, Index, external_of
-from .summary import KIND_NAMES, Summaries, SummaryError, outline
+from .summary import Summaries, SummaryError, prompt_of
 
 HOST = "127.0.0.1"
 PORT = 8766
@@ -96,7 +96,10 @@ def _overlaps(span: tuple[int, int] | None, ranges: list[tuple[int, int]]) -> bo
 
 
 def create_app(
-    repo: str | Path, python: str | None = None, on_ready: Callable[[Analysis], None] | None = None
+    repo: str | Path,
+    python: str | None = None,
+    on_ready: Callable[[Analysis], None] | None = None,
+    style_guide: Path | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -126,7 +129,7 @@ def create_app(
             app.state.sessions = sessions
             app.state.reopening = asyncio.Lock()
             app.state.nodes = {n.id: n for n in analysis.nodes}
-            app.state.summaries = Summaries()
+            app.state.summaries = Summaries(style_guide=style_guide)
             await app.state.summaries.unavailable()
             app.state.repo = {
                 "name": files.root.name,
@@ -204,28 +207,24 @@ def create_app(
         locations = await ask(path, lambda session: session.definition_at(path, line, col, LSP_TIMEOUT))
         return {"targets": [_target(loc, app.state.analyzed.index) for loc in locations]}
 
-    def summarized(node_id: str) -> tuple[str, str, str]:
-        """노드 id를 요약에 넘길 종류, 이름, 코드로 바꾼다. 파일은 문서 문자열과 시그니처 목록을, 그 밖의 노드는 자기 줄 범위를 넘긴다."""
-        node = app.state.nodes.get(node_id)
-        text = app.state.analyzed.texts.get(node.path) if node is not None and node.kind in KIND_NAMES else None
-        if text is None:
+    def summarized(node_id: str) -> str:
+        """노드 id를 설명을 만들 프롬프트로 바꾼다."""
+        analyzed: Analyzed = app.state.analyzed
+        prompt = prompt_of(app.state.nodes, analyzed.analysis.edges, analyzed.texts, node_id)
+        if prompt is None:
             raise HTTPException(status_code=404, detail=f"요약할 노드가 아니다: {node_id}")
-        if node.kind == "module":
-            return node.kind, node.path, outline(text)
-        start, end = node.range
-        return node.kind, node.id.partition(":")[2], "\n".join(text.splitlines()[start - 1 : end])
+        return prompt
 
     @app.get("/api/summary")
     async def get_summary(node: str) -> dict:
-        _, _, code = summarized(node)
+        prompt = summarized(node)
         summaries: Summaries = app.state.summaries
         reason = await summaries.unavailable()
-        return {"summary": summaries.cached(code), "available": reason is None, "reason": reason}
+        return {"summary": summaries.cached(prompt), "available": reason is None, "reason": reason}
 
     @app.post("/api/summary")
     async def make_summary(request: Request, node: str, refresh: bool = False) -> dict:
-        kind, name, code = summarized(node)
-        making = asyncio.ensure_future(app.state.summaries.make(kind, name, code, refresh))
+        making = asyncio.ensure_future(app.state.summaries.make(summarized(node), refresh))
         gone = asyncio.ensure_future(_disconnected(request))
         try:
             done, _ = await asyncio.wait({making, gone}, return_when=asyncio.FIRST_COMPLETED)

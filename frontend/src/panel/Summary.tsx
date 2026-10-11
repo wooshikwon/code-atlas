@@ -1,9 +1,10 @@
-// LLM 요약 칸. 고른 노드의 요약을 캐시에서 읽어 보이고, 캐시에 없으면 "요약 생성" 버튼을 눌렀을 때 만든다.
+// LLM 요약 칸. 고른 노드의 설명을 캐시에서 읽어 요지, 하는 일, 앞뒤 흐름 세 부분으로 보이고, 캐시에 없으면 "요약 생성" 버튼을 눌렀을 때 만든다.
 // 상단 줄의 "자동 요약"이 켜져 있으면 노드를 고른 채 잠시 머문 뒤에 만든다. 노드를 떠나거나 "자동 요약"을 끄면
 // 만들고 있던 요청을 끊는다.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { getSummary, makeSummary } from "../api/client";
 import { useAtlas } from "../state/store";
+import { partsOf, spansOf } from "./parts";
 
 /** "자동 요약"이 켜져 있을 때 캐시에 없는 요약은 노드를 고른 채 이만큼 머문 뒤에 만든다. */
 const DELAY = 600;
@@ -18,6 +19,28 @@ type State =
   | { phase: "done"; summary: string; available: boolean }
   | { phase: "failed"; error: string; mode: Mode }
   | { phase: "unavailable"; reason: string };
+
+/** 백틱으로 감싼 식별자를 등폭 글꼴로 그린다. */
+function inline(text: string): ReactNode[] {
+  return spansOf(text).map((span, i) => (span.code ? <code key={i}>{span.text}</code> : span.text));
+}
+
+function Explained({ summary }: { summary: string }) {
+  const { lead, sections } = partsOf(summary);
+  return (
+    <div className="summary-text">
+      <p className="summary-lead">{inline(lead)}</p>
+      {sections.map((section) => (
+        <section key={section.title} className="summary-part">
+          <h4 className="info-panel-label">{section.title}</h4>
+          {section.paragraphs.map((paragraph, i) => (
+            <p key={i}>{inline(paragraph)}</p>
+          ))}
+        </section>
+      ))}
+    </div>
+  );
+}
 
 /** 노드가 바뀌면 `key`로 새로 그린다. */
 export function Summary({ node }: { node: string }) {
@@ -79,7 +102,14 @@ export function Summary({ node }: { node: string }) {
 
   return (
     <div className="info-panel-summary">
-      <span className="info-panel-label">LLM 요약</span>
+      <div className="summary-head">
+        <span className="info-panel-label">LLM 요약</span>
+        {state.phase === "done" && state.available && (
+          <button className="summary-action" onClick={() => ask("refresh")}>
+            다시 생성
+          </button>
+        )}
+      </div>
       <div className="summary-body">
         {state.phase === "reading" && <span className="info-panel-hint">&nbsp;</span>}
         {state.phase === "empty" && (
@@ -88,16 +118,7 @@ export function Summary({ node }: { node: string }) {
           </button>
         )}
         {state.phase === "making" && <span className="info-panel-hint">요약을 만드는 중</span>}
-        {state.phase === "done" && (
-          <>
-            <span className="summary-text">{state.summary}</span>
-            {state.available && (
-              <button className="summary-action" onClick={() => ask("refresh")}>
-                다시 생성
-              </button>
-            )}
-          </>
-        )}
+        {state.phase === "done" && <Explained summary={state.summary} />}
         {state.phase === "failed" && (
           <>
             <span className="info-panel-hint">{state.error}</span>
