@@ -39,7 +39,7 @@ import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay"
 import type { Lit } from "./route";
 import { drawn, type EdgeKey } from "./scope";
 import { clipped, nodeTip, packTip, tipOf } from "./tips";
-import { Tooltip, type TooltipHandle } from "./Tooltip";
+import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
 import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, type Shown } from "./visible";
@@ -236,7 +236,6 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   /** 이 컴포넌트를 그리기 시작할 때의 화면 */
   const [start] = useState(() => home.current ?? undefined);
   const root = useRef<HTMLDivElement | null>(null);
-  const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
   const onScreen = useRef<Layout | null>(null);
   /** 화면에 그린 배치의 입력 */
@@ -469,7 +468,6 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const aim = useAim({
     lines: views,
     boxes: scene?.layout.boxes ?? NO_BOXES,
-    tip,
     name: nameOf,
     describe: ({ source, target, group, sites, route }) =>
       `${nameOf(source)} → ${nameOf(target)} · ${sites === 0 && route !== null ? STEP_NAMES[route] : `${GROUP_NAMES[group]} · ${sites}곳`}`,
@@ -538,7 +536,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   };
 
   const onNodeClick: NodeMouseHandler<AtlasFlowNode | PackFlowNode> = (event, node) => {
-    tip.current?.hide();
+    tooltip.hide();
     if (isPack(node)) {
       clicked.current = null;
       togglePack(node.data.box);
@@ -555,7 +553,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     press(node.data.node.id);
   };
   const onPaneClick = (event: ReactMouseEvent) => {
-    tip.current?.hide();
+    tooltip.hide();
     if (repeated(event)) {
       return;
     }
@@ -576,7 +574,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return;
     }
     if (isPack(node)) {
-      tip.current?.show(node.data.tip, event.clientX, event.clientY);
+      tooltip.show(node.data.tip, event.clientX, event.clientY);
       return;
     }
     setHover(node.data.node.id);
@@ -585,7 +583,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const title = titleOf(node.data.node);
     const cut = labelOf(node.data.node) !== title || clipped(root.current?.querySelector(`[data-id="${CSS.escape(faceId(id))}"] .node-label`) ?? null);
     const text = tipOf(event.target) ?? nodeTip(cut ? title : null, useSummaries.getState().leads[id] ?? null, node.data.unused);
-    tip.current?.show(text, event.clientX, event.clientY);
+    tooltip.show(text, event.clientX, event.clientY);
   };
   /** 사용자가 화면을 끌거나 확대·축소하면 전체 맞춤 상태를 끈다. 코드가 옮긴 화면은 event가 null이다. */
   const released: OnMove = (event) => {
@@ -596,7 +594,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const onNodeLeave = () => {
     setHover(null);
     setAimedNode(null);
-    tip.current?.hide();
+    tooltip.hide();
   };
   if (scene === null) {
     return (
@@ -665,7 +663,6 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       </ReactFlow>
       <Dock />
       <Arranging />
-      <Tooltip ref={tip} />
       {aim.menu}
     </div>
   );

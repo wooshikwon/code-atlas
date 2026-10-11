@@ -1,5 +1,6 @@
 import type { Change } from "../api/types";
-import { CHANGE_LETTERS } from "../state/changes";
+import { CHANGE_LETTERS, CHANGE_NAMES } from "../state/changes";
+import { useSummaries } from "../state/summaries";
 import { Chevron, Icon } from "./Icon";
 import type { Row } from "./rows";
 
@@ -12,7 +13,7 @@ export function ChangeMark({ change, letter = true }: { change: Change | null; l
     return null;
   }
   return (
-    <span className="tree-change" data-change={change} title={change === "modified" ? "수정됨" : "추가됨"}>
+    <span className="tree-change" data-change={change} role="img" aria-label={CHANGE_NAMES[change]} data-tip={CHANGE_NAMES[change]}>
       {letter && CHANGE_LETTERS[change]}
     </span>
   );
@@ -20,6 +21,7 @@ export function ChangeMark({ change, letter = true }: { change: Change | null; l
 
 /** 파일트리의 행 하나. cursor는 키보드로 옮기는 활성 행이다. */
 export function TreeNode({ row, id, cursor, onPick }: { row: Row; id: string; cursor: boolean; onPick: (row: Row) => void }) {
+  const lead = useSummaries((s) => (row.node === null ? undefined : s.leads[row.node]));
   return (
     <li
       id={id}
@@ -28,7 +30,8 @@ export function TreeNode({ row, id, cursor, onPick }: { row: Row; id: string; cu
       aria-expanded={row.expanded ?? undefined}
       aria-selected={row.selected}
       className={`tree-row tree-${row.kind}${row.selected ? " active" : ""}${cursor ? " cursor" : ""}`}
-      title={row.title}
+      data-full={row.title}
+      data-tip={lead}
       data-node={row.node ?? undefined}
       onClick={() => onPick(row)}
     >

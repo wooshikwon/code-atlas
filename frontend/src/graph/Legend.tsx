@@ -164,7 +164,7 @@ export function LegendButton() {
     <button
       className="dock-button legend-button"
       onClick={toggleLegend}
-      title="범례"
+      data-tip="범례"
       aria-label="범례"
       aria-expanded={open}
       aria-controls="legend"

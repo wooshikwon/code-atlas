@@ -60,7 +60,7 @@ function Window({ note, path, top, close }: { note: Note; path: string; top: num
             지우기
           </button>
         )}
-        <button className="summary-action code-note-fold" onClick={close} title="접기" aria-label="접기">
+        <button className="summary-action code-note-fold" onClick={close} data-tip="접기" aria-label="접기">
           –
         </button>
       </div>

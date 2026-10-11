@@ -67,9 +67,11 @@ export function Minimap() {
   const path = useAtlas((s) => s.finder.route?.paths[s.finder.pick]);
   const { getViewport, setViewport } = useReactFlow();
   // 미니맵을 누르거나 끌면 화면이 옮겨지므로 전체 맞춤 상태를 끈다. React Flow의 MiniMap은 pointerdown 처리기를 받지 않는다.
+  // MiniMap은 ariaLabel을 SVG의 `<title>`로 그려 브라우저 기본 말풍선이 뜨므로, 비워 두고 접근성 이름을 `aria-label`로 준다.
   useEffect(() => {
     const element = open ? document.querySelector(".graph-minimap") : null;
     const release = () => useAtlas.setState({ fitted: false });
+    element?.querySelector("svg")?.setAttribute("aria-label", "미니맵");
     element?.addEventListener("pointerdown", release);
     return () => element?.removeEventListener("pointerdown", release);
   }, [open]);
@@ -100,7 +102,7 @@ export function Minimap() {
         pannable
         zoomable={false}
         onClick={onClick}
-        ariaLabel="미니맵"
+        ariaLabel=""
       />
       {path !== undefined && <MinimapRoute path={path} />}
     </>
@@ -114,7 +116,7 @@ export function MinimapButton() {
     <button
       className="dock-button minimap-button"
       onClick={toggleMinimap}
-      title="미니맵"
+      data-tip="미니맵"
       aria-label="미니맵"
       aria-expanded={open}
     >

@@ -25,8 +25,8 @@ import { flowNodes, parts, pointing, type Drawn } from "./nodes/common";
 import { UNUSED_OPACITY } from "./overlay";
 import { nodeTip, tipOf } from "./tips";
 import { NO_LINES } from "./view";
-import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { GROUP_NAMES } from "./names";
+import { tooltip } from "./Tooltip";
 import type { EdgeKey } from "./scope";
 import { boundsOf, fitPadding, FRAME_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, nodeIndex } from "./visible";
@@ -98,7 +98,6 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const [aimedNode, setAimedNode] = useState<string | null>(null);
 
   const root = useRef<HTMLDivElement | null>(null);
-  const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
   const onScreen = useRef<Layout | null>(null);
   /** 화면을 맞춰 둔 가운데 함수 */
@@ -172,7 +171,6 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const aim = useAim({
     lines,
     boxes: scene?.layout.boxes ?? NO_BOXES,
-    tip,
     name: nameOf,
     describe: ({ source, target, group, sites }) => `${nameOf(source)} → ${nameOf(target)} · ${GROUP_NAMES[group]} · ${sites}곳`,
     only: null,
@@ -207,7 +205,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   };
 
   const onNodeClick: NodeMouseHandler<CallFlowNode> = (event, node) => {
-    tip.current?.hide();
+    tooltip.hide();
     if ((event.target as Element).closest(".call-more") !== null) {
       clicked.current = null;
       expandFunction(node.data.node.id);
@@ -220,7 +218,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     select(node.data.node.id);
   };
   const onPaneClick = (event: ReactMouseEvent) => {
-    tip.current?.hide();
+    tooltip.hide();
     if (repeated(event)) {
       return;
     }
@@ -239,11 +237,11 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     const { id } = node.data.node;
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
     const text = tipOf(event.target) ?? nodeTip(node.data.label === title ? null : title, useSummaries.getState().leads[id] ?? null, node.data.unused);
-    tip.current?.show(text, event.clientX, event.clientY);
+    tooltip.show(text, event.clientX, event.clientY);
   };
   const onLeave = () => {
     setAimedNode(null);
-    tip.current?.hide();
+    tooltip.hide();
   };
   if (scene === null) {
     return (
@@ -281,7 +279,6 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       />
       <Dock />
       <Arranging />
-      <Tooltip ref={tip} />
       {aim.menu}
     </div>
   );

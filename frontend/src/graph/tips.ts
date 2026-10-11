@@ -1,5 +1,5 @@
-// 노드에 단 배지와 표시 위에 마우스를 올렸을 때 말풍선에 적는 글. 배지 요소가 `data-tip`에 글을 담고,
-// 그래프 뷰가 마우스 아래 요소에서 그 글을 찾아 노드의 말풍선 대신 띄운다. 줄은 `\n`으로 나눈다.
+// 말풍선에 적는 글. 요소가 `data-tip`에 글을 담으면 마우스를 올리거나 키보드 초점을 받았을 때 말풍선(`Tooltip.tsx`)이 그 글을 띄운다.
+// 그래프에서는 그래프 뷰가 마우스 아래 배지와 표시에서 그 글을 찾아 노드의 말풍선 대신 띄운다. 줄은 `\n`으로 나눈다.
 import type { AtlasNode, Change } from "../api/types";
 
 export const ENTRY_TIP = "진입점: 실행을 시작하는 코드";
@@ -83,7 +83,16 @@ export function trunkTip(sources: number, target: string, sites: number): string
   return `노드 ${sources}개 → ${target} · ${sites}곳`;
 }
 
-/** 마우스 아래 요소나 그 조상이 담은 말풍선 글. 없으면 null이다. */
+/**
+ * 마우스 아래 요소나 그 조상이 담은 말풍선 글. `data-full`에 담은 줄이지 않은 이름은 그 요소의 글자가 말줄임으로 잘렸을 때만 첫 줄에 적고,
+ * `data-tip`에 담은 글은 늘 적는다. 적을 글이 없으면 null이다.
+ */
 export function tipOf(target: EventTarget | null): string | null {
-  return target instanceof Element ? (target.closest<HTMLElement>("[data-tip]")?.dataset.tip ?? null) : null;
+  const holder = target instanceof Element ? target.closest<HTMLElement>("[data-tip], [data-full]") : null;
+  if (holder === null) {
+    return null;
+  }
+  const { full, tip } = holder.dataset;
+  const lines = [full !== undefined && clipped(holder) ? full : undefined, tip].filter((line) => line !== undefined && line !== "");
+  return lines.length === 0 ? null : lines.join("\n");
 }

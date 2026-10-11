@@ -101,7 +101,7 @@ export function Finder() {
         <button
           type="button"
           className="finder-swap"
-          title="출발과 도착 맞바꾸기"
+          data-tip="출발과 도착 맞바꾸기"
           aria-label="출발과 도착 맞바꾸기"
           disabled={finder.from === null && finder.to === null}
           onClick={swapEnds}
@@ -118,7 +118,7 @@ export function Finder() {
                 type="button"
                 className="finder-pick"
                 aria-pressed={index === pick}
-                title={pickTip(each, nodes)}
+                data-tip={pickTip(each, nodes)}
                 onClick={() => pickPath(index)}
               >
                 <b>{index + 1}</b>
@@ -134,7 +134,7 @@ export function Finder() {
                   className="finder-step"
                   data-node={row.id}
                   aria-current={row.id === focus ? "true" : undefined}
-                  title={`${row.name} · ${row.file}`}
+                  data-full={`${row.name} · ${row.file}`}
                   onClick={() => show(row.id)}
                 >
                   <span className="finder-step-number">{index + 1}</span>
@@ -151,7 +151,7 @@ export function Finder() {
                 짧은 것부터 {PATH_LIMIT}개 · 경로가 더 있다
               </span>
             )}
-            <button type="button" className="finder-fit" title="경로 위 노드가 모두 보이게 화면을 맞춘다" onClick={fitPath}>
+            <button type="button" className="finder-fit" data-tip="경로 위 노드가 모두 보이게 화면을 맞춘다" onClick={fitPath}>
               경로 전체 보기
             </button>
           </div>
@@ -189,7 +189,7 @@ export function FinderButton() {
     <button
       className="dock-button finder-button"
       onClick={toggleFinder}
-      title={pin ? "경로 찾기 · 경로 고정 중" : "경로 찾기"}
+      data-tip={pin ? "경로 찾기 · 경로 고정 중" : "경로 찾기"}
       aria-label="경로 찾기"
       aria-expanded={open}
       aria-controls="finder"
