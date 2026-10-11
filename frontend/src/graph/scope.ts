@@ -236,10 +236,10 @@ export function picked(graph: Graph, shown: Shown, flow: Flow | null, key: EdgeK
   return null;
 }
 
-/** 줄기 키 `trunk|도착 노드|번호`의 도착 노드. 줄기 키가 아니면 null이다. */
+/** 들어오는 줄기의 키 `trunk|도착 노드|in|번호`의 도착 노드. 들어오는 줄기의 키가 아니면 null이다. */
 export function trunkTarget(key: EdgeKey): string | null {
-  const [tag, target] = key.split("|");
-  return tag === "trunk" ? target : null;
+  const [tag, target, end] = key.split("|");
+  return tag === "trunk" && end === "in" ? target : null;
 }
 
 /** 노드 target으로 들어오는 그린 선. 함수 안 import만 합친 선은 줄기에 들지 않으므로 뺀다. */

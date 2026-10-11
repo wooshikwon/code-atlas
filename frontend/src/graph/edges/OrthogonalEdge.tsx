@@ -12,8 +12,8 @@ import { Trunk } from "./Trunk";
 
 /**
  * pointed는 마우스를 올린 선이고 cycle은 순환 덮개가 칠하는 순환 선이다. whole은 줄기에 든 선이 줄기 위에 전체 경로를 그리는지다.
- * own은 활성화된 선이 그 선 위에 적는 sites 수의 가운데 점이고, 적지 않으면 null이다. sum은 줄기 위에 전체 경로를 그리는 선이
- * 줄기의 들어오는 합계를 자기 선 위에 한 번 더 적을 자리와 값이다. 전체 경로가 줄기의 합계를 덮기 때문이다.
+ * own은 활성화된 선이 그 선 위에 적는 sites 수의 가운데 점이고, 적지 않으면 null이다. sum은 들어오는 줄기 위에 전체 경로를 그리는 선이
+ * 줄기의 들어오는 합계를 자기 선 위에 한 번 더 적을 점과 값이다. 전체 경로가 줄기의 합계를 덮기 때문이다.
  */
 export type AtlasFlowEdge = Edge<
   EdgeView & { pointed: boolean; cycle: boolean; whole: boolean; own: Point | null; sum: { at: Point; sites: number } | null },
@@ -41,6 +41,11 @@ function written(edge: FlowEdge): string {
   return text;
 }
 
+/** 선이 줄기에 들었는지 */
+function bundled(view: EdgeView): boolean {
+  return view.trunks.in !== null || view.trunks.out !== null;
+}
+
 /**
  * 그릴 선마다 React Flow 선 하나와 줄기마다 하나. 마우스를 올린 선 pointed는 다른 선 위의 층에 본문 잉크, 불투명도 1로 그린다.
  * 줄기에 든 선이 모두 pointed에 들면 그 줄기도 같은 방식으로 그린다. cycles에 든 선은 순환 선이다. 줄기에 든 선은 가지만 그리고,
@@ -64,10 +69,10 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
   const stemOf = new Map(trunks.map((trunk) => [trunk.key, trunk]));
   const lines = views.map((view): AtlasFlowEdge => {
     const { pointed: on, cycle } = marks(view);
-    const whole = view.trunk !== null && emphasized(view, { pointed: on, cycle });
+    const whole = bundled(view) && emphasized(view, { pointed: on, cycle });
     const own = numbers.get(view.key) ?? null;
-    const stem = whole ? stemOf.get(view.trunk!)! : null;
-    const sum = stem === null ? null : { at: stem.at, sites: stem.sites };
+    const stem = whole && view.trunks.in !== null ? stemOf.get(view.trunks.in)! : null;
+    const sum = stem === null || stem.at === null ? null : { at: stem.at, sites: stem.sites };
     return kept({
       id: view.key,
       source: view.source,
@@ -87,13 +92,13 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
     return kept({
       id: trunk.key,
       source: members[0].source,
-      target: trunk.target,
+      target: members[0].target,
       type: "trunk",
       data: { ...trunk, ...shade, pointed: on },
       zIndex: on ? LAYER.pointed : LAYER.edge,
     });
   });
-  const above = new Set(views.filter((view) => view.trunk !== null && emphasized(view, { pointed: false, cycle: cycles.has(view.key) })).map((view) => view.key));
+  const above = new Set(views.filter((view) => bundled(view) && emphasized(view, { pointed: false, cycle: cycles.has(view.key) })).map((view) => view.key));
   return [...lines.filter((line) => !above.has(line.id)), ...stems, ...lines.filter((line) => above.has(line.id))];
 }
 
@@ -136,8 +141,9 @@ export function Markers() {
 }
 
 /**
- * 선 하나. 줄기에 든 선은 줄기 앞까지의 가지를 화살촉 없이 그리고, 강조하는 선이면 그 위에 출발부터 도착까지의 경로를 화살촉과 함께
- * 한 번 더 그린다. 누름 영역은 가지다. 숫자는 도착 노드 앞의 들어오는 합계와, 강조하는 선 위에 적는 그 선의 수 두 가지다.
+ * 선 하나. 줄기에 든 선은 두 줄기 사이의 가지를 그리고, 강조하는 선이면 그 위에 출발부터 도착까지의 경로를 화살촉과 함께
+ * 한 번 더 그린다. 가지는 들어오는 줄기에 들지 않았을 때만 화살촉을 단다. 누름 영역은 가지다. 숫자는 도착 노드 앞의 들어오는 합계와,
+ * 강조하는 선 위에 적는 그 선의 수 두 가지다.
  */
 export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
   if (data === undefined) {
@@ -146,13 +152,14 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
   const ink: Ink = data.cycle ? "critical" : data.tone;
   const branch = roundedPath(data.branch);
   const arrow = `url(#${markerId(data.group, ink)})`;
-  /** 따로 들어가는 선은 도착 노드 앞의 합계를 늘 적고, 줄기에 든 선은 활성화됐을 때만 그 선 위에 그 선의 수를 적는다. */
+  /** 따로 들어가는 선은 도착 노드 앞의 합계를 늘 적고, 들어오는 줄기에 든 선은 활성화됐을 때만 그 선 위에 그 선의 수를 적는다. */
   const number = data.into ?? data.own;
   return (
     <g
       className={`edge edge-${data.group} tone-${ink}`}
       data-key={data.key}
-      data-branch={data.trunk ?? undefined}
+      data-trunk-in={data.trunks.in ?? undefined}
+      data-trunk-out={data.trunks.out ?? undefined}
       data-whole={data.whole ? "" : undefined}
       data-below={data.below ? "" : undefined}
       data-sites={data.sites}
@@ -165,7 +172,7 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
       {data.whole ? (
         <path className="edge-line" d={roundedPath(data.points)} markerEnd={arrow} />
       ) : (
-        <path className="edge-line" d={branch} markerEnd={data.trunk === null ? arrow : undefined} />
+        <path className="edge-line" d={branch} markerEnd={data.trunks.in === null ? arrow : undefined} />
       )}
       {number !== null && (
         <text className="edge-weight" x={number.x} y={number.y} dy="0.35em" textAnchor="middle">

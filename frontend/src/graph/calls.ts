@@ -14,6 +14,7 @@ import {
   LOC_GAP,
   NODE_GAP,
   ordered,
+  outPort,
   spacingOptions,
   titleOf,
   type Layout,
@@ -21,7 +22,7 @@ import {
   type Size,
 } from "./layout";
 import { EDGE_OPACITY, edgeKey } from "./scope";
-import { trunkViews, type EdgeView, type Lines } from "./view";
+import { NO_TRUNKS, trunkViews, type EdgeView, type Lines } from "./view";
 import { unitOf } from "./visible";
 
 export type Side = "caller" | "center" | "callee";
@@ -159,18 +160,19 @@ export function callSize(calls: Calls, nodes: Map<string, AtlasNode>, node: Atla
 
 /**
  * 모든 노드와 실행 선을 한 번에 배치하는 ELK 입력. 열은 ELK가 선으로 정하고, 열 안에서는 `Calls.nodes`의 순서대로 놓는다.
- * 선은 도착 노드의 포트에 닿아 도착 노드 앞에서 합류한다.
+ * 선은 양 끝 노드의 포트에 닿아 출발 노드 뒤와 도착 노드 앞에서 합류한다.
  */
 export function callElk(calls: Calls, size: (id: string) => Size): ElkNode {
+  const targets = (id: string) => [...new Set(calls.edges.filter((edge) => edge.source === id).map((edge) => edge.target))];
   return {
     id: "calls",
     layoutOptions: callOptions(callLane(calls)),
-    children: ordered(calls.nodes.map((id) => joined({ id, ...size(id) }))),
-    edges: calls.edges.map((edge) => ({ id: edgeKey(edge), sources: [edge.source], targets: [inPort(edge.target)] })),
+    children: ordered(calls.nodes.map((id) => joined({ id, ...size(id) }, targets(id)))),
+    edges: calls.edges.map((edge) => ({ id: edgeKey(edge), sources: [outPort(edge.source, edge.target)], targets: [inPort(edge.target)] })),
   };
 }
 
-/** 실행 선마다 배치가 낸 경로와 색을 정하고 도착이 같은 선을 줄기로 묶는다. center에 닿는 선만 본문 잉크로 그린다. */
+/** 실행 선마다 배치가 낸 경로와 색을 정하고 도착이나 출발이 같은 선을 줄기로 묶는다. center에 닿는 선만 본문 잉크로 그린다. */
 export function callEdges(calls: Calls, center: string, layout: Layout): Lines {
   const views: EdgeView[] = [];
   for (const edge of calls.edges) {
@@ -193,7 +195,7 @@ export function callEdges(calls: Calls, center: string, layout: Layout): Lines {
       joins: true,
       below: false,
       branch: points,
-      trunk: null,
+      trunks: NO_TRUNKS,
     });
   }
   return trunkViews(views, [...layout.boxes.values()]);

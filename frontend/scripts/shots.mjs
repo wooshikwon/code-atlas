@@ -214,18 +214,22 @@ const edgesOf = (page) =>
 
 /**
  * 선마다 경로의 시작점·끝점(그래프 좌표), 선 굵기, 층, 마우스를 올린 선인지. 줄기는 세지 않는다. 줄기에 든 선은 가지만 그리므로
- * 끝점은 그 줄기가 도착 노드에 닿는 점이다.
+ * 시작점은 나가는 줄기가 출발 노드에 닿는 점이고 끝점은 들어오는 줄기가 도착 노드에 닿는 점이다. trunk는 들어오는 줄기의 키다.
  */
 const linesOf = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")].map((edge) => {
       const line = edge.querySelector(".edge-line");
       const total = line.getTotalLength();
-      const stem = edge.dataset.branch === undefined || edge.hasAttribute("data-whole") ? null : document.querySelector(`.edge-trunk[data-key="${CSS.escape(edge.dataset.branch)}"] .edge-line`);
-      const [start, end] = [line.getPointAtLength(0), stem === null ? line.getPointAtLength(total) : stem.getPointAtLength(stem.getTotalLength())];
+      const stemOf = (key) => (key === undefined || edge.hasAttribute("data-whole") ? null : document.querySelector(`.edge-trunk[data-key="${CSS.escape(key)}"] .edge-line`));
+      const [from, stem] = [stemOf(edge.dataset.trunkOut), stemOf(edge.dataset.trunkIn)];
+      const [start, end] = [(from ?? line).getPointAtLength(0), stem === null ? line.getPointAtLength(total) : stem.getPointAtLength(stem.getTotalLength())];
       return {
         key: edge.dataset.key,
-        trunk: edge.dataset.branch ?? null,
+        trunk: edge.dataset.trunkIn ?? null,
+        out: edge.dataset.trunkOut ?? null,
+        below: edge.hasAttribute("data-below"),
+        arrow: line.hasAttribute("marker-end"),
         start: { x: start.x, y: start.y },
         end: { x: end.x, y: end.y },
         width: parseFloat(getComputedStyle(line).strokeWidth),
@@ -5273,20 +5277,25 @@ async function nodeHover(t, page) {
 
 // ── 4단계: 선의 합류 ─────────────────────────────────────────────
 
-/** 줄기마다 키, 도착 노드, 가지의 수(count), 적힌 합계(sum), 가지의 sites 수 합(sites), 가지의 키, 합류점 수, 진하기, 도착 노드에 닿는 끝점(그래프 좌표), 누름 영역의 커서 */
-const trunksOf = (page) =>
-  page.evaluate(() =>
-    [...document.querySelectorAll(".react-flow__edge .edge-trunk")].map((trunk) => {
+/**
+ * end 쪽 줄기마다 키, 줄기가 붙은 노드(target), 가지의 수(count), 적힌 합계(sum. 나가는 줄기는 null), 가지의 sites 수 합(sites), 가지의 키,
+ * 합류점이나 갈림점의 수, 진하기, 선이 가는 방향의 끝점(그래프 좌표. 들어오는 줄기는 도착 노드에 닿는 점), 누름 영역의 커서.
+ * end는 "in"(들어오는 줄기)이나 "out"(나가는 줄기)이다.
+ */
+const trunksOf = (page, end = "in") =>
+  page.evaluate((side) =>
+    [...document.querySelectorAll(`.react-flow__edge .edge-trunk[data-end="${side}"]`)].map((trunk) => {
       const line = trunk.querySelector(".edge-line");
       const end = line.getPointAtLength(line.getTotalLength());
+      const branches = [...document.querySelectorAll(`.edge[data-trunk-${side}="${CSS.escape(trunk.dataset.key)}"]`)];
       return {
         key: trunk.dataset.key,
-        target: trunk.dataset.target,
-        count: document.querySelectorAll(`.edge[data-branch="${CSS.escape(trunk.dataset.key)}"]`).length,
-        sum: Number(trunk.querySelector(".edge-trunk-count").textContent),
-        sites: [...document.querySelectorAll(`.edge[data-branch="${CSS.escape(trunk.dataset.key)}"]`)].reduce((total, edge) => total + Number(edge.dataset.sites), 0),
-        branches: [...document.querySelectorAll(`.edge[data-branch="${CSS.escape(trunk.dataset.key)}"]`)].map((edge) => edge.dataset.key),
-        joints: trunk.querySelectorAll(".edge-joint").length,
+        target: trunk.dataset.node,
+        count: branches.length,
+        sum: trunk.querySelector(".edge-trunk-count") === null ? null : Number(trunk.querySelector(".edge-trunk-count").textContent),
+        sites: branches.reduce((total, edge) => total + Number(edge.dataset.sites), 0),
+        branches: branches.map((edge) => edge.dataset.key),
+        joints: trunk.querySelectorAll(`.edge-joint-${side}`).length,
         arrows: trunk.querySelectorAll(".edge-line[marker-end]").length,
         tone: trunk.classList.contains("tone-strong") ? "strong" : "muted",
         opacity: Number(getComputedStyle(trunk).opacity),
@@ -5294,10 +5303,12 @@ const trunksOf = (page) =>
         pointed: trunk.hasAttribute("data-pointed"),
         step: trunk.hasAttribute("data-step"),
         layer: getComputedStyle(trunk.closest("svg")).zIndex,
+        start: { x: line.getPointAtLength(0).x, y: line.getPointAtLength(0).y },
         end: { x: end.x, y: end.y },
         cursor: getComputedStyle(trunk.querySelector(".edge-hit")).cursor,
       };
     }),
+    end,
   );
 
 /** 줄기 위에서 맨 위 요소가 그 줄기인 화면 좌표. 도착 노드 쪽에서부터 4px마다 찾는다. 없으면 null이다. */
@@ -5401,7 +5412,7 @@ async function merge(t, page) {
     wanted.map(([target, n]) => `${target} ${n}`).join(", ") + (missed.length > 0 ? ` / 어긋남 ${missed.map(([target]) => target).join(", ")}` : ""),
   );
   const alone = lines.filter((line) => line.trunk === null);
-  const arrows = await page.evaluate(() => [...document.querySelectorAll(".edge[data-branch]:not([data-whole]) .edge-line[marker-end]")].length);
+  const arrows = await page.evaluate(() => [...document.querySelectorAll(".edge[data-trunk-in]:not([data-whole]) .edge-line[marker-end]")].length);
   t.check("줄기에 든 선은 가지를 화살촉 없이 그리고 줄기에 들지 않은 선은 화살촉을 단다", arrows === 0 && alone.length + lines.filter((line) => line.trunk !== null).length === lines.length, `줄기에 들지 않은 선 ${alone.length}개`);
   await t.shot();
 
@@ -5412,6 +5423,104 @@ async function merge(t, page) {
     openTrunks.length > 0 && sound(openTrunks, openLines) && openTrunks.every((trunk) => trunk.target !== "parser"),
     openTrunks.map((trunk) => `${trunk.target} ${trunk.count}`).join(", "),
   );
+}
+
+/** 접은 처음 화면과 파일을 고른 화면에서 나가는 줄기의 구성과 갈림점을 보고, 나가는 줄기에 마우스를 올리고 누른다. */
+async function mergeOut(t, page) {
+  await load(page, url, false);
+  const marksOf = () =>
+    page.evaluate(() => {
+      const read = (selector) =>
+        [...document.querySelectorAll(`.react-flow__edge ${selector}`)].map((mark) => ({
+          x: mark.cx.baseVal.value,
+          y: mark.cy.baseVal.value,
+          fill: getComputedStyle(mark).fill,
+          stroke: getComputedStyle(mark).stroke,
+          line: getComputedStyle(mark.closest(".edge").querySelector(".edge-line")).stroke,
+        }));
+      return { forks: read(".edge-joint-out"), joints: read(".edge-joint-in") };
+    });
+  const built = async (name) => {
+    const [lines, stems, boxes, marks] = [await linesOf(page), await trunksOf(page, "out"), await flowBoxes(page), await marksOf()];
+    const surface = (await colorOf(page, "--surface")).rgb;
+    const onSide = (stem) => {
+      const box = boxes[stem.target];
+      return box !== undefined && (near(stem.start.x, box.x + box.width) || near(stem.start.x, box.x)) && stem.start.y > box.y - 1 && stem.start.y < box.y + box.height + 1;
+    };
+    t.check(
+      `${name}: 나가는 줄기 ${stems.length}개마다 화살촉과 수가 없고, 든 선이 모두 그 줄기의 출발 노드에서 나가며, 줄기가 출발 노드의 옆 변에서 시작하고 굵기는 선 하나와 같다`,
+      stems.length > 0 && stems.every((stem) => stem.sum === null && stem.arrows === 0 && stem.count >= 1 && stem.branches.every((key) => endsOfKey(key)[0] === stem.target) && onSide(stem) && near(stem.width, 1.5, 0.01)),
+      stems.map((stem) => `${stem.target} ${stem.count}`).join(", "),
+    );
+    const starts = new Map();
+    for (const line of lines.filter((each) => !each.below)) {
+      const at = `${endsOfKey(line.key)[0]}@${Math.round(line.start.x)},${Math.round(line.start.y)}`;
+      starts.set(at, [...(starts.get(at) ?? []), line]);
+    }
+    const fanned = [...starts.values()].filter((group) => new Set(group.map((line) => endsOfKey(line.key)[1])).size >= 2);
+    // 출발과 도착이 같은 선끼리는 경로 전체가 겹쳐 들어오는 줄기에만 든다.
+    const loose = fanned.flatMap((group) => group.filter((line) => line.out === null && line.trunk === null));
+    t.check(
+      `${name}: 한 노드의 같은 점에서 도착이 다른 선이 나가는 ${fanned.length}곳마다 그 선이 나가는 줄기에 든다`,
+      fanned.length > 0 && loose.length === 0,
+      loose.map((line) => line.key).slice(0, 4).join(", "),
+    );
+    const alone = lines.filter((line) => line.out !== null && line.trunk === null);
+    t.check(`${name}: 나가는 줄기에만 든 선 ${alone.length}개는 가지 끝에 화살촉을 단다`, alone.every((line) => line.arrow));
+    const apart = marks.forks.every((fork) => !marks.joints.some((joint) => near(fork.x, joint.x) && near(fork.y, joint.y)));
+    t.check(
+      `${name}: 갈림점 ${marks.forks.length}개는 바탕색으로 채우고 줄기 색 테두리를 두른 빈 원, 합류점 ${marks.joints.length}개는 줄기 색으로 채운 원이고 두 점은 같은 곳에 놓이지 않는다`,
+      marks.forks.length > 0 && marks.joints.length > 0 && marks.forks.every((fork) => fork.fill === surface && fork.stroke === fork.line) && marks.joints.every((joint) => joint.fill === joint.line) && apart,
+    );
+  };
+  await built("접은 처음 화면");
+
+  const ink = (await colorOf(page, "--ink")).rgb;
+  const spot = await sharedSpot(page);
+  await page.mouse.move(spot.x + 1, spot.y + 1);
+  await page.mouse.move(spot.x, spot.y);
+  await page.waitForSelector(".edge-trunk[data-pointed]", { timeout: 5_000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const stem = (await trunksOf(page, "out")).find((each) => each.key === spot.trunk);
+  const rows = (await tipText(page)).split("\n");
+  t.check(
+    `선 ${spot.keys.length}개가 든 나가는 줄기의 출발 노드 쪽에 올리면 줄기와 그 선이 모두 본문 잉크로 다른 선 위의 층에 그려지고, 말풍선은 합계 줄 없이 선마다 한 줄이다`,
+    stem.pointed && stem.tone === "strong" && stem.layer === "5" && same(await pointedLines(page), spot.keys) && (await linesOf(page)).filter((line) => line.pointed).every((line) => line.stroke === ink) &&
+      rows.length === spot.keys.length && rows.every((row) => / → .+ · \d+곳$/.test(row)),
+    rows.join(" / "),
+  );
+  t.check("나가는 줄기 위에는 수를 적지 않는다", (await count(page, '.edge-trunk[data-end="out"] text')) === 0);
+  await t.shot();
+  await page.mouse.click(spot.x, spot.y);
+  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
+  const menu = await menuOf(page);
+  t.check(
+    "나가는 줄기를 누르면 노드를 고르지 않고 누른 자리에 그 줄기에 든 선의 목록을 고정한다",
+    menu !== null && same(menu.map((item) => item.key).sort(), spot.keys) && (await selectedOf(page)) === null,
+    `항목 ${menu?.length ?? 0}개`,
+  );
+  await page.keyboard.press("Escape");
+  await page.mouse.move(5, 5);
+  await rest(page);
+
+  await page.click(".legend-button");
+  t.check(
+    "범례가 갈림 견본(빈 원)과 합류 견본(채운 원)을 하나씩 보여 준다",
+    (await count(page, ".legend .edge-joint-out")) === 1 && (await count(page, ".legend .edge-joint-in")) === 1 && (await page.evaluate(() => document.querySelector(".legend").textContent.includes("갈림"))),
+  );
+  await page.click(".legend-button");
+
+  await pickFile(page, FILE);
+  await page.mouse.move(5, 5);
+  await rest(page);
+  await built("파일을 고른 화면");
+  await page.screenshot({ path: join(OUT, "s4-merge-out-file.png") });
+
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await rest(page);
+  const [dark, surface] = [await marksOf(), await colorOf(page, "--surface")];
+  t.check("어두운 화면의 갈림점은 어두운 바탕색으로 채운다", surface.value === DARK.surface && dark.forks.length > 0 && dark.forks.every((fork) => fork.fill === surface.rgb && fork.stroke === fork.line));
+  await page.screenshot({ path: join(OUT, "s4-merge-out-file-dark.png") });
 }
 
 /** 가지와 줄기에 마우스를 올린다. */
@@ -5544,7 +5653,7 @@ async function mergePin(t, page) {
   const [steps, trunks] = [await routeLinesOf(page), await trunksOf(page)];
   const stepKeys = new Set(steps.map((line) => line.key));
   const joined = await page.evaluate(() =>
-    [...document.querySelectorAll(".edge[data-route][data-branch]")].map((edge) => ({ key: edge.dataset.key, whole: edge.hasAttribute("data-whole") })),
+    [...document.querySelectorAll(".edge[data-route][data-trunk-in]")].map((edge) => ({ key: edge.dataset.key, whole: edge.hasAttribute("data-whole") })),
   );
   t.check(
     `경로의 걸음 ${steps.length}개가 본문 잉크 3px이고, 줄기에 든 걸음 ${joined.length}개는 줄기 위에 전체 경로를 그린다`,
@@ -5585,7 +5694,7 @@ async function mergePin(t, page) {
   const cycles = await page.evaluate(() =>
     [...document.querySelectorAll(".edge[data-cycle]")].map((edge) => {
       const line = edge.querySelector(".edge-line");
-      return { key: edge.dataset.key, joined: edge.dataset.branch !== undefined, whole: edge.hasAttribute("data-whole"), stroke: getComputedStyle(line).stroke, arrow: line.hasAttribute("marker-end") };
+      return { key: edge.dataset.key, joined: edge.dataset.trunkIn !== undefined, whole: edge.hasAttribute("data-whole"), stroke: getComputedStyle(line).stroke, arrow: line.hasAttribute("marker-end") };
     }),
   );
   const inTrunk = cycles.filter((line) => line.joined);
@@ -6166,9 +6275,9 @@ const crossingsOf = (page) =>
         const each = key.split("|");
         return each[0] === "agg" || each[0] === "step" ? [each[1], each[2]] : [each[0], each[1]];
       };
-      // 줄기는 도착 노드와 줄기에 든 선의 출발 노드가 양 끝이다.
+      // 줄기는 줄기가 붙은 노드와 줄기에 든 선의 반대쪽 끝 노드가 양 끝이다.
       const ends = edge.classList.contains("edge-trunk")
-        ? [parts[1], ...[...document.querySelectorAll(`.edge[data-branch="${CSS.escape(edge.dataset.key)}"]`)].map((branch) => endsOf(branch.dataset.key)[0])]
+        ? [parts[1], ...[...document.querySelectorAll(`.edge[data-trunk-${edge.dataset.end}="${CSS.escape(edge.dataset.key)}"]`)].map((branch) => endsOf(branch.dataset.key)[edge.dataset.end === "in" ? 0 : 1])]
         : endsOf(edge.dataset.key);
       for (const line of edge.querySelectorAll(".edge-line")) {
         const total = line.getTotalLength();
@@ -6247,7 +6356,7 @@ async function lanes(t, page) {
 // ── 4단계: 선의 숫자 ─────────────────────────────────────────────
 
 /**
- * 화면의 숫자(도착 노드 앞의 합계, 활성화된 선의 수)마다 다른 숫자, 합류점, 노드의 상자·글자·배지, 자기 선이 아닌 선과 겹치는 곳.
+ * 화면의 숫자(도착 노드 앞의 합계, 활성화된 선의 수)마다 다른 숫자, 합류점·갈림점, 노드의 상자·글자·배지, 자기 선이 아닌 선과 겹치는 곳.
  * 숫자의 사각형은 글자의 사각형이고 좌표는 그래프 좌표다. 줄기 위에 전체 경로를 그리는 선이 줄기의 합계를 같은 자리에 다시 적은 것은
  * 한 숫자로 센다. 줄기의 합계는 줄기와 그 가지가 자기 선이고, 선이 적는 수는 그 선(합계를 다시 적은 것이면 그 줄기까지)이 자기 선이다.
  * 활성화된 선의 수가 같은 노드에서 나가는 선과 겹치는 것은 세지 않는다.
@@ -6267,12 +6376,12 @@ const numberClashes = (page) =>
       const parts = key.split("|");
       return parts[0] === "agg" || parts[0] === "step" ? [parts[1], parts[2]] : [parts[0], parts[1]];
     };
-    const sourceOf = (key) => (key.startsWith("trunk|") ? null : endsOf(key)[0]);
+    const sourceOf = (key) => (key.startsWith("trunk|") ? (key.split("|")[2] === "out" ? key.split("|")[1] : null) : endsOf(key)[0]);
     const numbers = [];
     for (const text of document.querySelectorAll(".react-flow__edge .edge :is(.edge-weight, .edge-trunk-count)")) {
       const edge = text.closest(".edge");
       const box = boxOf(text);
-      const trunk = text.classList.contains("edge-sum") ? edge.dataset.branch : edge.classList.contains("edge-trunk") ? edge.dataset.key : null;
+      const trunk = text.classList.contains("edge-sum") ? edge.dataset.trunkIn : edge.classList.contains("edge-trunk") ? edge.dataset.key : null;
       const same = numbers.find((n) => n.trunk !== null && n.trunk === trunk);
       if (same !== undefined) {
         same.own.add(edge.dataset.key);
@@ -6281,12 +6390,12 @@ const numberClashes = (page) =>
       const own = new Set([edge.dataset.key]);
       if (trunk !== null) {
         own.add(trunk);
-        document.querySelectorAll(`.edge[data-branch="${CSS.escape(trunk)}"]`).forEach((branch) => own.add(branch.dataset.key));
+        document.querySelectorAll(`.edge[data-trunk-in="${CSS.escape(trunk)}"]`).forEach((branch) => own.add(branch.dataset.key));
       }
-      const fixed = trunk !== null || edge.dataset.branch === undefined;
-      numbers.push({ label: `${edge.dataset.key}의 ${text.textContent}`, box, own, trunk, fixed, source: sourceOf(edge.dataset.key), target: edge.classList.contains("edge-trunk") ? edge.dataset.target : endsOf(edge.dataset.key)[1] });
+      const fixed = trunk !== null || edge.dataset.trunkIn === undefined;
+      numbers.push({ label: `${edge.dataset.key}의 ${text.textContent}`, box, own, trunk, fixed, target: edge.classList.contains("edge-trunk") ? edge.dataset.node : endsOf(edge.dataset.key)[1] });
     }
-    const joints = [...document.querySelectorAll(".edge-joint")].map((dot) => ({ x: dot.cx.baseVal.value - 2.5, y: dot.cy.baseVal.value - 2.5, width: 5, height: 5 }));
+    const joints = [...document.querySelectorAll(".edge-joint-in, .edge-joint-out")].map((dot) => ({ x: dot.cx.baseVal.value - 2.5, y: dot.cy.baseVal.value - 2.5, width: 5, height: 5 }));
     const letters = [...document.querySelectorAll(".node-face :is(.node-label, .loc, .change-mark, .badge, .node-below, .node-field, .node-pack), .node-pack")].map((el) => toGraph(el.getBoundingClientRect()));
     const bodies = [...document.querySelectorAll(".react-flow__node")]
       .filter((w) => !w.dataset.id.endsWith("#face") && !w.dataset.id.endsWith("#pack") && w.querySelector(":scope > :is(.node-region, .node-module-open)") === null && document.querySelector(`.react-flow__node[data-id^="${CSS.escape(w.dataset.id)}."], .react-flow__node[data-id^="${CSS.escape(w.dataset.id)}:"]`) === null)
@@ -6309,9 +6418,7 @@ const numberClashes = (page) =>
       if ([...letters, ...bodies].some((box) => overlap(n.box, box))) {
         found.boxes.push(n.label);
       }
-      // 활성화된 선의 수는 그 선만 지나는 구간에 자리가 없으면 같은 노드에서 나가는 선과 함께 지나는 구간에 놓는다.
-      const together = (line) => !n.fixed && sourceOf(line.key) === n.source;
-      const crossing = lines.filter((line) => !n.own.has(line.key) && !together(line) && line.points.some((p) => p.x > n.box.x && p.x < n.box.x + n.box.width && p.y > n.box.y && p.y < n.box.y + n.box.height));
+      const crossing = lines.filter((line) => !n.own.has(line.key) && line.points.some((p) => p.x > n.box.x && p.x < n.box.x + n.box.width && p.y > n.box.y && p.y < n.box.y + n.box.height));
       // 도착 노드 앞의 합계가 그 노드에서 같은 변 쪽으로 나가는 선과 겹치는 것은 따로 센다(진입점 단위 사이의 선, 왼쪽 열로 돌아가는 선).
       const leaving = (line) => n.fixed && sourceOf(line.key) === n.target;
       found.lines.push(...crossing.filter((line) => !leaving(line)).map((line) => `${n.label} × ${line.key}`));
@@ -6343,7 +6450,7 @@ async function numbers(t, page) {
           value: Number(text.textContent),
           trunk: edge.classList.contains("edge-trunk"),
           sum: text.classList.contains("edge-sum"),
-          joined: edge.dataset.branch !== undefined,
+          joined: edge.dataset.trunkIn !== undefined,
           active: edge.hasAttribute("data-whole") || edge.hasAttribute("data-pointed") || edge.classList.contains("tone-strong"),
           gap: Math.hypot(box.x + box.width / 2 - end.x, box.y + box.height / 2 - end.y) - box.width / 2,
         };
@@ -6430,8 +6537,9 @@ const menuOf = (page) =>
   page.evaluate(() => (document.querySelector(".line-menu") === null ? null : [...document.querySelectorAll(".line-menu-item")].map((item) => ({ key: item.dataset.key, text: item.textContent }))));
 
 /**
- * 도착 노드가 다른 선 둘 이상이 함께 지나는 구간 위의 화면 좌표와 그 구간을 지나는 선의 키. 선의 경로를 4px마다 짚어 2px 격자에 모으고,
- * 그 점의 맨 위 요소가 선인 곳을 고른다. 없으면 null이다.
+ * 도착 노드가 다른 선 둘 이상이 함께 지나는 구간 위의 화면 좌표와 그 구간을 지나는 선의 키, 그 구간을 그리는 나가는 줄기의 키.
+ * 나가는 줄기가 출발 노드를 떠난 지 10px인 점을 본다. 그 점에서는 줄기에 든 선이 모두 함께 지난다. 다른 선이나 줄기의 누름 영역이 그 점을
+ * 지나지 않고 그 점의 맨 위 요소가 선인 줄기를 고른다. 없으면 null이다.
  */
 const sharedSpot = (page) =>
   page.evaluate(() => {
@@ -6439,25 +6547,24 @@ const sharedSpot = (page) =>
       const parts = key.split("|");
       return parts[0] === "agg" || parts[0] === "step" ? [parts[1], parts[2]] : [parts[0], parts[1]];
     };
-    const cells = new Map();
-    for (const edge of document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")) {
-      const line = edge.querySelector(".edge-hit");
-      const matrix = line.getScreenCTM();
-      for (let at = 8; at < line.getTotalLength() - 8; at += 4) {
-        const point = new DOMPoint(line.getPointAtLength(at).x, line.getPointAtLength(at).y).matrixTransform(matrix);
-        const cell = `${Math.round(point.x / 2)}:${Math.round(point.y / 2)}`;
-        const found = cells.get(cell) ?? { x: point.x, y: point.y, keys: new Set() };
-        found.keys.add(edge.dataset.key);
-        cells.set(cell, found);
-      }
-    }
     const area = document.querySelector(".graph").getBoundingClientRect();
     const panel = document.querySelector(".info-panel").getBoundingClientRect();
-    for (const { x, y, keys } of cells.values()) {
-      const targets = new Set([...keys].map((key) => endsOf(key)[1]));
+    const hits = [...document.querySelectorAll(".react-flow__edge .edge[data-key] .edge-hit")];
+    for (const trunk of document.querySelectorAll('.react-flow__edge .edge-trunk[data-end="out"]')) {
+      const keys = [...document.querySelectorAll(`.edge[data-trunk-out="${CSS.escape(trunk.dataset.key)}"]`)].map((edge) => edge.dataset.key);
+      const targets = new Set(keys.map((key) => endsOf(key)[1]));
+      const line = trunk.querySelector(".edge-line");
+      if (targets.size < 2 || line.getTotalLength() < 20) {
+        continue;
+      }
+      const at = line.getPointAtLength(10);
+      if (hits.some((hit) => hit.closest(".edge") !== trunk && hit.isPointInStroke(at))) {
+        continue;
+      }
+      const { x, y } = new DOMPoint(at.x, at.y).matrixTransform(line.getScreenCTM());
       const visible = x > area.left + 10 && x < panel.left - 10 && y > area.top + 10 && y < area.bottom - 200;
-      if (keys.size >= 2 && targets.size >= 2 && visible && document.elementFromPoint(x, y)?.closest(".react-flow__edge") != null) {
-        return { x, y, keys: [...keys].sort(), targets: [...targets] };
+      if (visible && document.elementFromPoint(x, y)?.closest(".react-flow__edge") != null) {
+        return { x, y, keys: keys.sort(), targets: [...targets], trunk: trunk.dataset.key };
       }
     }
     return null;
@@ -6474,13 +6581,21 @@ async function overlap(t, page) {
   };
   // 줄기 가운데 일부 선만 지나는 구간: 줄기의 먼 쪽 끝.
   const trunk = (await trunksOf(page)).filter((each) => each.count >= 3).sort((a, b) => b.count - a.count)[0];
-  const far = await page.evaluate((key) => {
-    const line = document.querySelector(`.edge-trunk[data-key="${CSS.escape(key)}"] .edge-line`);
-    const point = new DOMPoint(line.getPointAtLength(6).x, line.getPointAtLength(6).y).matrixTransform(line.getScreenCTM());
-    return { x: point.x, y: point.y };
-  }, trunk.key);
-  await hoverAt(far);
-  const part = { pointed: await pointedLines(page), rows: (await tipText(page)).split("\n"), trunk: (await trunksOf(page)).find((each) => each.key === trunk.key).pointed };
+  // 먼 쪽 끝은 다른 노드에서 나가는 줄기가 갈라지는 점일 수 있으므로, 끝에서 6px씩 들어오며 이 줄기의 가지만 지나는 첫 점을 고른다.
+  let part = null;
+  for (let along = 6; along <= 36 && (part === null || !part.pointed.every((key) => trunk.branches.includes(key))); along += 6) {
+    const far = await page.evaluate(
+      ([key, at]) => {
+        const line = document.querySelector(`.edge-trunk[data-key="${CSS.escape(key)}"] .edge-line`);
+        const point = new DOMPoint(line.getPointAtLength(at).x, line.getPointAtLength(at).y).matrixTransform(line.getScreenCTM());
+        return { x: point.x, y: point.y };
+      },
+      [trunk.key, along],
+    );
+    await page.mouse.move(5, 5);
+    await hoverAt(far);
+    part = { pointed: await pointedLines(page), rows: (await tipText(page)).split("\n"), trunk: (await trunksOf(page)).find((each) => each.key === trunk.key).pointed };
+  }
   t.check(
     `가지 ${trunk.count}개인 줄기의 먼 쪽 구간에 올리면 그 구간을 지나는 선만 강조하고 줄기 전체는 강조하지 않는다`,
     part.pointed.length >= 1 && part.pointed.length < trunk.count && !part.trunk && part.pointed.every((key) => trunk.branches.includes(key)),
@@ -6765,6 +6880,7 @@ const SCENARIOS = [
   ["arranging", arranging],
   ["node-hover", nodeHover],
   ["merge", merge],
+  ["merge-out", mergeOut],
   ["merge-hover", mergeHover],
   ["merge-click", mergeClick],
   ["merge-select", mergeSelect],
@@ -6795,6 +6911,7 @@ const STAGE4 = new Set([
   "arranging",
   "node-hover",
   "merge",
+  "merge-out",
   "merge-hover",
   "merge-click",
   "merge-select",

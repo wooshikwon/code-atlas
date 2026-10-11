@@ -337,7 +337,8 @@ describe("trunkTarget, arriving", () => {
   const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
 
   it("줄기 키에서 도착 노드를 읽고 다른 키는 null이다", () => {
-    expect(trunkTarget("trunk|common|0")).toBe("common");
+    expect(trunkTarget("trunk|common|in|0")).toBe("common");
+    expect(trunkTarget("trunk|common|out|0")).toBeNull();
     expect(trunkTarget("agg|cli|common")).toBeNull();
     expect(trunkTarget("main|common|import")).toBeNull();
   });

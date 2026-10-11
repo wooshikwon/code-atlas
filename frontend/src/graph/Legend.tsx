@@ -1,9 +1,10 @@
-// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시와 접힌 상자의 배지, 선 모양 세 개와 합류, 찾은 경로의 선,
+// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시와 접힌 상자의 배지, 선 모양 세 개와 갈림·합류, 찾은 경로의 선,
 // 변경 표시 두 색을 보여 주고, 분석 덮개를 켜면 그 덮개의 표시를 끝에 덧붙인다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
 import { useOverlay, type OverlayKind } from "../state/overlay";
 import { useAtlas } from "../state/store";
+import { FORK_RIM, JOINT_RADIUS } from "./layout";
 import { GROUP_NAMES } from "./names";
 import { CycleMark } from "./nodes/common";
 
@@ -125,8 +126,16 @@ export function Legend() {
         ))}
         <li>
           <svg width={30} height={16}>
+            <path d="M2,4 L27,4" className="legend-edge tone-muted" markerEnd="url(#arrow-run-muted)" />
+            <path d="M9,4 L9,12 L27,12" className="legend-edge tone-muted" markerEnd="url(#arrow-run-muted)" />
+            <circle cx={9} cy={4} r={JOINT_RADIUS} strokeWidth={FORK_RIM} className="edge-joint-out tone-muted" />
+          </svg>
+          갈림: 한 노드에서 나가는 선
+        </li>
+        <li>
+          <svg width={30} height={16}>
             <path d="M2,3 L10,3 L10,9 M2,14 L10,14 L10,9 L27,9" className="legend-edge tone-muted" markerEnd="url(#arrow-run-muted)" />
-            <circle cx={10} cy={9} r={2.5} className="edge-joint tone-muted" />
+            <circle cx={10} cy={9} r={JOINT_RADIUS} className="edge-joint-in tone-muted" />
             <text x={17} y={9} dy="0.35em" textAnchor="middle" className="edge-trunk-count tone-muted">
               7
             </text>

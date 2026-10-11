@@ -150,7 +150,7 @@ export function useAim({ lines, boxes, tip, name, describe, only, skip, pick, op
     }
     if (views.length === 1 || target !== null) {
       if (event.shiftKey) {
-        open(views.length === 1 ? views[0].key : (views[0].trunk ?? trunkKey(views[0].target, 0)));
+        open(views.length === 1 ? views[0].key : (views[0].trunks.in ?? trunkKey(views[0].target, "in", 0)));
       } else {
         pick(views[0].target);
       }

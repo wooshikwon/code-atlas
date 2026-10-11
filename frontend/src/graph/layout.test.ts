@@ -125,20 +125,22 @@ describe("elkGraphs", () => {
     expect(closed.shelf.map((n) => n.id)).toEqual(["scratch"]);
   });
 
-  it("자식을 그리지 않는 노드는 왼쪽 변에 들어오는 포트 하나를 두고 그 노드로 가는 선은 포트에 닿는다. 자식을 그리는 노드에는 포트가 없다", () => {
+  it("자식을 그리지 않는 노드는 왼쪽 변 가운데에 들어오는 포트 하나를, 오른쪽 변 가운데에 나가는 포트를 도착 노드마다 하나씩 두고 선은 그 포트에 닿는다. 자식을 그리는 노드에는 포트가 없다", () => {
     const root = opened.components[0];
     for (const id of ["main", "common", "pkg.util", "pkg.mod:parse", "pkg.mod:Store.load"]) {
       const node = find(root, id)!;
-      expect(node.ports).toEqual([{ id: `${id}#in`, width: 0, height: 0, layoutOptions: { "elk.port.side": "WEST" } }]);
-      expect(node.layoutOptions?.["elk.portConstraints"]).toBe("FIXED_SIDE");
+      expect(node.ports![0]).toEqual({ id: `${id}#in`, x: 0, y: node.height! / 2, width: 0, height: 0, layoutOptions: { "elk.port.side": "WEST" } });
+      expect(node.ports!.slice(1).every((port) => port.id.startsWith(`${id}#out#`) && port.x === node.width && port.y === node.height! / 2)).toBe(true);
+      expect(node.layoutOptions?.["elk.portConstraints"]).toBe("FIXED_POS");
     }
+    expect(find(root, "main")!.ports!.slice(1).map((port) => port.id)).toEqual(["main#out#pkg", "main#out#common"]);
     for (const id of ["pkg", "pkg.mod", "pkg.mod:Store", "app"]) {
       expect(find(root, id)!.ports).toBeUndefined();
     }
-    const targets = new Map(root.edges!.map((e) => [e.id, e.targets[0]]));
-    expect(targets.get("main|common|import")).toBe("common#in");
-    expect(targets.get("agg|main|pkg")).toBe("pkg");
-    expect(root.edges!.every((e) => !e.sources[0].endsWith("#in"))).toBe(true);
+    const ends = new Map(root.edges!.map((e) => [e.id, [e.sources[0], e.targets[0]]]));
+    expect(ends.get("main|common|import")).toEqual(["main#out#common", "common#in"]);
+    expect(ends.get("agg|main|pkg")).toEqual(["main#out#pkg", "pkg"]);
+    expect(root.edges!.every((e) => !e.sources[0].endsWith("#in") && !e.targets[0].includes("#out#"))).toBe(true);
   });
 
   it("손잡이를 다는 상자는 자식 목록 끝에 손잡이 노드를 열0으로 넣고, 이미 그리던 자식의 순서와 열은 그대로다", () => {

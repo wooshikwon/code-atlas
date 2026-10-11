@@ -101,8 +101,10 @@ export const NUMBER_HEIGHT = 14;
 export const NUMBER_PAD = 2;
 /** 화살촉의 길이. 세 분류 가운데 가장 긴 계승 화살촉(`edges/OrthogonalEdge.tsx`의 markerWidth)이다. */
 export const ARROW_LENGTH = 13;
-/** 합류점의 반지름. `edges/Trunk.tsx`가 그리는 점이다. */
+/** 합류점과 갈림점의 반지름. `edges/Trunk.tsx`가 합류점은 채운 원으로, 갈림점은 테두리만 두른 빈 원으로 그린다. */
 export const JOINT_RADIUS = 2.5;
+/** 갈림점의 테두리 굵기. 실행 선과 사용 선의 굵기와 같다. */
+export const FORK_RIM = 1.5;
 
 /** digits 자리 수가 선 위에서 차지하는 폭 */
 export function numberWidth(digits: number): number {
@@ -165,16 +167,28 @@ export function inPort(id: string): string {
   return `${id}#in`;
 }
 
+/** 자식을 그리지 않는 노드 id가 target으로 가는 선을 내보내는 포트의 id */
+export function outPort(id: string, target: string): string {
+  return `${id}#out#${target}`;
+}
+
 /**
- * 자식을 그리지 않는 노드는 왼쪽 변에 들어오는 포트 하나를 둔다. ELK의 직각 경로 계산이 같은 포트로 가는 선을 도착 노드 앞에서
- * 한 줄기로 합친다. 나가는 쪽에는 포트를 두지 않으므로 나가는 선은 합치지 않는다. 자식을 그리는 노드(폴더 영역, 펼친 파일 상자)에는
- * 포트를 두지 않는다. 구조 뷰와 함수 시점 뷰의 ELK 입력이 함께 쓴다.
+ * 자식을 그리지 않는 노드는 왼쪽 변 가운데에 들어오는 포트 하나를, 오른쪽 변 가운데에 나가는 포트를 도착 노드(targets)마다 하나씩 둔다.
+ * ELK의 직각 경로 계산은 포트로 이어진 선을 한 묶음으로 보고 묶음마다 세로 줄 하나를 낸다. 들어오는 포트가 하나이므로 같은 노드로
+ * 가는 선이 세로 줄 하나를 함께 쓰고, 나가는 포트는 같은 점에 놓이므로 같은 노드에서 나가는 선이 첫 세로 줄까지 가로 줄 하나를 함께
+ * 지난다. 나가는 포트를 도착 노드마다 따로 두어 묶음이 도착 노드마다 나뉘므로, 세로 줄 하나는 한 노드로 들어가는 선만 지난다.
+ * 자식을 그리는 노드(폴더 영역, 펼친 파일 상자)는 배치 전에 크기를 모르므로 포트를 두지 않는다. 구조 뷰와 함수 시점 뷰의 ELK 입력이
+ * 함께 쓴다.
  */
-export function joined(node: ElkNode): ElkNode {
+export function joined(node: ElkNode, targets: string[]): ElkNode {
+  const [width, height] = [node.width ?? 0, node.height ?? 0];
   return {
     ...node,
-    ports: [{ id: inPort(node.id), width: 0, height: 0, layoutOptions: { "elk.port.side": "WEST" } }],
-    layoutOptions: { ...node.layoutOptions, "elk.portConstraints": "FIXED_SIDE" },
+    ports: [
+      { id: inPort(node.id), x: 0, y: height / 2, width: 0, height: 0, layoutOptions: { "elk.port.side": "WEST" } },
+      ...targets.map((target) => ({ id: outPort(node.id, target), x: width, y: height / 2, width: 0, height: 0, layoutOptions: { "elk.port.side": "EAST" } })),
+    ],
+    layoutOptions: { ...node.layoutOptions, "elk.portConstraints": "FIXED_POS" },
   };
 }
 
@@ -425,7 +439,7 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
 
 /**
  * 보이는 노드를 연결 묶음마다 parent 사슬로 중첩한 ELK 입력. 자식을 그리는 노드마다 따로 배치하므로 선은 형제 사이로
- * 올려 그 부모에 선언하고, 자식을 그리지 않는 노드로 가는 선은 그 노드의 포트(`joined`)에 닿게 한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣어 그 순서를 `ordered`로 적는다.
+ * 올려 그 부모에 선언하고, 자식을 그리지 않는 노드에 닿는 선은 그 노드의 포트(`joined`)에 닿게 한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣어 그 순서를 `ordered`로 적는다.
  * ends는 강조하는 경로의 출발 노드와 도착 노드이고, 그 노드의 크기에 표지의 폭을 더한다.
  * 순환 아이콘을 다는 상자는 아이콘의 폭을 크기에 더한다. 접힌 파일 상자와 접힌 폴더 상자는 아래 글자의 줄을 상자 아래에 잡아 둔다.
  * 손잡이를 다는 파일 상자(`shown.packs`)는 자식 목록 끝에 손잡이 노드를 열0으로 넣는다. 손잡이에는 선이 없으므로 열0의 마지막에 놓인다.
@@ -446,7 +460,16 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
   const edgesOf = (parent: string | null, members?: Set<string>): ElkExtendedEdge[] =>
     (inside.get(parent) ?? [])
       .filter((link) => members === undefined || members.has(link.source))
-      .map((link) => ({ id: link.key, sources: [link.source], targets: [children.has(link.target) ? link.target : inPort(link.target)] }));
+      .map((link) => ({
+        id: link.key,
+        sources: [children.has(link.source) ? link.source : outPort(link.source, link.target)],
+        targets: [children.has(link.target) ? link.target : inPort(link.target)],
+      }));
+  /** 노드마다 그 노드에서 나가는 선의 도착 노드 */
+  const targets = new Map<string, Set<string>>();
+  for (const link of [...inside.values()].flat()) {
+    targets.set(link.source, (targets.get(link.source) ?? new Set()).add(link.target));
+  }
 
   const lane = laneOf(numberDigits(graph, shown.hidden));
   const options = elkOptions(lane);
@@ -471,14 +494,17 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
       };
     }
     if (node.kind !== "module" && node.kind !== "package") {
-      return joined({ id: node.id, ...leafSize(node, measure, marksOf(node.id)), layoutOptions: placed });
+      return joined({ id: node.id, ...leafSize(node, measure, marksOf(node.id)), layoutOptions: placed }, [...(targets.get(node.id) ?? [])]);
     }
-    return joined({
-      id: node.id,
-      ...leafSize(node, measure, marksOf(node.id)),
-      labels: [{ text: BOX_CAPTION, width: measure(BOX_CAPTION), height: CAPTION_HEIGHT }],
-      layoutOptions: { ...placed, "elk.nodeLabels.placement": "OUTSIDE V_BOTTOM H_LEFT" },
-    });
+    return joined(
+      {
+        id: node.id,
+        ...leafSize(node, measure, marksOf(node.id)),
+        labels: [{ text: BOX_CAPTION, width: measure(BOX_CAPTION), height: CAPTION_HEIGHT }],
+        layoutOptions: { ...placed, "elk.nodeLabels.placement": "OUTSIDE V_BOTTOM H_LEFT" },
+      },
+      [...(targets.get(node.id) ?? [])],
+    );
   };
 
   return {
