@@ -63,10 +63,10 @@ function onBorder(p: Point, box: Box): boolean {
 }
 
 /** 형제 묶음마다 열 순서(x가 같은 노드끼리 한 열)와 열 안 y 순서를 문자열로 만든다. */
-function arrangement(result: Layout, ids: string[]): string {
+function arrangement(result: Layout, ids: string[], index = nodes): string {
   const groups = new Map<string | null, string[]>();
   for (const id of ids) {
-    const parent = nodes.get(id)!.parent;
+    const parent = index.get(id)!.parent;
     groups.set(parent, [...(groups.get(parent) ?? []), id]);
   }
   return [...groups]
@@ -203,6 +203,25 @@ describe("elkGraphs", () => {
     expect(find(mod, "pkg.mod:Store")?.edges?.map((e) => e.id)).toEqual(["pkg.mod:Store.load|pkg.mod:Store.save|call"]);
   });
 
+  it("자식마다 children 배열의 순서를 elk.position으로 적고, 그 순서대로 놓는 옵션을 준다", () => {
+    const walk = (parent: ElkNode) => {
+      for (const [i, child] of (parent.children ?? []).entries()) {
+        expect(child.layoutOptions?.["elk.position"], child.id).toBe(`(0,${i})`);
+        walk(child);
+      }
+    };
+    for (const root of [...closed.components, ...opened.components]) {
+      walk(root);
+      expect(root.layoutOptions).toMatchObject({
+        "elk.layered.crossingMinimization.semiInteractive": "true",
+        "elk.layered.crossingMinimization.greedySwitch.type": "OFF",
+        "elk.layered.thoroughness": "1",
+      });
+      expect(Object.keys(root.layoutOptions ?? {}).filter((key) => key.includes("ModelOrder"))).toEqual([]);
+    }
+    expect(find(opened.components[0], "pkg.mod")?.layoutOptions?.["elk.layered.crossingMinimization.semiInteractive"]).toBe("true");
+  });
+
   it("파일 상자를 펼쳐도 최상위 선과 partition이 같다", () => {
     const strip = (root: ElkNode) => ({
       nodes: root.children?.map((c) => [c.id, c.layoutOptions?.["elk.partitioning.partition"]]),
@@ -252,6 +271,57 @@ describe("arrange", async () => {
     expect(arrangement(node, boxes)).toBe(before);
     expect(file.sizes.get("main")!.height).toBeGreaterThan(40);
     expect(node.boxes.has("app.text:wrap")).toBe(true);
+  });
+
+  it("형제마다 열과 열 안 순서가 고정한 값과 같다", async () => {
+    const lanes = (result: Layout, index = nodes) => arrangement(result, [...result.boxes.keys()], index).split("\n").sort();
+    const top = "null: app,cli,main,scratch | pkg | common";
+    const folders = ["app: app.web | app.__init__,app.text", "pkg: pkg.mod,pkg.util"];
+    expect(lanes(closed)).toEqual([...folders, top].sort());
+    expect(lanes(await arranged("pkg.mod"))).toEqual(
+      [...folders, top, "pkg.mod: pkg.mod:Store | pkg.mod:Row,pkg.mod:parse", "pkg.mod:Store: pkg.mod:Store.load | pkg.mod:Store.save"].sort(),
+    );
+    expect(lanes(node)).toEqual([...folders, top, "app.text: app.text:wrap", "app.web: app.web:index | app.web:render"].sort());
+    expect(lanes(await arranged("main:run"))).toEqual(
+      [
+        ...folders,
+        top,
+        "cli: cli:main",
+        "main: main:run | main:helper",
+        "pkg.mod: pkg.mod:Store | pkg.mod:Row",
+        "pkg.mod:Store: pkg.mod:Store.load | pkg.mod:Store.save",
+      ].sort(),
+    );
+
+    const routeNodes = nodeIndex(routeFixture);
+    const routeCols = columns(routeFixture, toggles);
+    const route = async (selection: string | null) => {
+      const picked = selection === null ? null : flow(routeFixture, selection, 2, hidden(routeFixture, toggles));
+      const visible = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: picked, lit: null });
+      return lanes(await arrange(elkGraphs(routeFixture, visible, routeCols, measure, new Map()), run), routeNodes);
+    };
+    const regions = [
+      "flow: flow.walk | flow.build | flow.sink",
+      "lazy: lazy.one | lazy.two",
+      "north: north.up",
+      "null: flow,lazy,north | south | ring",
+      "ring: ring.a | ring.b | ring.c",
+      "south: south.down",
+    ];
+    expect(await route(null)).toEqual(regions);
+    expect(await route("flow.walk:begin")).toEqual(
+      [...regions, "flow.walk: flow.walk:begin | flow.walk:mid,flow.walk:right,flow.walk:probe,flow.walk:lone | flow.walk:left | flow.walk:finish"].sort(),
+    );
+    expect(await route("flow.build:Child.step")).toEqual(
+      [
+        ...regions,
+        "flow.build: flow.build:make,flow.build:Child | flow.build:Engine,flow.build:Base",
+        "flow.build:Base: flow.build:Base.run | flow.build:Base.step",
+        "flow.build:Child: flow.build:Child.step",
+        "flow.build:Engine: flow.build:Engine.__init__",
+        "flow.sink: flow.sink:emit",
+      ].sort(),
+    );
   });
 
   it("폴더를 접어도 다른 단위의 열 순서와 열 안 y 순서가 같다", () => {

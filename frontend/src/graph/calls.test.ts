@@ -136,6 +136,10 @@ describe("배치", () => {
     expect(x(load)).toBeLessThan(x(save));
     expect(x(save)).toBeLessThan(x("pkg.mod:parse"));
     expect(x("pkg.mod:Row")).toBe(x(save));
+    // 같은 열의 노드는 Calls.nodes의 순서대로 위에서 아래로 놓인다.
+    const column = calls.nodes.filter((id) => x(id) === x(save));
+    expect(column.length).toBeGreaterThan(1);
+    expect([...column].sort((a, b) => layout.boxes.get(a)!.y - layout.boxes.get(b)!.y)).toEqual(column);
 
     const views = callEdges(calls, load, layout);
     expect(views).toHaveLength(calls.edges.length);
