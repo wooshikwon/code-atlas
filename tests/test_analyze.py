@@ -39,19 +39,19 @@ class FakeSession:
 async def test_request_all_asks_each_site_once_and_skips_dynamic_and_builtin_sites():
     session = FakeSession({})
     sites = [site(line, dynamic=line == 5, builtin=line == 7) for line in range(1, 101)]
-    found, timed_out = await _request_all(session, sites)
+    found, late = await _request_all(session, sites)
     assert sorted(session.asked) == [line for line in range(1, 101) if line not in (5, 7)]
-    assert timed_out == 0 and 4 not in found and 6 not in found  # 5번 줄의 지점 번호가 4다
+    assert late == set() and 4 not in found and 6 not in found  # 5번 줄의 지점 번호가 4다
     assert found[1] == [Location("/repo/a.py", 2, 0)] and found[0] == []
     assert max(session.peaks.values()) == analyze.CONCURRENCY
 
 
 @pytest.mark.asyncio
-async def test_request_all_asks_only_timed_out_sites_again_and_counts_the_unanswered():
+async def test_request_all_asks_only_timed_out_sites_again_and_names_the_unanswered():
     session = FakeSession({50: 1, 60: 9})
-    found, timed_out = await _request_all(session, [site(line) for line in range(1, 101)])
+    found, late = await _request_all(session, [site(line) for line in range(1, 101)])
     assert session.asked.count(50) == 2 and session.asked.count(60) == 2
     assert len(session.asked) == 102
     assert found[49] == [Location("/repo/a.py", 50, 0)]
-    assert found[59] == [] and timed_out == 1
+    assert found[59] == [] and late == {59}
     assert max(session.peaks.values()) == analyze.CONCURRENCY

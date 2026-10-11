@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
@@ -315,6 +316,32 @@ async def test_changed_environment_asks_every_site_again(sample_repo, tmp_path, 
     reloaded = await refresh(sample_repo, sys.executable, third, previous=fresh)
     assert third.asked == first.asked and judged(reloaded) == judged(fresh)
     store.close()
+
+
+@pytest.mark.asyncio
+async def test_unanswered_sites_stay_counted_until_their_file_is_asked_again(sample_repo, tmp_path):
+    class Silent(FakeSession):
+        async def definition(self, path, line, col, timeout):
+            await super().definition(path, line, col, timeout)
+            if path == "src/app/cli.py":
+                raise asyncio.TimeoutError
+            return []
+
+    async def never(files):
+        pytest.fail("세션을 띄웠다")
+
+    store = Cache(sample_repo, tmp_path / "cache")
+    silent, answering = Silent(), FakeSession()
+    first = await refresh(sample_repo, sys.executable, silent, cache=store)
+    unanswered = first.analysis.stats["timed_out"]
+    assert unanswered == len({key for key in silent.asked if key[0] == "src/app/cli.py"}) > 0
+    reopened = await refresh(sample_repo, sys.executable, never, cache=store)
+    assert reopened.analysis.stats["timed_out"] == unanswered
+    cli = sample_repo / "src" / "app" / "cli.py"
+    cli.write_text("# 한 줄 민다\n" + cli.read_text())
+    again = await refresh(sample_repo, sys.executable, answering, cache=store)
+    store.close()
+    assert again.analysis.stats["timed_out"] == 0 and len(answering.asked) >= unanswered
 
 
 @pytest.mark.asyncio

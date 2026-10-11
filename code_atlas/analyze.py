@@ -146,13 +146,14 @@ def _probe(facts: list[FileFacts]) -> tuple[str, int, int] | None:
 
 async def _request_all(
     session: Session, sites: list[Site], timeout: float = REQUEST_TIMEOUT, asked: Callable[[], None] | None = None
-) -> tuple[dict[int, list[Location]], int]:
+) -> tuple[dict[int, list[Location]], set[int]]:
     """동적이지 않고 내장 이름으로 판정하지 않은 지점마다 정의 위치를 묻는다.
 
-    지점 번호별 응답과, 끝까지 응답이 없는 지점 수를 돌려준다. 시간 제한에 걸린 지점은 한 번 다시 묻는다.
+    지점 번호별 응답과, 끝까지 응답이 없는 지점의 번호를 돌려준다. 시간 제한에 걸린 지점은 한 번 다시 묻는다.
     지점 하나를 다 물을 때마다 `asked`를 부른다.
     """
     found: dict[int, list[Location]] = {}
+    late: set[int] = set()
     limit = asyncio.Semaphore(CONCURRENCY)
 
     async def answered(i: int) -> bool:
@@ -167,17 +168,17 @@ async def _request_all(
             return True
         return False
 
-    async def one(i: int) -> bool:
-        """지점 하나를 물어 `found`에 응답을 담는다. 두 번 모두 시간 제한에 걸리면 참이다."""
+    async def one(i: int) -> None:
+        """지점 하나를 물어 `found`에 응답을 담는다. 두 번 모두 시간 제한에 걸리면 `late`에 번호를 넣는다."""
         found[i] = []
         async with limit:
-            late = not await answered(i)
+            if not await answered(i):
+                late.add(i)
         if asked is not None:
             asked()
-        return late
 
-    late = await asyncio.gather(*(one(i) for i, s in enumerate(sites) if not (s.dynamic or s.builtin)))
-    return found, sum(late)
+    await asyncio.gather(*(one(i) for i, s in enumerate(sites) if not (s.dynamic or s.builtin)))
+    return found, late
 
 
 def _read(repo: str | Path) -> tuple[RepoFiles, dict[str, str], dict[str, tuple[int, int] | None]]:
@@ -262,6 +263,7 @@ class _Judging:
         self.sites: dict[str, list[ResolvedSite | None]] = {}  # 아직 묻지 않은 바뀐 파일의 지점은 None이다
         self.changed: set[str] = set()
         self.asked: set[tuple[str, int]] = set()  # 판정을 그대로 쓰는 파일에서 다시 물은 지점
+        self.late: set[tuple[str, int]] = set()  # 두 번 물어도 응답이 없어 미확인으로 둔 지점
         self.gone = set(base) - set(self.facts)
         self._gone_modules = {module_id(path, files.source_root) for path in self.gone}
         self.added = bool(base) and not set(self.facts) <= set(base)
@@ -276,6 +278,7 @@ class _Judging:
                         restore(site, verdict, kept.origins, self.externals)
                         for site, verdict in zip(facts.sites, kept.sites, strict=True)
                     ]
+                    self.late.update((path, i) for i in kept.late)
                     continue
                 except (KeyError, TypeError, ValueError):
                     logger.warning("저장해 둔 판정이 추출 결과와 맞지 않아 다시 묻는다: %s", path)
@@ -378,9 +381,10 @@ class _Judging:
                     found.append((path, i))
         return found
 
-    def settle(self, path: str, i: int, locations: list[Location]) -> None:
-        """물은 지점의 판정을 응답 위치로 정한다."""
+    def settle(self, path: str, i: int, locations: list[Location], late: bool) -> None:
+        """물은 지점의 판정을 응답 위치로 정한다. `late`는 그 지점이 두 번 물어도 응답이 없었다는 뜻이다."""
         self.sites[path][i] = resolve_site(self.facts[path].sites[i], locations, self.index, self.externals)
+        (self.late.add if late else self.late.discard)((path, i))
         if path not in self.changed:
             self.asked.add((path, i))
 
@@ -406,6 +410,7 @@ class _Judging:
                 [(site.status, site.target, site.edge) for site in judged],
                 {site.target: self.externals[site.target].origin for site in judged if site.status == "external"},
                 sorted(self.imports(path)),
+                sorted(i for late, i in self.late if late == path),
             )
         return found
 
@@ -465,18 +470,18 @@ async def refresh(
         facts = list(judging.facts.values())
         probe = _probe(facts)
 
-        def analyzed(answers: dict[str, Answers], timed_out: int) -> Analyzed:
+        def analyzed(answers: dict[str, Answers]) -> Analyzed:
             analysis, unused = _assembled(files, texts, facts, judging.resolution())
-            analysis.stats["timed_out"] = timed_out
+            analysis.stats["timed_out"] = len(judging.late)
             analysis.stats["elapsed_ms"] = round((time.monotonic() - started) * 1000)
             return Analyzed(analysis, files, judging.index, texts, stamps, probe, unused, stored, answers, env)
 
         todo = judging.pending()
-        done = timed_out = 0
+        done = 0
         if todo:
             if drafted is not None and previous is None and len(judging.changed) < len(facts):
                 report(Progress("build"))
-                drafted(await asyncio.to_thread(analyzed, {}, 0))
+                drafted(await asyncio.to_thread(analyzed, {}))
             report(Progress("resolve", 0, len(todo)))
             live = await session(files) if callable(session) else session
             live.sync_files(texts)
@@ -494,12 +499,11 @@ async def refresh(
             report(Progress("resolve", done, total))
             found, late = await _request_all(live, [judging.facts[path].sites[i] for path, i in batch], asked=asked)
             for n, (path, i) in enumerate(batch):
-                judging.settle(path, i, found.get(n, []))
-            timed_out += late
+                judging.settle(path, i, found.get(n, []), n in late)
             todo = judging.pending()
 
         report(Progress("build"))
-        result = await asyncio.to_thread(analyzed, judging.answers(stored), timed_out)
+        result = await asyncio.to_thread(analyzed, judging.answers(stored))
         if cache is not None and (fresh or judging.changed or judging.gone):
             await asyncio.to_thread(cache.save, snapshot, env, {path: stored[path] for path in fresh}, result.answers)
         return result

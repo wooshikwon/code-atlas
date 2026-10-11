@@ -28,7 +28,7 @@ from .model import Node, Site
 logger = logging.getLogger(__name__)
 
 ANALYZER_VERSION = 1  # extract·resolve·graph의 판정이 달라지는 변경마다 올린다
-SCHEMA_VERSION = 1  # 표와 `body`의 모양이 달라지는 변경마다 올린다
+SCHEMA_VERSION = 2  # 표와 `body`의 모양이 달라지는 변경마다 올린다
 CACHE_DIR = Path.home() / ".cache" / "code-atlas"
 LOCK_TIMEOUT = 5.0
 PROBE_TIMEOUT = 5.0
@@ -62,6 +62,7 @@ class Answers:
     """파일 하나의 지점 판정. `sites`는 추출 결과의 지점 순서대로 (상태, 대상 노드 id, 선 종류)다.
 
     `origins`는 대상이 된 외부 노드 id의 origin이고, `imports`는 이 파일이 import하는 레포 파일의 경로다.
+    `late`는 언어 서버가 두 번 물어도 응답하지 않아 미확인으로 둔 지점의 번호다.
     """
 
     text_hash: str
@@ -69,6 +70,7 @@ class Answers:
     sites: list[tuple[str, str | None, str | None]]
     origins: dict[str, str]
     imports: list[str]
+    late: list[int]
 
 
 def _installed(folder: str) -> list[str]:
@@ -229,7 +231,7 @@ class Cache:
             for path, text_hash, known, packed in rows:
                 body = _unpack(packed)
                 sites = [(status, target, edge) for status, target, edge in body["sites"]]
-                found[path] = Answers(text_hash, known, sites, body["origins"], body["imports"])
+                found[path] = Answers(text_hash, known, sites, body["origins"], body["imports"], body["late"])
             return found
         except (sqlite3.Error, zlib.error, ValueError, KeyError, TypeError):
             logger.warning("캐시에서 판정을 읽지 못했다: %s", snapshot, exc_info=True)
@@ -242,7 +244,13 @@ class Cache:
         """
         fact_rows = [(path, s.text_hash, s.known, _pack(_body(s))) for path, s in facts.items()]
         answer_rows = [
-            (snapshot, path, a.text_hash, a.known, _pack({"sites": a.sites, "origins": a.origins, "imports": a.imports}))
+            (
+                snapshot,
+                path,
+                a.text_hash,
+                a.known,
+                _pack({"sites": a.sites, "origins": a.origins, "imports": a.imports, "late": a.late}),
+            )
             for path, a in answers.items()
         ]
         try:

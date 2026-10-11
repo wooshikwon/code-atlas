@@ -36,7 +36,7 @@ store = Cache(repo, directory)
 for round in range(40):
     text_hash = f"{tag}-{round}"
     facts = {f.file.path: Stored(text_hash, tag, f, []) for f in extract_repo(collect(repo))}
-    answers = {path: Answers(text_hash, tag, [("unresolved", None, None)] * len(s.facts.sites), {}, []) for path, s in facts.items()}
+    answers = {path: Answers(text_hash, tag, [("unresolved", None, None)] * len(s.facts.sites), {}, [], []) for path, s in facts.items()}
     store.save("worktree", tag, facts, answers)
 store.close()
 sys.exit(Count.seen)
@@ -53,7 +53,7 @@ def answers_of(stored: dict[str, Stored]) -> dict[str, Answers]:
     made = [("resolved", "app.core:run", "call"), ("external", "ext:os", "import"), ("unresolved", None, None)]
     return {
         path: Answers(
-            s.text_hash, s.known, [made[i % 3] for i in range(len(s.facts.sites))], {"ext:os": "stdlib"}, ["src/app/core.py"]
+            s.text_hash, s.known, [made[i % 3] for i in range(len(s.facts.sites))], {"ext:os": "stdlib"}, ["src/app/core.py"], [0]
         )
         for path, s in stored.items()
     }
@@ -159,7 +159,7 @@ def test_save_drops_facts_no_answers_point_to(saved, sample_repo):
     store, stored, answers = saved
     path = "src/app/core.py"
     edited = {path: Stored("h2", "k1", stored[path].facts, stored[path].names)}
-    store.save("worktree", ENV, edited, {**answers, path: Answers("h2", "k1", answers[path].sites, {}, [])})
+    store.save("worktree", ENV, edited, {**answers, path: Answers("h2", "k1", answers[path].sites, {}, [], [])})
     assert store.facts(path, "h1") is None
     assert store.facts(path, "h2") == edited[path]
     removed = "src/app/models.py"
@@ -175,7 +175,7 @@ def test_snapshots_share_facts_and_keep_their_own_answers(saved):
     commit = {p: a for p, a in answers.items() if p != "src/app/models.py"}
     store.save("0123abc", "env-commit", {}, commit)
     edited = {path: Stored("h2", "k1", stored[path].facts, stored[path].names)}
-    store.save("worktree", ENV, edited, {**answers, path: Answers("h2", "k1", [], {}, [])})
+    store.save("worktree", ENV, edited, {**answers, path: Answers("h2", "k1", [], {}, [], [])})
     assert store.facts(path, "h1") == stored[path]
     assert store.facts(path, "h2") == edited[path]
     assert store.answers("0123abc", "env-commit") == commit
