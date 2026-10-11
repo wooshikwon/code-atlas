@@ -10,6 +10,8 @@
   /* 그래프 밖 요소의 겹침 순서. 그래프 안 요소의 층은 graph/layers.ts가 정한다. */
   --z-panel-grip: 2;
   --z-overlay: 5;
+  /* 왼쪽 아래 칸은 정보 패널 위에 그린다. 창이 좁아 둘이 겹쳐도 경로 탐색 창의 버튼이 눌린다. */
+  --z-dock: 6;
   --z-menu: 20;
   --z-palette: 50;
   --z-tooltip: 60;
@@ -1388,7 +1390,7 @@ ul {
    칸의 빈 곳은 마우스를 받지 않아 그래프를 가리지 않는다. */
 .dock {
   position: absolute;
-  z-index: var(--z-overlay);
+  z-index: var(--z-dock);
   bottom: 12px;
   left: 12px;
   display: flex;
