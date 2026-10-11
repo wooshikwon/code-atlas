@@ -27,6 +27,8 @@ const NAMED_ZOOM = 0.8;
 /** 큰 상자를 패널을 뺀 영역의 시작 끝에서 띄우는 폭 */
 const INSET = 20;
 const DARK = { surface: "#1a1a19", ink: "#ffffff" };
+/** 상단 줄 오른쪽 칸의 버튼. 왼쪽부터다. */
+const TOOLS = ["필터", "화면 맞춤", "어두운 화면"];
 /** 좁은 창에서 상단 줄을 확인할 때 고르는 함수와 창 폭 */
 const NARROW = { owner: "parser.plan", id: "parser.plan:_parse_week_header", label: "_parse_week_header()", widths: [1700, 1440, 1280, 1160, 980, 900, 720] };
 /** 글자 요소가 그리는 글자와 배지. 이 요소의 가운데 점에서는 늘 그 노드가 눌린다. */
@@ -392,6 +394,27 @@ async function pick(page, id) {
 }
 
 /** 패널을 뺀 영역 가운데에서 휠을 돌려 확대 비율을 target으로 맞추고 맞춘 값을 돌려준다. */
+/** 필터 창을 열고 fn을 부른 뒤 닫는다. 이미 열려 있으면 열고 닫지 않는다. */
+async function inFilters(page, fn) {
+  const opened = (await count(page, ".filter-panel")) > 0;
+  if (!opened) {
+    await page.click(".filter-button");
+    await page.waitForSelector(".filter-panel", { timeout: 5_000 });
+  }
+  try {
+    return await fn();
+  } finally {
+    if (!opened && (await count(page, ".filter-panel")) > 0) {
+      await page.click(".filter-button");
+    }
+  }
+}
+
+/** 필터 창의 토글 name을 켜거나 끈다. */
+const setToggle = (page, name, on) => inFilters(page, () => page.locator(".filter-panel").getByLabel(name).setChecked(on));
+/** 필터 창의 토글 name이 켜져 있는지 */
+const toggled = (page, name) => inFilters(page, () => page.locator(".filter-panel").getByLabel(name).isChecked());
+
 async function zoomTo(page, target) {
   const { free } = await stageOf(page);
   await page.mouse.move(free.x + free.width / 2, free.y + free.height / 2);
@@ -1413,7 +1436,7 @@ async function labels(t, page) {
   const graph = await api("/api/graph");
   const files = graph.nodes.filter((n) => n.kind === "module").map((n) => n.id);
   const classes = new Set(graph.nodes.filter((n) => n.kind === "class").map((n) => n.id));
-  await page.getByLabel("테스트 코드").check();
+  await setToggle(page, "테스트 코드", true);
   await settle(page);
   // 레포를 열 때 접혀 있는 폴더를 파일트리에서 모두 펼쳐 파일 행을 낸다.
   for (let closed = page.locator('.tree-row.tree-dir[aria-expanded="false"]'); (await closed.count()) > 0; ) {
@@ -1469,7 +1492,7 @@ async function labels(t, page) {
 
 async function external(t, page) {
   await load(page);
-  await page.getByLabel("외부 노드").check();
+  await setToggle(page, "외부 노드", true);
   await page.waitForSelector(".node-external", { timeout: 30_000 }).catch(() => {});
   await settle(page);
   const pills = await page.evaluate(() =>
@@ -2186,7 +2209,7 @@ async function summaryStale(t, page) {
   );
 
   // "자동 요약"이 켜져 있으면 바뀌기 전에 만든 요약을 누르지 않아도 다시 만든다.
-  await page.getByLabel("자동 요약").check();
+  await setToggle(page, "자동 요약", true);
   await page.reload();
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
   await settle(page);
@@ -2206,7 +2229,7 @@ async function summaryAsk(t, page) {
   const posts = summaryPosts(page);
   const aborted = summaryAborts(page);
   await load(page);
-  t.check('상단 줄의 "자동 요약" 토글이 꺼진 채로 열린다', !(await page.getByLabel("자동 요약").isChecked()));
+  t.check('필터 창의 "자동 요약" 토글이 꺼진 채로 열린다', !(await toggled(page, "자동 요약")));
   await pickInTree(page, first);
   await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 }).catch(() => {});
   await page.waitForTimeout(1_500);
@@ -2224,7 +2247,7 @@ async function summaryAsk(t, page) {
   );
   await t.shot();
 
-  await page.getByLabel("자동 요약").check();
+  await setToggle(page, "자동 요약", true);
   await pickInTree(page, second);
   await page.waitForFunction(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent === "요약을 만드는 중", null, { timeout: 5_000 }).catch(() => {});
   await page.waitForTimeout(500);
@@ -2234,17 +2257,17 @@ async function summaryAsk(t, page) {
     `POST ${posts.join(", ") || "없음"}`,
   );
   t.check(`${first.id}를 떠나도 만들고 있던 그 함수의 POST를 끊지 않는다`, aborted.length === 0, `끊은 POST ${aborted.join(", ") || "없음"}`);
-  await page.getByLabel("자동 요약").uncheck();
+  await setToggle(page, "자동 요약", false);
   await page.waitForTimeout(500);
   t.check(
     '"자동 요약"을 꺼도 만들고 있던 POST를 끊지 않고 "요약을 만드는 중"을 그대로 보인다',
     aborted.length === 0 && (await summaryHint(page)) === "요약을 만드는 중",
     `끊은 POST ${aborted.join(", ") || "없음"}, 문구 ${await summaryHint(page)}`,
   );
-  await page.getByLabel("자동 요약").check();
+  await setToggle(page, "자동 요약", true);
   await page.reload();
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
-  t.check('새로고침 뒤에도 "자동 요약" 토글이 켜져 있다', await page.getByLabel("자동 요약").isChecked());
+  t.check('새로고침 뒤에도 "자동 요약" 토글이 켜져 있다', await toggled(page, "자동 요약"));
 }
 
 /** 캐시에서 읽은 설명을 가짜 설명으로 바꿔, 정의 표기가 누를 수 있는 등폭 글자로 그려지고 누르면 그 노드를 고르는지 본다. 요약을 만들지 않는다. */
@@ -2460,47 +2483,120 @@ async function initFile(t, page) {
   );
 }
 
-/** 상단 줄의 진입점 목록과 git 브랜치 이름, 좁은 창 폭의 상단 줄 */
-async function toolbar(t, page) {
-  const [graph, reply] = [await api("/api/graph"), await api("/api/changes")];
-  const entries = graph.nodes.filter((n) => n.entry && !n.test).map((n) => n.id);
-  await load(page);
-  const branch = await page.evaluate(() => document.querySelector(".toolbar-branch")?.textContent ?? null);
-  t.check(
-    "상단 줄이 현재 git 브랜치 이름을 적는다",
-    reply.git && reply.branch !== null ? branch === `브랜치 ${reply.branch}` : branch === null,
-    `화면 ${branch}, 서버 ${reply.branch}`,
+/** 상단 줄 오른쪽 칸에 그린 요소의 이름. 버튼은 접근성 이름이나 글자다. */
+const toolsOf = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".toolbar-tools > *")].map((element) => {
+      const button = element.matches("button") ? element : element.querySelector("button");
+      return button?.getAttribute("aria-label") ?? element.textContent.trim();
+    }),
   );
-  t.check("하단 상태 줄이 없고 진입점 목록이 접힌 채로 열린다", (await count(page, ".toolbar-menu")) === 0 && (await count(page, ".statusbar, .status-bar")) === 0);
-  await page.click(".toolbar-entries > .toolbar-button");
-  await page.waitForSelector(".toolbar-menu-item", { timeout: 5_000 }).catch(() => {});
-  const listed = await page.evaluate(() => [...document.querySelectorAll(".toolbar-menu-item")].map((item) => item.dataset.node));
-  t.check(`진입점 목록을 누르면 진입점 ${entries.length}개의 이름이 펼쳐진다`, entries.length > 0 && same([...listed].sort(), [...entries].sort()), listed.join(", "));
-  await t.shot();
-  await page.click(`.toolbar-menu-item[data-node="${entries.at(-1)}"]`);
-  await waitSelected(page, entries.at(-1)).catch(() => {});
-  t.check("이름을 고르면 그래프가 그 노드를 선택하고 목록이 접힌다", (await selectedOf(page)) === entries.at(-1) && (await count(page, ".toolbar-menu")) === 0, `선택 ${await selectedOf(page)}`);
-  const fits = await page.evaluate(() => {
-    const bar = document.querySelector(".toolbar");
-    return bar.scrollWidth <= bar.clientWidth;
-  });
-  t.check("상단 줄의 요소가 줄 폭 안에 들어간다", fits);
 
-  // 목록이 접힌 뒤에는 포커스가 진입점 버튼에 남아 있어도 Esc가 선택을 푼다.
-  await page.click(".toolbar-entries > .toolbar-button");
-  await page.waitForSelector(".toolbar-menu", { timeout: 5_000 }).catch(() => {});
+/** 필터 버튼에 마우스를 올렸을 때 뜨는 말풍선의 줄 */
+async function filterTipOf(page) {
+  await page.mouse.move(0, 0);
+  await page.hover(".filter-button");
+  await page.waitForSelector(".tooltip", { timeout: 5_000 }).catch(() => {});
+  const lines = await page.evaluate(() => document.querySelector(".tooltip")?.innerText.split("\n") ?? []);
+  await page.mouse.move(0, 0);
+  return lines;
+}
+
+/** 상단 줄의 필터 버튼과 필터 창, 좁은 창 폭의 상단 줄 */
+async function toolbar(t, page) {
+  const [graph, reply, repo] = [await api("/api/graph"), await api("/api/changes"), await api("/api/repo")];
+  const entries = graph.nodes.filter((n) => n.entry && !n.test).map((n) => n.id);
+  const groups = cyclesOf(graph, hiddenOf(graph)).groups.length;
+  await load(page);
+  t.check(
+    `상단 줄 오른쪽에 ${TOOLS.join(", ")} 버튼만 이 순서로 있고 하단 상태 줄이 없다`,
+    same(await toolsOf(page), TOOLS) && (await count(page, ".statusbar, .status-bar")) === 0,
+    (await toolsOf(page)).join(", "),
+  );
+  const idle = await filterTipOf(page);
+  t.check(
+    "필터 창이 닫힌 채로 열리고, 보기 설정이 모두 기본값이면 필터 버튼에 수가 없고 말풍선이 그 사실을 적는다",
+    (await count(page, ".filter-panel")) === 0 && (groups > 0 || ((await count(page, ".filter-count")) === 0 && same(idle, ["필터 · 보기 설정이 모두 기본값이다"]))),
+    idle.join(" / "),
+  );
+
+  await page.click(".filter-button");
+  await page.waitForSelector(".filter-panel", { timeout: 5_000 }).catch(() => {});
+  const panel = await page.evaluate(() => {
+    const root = document.querySelector(".filter-panel");
+    const section = (name) => root.querySelector(`.filter-section[aria-label="${name}"]`);
+    return {
+      titles: [...root.querySelectorAll(".filter-title")].map((title) => title.textContent),
+      view: [...section("보기 설정").querySelectorAll(".toolbar-toggle, .filter-overlays > .filter-label")].map((item) => item.textContent.trim()),
+      options: [...section("보기 설정").querySelectorAll(".overlay-option")].map((option) => option.dataset.kind),
+      stats: [...section("레포 정보").querySelectorAll(".filter-stats")].map((line) => line.textContent),
+      branch: section("레포 정보").querySelector(".filter-branch")?.textContent ?? null,
+      entries: [...section("레포 정보").querySelectorAll(".filter-entry")].map((item) => item.dataset.node),
+    };
+  });
+  t.check(
+    "필터 버튼을 누르면 보기 설정 구역에 흐름 단계, 분석 덮개, 토글 세 개가 있는 창이 열린다",
+    same(panel.titles, ["보기 설정", "레포 정보"]) && same(panel.view, ["흐름 단계2", "분석 덮개", "테스트 코드", "외부 노드", "자동 요약"]) && same(panel.options, ["none", "cycles", "unused"]),
+    `${panel.titles.join(" / ")}: ${panel.view.join(", ")}`,
+  );
+  const { stats } = repo;
+  const rate = stats.call_sites === 0 ? "-" : `${Math.round((stats.resolved / stats.call_sites) * 1000) / 10}%`;
+  t.check(
+    "레포 정보 구역이 파일·노드·선 수, 호출 확인 비율, 현재 git 브랜치 이름을 적는다",
+    panel.stats[0] === `파일 ${stats.files} · 노드 ${stats.nodes} · 선 ${stats.edges}` &&
+      panel.stats[1].startsWith(`호출 확인 ${rate}`) &&
+      (reply.git && reply.branch !== null ? panel.branch === `브랜치 ${reply.branch}` : panel.branch === null),
+    `${panel.stats.join(" / ")} / ${panel.branch}`,
+  );
+  t.check(`레포 정보 구역이 진입점 ${entries.length}개의 이름을 적는다`, entries.length > 0 && same([...panel.entries].sort(), [...entries].sort()), panel.entries.join(", "));
+  await t.shot();
+
+  // 보기 설정을 바꿔도 창이 닫히지 않고 필터 버튼이 바꾼 설정의 수를 적는다.
+  const filters = page.locator(".filter-panel");
+  await filters.getByLabel("테스트 코드").check();
+  await filters.getByLabel("자동 요약").check();
+  await filters.locator('input[type="range"]').fill("3");
+  await page.click('.overlay-option[data-kind="unused"]');
+  await rest(page);
+  const changed = ["흐름 단계 3", "덮개 미사용 후보", "테스트 코드", "자동 요약"];
+  t.check(
+    "보기 설정 네 개를 바꿔도 창이 열려 있고 필터 버튼이 4를 적는다",
+    (await count(page, ".filter-panel")) === 1 && (await page.evaluate(() => document.querySelector(".filter-count")?.textContent)) === "4" && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "unused",
+    `필터 버튼의 수 ${await page.evaluate(() => document.querySelector(".filter-count")?.textContent ?? "없음")}`,
+  );
+  await page.click(".filter-button");
+  const closed = (await count(page, ".filter-panel")) === 0;
+  const tip = await filterTipOf(page);
+  t.check("필터 버튼을 다시 누르면 창이 닫히고, 말풍선이 기본값과 다른 보기 설정의 이름을 적는다", closed && same(tip, ["필터 · 기본값과 다른 보기 설정", ...changed]), tip.join(" / "));
+  await inFilters(page, async () => {
+    await filters.getByLabel("테스트 코드").uncheck();
+    await filters.getByLabel("자동 요약").uncheck();
+    await filters.locator('input[type="range"]').fill("2");
+    await page.click(`.overlay-option[data-kind="${groups > 0 ? "cycles" : "none"}"]`);
+  });
+  await rest(page);
+
+  // 진입점 이름을 고르면 그 노드로 가고 창이 닫힌다. 창 밖을 누르거나 Esc를 눌러도 창만 닫힌다.
+  await page.click(".filter-button");
+  await page.click(`.filter-entry[data-node="${entries.at(-1)}"]`);
+  await waitSelected(page, entries.at(-1)).catch(() => {});
+  t.check("진입점 이름을 고르면 그래프가 그 노드를 선택하고 창이 닫힌다", (await selectedOf(page)) === entries.at(-1) && (await count(page, ".filter-panel")) === 0, `선택 ${await selectedOf(page)}`);
+  await page.click(".filter-button");
+  await page.waitForSelector(".filter-panel", { timeout: 5_000 }).catch(() => {});
   await page.keyboard.press("Escape");
-  const folded = (await count(page, ".toolbar-menu")) === 0 && (await selectedOf(page)) === entries.at(-1);
-  const focused = await page.evaluate(() => document.activeElement?.closest(".toolbar-entries") !== null);
+  const folded = (await count(page, ".filter-panel")) === 0 && (await selectedOf(page)) === entries.at(-1);
+  await page.click(".filter-button");
+  await page.click(".toolbar-trail");
+  const outside = (await count(page, ".filter-panel")) === 0;
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => document.querySelector(".react-flow__node .node-selected") === null, null, { timeout: 5_000 }).catch(() => {});
   t.check(
-    "Esc 한 번에 진입점 목록만 접히고, 포커스가 진입점 버튼에 남은 채 한 번 더 누르면 선택이 풀린다",
-    folded && focused && (await selectedOf(page)) === null,
-    `목록 접힘 ${folded}, 버튼 포커스 ${focused}, 선택 ${await selectedOf(page)}`,
+    "Esc 한 번에 필터 창만 닫히고, 창 밖을 눌러도 닫히며, 창이 닫힌 뒤의 Esc는 선택을 푼다",
+    folded && outside && (await selectedOf(page)) === null,
+    `Esc에 창만 닫힘 ${folded}, 밖을 눌러 닫힘 ${outside}, 선택 ${await selectedOf(page)}`,
   );
 
-  // 창 폭마다 파일트리 폭이 기본값인 새 화면을 열어 상단 줄의 모든 버튼과 입력이 창 안에서 눌리는지 본다.
+  // 창 폭마다 파일트리 폭이 기본값인 새 화면을 열어 상단 줄과 필터 창의 모든 버튼과 입력이 창 안에서 눌리는지 본다.
   // "분석 뒤 바뀐 파일 N개"는 /api/changes 응답에 분석 뒤 바뀐 파일 하나를 더해 띄운다.
   const extra = { path: graph.nodes.find((n) => n.kind === "module" && !n.test).path, status: "unchanged", stale: true, test: false };
   let stale = false;
@@ -2533,7 +2629,7 @@ async function toolbar(t, page) {
           const rect = element.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
         };
-        const title = (control) => control.textContent.trim() || control.closest("label")?.textContent.trim() || control.type;
+        const title = (control) => control.getAttribute("aria-label") || control.textContent.trim() || control.closest("label")?.textContent.trim() || control.type;
         const toolbar = document.querySelector(".toolbar");
         const area = toolbar.getBoundingClientRect();
         const controls = [...toolbar.querySelectorAll("button, input")].filter(shown);
@@ -2543,69 +2639,53 @@ async function toolbar(t, page) {
           return rect.left < area.left || rect.right > Math.min(area.right, window.innerWidth) || rect.top < area.top || hit === null || !control.contains(hit);
         });
         const last = document.querySelector(".trail-last");
-        const stats = [...document.querySelectorAll(".toolbar-stats > span")].find(shown);
         const [stage, panel] = [document.querySelector(".stage").getBoundingClientRect(), document.querySelector(".info-panel").getBoundingClientRect()];
+        const filters = document.querySelector(".filter-panel")?.getBoundingClientRect();
         return {
-          fit: toolbar.dataset.fit,
           width: Math.round(area.width),
           height: Math.round(area.height),
+          fits: toolbar.scrollWidth <= toolbar.clientWidth,
           controls: controls.map(title),
           missed: missed.map(title),
-          last: last === null ? null : { text: last.textContent, whole: shown(last) && last.scrollWidth <= last.clientWidth && last.getBoundingClientRect().right <= area.right },
+          last: last === null ? null : { text: last.textContent, width: Math.round(last.getBoundingClientRect().width), whole: last.scrollWidth <= last.clientWidth, inside: last.getBoundingClientRect().right <= area.right },
           cut: document.querySelector(".trail-cut")?.title ?? null,
-          stats: stats === undefined ? null : { text: stats.textContent, inside: stats.getBoundingClientRect().right <= area.right },
           stale: document.querySelector(".toolbar-stale")?.textContent ?? null,
           gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom],
+          filters: filters === undefined ? null : { inside: filters.left >= area.left && filters.right <= Math.min(area.right, window.innerWidth) && filters.bottom <= window.innerHeight },
         };
       });
     const bar = await read();
-    const menu = bar.controls.includes("설정");
-    const depth = await page.evaluate(() => document.querySelector('.toolbar input[type="range"]').closest("label").textContent.trim());
-    const wanted = ["←", "→", `진입점 ${entries.length}`, depth, "화면 맞춤", "어두운 화면", ...(menu ? ["설정"] : ["테스트 코드", "외부 노드", "자동 요약"])];
     t.check(
-      `${name}: 상단 줄의 버튼·슬라이더·토글이 모두 창 안에 있고 가운데 점에서 눌린다`,
-      bar.missed.length === 0 && wanted.every((title) => bar.controls.includes(title)) && (!stale || bar.stale !== null),
-      `단계 ${bar.fit}, 상단 줄 ${bar.width}×${bar.height}, 눌리지 않는 요소 ${bar.missed.join("·") || "없음"}, 요소 ${bar.controls.join("·")}`,
+      `${name}: 상단 줄이 한 줄이고 ${["뒤로", "앞으로", ...TOOLS].join("·")} 버튼이 모두 창 안에서 가운데 점으로 눌린다`,
+      bar.height < 40 && bar.fits && bar.missed.length === 0 && ["뒤로", "앞으로", ...TOOLS].every((title) => bar.controls.includes(title)) && (!stale || bar.stale !== null),
+      `상단 줄 ${bar.width}×${bar.height}, 눌리지 않는 요소 ${bar.missed.join("·") || "없음"}, 요소 ${bar.controls.join("·")}`,
     );
     t.check(
-      `${name}: 통계 문구와 탐색 경로의 마지막 단계가 잘리지 않고, 탐색 경로를 줄였으면 통계 문구가 짧은 형태다`,
-      bar.stats?.inside === true && bar.stats.text.includes("호출 확인") && bar.last?.whole === true && bar.last.text === NARROW.label && (bar.cut === null || bar.fit !== "full"),
-      `통계 문구 "${bar.stats?.text}", 마지막 단계 "${bar.last?.text}", 줄인 단계 "${bar.cut ?? "없음"}"`,
+      `${name}: 탐색 경로의 마지막 단계가 상단 줄 안에 보이고, 폭이 모자라면 앞 단계부터 줄인다`,
+      bar.last !== null && bar.last.text === NARROW.label && bar.last.inside && (bar.last.whole || bar.cut !== null || bar.last.width > 0),
+      `마지막 단계 "${bar.last?.text}" ${bar.last?.width}px${bar.last?.whole ? "" : "(말줄임)"}, 줄인 단계 "${bar.cut ?? "없음"}"`,
     );
     t.check(
       `${name}: 관계 그래프 영역이 상단 줄 바로 아래에서 시작하고 정보 패널의 위아래 여백이 같다`,
       near(bar.gaps[2], 0) && bar.gaps[0] > 0 && near(bar.gaps[0], bar.gaps[1]),
       `패널 위 ${bar.gaps[0]}, 아래 ${bar.gaps[1]}, 상단 줄과 영역 사이 ${bar.gaps[2]}`,
     );
-    if (width === NARROW.widths[0]) {
-      t.check(
-        `${name}: 통계 문구와 덮개 버튼, 토글 세 개를 한 줄에 그린다`,
-        (bar.fit === "full" || bar.fit === "brief") && bar.height < 40 && !menu && bar.controls.some((title) => title.startsWith("덮개")),
-        `단계 ${bar.fit}`,
-      );
-    }
-    if (menu) {
-      await page.click(".toolbar-toggles-button");
-      const listed = await page.evaluate(() =>
-        [...document.querySelectorAll(".toolbar-toggles-list[data-open] .toolbar-toggle")].map((label) => label.textContent.trim()),
-      );
-      const opened = await read();
-      if (!stale) {
-        await page.screenshot({ path: join(OUT, `s2-toolbar-${width}.png`) });
-      }
-      await page.keyboard.press("Escape");
-      t.check(
-        `${name}: 토글 세 개가 "설정" 버튼 아래 목록에서 눌리고 Esc에 목록만 접힌다`,
-        same(listed, ["테스트 코드", "외부 노드", "자동 요약"]) &&
-          listed.every((title) => opened.controls.includes(title)) &&
-          opened.missed.length === 0 &&
-          (await count(page, ".toolbar-toggles-list[data-open]")) === 0 &&
-          (await selectedOf(page)) === NARROW.id,
-        `목록 ${listed.join("·") || "없음"}, 눌리지 않는 요소 ${opened.missed.join("·") || "없음"}, 선택 ${await selectedOf(page)}`,
-      );
-    } else if (!stale) {
+    await page.click(".filter-button");
+    await page.waitForSelector(".filter-panel", { timeout: 5_000 }).catch(() => {});
+    const opened = await read();
+    if (!stale) {
       await page.screenshot({ path: join(OUT, `s2-toolbar-${width}.png`) });
     }
+    await page.keyboard.press("Escape");
+    t.check(
+      `${name}: 필터 창이 상단 줄의 폭과 창 안에 열리고 그 안의 입력이 모두 눌리며 Esc에 창만 닫힌다`,
+      opened.filters?.inside === true &&
+        ["테스트 코드", "외부 노드", "자동 요약"].every((title) => opened.controls.includes(title)) &&
+        opened.missed.length === 0 &&
+        (await count(page, ".filter-panel")) === 0 &&
+        (await selectedOf(page)) === NARROW.id,
+      `창 안 ${opened.filters?.inside}, 눌리지 않는 요소 ${opened.missed.join("·") || "없음"}, 선택 ${await selectedOf(page)}`,
+    );
   }
 }
 
@@ -2951,21 +3031,12 @@ const watchFlashes = (page) =>
 
 const flashesOf = (page) => page.evaluate(() => window.__shotsFlashes);
 
-/** 덮개 메뉴에서 kind("none"·"cycles"·"unused")를 고른다. 상단 줄이 덮개 버튼을 접었으면 "설정" 목록에서 고른다. */
+/** 필터 창에서 덮개 kind("none"·"cycles"·"unused")를 고른다. */
 async function setOverlay(page, kind) {
-  const direct = await page.evaluate(() => {
-    const rect = document.querySelector(".overlay-button")?.getBoundingClientRect();
-    return rect !== undefined && rect.width > 0;
-  });
-  await page.click(direct ? ".overlay-button" : ".toolbar-toggles-button");
-  await page.click(`.overlay-option[data-kind="${kind}"] >> visible=true`);
-  if ((await count(page, ".toolbar-toggles-list[data-open]")) > 0) {
-    await page.keyboard.press("Escape");
-  }
+  await inFilters(page, () => page.click(`.overlay-option[data-kind="${kind}"]`));
   await page.waitForFunction((want) => (document.querySelector(".graph").dataset.overlay ?? "none") === want, kind, { timeout: 5_000 });
   await rest(page);
 }
-
 
 // ── 3단계 시나리오: 경로 찾기와 경로 고정 ─────────────────────────
 
@@ -3516,9 +3587,9 @@ async function finderPin(t, page) {
   await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 });
   await settle(page);
   const settings = async () => ({
-    tests: await page.getByLabel("테스트 코드").isChecked(),
-    external: await page.getByLabel("외부 노드").isChecked(),
-    depth: await page.locator('.toolbar input[type="range"]').inputValue(),
+    tests: await toggled(page, "테스트 코드"),
+    external: await toggled(page, "외부 노드"),
+    depth: await inFilters(page, () => page.locator('.filter-panel input[type="range"]').inputValue()),
   });
   const free = await settings();
   await pin(page);
@@ -3551,13 +3622,18 @@ async function finderPin(t, page) {
   };
 
   t.check(
-    "고정 중에 뒤로·앞으로 버튼, 흐름 단계 슬라이더, 테스트 코드·외부 노드 토글이 disabled이고 자동 요약 토글은 아니다",
+    "고정 중에 뒤로·앞으로 버튼, 필터 창의 흐름 단계 슬라이더, 테스트 코드·외부 노드 토글이 disabled이고 자동 요약 토글은 아니다",
     (await page.getByRole("button", { name: "뒤로" }).isDisabled()) &&
       (await page.getByRole("button", { name: "앞으로" }).isDisabled()) &&
-      (await page.locator('.toolbar input[type="range"]').isDisabled()) &&
-      (await page.getByLabel("테스트 코드").isDisabled()) &&
-      (await page.getByLabel("외부 노드").isDisabled()) &&
-      !(await page.getByLabel("자동 요약").isDisabled()),
+      (await inFilters(page, async () => {
+        const panel = page.locator(".filter-panel");
+        return (
+          (await panel.locator('input[type="range"]').isDisabled()) &&
+          (await panel.getByLabel("테스트 코드").isDisabled()) &&
+          (await panel.getByLabel("외부 노드").isDisabled()) &&
+          !(await panel.getByLabel("자동 요약").isDisabled())
+        );
+      })),
   );
   // 고정 중에도 화면 맞춤은 동작한다. 경로 전체를 보이게 한 뒤 경로 밖 요소를 누른다.
   const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
@@ -3655,9 +3731,11 @@ async function finderPin(t, page) {
   await blocked("요약의 경로 밖 정의 표기 클릭", () => page.click(`.summary-text .summary-ref[data-node="${FUNCTION}"]`), 1, TRIP.to.id);
   await blocked("Alt+←", () => page.keyboard.press("Alt+ArrowLeft"), 1, TRIP.to.id);
   await blocked("disabled인 테스트 코드 토글과 흐름 단계 슬라이더 누르기", async () => {
-    await page.getByLabel("테스트 코드").click({ force: true });
-    const slider = await rectOf(page, '.toolbar input[type="range"]');
-    await page.mouse.click(slider.x + 2, slider.y + slider.height / 2);
+    await inFilters(page, async () => {
+      await page.locator(".filter-panel").getByLabel("테스트 코드").click({ force: true });
+      const slider = await rectOf(page, '.filter-panel input[type="range"]');
+      await page.mouse.click(slider.x + 2, slider.y + slider.height / 2);
+    });
   }, 0, TRIP.to.id);
 
   // 창을 접어도 고정은 유지되고, 접은 채 막힌 조작을 하면 창이 펴진다.
@@ -3701,11 +3779,11 @@ async function finderPin(t, page) {
   await page.keyboard.press("Alt+ArrowLeft");
   await rest(page);
   const stepped = (await count(page, `${node("parser")} > .node-package`)) === 1 || (await selectedOf(page)) !== outside.file;
-  await page.getByLabel("테스트 코드").check();
+  await setToggle(page, "테스트 코드", true);
   await rest(page);
   t.check(
     "끈 뒤에는 파일트리의 파일 클릭, 접힌 폴더 상자 클릭, Alt+←, 테스트 코드 토글이 평소대로 동작한다",
-    picked && unfolded && stepped && (await page.getByLabel("테스트 코드").isChecked()),
+    picked && unfolded && stepped && (await toggled(page, "테스트 코드")),
     `파일 선택 ${picked}, 폴더 펼침 ${unfolded}, 뒤로 ${stepped}`,
   );
 }
@@ -3803,18 +3881,15 @@ async function finderEnds(t, page) {
 
 // ── 3단계 시나리오: 분석 덮개 ─────────────────────────────────────
 
-/** 덮개 메뉴의 행마다 종류, 글자, 고른 상태. 화면에 보이는 행만 읽는다. */
+/** 필터 창의 덮개 행마다 종류, 글자, 고른 상태 */
 const overlayOptions = (page) =>
   page.evaluate(() =>
-    [...document.querySelectorAll(".overlay-option")]
-      .filter((option) => option.getBoundingClientRect().width > 0)
-      .map((option) => ({
-        kind: option.dataset.kind,
-        text: option.innerText.replaceAll("\n", " "),
-        checked: option.getAttribute("aria-checked") === "true",
-        inSettings: option.closest(".toolbar-toggles-list") !== null,
-        inside: option.getBoundingClientRect().right <= window.innerWidth && option.getBoundingClientRect().left >= 0,
-      })),
+    [...document.querySelectorAll(".filter-panel .overlay-option")].map((option) => ({
+      kind: option.dataset.kind,
+      text: option.innerText.replaceAll("\n", " "),
+      checked: option.getAttribute("aria-checked") === "true",
+      inside: option.getBoundingClientRect().right <= window.innerWidth && option.getBoundingClientRect().left >= 0,
+    })),
   );
 
 /** 테스트 코드를 뺀 미사용 후보 */
@@ -3834,35 +3909,33 @@ async function overlayMenu(t, page) {
     await page.reload();
     await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
     await settle(page);
-    const fit = await page.evaluate(() => document.querySelector(".toolbar").dataset.fit);
-    const folded = fit === "menu" || fit === "rows";
     if (width === 1700) {
       t.check(
         groups === 0 ? "순환 묶음이 없는 레포는 덮개 없이 열린다" : "순환 묶음이 있는 레포는 순환 덮개를 켠 채로 열린다",
         (await page.evaluate(() => document.querySelector(".graph").dataset.overlay ?? "none")) === (groups === 0 ? "none" : "cycles"),
-        await page.evaluate(() => document.querySelector(".overlay-button").textContent),
+        `필터 버튼의 수 ${await page.evaluate(() => document.querySelector(".filter-count")?.textContent ?? "없음")}`,
       );
     }
     const before = await flowBoxes(page);
-    await page.click(folded ? ".toolbar-toggles-button" : ".overlay-button");
-    await page.waitForFunction(() => [...document.querySelectorAll(".overlay-option")].some((option) => option.getBoundingClientRect().width > 0), null, { timeout: 5_000 }).catch(() => {});
+    await page.click(".filter-button");
+    await page.waitForSelector(".filter-panel .overlay-option", { timeout: 5_000 }).catch(() => {});
     const options = await overlayOptions(page);
     t.check(
-      `창 폭 ${width}px: 덮개 목록이 없음, 순환 의존 묶음 ${groups}, 미사용 후보 ${candidates.length}개를 ${folded ? '"설정" 목록 안에' : "덮개 버튼 아래에"} 적고 창 안에 있다`,
-      same(options.map((o) => o.text), ["없음", `순환 의존 묶음 ${groups}`, `미사용 후보 ${candidates.length}개`]) && options.every((o) => o.inSettings === folded && o.inside),
-      `단계 ${fit}, ${options.map((o) => o.text).join(" / ")}`,
+      `창 폭 ${width}px: 필터 창의 덮개 행이 없음, 순환 의존 묶음 ${groups}, 미사용 후보 ${candidates.length}개를 적고 창 안에 있다`,
+      same(options.map((o) => o.text), ["없음", `순환 의존 묶음 ${groups}`, `미사용 후보 ${candidates.length}개`]) && options.every((o) => o.inside),
+      options.map((o) => o.text).join(" / "),
     );
     await page.screenshot({ path: join(OUT, `s3-overlay-menu-${width}.png`) });
-    await page.click('.overlay-option[data-kind="unused"] >> visible=true');
-    if ((await count(page, ".toolbar-toggles-list[data-open]")) > 0) {
-      await page.keyboard.press("Escape");
-    }
+    await page.click('.overlay-option[data-kind="unused"]');
     await rest(page);
+    const picked = (await overlayOptions(page)).find((o) => o.checked)?.kind;
+    await page.click(".filter-button");
     const after = await flowBoxes(page);
     t.check(
-      `창 폭 ${width}px: 미사용 후보를 고르면 덮개가 켜지고 목록이 접히며 상자의 위치와 크기가 그대로다`,
+      `창 폭 ${width}px: 미사용 후보를 고르면 덮개가 켜지고 그 행이 고른 행이 되며 상자의 위치와 크기가 그대로다`,
       (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "unused" &&
-        (await overlayOptions(page)).length === 0 &&
+        picked === "unused" &&
+        (await count(page, ".filter-panel")) === 0 &&
         Object.keys(before).every((id) => after[id] !== undefined && sameRect(after[id], before[id])),
       `덮개 ${await page.evaluate(() => document.querySelector(".graph").dataset.overlay)}`,
     );
@@ -4083,8 +4156,8 @@ async function cyclesScenario(t, page) {
   const critical = await colorOf(page, "--critical");
   t.check(
     `순환 묶음 ${found.groups.length}개가 있는 레포는 순환 덮개를 켠 채로 열린다`,
-    found.groups.length === 2 && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "cycles" && (await page.evaluate(() => document.querySelector(".overlay-button").textContent)).includes("순환 의존"),
-    await page.evaluate(() => document.querySelector(".overlay-button").textContent),
+    found.groups.length === 2 && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "cycles" && (await page.evaluate(() => document.querySelector(".filter-count")?.textContent)) === "1",
+    `필터 버튼의 수 ${await page.evaluate(() => document.querySelector(".filter-count")?.textContent ?? "없음")}`,
   );
   t.check("순환 아이콘은 묶음에 든 파일 상자에만 있다", same(await cycleMarksOf(page), members), (await cycleMarksOf(page)).join(", "));
   const lines = await cycleLinesOf(page);

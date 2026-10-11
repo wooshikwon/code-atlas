@@ -1,7 +1,7 @@
-// 상단 줄의 펼치는 목록이 함께 쓰는 접기 동작.
+// 상단 줄에서 펼치는 창의 접기 동작.
 import { useEffect, type RefObject } from "react";
 
-/** 목록이 펼쳐진 동안 root 밖을 누르거나 Esc를 누르면 목록을 접는다. */
+/** 창이 펼쳐진 동안 root 밖을 누르거나 Esc를 누르면 창을 접는다. */
 export function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, setOpen: (open: boolean) => void): void {
   useEffect(() => {
     if (!open) {

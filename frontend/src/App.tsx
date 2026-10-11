@@ -1,45 +1,30 @@
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { GraphView } from "./graph/GraphView";
 import { fitTarget, FRAME_ZOOM, stageOf } from "./graph/viewport";
-import { Entries } from "./nav/Entries";
-import { useFit } from "./nav/fit";
+import { Filters } from "./nav/Filters";
 import { bind } from "./nav/keys";
-import { Overlays } from "./nav/Overlays";
-import { Toggles } from "./nav/Toggles";
 import { Trail } from "./nav/Trail";
 import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
 import { Palette } from "./search/Palette";
-import { useBranch, useStaleCount, watch } from "./state/changes";
-import { useOverlay } from "./state/overlay";
-import { litOf, pinned, useAtlas, type Depth } from "./state/store";
+import { useStaleCount, watch } from "./state/changes";
+import { litOf, pinned, useAtlas } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
 function Toolbar() {
-  const stats = useAtlas((s) => s.repo?.stats);
   const stale = useStaleCount();
-  const branch = useBranch();
   const functionView = useAtlas((s) => s.view.kind === "function");
   const canBack = useAtlas((s) => s.history.index > 0);
   const canForward = useAtlas((s) => s.history.index < s.history.entries.length - 1);
-  const depth = useAtlas((s) => s.depth);
-  /** 경로 고정 중에는 뒤로·앞으로 버튼과 흐름 단계 슬라이더를 누를 수 없다. */
+  /** 경로 고정 중에는 뒤로·앞으로 버튼을 누를 수 없다. */
   const pin = useAtlas((s) => pinned(s.finder));
   const theme = useAtlas((s) => s.theme);
-  const overlay = useOverlay((s) => s.kind);
   const back = useAtlas((s) => s.back);
   const forward = useAtlas((s) => s.forward);
-  const setDepth = useAtlas((s) => s.setDepth);
   const setTheme = useAtlas((s) => s.setTheme);
   const { fitView } = useReactFlow();
-
-  const rate = stats === undefined || stats.call_sites === 0 ? "-" : `${Math.round((stats.resolved / stats.call_sites) * 1000) / 10}%`;
-  /** 통계 문구의 뒤쪽. 줄 폭이 모자라면 이 문구만 적는다. */
-  const brief =
-    stats === undefined ? null : `호출 확인 ${rate}` + ((stats.timed_out ?? 0) > 0 ? ` · 응답 없음 ${stats.timed_out}` : "");
-  const summary = stats === undefined ? null : `파일 ${stats.files} · 노드 ${stats.nodes} · 선 ${stats.edges} · ${brief}`;
 
   /**
    * 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. 함수 시점 뷰에서는 확대 비율을 100%보다 키우지 않는다.
@@ -53,12 +38,8 @@ function Toolbar() {
     }
   };
 
-  const bar = useRef<HTMLDivElement | null>(null);
-  const tools = useRef<HTMLDivElement | null>(null);
-  const fit = useFit(bar, tools, `${summary}|${branch}|${stale}|${overlay}`);
-
   return (
-    <div className="toolbar" data-fit={fit} ref={bar}>
+    <div className="toolbar">
       <div className="toolbar-nav">
         <button className="toolbar-button" onClick={back} disabled={!canBack || pin} title="뒤로" aria-label="뒤로">
           ←
@@ -66,46 +47,21 @@ function Toolbar() {
         <button className="toolbar-button" onClick={forward} disabled={!canForward || pin} title="앞으로" aria-label="앞으로">
           →
         </button>
-        <Trail fit={fit} />
+        <Trail />
       </div>
-      <div className="toolbar-tools" ref={tools}>
-        {summary !== null && (
-          <span className="toolbar-stats" title={summary}>
-            <span className="toolbar-stats-full">{summary}</span>
-            <span className="toolbar-stats-brief">{brief}</span>
-          </span>
-        )}
-        <Entries />
-        {branch !== null && (
-          <span className="toolbar-branch" title="현재 git 브랜치">
-            브랜치 {branch}
-          </span>
-        )}
-        {stale > 0 && (
-          <span className="toolbar-stale" title="그래프의 노드와 줄 범위는 레포를 열 때 분석한 값이다">
-            분석 뒤 바뀐 파일 {stale}개
-          </span>
-        )}
-        <label className="toolbar-toggle">
-          흐름 단계
-          <input
-            type="range"
-            min={1}
-            max={3}
-            value={depth}
-            disabled={pin}
-            onChange={(event) => setDepth(Number(event.target.value) as Depth)}
-          />
-          {depth}
-        </label>
-        <Overlays />
-        <Toggles />
+      <div className="toolbar-tools">
+        <Filters />
         <button className="toolbar-button" onClick={fitGraph}>
           화면 맞춤
         </button>
         <button className="toolbar-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
           {theme === "light" ? "어두운 화면" : "밝은 화면"}
         </button>
+        {stale > 0 && (
+          <span className="toolbar-stale" title="그래프의 노드와 줄 범위는 레포를 열 때 분석한 값이다">
+            분석 뒤 바뀐 파일 {stale}개
+          </span>
+        )}
       </div>
     </div>
   );

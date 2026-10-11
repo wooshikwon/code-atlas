@@ -381,8 +381,8 @@ ul {
   min-width: 0;
 }
 
-/* 상단 줄은 뒤로·앞으로 버튼과 탐색 경로를 담은 .toolbar-nav와 나머지 요소를 담은 .toolbar-tools로 나뉜다.
-   nav/fit.ts가 줄 폭에 맞는 단계를 data-fit에 적는다. */
+/* 상단 줄은 뒤로·앞으로 버튼과 탐색 경로를 담은 .toolbar-nav와 필터 버튼, 화면 맞춤, 화면 색 버튼을 담은 .toolbar-tools로 나뉜다.
+   줄 폭이 모자라면 탐색 경로가 줄어든다. */
 .toolbar {
   display: flex;
   flex: none;
@@ -405,75 +405,14 @@ ul {
   min-width: 0;
 }
 
+/* 필터 창은 이 칸의 오른쪽 끝에 맞춰 열린다. */
 .toolbar-tools {
-  flex: none;
-}
-
-/* 두 줄일 때 둘째 줄의 요소는 줄 폭을 넘으면 다음 줄로 넘어간다. */
-.toolbar[data-fit="rows"] {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-}
-
-.toolbar[data-fit="rows"] .toolbar-nav {
-  flex: none;
-}
-
-.toolbar[data-fit="rows"] .toolbar-tools {
-  flex-wrap: wrap;
-  row-gap: 6px;
-  padding: 0 0 5px;
-}
-
-.toolbar-stats,
-.toolbar-branch,
-.toolbar-stale {
-  white-space: nowrap;
-}
-
-.toolbar-stats {
-  color: var(--muted);
-}
-
-.toolbar-stats-brief {
-  display: none;
-}
-
-.toolbar-branch {
-  color: var(--muted);
-}
-
-.toolbar-entries {
   position: relative;
   flex: none;
 }
 
-.toolbar-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: var(--z-menu);
-  min-width: 100%;
-  margin: 0;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--surface);
-  list-style: none;
-}
-
-.toolbar-menu-item {
-  display: block;
-  width: 100%;
-  padding: 2px 8px;
-  border-radius: 3px;
-  text-align: left;
+.toolbar-stale {
   white-space: nowrap;
-}
-
-.toolbar-menu-item:hover {
-  background: var(--hover-bg);
 }
 
 .toolbar-trail {
@@ -532,58 +471,6 @@ ul {
 
 .toolbar-toggle input[type="range"] {
   width: 72px;
-}
-
-.toolbar-toggles,
-.toolbar-toggles-list {
-  display: contents;
-}
-
-.toolbar-toggles-button {
-  display: none;
-}
-
-/* brief부터 통계 문구는 호출 확인 비율만 적는다. */
-.toolbar:not([data-fit="full"]) .toolbar-stats-full {
-  display: none;
-}
-
-.toolbar:not([data-fit="full"]) .toolbar-stats-brief {
-  display: inline;
-}
-
-/* menu부터 토글 세 개를 "설정" 버튼 아래 목록으로 접는다. */
-.toolbar:is([data-fit="menu"], [data-fit="rows"]) .toolbar-toggles {
-  display: block;
-  position: relative;
-  flex: none;
-}
-
-.toolbar:is([data-fit="menu"], [data-fit="rows"]) .toolbar-toggles-button {
-  display: block;
-}
-
-.toolbar:is([data-fit="menu"], [data-fit="rows"]) .toolbar-toggles-list {
-  display: none;
-}
-
-.toolbar:is([data-fit="menu"], [data-fit="rows"]) .toolbar-toggles-list[data-open] {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: var(--z-menu);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--surface);
-}
-
-.toolbar:is([data-fit="menu"], [data-fit="rows"]) .toolbar-toggles-list[data-open][data-side="left"] {
-  right: auto;
-  left: 0;
 }
 
 .toolbar-button {
@@ -1927,35 +1814,112 @@ ul {
 
 /* 분석 덮개 */
 
-/* 덮개 메뉴. 상단 줄에 넉넉하면 버튼과 그 아래 목록으로, 토글을 "설정"으로 접는 단계부터는 "설정" 목록의 "분석 덮개" 구역으로 그린다. */
-.toolbar-overlays {
-  position: relative;
+/* 필터 버튼. 기본값과 다른 보기 설정이 있으면 그 수를 아이콘 옆에 적는다. */
+.filter-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px;
+}
+
+.filter-icon {
   flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linejoin: round;
 }
 
-.toolbar:is([data-fit="menu"], [data-fit="rows"]) .toolbar-overlays,
-.toolbar-toggles-overlays {
-  display: none;
+.filter-button[data-changed] .filter-icon {
+  fill: currentColor;
 }
 
-.toolbar:is([data-fit="menu"], [data-fit="rows"]) .toolbar-toggles-overlays {
-  display: block;
-  margin: 0 -4px;
-  padding-top: 5px;
+.filter-count {
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  color: var(--surface);
+  background: var(--ink);
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+}
+
+/* 필터 창. 보기 설정과 레포 정보 두 구역을 위아래로 둔다. */
+.filter-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: var(--z-menu);
+  display: flex;
+  flex-direction: column;
+  width: 264px;
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.filter-section + .filter-section {
   border-top: 1px solid var(--line);
 }
 
-.toolbar-toggles-label {
+.filter-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.filter-label {
   display: block;
-  padding: 0 4px 2px;
+  padding: 0 0 2px;
   color: var(--muted);
   font-size: 11px;
 }
 
-.overlay-menu {
-  right: 0;
-  left: auto;
-  min-width: 190px;
+.filter-overlays {
+  margin: 0 -4px;
+}
+
+.filter-overlays .filter-label {
+  padding-left: 4px;
+}
+
+.filter-stats,
+.filter-branch {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filter-entry-list {
+  margin: 0 -4px;
+  padding: 0;
+  list-style: none;
+}
+
+.filter-entry {
+  display: block;
+  width: 100%;
+  padding: 2px 8px;
+  overflow: hidden;
+  border-radius: 3px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-entry:hover {
+  background: var(--hover-bg);
 }
 
 .overlay-option {

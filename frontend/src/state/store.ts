@@ -2,11 +2,13 @@
 import { create } from "zustand";
 import { getGraph, getRepo, getTree } from "../api/client";
 import type { Graph, Repo, Tree } from "../api/types";
+import { cycles } from "../graph/cycles";
 import { lit, route, type Lit, type Route } from "../graph/route";
 import type { EdgeKey } from "../graph/scope";
 import { hidden } from "../graph/visible";
 import { applyTheme, preferredTheme, type Theme } from "../theme";
 import { back, focusOf, forward, jump, push, type History, type Place, type Selection, type View } from "./history";
+import { useOverlay } from "./overlay";
 
 export type { Place, Selection, View } from "./history";
 
@@ -320,6 +322,9 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
           const collapsed = nestedFolders(graph);
           const place = placeOf({ ...START, collapsed });
           set({ repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 } });
+          // 순환 묶음이 하나라도 있으면 순환 덮개를 켠 채로 연다.
+          const { showTests, showExternal } = get();
+          useOverlay.getState().set(cycles(graph, hidden(graph, { showTests, showExternal })).groups.length > 0 ? "cycles" : null);
         })
         .catch((caught: unknown) => set({ error: caught instanceof Error ? caught.message : String(caught) }));
     },
