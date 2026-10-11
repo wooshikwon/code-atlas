@@ -2329,8 +2329,9 @@ async function summaryRef(t, page) {
       titles: [...text.querySelectorAll(".summary-title")].map((element) => element.textContent),
       sizes: [lead, title, body].map((element) => parseFloat(style(element).fontSize)),
       weights: [lead, title, body].map((element) => Number(style(element).fontWeight)),
-      chip: { filled: style(chip).backgroundColor !== "rgba(0, 0, 0, 0)", line: style(chip).textDecorationLine, cursor: style(chip).cursor },
-      link: { filled: style(link).backgroundColor !== "rgba(0, 0, 0, 0)", line: style(link).textDecorationLine, cursor: style(link).cursor },
+      chip: { filled: style(chip).backgroundColor !== "rgba(0, 0, 0, 0)", line: style(chip).textDecorationLine, cursor: style(chip).cursor, color: style(chip).color },
+      link: { filled: style(link).backgroundColor !== "rgba(0, 0, 0, 0)", line: style(link).textDecorationLine, cursor: style(link).cursor, color: style(link).color },
+      ink: style(text).color,
       path: [link.querySelector(".ref-path").textContent, style(link.querySelector(".ref-path")).color !== style(link).color],
       items: [...text.querySelectorAll("ul.summary-list > li")].map((item) => item.textContent),
       strong: [...text.querySelectorAll("strong")].map((element) => element.textContent),
@@ -2342,10 +2343,11 @@ async function summaryRef(t, page) {
     same(styled.titles, ["하는 일", "앞뒤 흐름"]) && styled.weights[1] >= 600 && styled.weights[0] >= 600 && styled.weights[2] < 600 && styled.sizes[0] > styled.sizes[2] && styled.sizes[1] >= styled.sizes[2],
     `크기 ${styled.sizes.join("·")}, 굵기 ${styled.weights.join("·")}`,
   );
+  const linkColor = await colorOf(page, "--link");
   t.check(
-    "코드 칩은 바탕을 칠하고, 누를 수 있는 정의 표기 칩만 밑줄을 긋고 손 모양 커서를 쓰며 파일 경로를 흐리게 적는다",
-    styled.chip.filled && styled.link.filled && styled.chip.line === "none" && styled.link.line === "underline" && styled.link.cursor === "pointer" && styled.chip.cursor !== "pointer" && styled.path[0] === `${first.split("::")[0]}::` && styled.path[1],
-    JSON.stringify({ chip: styled.chip, link: styled.link }),
+    "코드 칩은 바탕을 칠하고 본문 잉크로 적으며, 누를 수 있는 정의 표기 칩만 --link 색 글자와 손 모양 커서를 쓰고 밑줄 없이 파일 경로를 옅게 적는다",
+    styled.chip.filled && styled.link.filled && styled.chip.color === styled.ink && styled.link.color !== styled.ink && styled.link.color === linkColor.rgb && styled.chip.line === "none" && styled.link.line === "none" && styled.link.cursor === "pointer" && styled.chip.cursor !== "pointer" && styled.path[0] === `${first.split("::")[0]}::` && styled.path[1],
+    JSON.stringify({ chip: styled.chip, link: styled.link, 색: linkColor }),
   );
   t.check(
     "목록 기호로 시작하는 줄은 목록으로, `**`로 감싼 글은 굵게, 코드 울타리 사이의 줄은 들여쓰기를 둔 코드 블록으로 그린다",

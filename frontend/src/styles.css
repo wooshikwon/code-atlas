@@ -4,6 +4,8 @@
   --hover-bg: color-mix(in srgb, var(--ink) 6%, transparent);
   --active-bg: color-mix(in srgb, var(--ink) 12%, transparent);
   --panel-bg: color-mix(in srgb, var(--ink) 3%, var(--surface));
+  /* 누를 수 있는 글자의 색. 추가 표시의 파랑에 본문 잉크를 섞어 코드 칩 바탕 위에서 대비 4.5:1을 넘긴다. */
+  --link: color-mix(in srgb, var(--ink) 25%, var(--added));
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
@@ -1741,7 +1743,7 @@ ol.summary-list {
   color: var(--muted);
 }
 
-/* 정의 표기 가운데 그래프의 노드와 대응하는 것은 누를 수 있다. 테두리와 밑줄을 긋고 마우스를 올리면 진해진다. */
+/* 정의 표기 가운데 그래프의 노드와 대응하는 것은 누를 수 있다. 글자를 --link 색으로 그리고 마우스를 올리면 밑줄을 긋는다. */
 .summary-ref {
   display: inline;
   padding: 0;
@@ -1751,16 +1753,17 @@ ol.summary-list {
 }
 
 .summary-ref code {
-  box-shadow: inset 0 0 0 1px var(--line);
-  text-decoration: underline var(--muted);
-  text-underline-offset: 2px;
+  color: var(--link);
   cursor: pointer;
 }
 
+.summary-ref .ref-path {
+  color: color-mix(in srgb, var(--link) 65%, transparent);
+}
+
 .summary-ref:hover code {
-  background: var(--active-bg);
-  box-shadow: inset 0 0 0 1px var(--muted);
-  text-decoration-color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .summary-action {
