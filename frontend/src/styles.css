@@ -1174,8 +1174,9 @@ ul {
   background: color-mix(in srgb, var(--ink) 6%, var(--surface));
 }
 
+/* 호출하는 쪽의 + 버튼은 원 왼쪽 위로 6px 나가는 배지와 닿지 않게 9px 띄운다. 폭은 calls.ts의 MORE_GAP과 같다. */
 .node-call[data-side="caller"] :is(.call-more, .call-more-slot) {
-  margin-right: 4px;
+  margin-right: 9px;
 }
 
 .node-call[data-side="callee"] :is(.call-more, .call-more-slot) {
@@ -1190,17 +1191,11 @@ ul {
   visibility: hidden;
 }
 
-/* 배지는 감싼 모양의 오른쪽 위·아래 모서리에 세로 가운데를 맞춘다. 오른쪽으로 나가는 폭 --overhang은 layout.ts의 BADGE_OVERHANG을
-   컴포넌트가 넣는다. 글자 요소는 테두리가 없으므로 배지의 위치를 모양의 바깥 변에서 잰다. */
-.badges {
-  position: absolute;
-  top: -7px;
-  right: calc(0px - var(--overhang));
-  display: flex;
-  gap: 3px;
-}
-
+/* 배지는 감싼 모양의 모서리에 세로 가운데를 맞춘다. 미확인 호출 수는 오른쪽 위, 모듈 변수 변경은 오른쪽 아래, 도는 원은 왼쪽 위다.
+   모양 밖으로 나가는 폭 --overhang은 layout.ts의 BADGE_OVERHANG을 컴포넌트가 넣는다. 글자 요소는 테두리가 없으므로 배지의 위치를
+   모양의 바깥 변에서 잰다. */
 .badge {
+  position: absolute;
   min-width: 14px;
   /* layout.ts의 BADGE_HEIGHT와 같다. */
   height: 14px;
@@ -1213,12 +1208,16 @@ ul {
 }
 
 .badge-unresolved {
+  top: -7px;
+  right: calc(0px - var(--overhang));
   color: var(--surface);
   background: var(--muted);
 }
 
 /* LLM 요약을 만드는 중인 노드의 도는 원 */
 .badge-busy {
+  top: -7px;
+  left: calc(0px - var(--overhang));
   width: 14px;
   padding: 0;
   border: 2px solid color-mix(in srgb, var(--muted) 45%, var(--surface));
@@ -1240,7 +1239,6 @@ ul {
 }
 
 .badge-global {
-  position: absolute;
   right: calc(0px - var(--overhang));
   bottom: -7px;
   color: var(--surface);

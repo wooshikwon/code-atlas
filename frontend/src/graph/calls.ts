@@ -22,7 +22,8 @@ export interface Calls {
 const FILE_HEIGHT = 14;
 /** + 버튼의 한 변 */
 const MORE = 16;
-const MORE_GAP = 4;
+/** + 버튼과 노드 사이의 폭. 호출하는 쪽은 + 버튼이 원 왼쪽에 있으므로 원 왼쪽 위로 나가는 배지와 닿지 않게 원과 이름표 사이만큼 띄운다. */
+const MORE_GAP = { caller: CIRCLE_GAP, callee: 4, center: 0 } as const;
 
 const CALL_OPTIONS = {
   "elk.algorithm": "layered",
@@ -119,12 +120,13 @@ export function counted(node: AtlasNode): boolean {
 
 /** 노드 크기. 원과 그 오른쪽의 이름표 줄·파일 경로 줄이고, 더 펼 선이 남은 노드는 + 버튼의 폭을 더한다. */
 export function callSize(calls: Calls, nodes: Map<string, AtlasNode>, node: AtlasNode, measure: Measure): Size {
-  const label = measure((node.entry ? ENTRY_MARK : "") + callLabel(nodes, node), calls.side.get(node.id) === "center");
+  const side = calls.side.get(node.id)!;
+  const label = measure((node.entry ? ENTRY_MARK : "") + callLabel(nodes, node), side === "center");
   const name = counted(node) ? label + LOC_GAP + measure(String(node.loc)) : label;
   const file = fileLabel(nodes, node);
   const text = Math.max(name, file === null ? 0 : measure(file));
   return {
-    width: Math.ceil(CIRCLE + CIRCLE_GAP + text + (calls.more.has(node.id) ? MORE_GAP + MORE : 0)),
+    width: Math.ceil(CIRCLE + CIRCLE_GAP + text + (calls.more.has(node.id) ? MORE_GAP[side] + MORE : 0)),
     height: LEAF_HEIGHT + FILE_HEIGHT,
   };
 }

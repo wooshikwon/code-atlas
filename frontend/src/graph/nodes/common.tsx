@@ -177,9 +177,9 @@ export function Mark({ change }: { change: Change | null }) {
 }
 
 /**
- * 감싼 모양의 오른쪽 위 모서리에 미확인 호출 수를, 오른쪽 아래 모서리에 모듈 변수 변경을 단다. 글자 요소에만 그린다.
- * 배지의 오른쪽 끝은 모양의 오른쪽 끝에서 `BADGE_OVERHANG`만큼 나간다. LLM 요약을 만드는 중이면 오른쪽 위 모서리에
- * 도는 원을 달고, 미확인 호출 수 배지가 있으면 그 왼쪽에 나란히 둔다. 배지마다 뜻을 적은 말풍선 글(`tips.ts`)을 `data-tip`에 담는다.
+ * 감싼 모양의 오른쪽 위 모서리에 미확인 호출 수를, 오른쪽 아래 모서리에 모듈 변수 변경을, 왼쪽 위 모서리에 LLM 요약을
+ * 만드는 중인 도는 원을 단다. 글자 요소에만 그린다. 배지의 바깥쪽 끝은 모양의 그쪽 끝에서 `BADGE_OVERHANG`만큼 나간다.
+ * 배지마다 뜻을 적은 말풍선 글(`tips.ts`)을 `data-tip`에 담는다.
  */
 export function Badges({ data }: { data: AtlasNodeData }) {
   if (data.part === "body") {
@@ -188,14 +188,10 @@ export function Badges({ data }: { data: AtlasNodeData }) {
   const style = { "--overhang": `${BADGE_OVERHANG}px` } as CSSProperties;
   return (
     <>
-      {(data.busy > 0 || data.unresolved > 0) && (
-        <span className="badges" style={style}>
-          {data.busy > 0 && <span className="badge badge-busy" role="img" aria-label="요약을 만드는 중" data-tip={busyTip(data.node, data.busy)} />}
-          {data.unresolved > 0 && (
-            <span className="badge badge-unresolved" data-tip={unresolvedTip(data.node, data.unresolved, data.expanded)}>
-              ?{data.unresolved}
-            </span>
-          )}
+      {data.busy > 0 && <span className="badge badge-busy" style={style} role="img" aria-label="요약을 만드는 중" data-tip={busyTip(data.node, data.busy)} />}
+      {data.unresolved > 0 && (
+        <span className="badge badge-unresolved" style={style} data-tip={unresolvedTip(data.node, data.unresolved, data.expanded)}>
+          ?{data.unresolved}
         </span>
       )}
       {data.node.global_write && (

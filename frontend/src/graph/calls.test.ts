@@ -111,13 +111,15 @@ describe("이름표와 크기", () => {
     expect(fileLabel(nodes, nodes.get("ext:json")!)).toBeNull();
   });
 
-  it("높이는 이름표 줄에 파일 경로 줄 14px를 더한 값이고, 더 펼 선이 남은 노드는 + 버튼 16px와 간격 4px만큼 넓다", () => {
+  it("높이는 이름표 줄에 파일 경로 줄 14px를 더한 값이고, 더 펼 선이 남은 노드는 + 버튼 16px와 간격만큼 넓다. 간격은 호출되는 쪽이 4px, 호출하는 쪽이 9px다", () => {
     const calls = callview(repoFixture, load, [], off);
-    const opened = callview(repoFixture, load, [save], off);
+    const opened = callview(repoFixture, load, [save, "main:run"], off);
     const before = callSize(calls, nodes, nodes.get(save)!, measure);
     const after = callSize(opened, nodes, nodes.get(save)!, measure);
     expect(before.height).toBe(LEAF_HEIGHT + 14);
     expect(before.width - after.width).toBe(20);
+    const caller = (of: typeof calls) => callSize(of, nodes, nodes.get("main:run")!, measure).width;
+    expect(caller(calls) - caller(opened)).toBe(25);
   });
 });
 

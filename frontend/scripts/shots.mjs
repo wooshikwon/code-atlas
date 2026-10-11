@@ -1868,6 +1868,34 @@ async function holdSummaryPosts(page) {
 }
 
 /** 요약을 만들지 않고 서버 대신 답해, 요약을 만드는 동안 다른 노드를 고르고 폴더를 접어도 요청이 끝까지 가는지 본다. */
+/**
+ * id 노드가 단 도는 원이 shape 모양의 왼쪽 위 모서리에서 왼쪽과 위로 나간 폭(확대 비율로 나눈 값)과, 도는 원이 그 노드의
+ * 이름표·편재 노드 배지와 겹치는지. 도는 원은 돌면서 화면 사각형이 바뀌므로 돌리기 전의 위치(offsetLeft, offsetTop)로 잰다.
+ */
+const busyAt = (page, id, shape) =>
+  page.evaluate(
+    ([faceSel, shapeSel]) => {
+      const badge = document.querySelector(`${faceSel} .badge-busy`);
+      const outline = document.querySelector(shapeSel);
+      if (badge === null || outline === null) {
+        return null;
+      }
+      const parent = badge.offsetParent;
+      const [from, box] = [parent.getBoundingClientRect(), outline.getBoundingClientRect()];
+      const scale = from.width / parent.offsetWidth;
+      const [x, y, size] = [from.left + (parent.clientLeft + badge.offsetLeft) * scale, from.top + (parent.clientTop + badge.offsetTop) * scale, badge.offsetWidth * scale];
+      const covers = [...document.querySelectorAll(`${faceSel} :is(.node-label, .node-inflow)`)].some((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.left < x + size && x < rect.right && rect.top < y + size && y < rect.bottom;
+      });
+      return { left: (box.left - x) / scale, above: (box.top - y) / scale, covers, animated: getComputedStyle(badge).animationName !== "none" };
+    },
+    [face(id), shape],
+  );
+/** 도는 원이 모양의 왼쪽 위 모서리에 세로 가운데를 맞추고 왼쪽으로 6px 나갔으며 이름표를 덮지 않는가 */
+const atCorner = (at) => at !== null && near(at.left, 6, 0.5) && near(at.above, 7, 0.5) && !at.covers;
+const cornerText = (at) => (at === null ? "도는 원 없음" : `왼쪽으로 ${at.left.toFixed(1)}px, 위로 ${at.above.toFixed(1)}px${at.covers ? ", 이름표와 겹침" : ""}`);
+
 async function summaryBusy(t, page) {
   // 폴더 안에 있는 파일의 함수 하나와 미확인 호출이 있는 파일의 함수 하나를 고른다.
   const graph = await api("/api/graph");
@@ -1889,56 +1917,86 @@ async function summaryBusy(t, page) {
   await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 });
   await page.click(".info-panel-summary .summary-make");
   await page.waitForSelector(`${face(target.id)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
-  const spinning = await page.evaluate((sel) => {
-    const badge = document.querySelector(sel);
-    const [rect, circle] = [badge.getBoundingClientRect(), badge.closest(".node-circle").getBoundingClientRect()];
-    return { animated: getComputedStyle(badge).animationName !== "none", right: rect.right - circle.right, above: circle.top - rect.top };
-  }, `${face(target.id)} .badge-busy`);
+  const spinning = await busyAt(page, target.id, `${face(target.id)} .node-circle`);
   t.check(
-    '"요약 생성"을 누르면 그 함수의 원 오른쪽 위 모서리에 도는 원이 붙는다',
-    held.length === 1 && (await busy(target.id)) === 1 && spinning.animated && spinning.right > 0 && spinning.above > 0,
-    `POST ${held.length}번, 원 오른쪽으로 ${spinning.right.toFixed(1)}px, 위로 ${spinning.above.toFixed(1)}px`,
+    '"요약 생성"을 누르면 그 함수의 원 왼쪽 위 모서리에 도는 원이 붙는다',
+    held.length === 1 && (await busy(target.id)) === 1 && spinning?.animated === true && atCorner(spinning),
+    `POST ${held.length}번, ${cornerText(spinning)}`,
   );
   await t.shot();
+
+  // 함수 시점 뷰에서도 그 함수의 원이 같은 곳에 도는 원을 단다.
+  await clickNode(page, target.id, 2);
+  await page.waitForSelector(`${face(target.id)} .node-call .badge-busy`, { timeout: 30_000 }).catch(() => {});
+  await settle(page);
+  const called = await busyAt(page, target.id, `${face(target.id)} .node-circle`);
+  t.check("함수 시점 뷰에서도 그 함수의 원 왼쪽 위 모서리에 도는 원이 붙는다", (await count(page, ".node-call .badge-busy")) === 1 && atCorner(called), cornerText(called));
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForSelector(`${face(target.id)} .node-function .badge-busy`, { timeout: 30_000 }).catch(() => {});
+  await settle(page);
 
   // 다른 파일의 함수를 고르면 요약을 만들던 함수가 화면에서 사라지고 그 함수가 든 파일 상자가 배지를 단다.
   await pickInTree(page, { id: FUNCTION, owner: FILE });
   await page.waitForSelector(`${face(target.owner)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
+  await settle(page);
+  const boxed = await busyAt(page, target.owner, node(target.owner));
   t.check(
-    "다른 파일의 함수를 골라도 요청을 끊지 않고, 접힌 파일 상자의 오른쪽 위에 도는 원이 붙는다",
-    aborted.length === 0 && (await count(page, node(target.id))) === 0 && (await busy(target.owner)) === 1,
-    `끊은 POST ${aborted.length}번, ${target.owner} 상자의 도는 원 ${await busy(target.owner)}개`,
+    "다른 파일의 함수를 골라도 요청을 끊지 않고, 접힌 파일 상자의 왼쪽 위 모서리에 도는 원이 붙는다",
+    aborted.length === 0 && (await count(page, node(target.id))) === 0 && (await busy(target.owner)) === 1 && atCorner(boxed),
+    `끊은 POST ${aborted.length}번, ${target.owner} 상자의 도는 원 ${await busy(target.owner)}개, ${cornerText(boxed)}`,
   );
   if (folderId === null) {
-    t.skip("그 파일이 든 폴더를 접으면 접힌 폴더 상자의 오른쪽 위에 도는 원이 붙는다", `${target.owner}가 폴더 안에 있지 않다`);
+    t.skip("그 파일이 든 폴더를 접으면 접힌 폴더 상자의 왼쪽 위 모서리에 도는 원이 붙는다", `${target.owner}가 폴더 안에 있지 않다`);
   } else {
     const row = `.tree-row.tree-dir[data-node="${folderId}"]`;
     await page.click(row);
     await page.waitForSelector(`${node(folderId)} > .node-body.node-package`, { timeout: 30_000 });
     await settle(page);
-    t.check("그 파일이 든 폴더를 접으면 접힌 폴더 상자의 오른쪽 위에 도는 원이 붙는다", (await busy(folderId)) === 1 && aborted.length === 0, `${folderId}/ 상자의 도는 원 ${await busy(folderId)}개`);
+    const folded = await busyAt(page, folderId, node(folderId));
+    t.check(
+      "그 파일이 든 폴더를 접으면 접힌 폴더 상자의 왼쪽 위 모서리에 도는 원이 붙는다",
+      (await busy(folderId)) === 1 && aborted.length === 0 && atCorner(folded),
+      `${folderId}/ 상자의 도는 원 ${await busy(folderId)}개, ${cornerText(folded)}`,
+    );
     await page.click(row);
     await page.waitForSelector(`.tree-row.tree-file[data-node="${target.owner}"]`, { timeout: 10_000 });
   }
 
+  // 진입점 파일의 함수 요약을 만드는 중에 그 파일 상자를 접으면 도는 원이 이름표 앞의 진입점 표지를 덮지 않는다.
+  await page.click(".info-panel-summary .summary-make");
+  await pickInTree(page, target);
+  await page.waitForSelector(`${face(FILE)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
+  await settle(page);
+  const entry = await busyAt(page, FILE, node(FILE));
+  t.check(
+    "진입점 파일 상자의 도는 원도 왼쪽 위 모서리에 있고 진입점 표지와 이름표를 덮지 않는다",
+    (await count(page, `${face(FILE)} .node-entry`)) === 1 && atCorner(entry),
+    cornerText(entry),
+  );
+  held[1].answer(longSummary(1));
+  await page.waitForFunction(() => document.querySelectorAll(".badge-busy").length === 1, null, { timeout: 5_000 }).catch(() => {});
+
   if (extra === null) {
-    t.skip("도는 원이 미확인 호출 수 배지의 왼쪽에 3px 띄워 나란히 놓인다", "미확인 호출이 있는 파일이 없다");
+    t.skip("미확인 호출 수 배지가 있는 상자는 도는 원을 왼쪽 위에, 미확인 호출 수 배지를 오른쪽 위에 단다", "미확인 호출이 있는 파일이 없다");
   } else {
     await pickInTree(page, extra);
     await page.click(".info-panel-summary .summary-make");
     await pickInTree(page, { id: FUNCTION, owner: FILE });
     await page.waitForSelector(`${face(extra.owner)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
-    const beside = await page.evaluate((sel) => {
-      const row = document.querySelector(sel)?.closest(".badges");
-      const [spin, mark] = [row?.querySelector(".badge-busy"), row?.querySelector(".badge-unresolved")];
-      return spin == null || mark == null ? null : { gap: mark.offsetLeft - spin.offsetLeft - spin.offsetWidth, level: mark.offsetTop - spin.offsetTop };
-    }, `${face(extra.owner)} .badge-busy`);
+    await settle(page);
+    const both = await busyAt(page, extra.owner, node(extra.owner));
+    /** 미확인 호출 수 배지가 상자의 오른쪽과 위로 나간 폭 */
+    const mark = await page.evaluate((sel) => {
+      const badge = document.querySelector(sel);
+      const parent = badge?.offsetParent;
+      return badge == null ? null : { right: badge.offsetLeft + badge.offsetWidth - parent.clientWidth, above: -badge.offsetTop };
+    }, `${face(extra.owner)} .badge-unresolved`);
     t.check(
-      "도는 원이 미확인 호출 수 배지의 왼쪽에 3px 띄워 나란히 놓인다",
-      beside !== null && beside.gap === 3 && beside.level === 0 && (await count(page, ".badge-busy")) === 2,
-      beside === null ? "배지가 없다" : `사이 ${beside.gap}px, 도는 원 ${await count(page, ".badge-busy")}개`,
+      "미확인 호출 수 배지가 있는 상자는 도는 원을 왼쪽 위에, 미확인 호출 수 배지를 오른쪽 위에 단다",
+      atCorner(both) && mark !== null && near(mark.right, 6, 0.5) && near(mark.above, 7, 0.5) && (await count(page, ".badge-busy")) === 2,
+      `도는 원 ${cornerText(both)}, 미확인 호출 수 배지 ${mark === null ? "없음" : `오른쪽으로 ${mark.right.toFixed(1)}px, 위로 ${mark.above.toFixed(1)}px`}, 도는 원 ${await count(page, ".badge-busy")}개`,
     );
-    held[1].answer(longSummary(1));
+    held[2].answer(longSummary(1));
   }
   held[0].answer(longSummary(1));
   await page.waitForFunction(() => document.querySelector(".badge-busy") === null, null, { timeout: 5_000 }).catch(() => {});
@@ -1947,7 +2005,7 @@ async function summaryBusy(t, page) {
   await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 5_000 }).catch(() => {});
   t.check(
     "그 함수를 다시 고르면 POST를 다시 보내지 않고 만들어 둔 요약을 보인다",
-    held.length === (extra === null ? 1 : 2) && (await count(page, ".info-panel-summary .summary-text")) === 1,
+    held.length === (extra === null ? 2 : 3) && (await count(page, ".info-panel-summary .summary-text")) === 1,
     `POST ${held.length}번`,
   );
 }
