@@ -1746,6 +1746,71 @@ async function summaryPanel(t, page) {
   );
 }
 
+/** LLM 요약 칸과 코드 뷰어 사이의 경계선을 끌어 두 영역의 높이를 바꾼다. */
+async function split(t, page) {
+  await answerSummaryReads(page, () => ({ summary: null, stale: false, available: true, reason: null }));
+  const open = async () => {
+    await pick(page, FILE);
+    await pick(page, FUNCTION);
+    await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+    await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 });
+  };
+  const sizes = async () => ({
+    panel: await rectOf(page, ".info-panel"),
+    summary: (await rectOf(page, ".info-panel-summary")).height,
+    code: (await rectOf(page, ".info-panel .code")).height,
+    editor: (await rectOf(page, ".info-panel .monaco-editor")).height,
+  });
+  const pull = async (dy) => {
+    await drag(page, center(await rectOf(page, ".info-panel-divide")), 0, dy);
+    await page.waitForTimeout(300);
+    return sizes();
+  };
+  const text = (s) => `요약 칸 ${s.summary.toFixed(1)}, 코드 뷰어 ${s.code.toFixed(1)}`;
+  await load(page);
+  t.check("노드를 고르지 않았으면 경계선이 없다", (await count(page, ".info-panel-divide")) === 0);
+  await open();
+  const start = await sizes();
+  const cursor = await page.evaluate(() => getComputedStyle(document.querySelector(".info-panel-divide")).cursor);
+  t.check("요약이 없는 함수에서도 요약 칸과 코드 뷰어 사이에 row-resize 커서의 경계선이 있다", cursor === "row-resize" && start.summary < start.panel.height / 4, `커서 ${cursor}, ${text(start)}`);
+  const lower = await pull(140);
+  t.check(
+    "경계선을 아래로 140px 끌면 요약 칸이 140px 늘고 코드 뷰어가 140px 줄며 Monaco가 코드 뷰어의 높이를 따른다",
+    near(lower.summary, start.summary + 140, 1.5) && near(lower.code, start.code - 140, 1.5) && sameRect(lower.panel, start.panel) && near(lower.editor, lower.code, 2),
+    `${text(start)} → ${text(lower)}, Monaco ${lower.editor.toFixed(1)}`,
+  );
+  await t.shot();
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  await open();
+  const kept = await sizes();
+  t.check("새로 고친 뒤에도 요약 칸의 높이가 유지된다", near(kept.summary, lower.summary, 1.5) && near(kept.code, lower.code, 1.5), text(kept));
+  await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="s"]')), 0, -300);
+  await page.waitForTimeout(300);
+  const shorter = await sizes();
+  t.check(
+    "패널의 높이를 줄이면 요약 칸이 패널 높이에 대한 비율을 유지한다",
+    shorter.panel.height < kept.panel.height - 100 && near(shorter.summary / shorter.panel.height, kept.summary / kept.panel.height, 0.005),
+    `패널 ${kept.panel.height.toFixed(0)} → ${shorter.panel.height.toFixed(0)}, ${text(shorter)}`,
+  );
+  const [top, bottom] = [await pull(-2000), await pull(2000)];
+  t.check("끝까지 끌어도 요약 칸은 56px, 코드 뷰어는 96px 아래로 줄지 않는다", near(top.summary, 56, 1.5) && near(bottom.code, 96, 1.5), `위로 ${text(top)}, 아래로 ${text(bottom)}`);
+  await page.dblclick(".info-panel-divide");
+  await page.waitForTimeout(300);
+  const again = await sizes();
+  t.check("경계선을 더블클릭하면 요약 칸이 끌기 전의 높이로 돌아간다", near(again.summary, start.summary, 1) && sameRect(again.panel, shorter.panel), text(again));
+  await pull(140);
+  await page.dblclick(".info-panel-head");
+  await settle(page);
+  const reset = await sizes();
+  t.check(
+    "머리 줄을 더블클릭하면 패널의 사각형과 요약 칸의 높이가 처음 값으로 돌아간다",
+    sameRect(reset.panel, start.panel) && near(reset.summary, start.summary, 1) && near(reset.code, start.code, 1),
+    `패널 ${rectText(reset.panel)}, ${text(reset)}`,
+  );
+}
+
 /**
  * POST /api/summary를 서버로 보내지 않고 붙잡아 둔다. 돌려준 배열의 항목마다 노드 id와, 요약으로 답하는 answer가 있다.
  */
@@ -2467,6 +2532,7 @@ const SCENARIOS = [
   ["changes", changes],
   ["zoom-keep", zoomKeep],
   ["summary-panel", summaryPanel],
+  ["split", split],
   ["summary-busy", summaryBusy],
   ["summary-stale", summaryStale],
   ["explain", explain],

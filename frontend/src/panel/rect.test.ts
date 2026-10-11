@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clamp, initial, MIN_HEIGHT, MIN_WIDTH, move, resize, type Dir } from "./rect";
+import { clamp, divide, initial, MIN_CODE, MIN_HEIGHT, MIN_SUMMARY, MIN_WIDTH, move, resize, type Dir } from "./rect";
 
 const area = { width: 1000, height: 800 };
 const rect = { x: 400, y: 100, width: 480, height: 420 };
@@ -85,5 +85,18 @@ describe("clamp", () => {
       width: MIN_WIDTH,
       height: MIN_HEIGHT,
     });
+  });
+});
+
+describe("divide", () => {
+  it("끈 만큼 요약 칸의 높이가 바뀐다", () => {
+    expect(divide(200, 60, 800)).toBe(260);
+    expect(divide(200, -60, 800)).toBe(140);
+  });
+
+  it("요약 칸과 코드 뷰어에 최소 높이를 남긴다", () => {
+    expect(divide(200, -5000, 800)).toBe(MIN_SUMMARY);
+    expect(divide(200, 5000, 800)).toBe(800 - MIN_CODE);
+    expect(divide(60, 0, 100)).toBe(MIN_SUMMARY);
   });
 });

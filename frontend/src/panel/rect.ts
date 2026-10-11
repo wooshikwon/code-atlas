@@ -1,4 +1,4 @@
-// 정보 패널 사각형의 이동·크기 조절·자르기. 좌표는 관계 그래프 영역의 왼쪽 위에서 잰다.
+// 정보 패널 사각형의 이동·크기 조절·자르기와 LLM 요약 칸의 높이 조절. 좌표는 관계 그래프 영역의 왼쪽 위에서 잰다.
 import type { Rect } from "../state/store";
 
 export type Dir = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -14,6 +14,9 @@ const DEFAULT_WIDTH = 480;
 /** 기본 사각형이 영역의 위·오른쪽·아래 가장자리에서 떨어지는 길이 */
 const DEFAULT_GAP = 8;
 export const MIN_HEIGHT = 58;
+/** 경계선을 끌어 줄일 때 LLM 요약 칸과 코드 뷰어에 남기는 높이 */
+export const MIN_SUMMARY = 56;
+export const MIN_CODE = 96;
 /** 머리 줄이 관계 그래프 영역 안에 남아야 하는 가로·세로 길이 */
 const KEEP_X = 60;
 const KEEP_Y = 40;
@@ -69,4 +72,12 @@ export function resize(rect: Rect, dir: Dir, dx: number, dy: number, area: Area)
     bottom = Math.max(Math.min(bottom + dy, area.height), top + MIN_HEIGHT);
   }
   return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/**
+ * LLM 요약 칸의 높이 height를 dy만큼 바꾼다. room은 요약 칸과 코드 뷰어의 높이를 더한 값이다.
+ * 요약 칸과 코드 뷰어에 최소 높이를 남기고, room이 두 최소 높이의 합보다 작으면 요약 칸의 최소 높이를 먼저 남긴다.
+ */
+export function divide(height: number, dy: number, room: number): number {
+  return Math.max(MIN_SUMMARY, Math.min(height + dy, room - MIN_CODE));
 }

@@ -1644,7 +1644,8 @@ ul {
   vertical-align: 1px;
 }
 
-/* 코드 뷰어가 없으면 요약 칸이 패널의 남은 높이를 쓰고, 있으면 패널 높이의 4분의 1까지만 쓴다. 넘치는 설명은 칸 안에서 스크롤한다. */
+/* 코드 뷰어가 없으면 요약 칸이 패널의 남은 높이를 쓰고, 있으면 패널 높이의 4분의 1까지만 쓴다. 넘치는 설명은 칸 안에서 스크롤한다.
+   사용자가 경계선을 끌어 높이를 정했으면 요약 칸은 내용의 길이와 무관하게 그 높이를 쓴다. */
 .info-panel-summary {
   flex: 1 1 0;
   min-height: 0;
@@ -1677,9 +1678,29 @@ ul {
   margin-left: 0;
 }
 
-.info-panel-summary:has(+ .code) {
-  flex: none;
+.info-panel-summary:has(~ .code) {
+  flex: 0 1 auto;
   max-height: 25%;
+}
+
+.info-panel-summary[data-sized] {
+  min-height: var(--summary-min);
+}
+
+.info-panel-summary[data-sized] ~ .code {
+  flex-shrink: 0;
+  min-height: var(--code-min);
+}
+
+/* LLM 요약 칸과 코드 뷰어 사이의 경계선. 코드 뷰어의 위쪽 테두리 위아래 3px에서 끌기를 받는다. */
+.info-panel-divide {
+  position: relative;
+  z-index: var(--z-panel-grip);
+  flex: none;
+  height: 6px;
+  margin: -3px 0;
+  cursor: row-resize;
+  touch-action: none;
 }
 
 .info-panel-summary code {

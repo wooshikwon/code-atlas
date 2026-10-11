@@ -308,6 +308,7 @@ describe("화면 설정", () => {
     store().setDepth(3);
     store().setTheme("dark");
     store().setPanel({ x: 10, y: 20, width: 300, height: 200 });
+    store().setSplit(0.4);
     store().toggleLegend();
     store().toggleMinimap();
     store().toggleAutoSummary();
@@ -315,6 +316,7 @@ describe("화면 설정", () => {
     expect(store().history.entries).toHaveLength(1);
     expect(parseUi(saved.get("code-atlas:ui:v1")!, "light")).toEqual({
       panel: { x: 10, y: 20, width: 300, height: 200 },
+      split: 0.4,
       legendOpen: true,
       minimapOpen: false,
       theme: "dark",
@@ -324,10 +326,10 @@ describe("화면 설정", () => {
   });
 
   it("형태가 맞지 않는 값은 기본값으로 둔다", () => {
-    const defaults = { panel: null, legendOpen: false, minimapOpen: true, theme: "dark", depth: 2, autoSummary: false };
+    const defaults = { panel: null, split: null, legendOpen: false, minimapOpen: true, theme: "dark", depth: 2, autoSummary: false };
     expect(parseUi(null, "dark")).toEqual(defaults);
     expect(parseUi("{", "dark")).toEqual(defaults);
-    expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, legendOpen: "yes", minimapOpen: 0, theme: "blue", depth: 4, autoSummary: 1 }), "dark")).toEqual(
+    expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, split: 1.5, legendOpen: "yes", minimapOpen: 0, theme: "blue", depth: 4, autoSummary: 1 }), "dark")).toEqual(
       defaults,
     );
   });

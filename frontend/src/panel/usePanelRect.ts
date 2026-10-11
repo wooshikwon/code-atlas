@@ -2,6 +2,7 @@
 // 저장한 사각형이 없으면 영역의 오른쪽에 붙어 위에서 아래까지 차는 기본 사각형을 쓴다.
 import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useAtlas, type Rect } from "../state/store";
+import { drag } from "./drag";
 import { clamp, initial, move, resize, type Area, type Dir } from "./rect";
 
 export type Grip = "move" | Dir;
@@ -48,34 +49,20 @@ export function usePanelRect(): PanelRect {
     if (event.button !== 0 || panel === null || rect === null || area === null) {
       return;
     }
-    event.preventDefault();
-    const handle = event.currentTarget;
-    const { pointerId, clientX, clientY } = event;
     /** 끌어서 정한 사각형. 포인터가 움직이지 않았으면 null이고 저장하지 않는다. */
     let last: Rect | null = null;
-
-    const onMove = (moved: PointerEvent) => {
-      const dx = moved.clientX - clientX;
-      const dy = moved.clientY - clientY;
-      last = kind === "move" ? move(rect, dx, dy, area) : resize(rect, kind, dx, dy, area);
-      place(panel, last);
-    };
-    const onEnd = () => {
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onEnd);
-      handle.removeEventListener("pointercancel", onEnd);
-      handle.removeEventListener("lostpointercapture", onEnd);
-      document.body.style.userSelect = "";
-      if (last !== null) {
-        setPanel(last);
-      }
-    };
-    handle.setPointerCapture(pointerId);
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onEnd);
-    handle.addEventListener("pointercancel", onEnd);
-    handle.addEventListener("lostpointercapture", onEnd);
-    document.body.style.userSelect = "none";
+    drag(
+      event,
+      (dx, dy) => {
+        last = kind === "move" ? move(rect, dx, dy, area) : resize(rect, kind, dx, dy, area);
+        place(panel, last);
+      },
+      () => {
+        if (last !== null) {
+          setPanel(last);
+        }
+      },
+    );
   };
 
   return { ref, rect, grip, reset: () => setPanel(null) };

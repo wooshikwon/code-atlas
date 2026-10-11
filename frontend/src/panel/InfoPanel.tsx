@@ -1,5 +1,5 @@
 // 관계 그래프 위에 떠 있는 정보 패널. 저장소의 선택을 머리 줄, LLM 요약 칸, 지점 목록, 코드 뷰어로 바꾼다.
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { flow } from "../graph/flow";
@@ -7,9 +7,10 @@ import { degrees, drawn, neighbors, picked, type DrawnEdge } from "../graph/scop
 import { hidden, nodeIndex, shown, unresolvedWithin, within } from "../graph/visible";
 import { focusOf } from "../state/history";
 import { useAtlas, type Selection } from "../state/store";
+import { drag } from "./drag";
 import { Header, type HeaderItem, type PickedEdge } from "./Header";
 import { useOpened } from "./opened";
-import type { Dir } from "./rect";
+import { divide, MIN_CODE, MIN_SUMMARY, type Dir } from "./rect";
 import { Sites } from "./Sites";
 import { Summary } from "./Summary";
 import { usePanelRect } from "./usePanelRect";
@@ -54,6 +55,8 @@ export function InfoPanel() {
   const showExternal = useAtlas((s) => s.showExternal);
   const collapsed = useAtlas((s) => s.collapsed);
   const depth = useAtlas((s) => s.depth);
+  const split = useAtlas((s) => s.split);
+  const setSplit = useAtlas((s) => s.setSplit);
   /** 그래프 선택과 무관하게 연 파일. 고른 노드나 선 대신 이 파일의 코드를 보인다. */
   const file = useOpened((s) => s.path);
   /** 지점 목록에서 눌러 코드 뷰어에 연 지점과 그때 고른 선. 선택이 바뀌면 쓰지 않는다. */
@@ -132,19 +135,60 @@ export function InfoPanel() {
           ? { path: site.path, range: siteRange, highlight: site.line }
           : null;
   const { ref, rect, grip, reset } = usePanelRect();
+  const summarized = node !== undefined && SUMMARIZED.has(node.kind);
+
+  /** LLM 요약 칸과 코드 뷰어 사이의 경계선을 끌어 요약 칸의 높이를 바꾸고, 그 높이를 패널 높이로 나눈 값을 저장한다. */
+  const part = (event: ReactPointerEvent<HTMLElement>) => {
+    const panel = ref.current;
+    const summary = panel?.querySelector<HTMLElement>(".info-panel-summary");
+    const viewer = panel?.querySelector<HTMLElement>(".code");
+    if (event.button !== 0 || panel === null || summary == null || viewer == null) {
+      return;
+    }
+    const height = summary.offsetHeight;
+    const room = height + viewer.offsetHeight;
+    /** 끌어서 정한 요약 칸의 높이. 포인터가 움직이지 않았으면 null이고 저장하지 않는다. */
+    let last: number | null = null;
+    drag(
+      event,
+      (_dx, dy) => {
+        last = divide(height, dy, room);
+        summary.style.maxHeight = "none";
+        summary.style.height = `${last}px`;
+      },
+      () => {
+        if (last !== null) {
+          setSplit(last / panel.clientHeight);
+        }
+      },
+    );
+  };
+
+  /** 패널의 사각형과 요약 칸의 높이를 처음 값으로 돌린다. */
+  const restore = () => {
+    reset();
+    setSplit(null);
+  };
 
   return (
     <div
       ref={ref}
       className="info-panel"
-      style={rect === null ? undefined : { left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+      style={
+        rect === null
+          ? undefined
+          : ({ left: rect.x, top: rect.y, width: rect.width, height: rect.height, "--summary-min": `${MIN_SUMMARY}px`, "--code-min": `${MIN_CODE}px` } as CSSProperties)
+      }
     >
       {rect !== null && item !== null && index !== null && (
         <>
-          <div className="info-panel-head" onPointerDown={grip("move")} onDoubleClick={reset} title="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다">
+          <div className="info-panel-head" onPointerDown={grip("move")} onDoubleClick={restore} title="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다">
             <Header item={item} nodes={index.nodes} />
           </div>
-          {node !== undefined && SUMMARIZED.has(node.kind) && <Summary node={node.id} />}
+          {summarized && <Summary node={node.id} split={code === null ? null : split} />}
+          {summarized && code !== null && (
+            <div className="info-panel-divide" onPointerDown={part} onDoubleClick={() => setSplit(null)} title="끌어서 요약 칸과 코드의 높이를 바꾸고, 더블클릭하면 기본 높이로 돌아간다" />
+          )}
           {file === null && edge !== null && <Sites sites={edge.sites} opened={site} open={(picked) => setOpened({ selection, site: picked })} />}
           {code !== null && <CodeView {...code} />}
         </>
