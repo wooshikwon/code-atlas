@@ -246,7 +246,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   };
 
   /**
-   * 노드를 누른 동작. 접힌 폴더 상자는 한 단계 펼치고 펼친 폴더 영역은 접는다. 그 밖의 노드는 고른다.
+   * 노드를 누른 동작. 접힌 폴더 상자는 한 단계 펼치고 펼친 폴더 영역의 머리 줄은 그 폴더를 접는다. 그 밖의 노드는 고른다.
    */
   const press = (id: string) => {
     if (index?.nodes.get(id)?.kind === "package") {
@@ -298,11 +298,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
   };
 
-  /** 펼친 폴더 영역은 왼쪽 위에 폴더 경로를 적어 두었고 닿는 선도 없으므로 말풍선을 띄우지 않는다. */
   const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
-    if (node.data.expanded && node.data.node.kind === "package") {
-      return;
-    }
     setHover(node.data.node.id);
     tip.current?.show(`${titleOf(node.data.node)} · ${KIND_NAMES[node.data.node.kind]}`, event.clientX, event.clientY);
   };

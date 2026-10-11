@@ -47,6 +47,7 @@ export function parts<D extends object>(data: D): Record<Part, D & { part: Part 
 /**
  * 노드마다 화면 기준 상자 at에 놓은 React Flow 노드 두 개. 바탕 요소를 모두 앞에, 글자 요소를 모두 뒤에 둔다.
  * 층은 노드 종류와 요소로만 정한다. 글자 요소는 글자와 배지만 마우스를 받으므로 감싼 요소는 마우스를 받지 않는다.
+ * 펼친 폴더 영역의 바탕 요소도 마우스를 받지 않아 영역의 빈 곳은 그래프 바탕처럼 눌리고 끌린다.
  * fresh에 든 노드는 불투명도 0으로 그린다.
  */
 export function flowNodes<D extends AtlasNodeData>(items: Drawn<D>[], at: Map<string, Box>, fresh: Set<string> | null): Node<D>[] {
@@ -65,7 +66,7 @@ export function flowNodes<D extends AtlasNodeData>(items: Drawn<D>[], at: Map<st
       focusable: !face,
       style: {
         opacity: fresh?.has(item.id) === true ? 0 : item.opacity,
-        pointerEvents: face ? "none" : undefined,
+        pointerEvents: face || (data.expanded && data.node.kind === "package") ? "none" : undefined,
       },
       data,
     };

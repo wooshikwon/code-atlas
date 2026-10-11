@@ -940,6 +940,7 @@ async function region(t, page) {
   const title = await page.evaluate((sel) => {
     const label = document.querySelector(`${sel} .node-label`);
     const [rect, around] = [label.getBoundingClientRect(), document.querySelector(sel).getBoundingClientRect()];
+    // 머리 줄의 폴더 경로
     return { text: label.textContent, dx: rect.left - around.left, dy: rect.top - around.top };
   }, face(folderId));
   t.check(
@@ -949,7 +950,7 @@ async function region(t, page) {
   );
   const layer = await page.evaluate((sel) => {
     const of = (element) => Number(getComputedStyle(element.closest(".react-flow__node, svg")).zIndex);
-    const others = [...document.querySelectorAll(".react-flow__node > :not(.node-region), .react-flow__edges .edge")].map(of);
+    const others = [...document.querySelectorAll(".react-flow__node > .node-body:not(.node-region), .react-flow__edges .edge")].map(of);
     return { region: of(document.querySelector(sel)), lowest: Math.min(...others) };
   }, area);
   t.check("폴더 영역의 층이 다른 모든 노드와 선의 층보다 아래다", layer.region === 1 && layer.lowest > layer.region, `영역 ${layer.region}, 그 밖의 가장 아래층 ${layer.lowest}`);
@@ -972,13 +973,12 @@ async function region(t, page) {
   }, area);
   t.check("영역 위를 지나는 선의 점에서 맨 위 요소가 영역이 아니라 그 선이다", crossing !== null, `${crossing}`);
 
-  // 영역의 빈 곳
+  // 영역의 빈 곳은 그래프 바탕처럼 눌리고, 머리 줄만 폴더를 접는다.
   const blank = await page.evaluate((sel) => {
-    const body = document.querySelector(sel);
-    const around = body.getBoundingClientRect();
-    for (let y = around.top + 6; y < around.bottom; y += 6) {
+    const around = document.querySelector(sel).getBoundingClientRect();
+    for (let y = around.top + 40; y < around.bottom; y += 6) {
       for (let x = around.left + 6; x < around.right; x += 6) {
-        if (document.elementFromPoint(x, y) === body) {
+        if (document.elementFromPoint(x, y)?.classList.contains("react-flow__pane")) {
           return { x, y };
         }
       }
@@ -986,13 +986,60 @@ async function region(t, page) {
     return null;
   }, area);
   const before = columnsOf(await boxes(page), inside);
+  await pick(page, FILE);
+  const view = await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+  const spot = await page.evaluate((sel) => {
+    const around = document.querySelector(sel).getBoundingClientRect();
+    for (let y = around.bottom - 6; y > around.top + 40; y -= 6) {
+      for (let x = around.right - 6; x > around.left; x -= 6) {
+        if (document.elementFromPoint(x, y)?.classList.contains("react-flow__pane")) {
+          return { x, y };
+        }
+      }
+    }
+    return null;
+  }, area);
+  if (spot === null) {
+    t.skip("영역의 빈 곳을 누르면 폴더는 펼친 채로 선택만 풀린다", "화면에 보이는 영역에 빈 곳이 없다");
+  } else {
+    await page.mouse.click(spot.x, spot.y);
+    await page.waitForFunction(() => document.querySelector(".react-flow__node .node-selected") === null, null, { timeout: 5_000 }).catch(() => {});
+    await settle(page);
+    t.check(
+      "영역의 빈 곳을 누르면 폴더는 펼친 채로 선택만 풀린다",
+      blank !== null && (await selectedOf(page)) === null && (await count(page, area)) === 1,
+      `선택 ${await selectedOf(page)}, 영역 ${await count(page, area)}개`,
+    );
+    const from = await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+    await drag(page, spot, 40, 30);
+    await settle(page);
+    t.check("영역의 빈 곳을 끌면 화면이 옮겨 간다", (await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform)) !== from && view !== "", `${from}`);
+  }
+  const head = await page.evaluate((sel) => {
+    const strip = document.querySelector(`${sel} .node-region-head`);
+    const [rect, around] = [strip.getBoundingClientRect(), document.querySelector(sel).getBoundingClientRect()];
+    // 머리 줄에서 폴더 경로 글자가 아닌 곳 가운데 화면에 보이는 가장 오른쪽 점
+    const y = rect.top + rect.height / 2;
+    let x = rect.right - 12;
+    while (x > rect.left && document.elementFromPoint(x, y) !== strip) {
+      x -= 12;
+    }
+    return { x, y, wide: rect.width / around.width, cursor: getComputedStyle(strip).cursor };
+  }, face(folderId));
+  await page.mouse.move(head.x, head.y);
+  const lit = await page.evaluate((sel) => getComputedStyle(document.querySelector(`${sel} .node-region-head`)).backgroundColor, face(folderId));
+  t.check(
+    "폴더 영역의 머리 줄은 영역의 폭 전체이고 마우스를 올리면 손 모양 커서와 바탕색으로 누를 수 있음을 알린다",
+    head.wide > 0.98 && head.cursor === "pointer" && lit !== "rgba(0, 0, 0, 0)",
+    `폭 비율 ${head.wide.toFixed(2)}, 커서 ${head.cursor}, 바탕 ${lit}`,
+  );
   await t.shot();
-  await page.mouse.click(blank.x, blank.y);
+  await page.mouse.click(head.x, head.y);
   await page.waitForSelector(`${node(folderId)} > .node-package`, { timeout: 30_000 }).catch(() => {});
   await settle(page);
   const folded = await boxes(page);
   t.check(
-    "영역의 빈 곳을 누르면 폴더가 접혀 parser/ 상자 하나가 되고 선택은 생기지 않는다",
+    "폴더 영역의 머리 줄을 폴더 경로에서 떨어진 오른쪽 끝에서 눌러도 폴더가 접혀 parser/ 상자 하나가 되고 선택은 생기지 않는다",
     (await count(page, `${node(folderId)} > .node-body.node-package`)) === 1 && folded.every((b) => !inside(b.id)) && (await selectedOf(page)) === null,
     `남은 파일 상자 ${folded.length}개, 선택 ${await selectedOf(page)}`,
   );
@@ -1011,8 +1058,15 @@ async function region(t, page) {
     (await count(page, area)) === 1 && (await boxes(page)).filter((b) => inside(b.id)).length === members.length && (await selectedOf(page)) === null,
     `parser/ 안 파일 상자 ${(await boxes(page)).filter((b) => inside(b.id)).length}개`,
   );
-  const file = members[0].id;
-  await pick(page, file);
+  // 정보 패널에 가리지 않은 파일 상자를 누른다.
+  let file = null;
+  for (const member of members) {
+    if (await clickNode(page, member.id).then(() => true, () => false)) {
+      file = member.id;
+      break;
+    }
+  }
+  await waitSelected(page, file);
   t.check("영역 안의 파일 상자를 누르면 그 파일이 선택되고 폴더는 펼친 채다", (await selectedOf(page)) === file && (await count(page, area)) === 1, `선택 ${await selectedOf(page)}`);
   await page.keyboard.press("Alt+ArrowLeft");
   await page.keyboard.press("Alt+ArrowLeft");
