@@ -5712,6 +5712,9 @@ async function packFile(t, page) {
   );
 
   await clickPack(page, file.id);
+  // 접는 배치가 화면에 그려진 뒤에 위치를 읽는다.
+  await page.waitForFunction((box) => document.querySelector(`.node-pack[data-box="${box}"]:not([data-open])`) !== null, file.id, { timeout: 10_000 }).catch(() => {});
+  await rest(page);
   const closed = await flowBoxes(page);
   const back = await rectOf(page, node(file.id));
   t.check(
@@ -5825,13 +5828,13 @@ async function packPin(t, page) {
     onPath && definitions.every((id) => path.includes(id) || path.some((step) => step.startsWith(`${id}.`))),
     `그린 정의 ${definitions.length}개, 경로 ${path.length}단계`,
   );
-  const folderPacks = (await packsOf(page)).filter((each) => each.open === false);
+  const shownPacks = (await packsOf(page)).filter((each) => each.open === false);
   await watchFlashes(page);
-  if (folderPacks.length === 0) {
-    t.skip("고정 중에 손잡이를 눌러도 단계가 바뀌지 않고 안내 줄이 뒤집힌다", "고정 중의 화면에 손잡이가 없다(파일 상자는 고정 중에 접힘이고 손잡이를 다는 폴더가 없다)");
+  if (shownPacks.length === 0) {
+    t.skip("고정 중에 손잡이를 눌러도 단계가 바뀌지 않고 안내 줄이 뒤집힌다", "고정 중의 화면에 손잡이가 없다(파일 상자는 고정 중에 접힘이다)");
   } else {
-    await clickPack(page, folderPacks[0].box);
-    t.check("고정 중에 손잡이를 눌러도 단계가 바뀌지 않고 안내 줄이 뒤집힌다", (await packOf(page, folderPacks[0].box))?.open === false && (await flashesOf(page)) === 1, `뒤집힘 ${await flashesOf(page)}번`);
+    await clickPack(page, shownPacks[0].box);
+    t.check("고정 중에 손잡이를 눌러도 단계가 바뀌지 않고 안내 줄이 뒤집힌다", (await packOf(page, shownPacks[0].box))?.open === false && (await flashesOf(page)) === 1, `뒤집힘 ${await flashesOf(page)}번`);
   }
   await t.shot();
   await page.click(".finder-clear");
