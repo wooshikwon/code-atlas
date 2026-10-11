@@ -1142,6 +1142,34 @@ async function edge(t, page) {
       (await page.evaluate(() => document.querySelector('.node-call[data-side="center"]')?.closest(".react-flow__node")?.dataset.id)) === FUNCTION,
     `선택 ${await selectedOf(page)}`,
   );
+
+  // 화면을 끄는 동안의 hover. 끄는 동안에는 그래프가 커서를 따라가므로 버튼을 누른 채의 mousemove를 선에 직접 보낸다.
+  await page.mouse.move(5, 5);
+  await settle(page);
+  const held = await hittable(page, await linesOf(page));
+  const moveOver = (buttons) =>
+    page.evaluate(
+      ([key, at, pressed]) =>
+        document
+          .querySelector(`.edge[data-key="${CSS.escape(key)}"] .edge-hit`)
+          .dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: at.x, clientY: at.y, buttons: pressed })),
+      [held.line.key, held.at, buttons],
+    );
+  const marks = async () => ({ pointed: await count(page, ".edge[data-pointed]"), tip: await count(page, ".tooltip") });
+  await moveOver(1);
+  await page.waitForTimeout(300);
+  const pressed = await marks();
+  await moveOver(0);
+  await page.waitForSelector(".edge[data-pointed]", { timeout: 5_000 }).catch(() => {});
+  const released = await marks();
+  await moveOver(1);
+  await page.waitForTimeout(300);
+  const repressed = await marks();
+  t.check(
+    "마우스 버튼을 누른 채(화면을 끄는 동안) 선 위를 지나면 선의 강조와 말풍선이 뜨지 않고, 떠 있던 강조와 말풍선은 거둔다",
+    pressed.pointed === 0 && pressed.tip === 0 && released.pointed > 0 && released.tip === 1 && repressed.pointed === 0 && repressed.tip === 0,
+    `누른 채 강조한 선 ${pressed.pointed}개·말풍선 ${pressed.tip}개, 뗀 뒤 ${released.pointed}개·${released.tip}개, 다시 누른 채 ${repressed.pointed}개·${repressed.tip}개`,
+  );
 }
 
 async function badgeTip(t, page) {
@@ -5961,19 +5989,41 @@ async function packToggle(t, page) {
 async function packFolder(t, page) {
   const graph = await api("/api/graph");
   await load(page, url, false);
-  const before = { zoom: await zoomOf(page), corner: await rectOf(page, node("parser")), view: await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform) };
-  await clickNode(page, "parser");
-  await page.waitForSelector(`${node("parser")} > .node-region`, { timeout: 30_000 });
-  await page.mouse.move(5, 5);
-  await rest(page);
-  const region = await rectOf(page, node("parser"));
+  const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+  /** 그린 상자 가운데 정보 패널이 가리지 않는 영역을 벗어난 상자의 id */
+  const outside = async () => {
+    const { free } = await stageOf(page);
+    const rects = await page.evaluate(() =>
+      [...document.querySelectorAll(".react-flow__node")].map((wrapper) => {
+        const r = wrapper.getBoundingClientRect();
+        return { id: wrapper.dataset.id, x: r.left, y: r.top, width: r.width, height: r.height };
+      }),
+    );
+    return rects.filter((rect) => !within(rect, free)).map((rect) => rect.id);
+  };
+  const expand = async () => {
+    await clickNode(page, "parser");
+    await page.waitForSelector(`${node("parser")} > .node-region`, { timeout: 30_000 });
+    await page.mouse.move(5, 5);
+    await rest(page);
+  };
+  const fold = async () => {
+    const head = await rectOf(page, `${face("parser")} .node-region-head`);
+    await page.mouse.click(head.x + 20, head.y + head.height / 2);
+    await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 });
+    await page.mouse.move(5, 5);
+    await rest(page);
+  };
+
+  // 전체 맞춤 상태: 레포를 연 처음 화면
+  const first = { zoom: await zoomOf(page), view: await viewport() };
+  await expand();
+  const beyond = await outside();
   t.check(
-    "폴더 상자를 눌러 펼치면 확대 비율이 그대로이고 영역의 왼쪽 위 모서리가 누른 상자의 왼쪽 위 모서리가 있던 좌표에 있다",
-    near(await zoomOf(page), before.zoom, 0.001) && near(region.x, before.corner.x, 1.5) && near(region.y, before.corner.y, 1.5),
-    `(${Math.round(before.corner.x)}, ${Math.round(before.corner.y)}) → (${Math.round(region.x)}, ${Math.round(region.y)})`,
+    "처음 화면에서 폴더 상자를 눌러 펼치면 그래프 전체를 다시 맞춰 모든 상자가 정보 패널이 가리지 않는 영역 안에 있다",
+    beyond.length === 0 && (await zoomOf(page)) <= 1.001,
+    `확대 비율 ${first.zoom.toFixed(3)} → ${(await zoomOf(page)).toFixed(3)}, 영역을 벗어난 상자 ${beyond.length}개`,
   );
-  const stays = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`.react-flow__node[data-id="${id}"]`).getBoundingClientRect().left > 0).length, ["arbiter", "note_batch"]);
-  t.check("누른 상자의 모서리가 가리지 않는 영역 안에 있으므로 화면을 옮기지 않아 왼쪽 열의 파일 상자가 화면에 남는다", stays === 2, `왼쪽 열의 파일 상자 ${stays}개`);
   await t.shot();
   const inside = graph.nodes.filter((n) => n.parent === "parser" && !n.test).map((n) => n.id);
   const files = await drawnIn(page, graph, "parser");
@@ -5982,18 +6032,47 @@ async function packFolder(t, page) {
     same(files, inside) && (await packOf(page, "parser")) === null,
     `그린 파일 ${files.length}개`,
   );
-  const head = await rectOf(page, `${face("parser")} .node-region-head`);
-  await page.mouse.click(head.x + 20, head.y + head.height / 2);
-  await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 });
-  await page.mouse.move(5, 5);
+  await fold();
+  t.check("머리 줄을 눌러 접으면 그래프 전체를 다시 맞춰 화면이 펼치기 전과 같다", (await viewport()) === first.view, `${first.view} → ${await viewport()}`);
+
+  // 사용자가 화면을 끈 뒤: 확대 비율을 그대로 두고 누른 상자의 모서리를 붙잡는다
+  const spot = await page.evaluate(() => {
+    const area = document.querySelector(".graph").getBoundingClientRect();
+    for (let y = area.top + 30; y < area.bottom - 30; y += 20) {
+      for (let x = area.left + 30; x < area.right - 30; x += 20) {
+        if (document.elementFromPoint(x, y)?.classList.contains("react-flow__pane")) {
+          return { x, y };
+        }
+      }
+    }
+    return null;
+  });
+  await drag(page, spot, -40, 30);
   await rest(page);
+  const before = { zoom: await zoomOf(page), corner: await rectOf(page, node("parser")), view: await viewport() };
+  await expand();
+  const region = await rectOf(page, node("parser"));
+  t.check(
+    "화면을 끈 뒤 폴더 상자를 눌러 펼치면 확대 비율이 그대로이고 영역의 왼쪽 위 모서리가 누른 상자의 왼쪽 위 모서리가 있던 좌표에 있다",
+    before.view !== first.view && near(await zoomOf(page), before.zoom, 0.001) && near(region.x, before.corner.x, 1.5) && near(region.y, before.corner.y, 1.5),
+    `(${Math.round(before.corner.x)}, ${Math.round(before.corner.y)}) → (${Math.round(region.x)}, ${Math.round(region.y)})`,
+  );
+  const stays = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`.react-flow__node[data-id="${id}"]`).getBoundingClientRect().left > 0).length, ["arbiter", "note_batch"]);
+  t.check("누른 상자의 모서리가 가리지 않는 영역 안에 있으므로 화면을 옮기지 않아 왼쪽 열의 파일 상자가 화면에 남는다", stays === 2, `왼쪽 열의 파일 상자 ${stays}개`);
+  await fold();
   const folded = await rectOf(page, node("parser"));
   t.check(
     "머리 줄을 눌러 접으면 폴더 상자가 영역의 왼쪽 위 모서리가 있던 좌표에 놓이고 화면이 펼치기 전과 같다",
-    near(folded.x, region.x, 1.5) && near(folded.y, region.y, 1.5) && near(await zoomOf(page), before.zoom, 0.001) &&
-      (await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform)) === before.view,
+    near(folded.x, region.x, 1.5) && near(folded.y, region.y, 1.5) && near(await zoomOf(page), before.zoom, 0.001) && (await viewport()) === before.view,
     `(${Math.round(region.x)}, ${Math.round(region.y)}) → (${Math.round(folded.x)}, ${Math.round(folded.y)})`,
   );
+
+  // "화면 맞춤"이 전체 맞춤 상태를 다시 켠다
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await rest(page);
+  await expand();
+  const refit = await outside();
+  t.check('"화면 맞춤"을 누른 뒤 펼치면 다시 모든 상자가 정보 패널이 가리지 않는 영역 안에 있다', refit.length === 0, `영역을 벗어난 상자 ${refit.length}개`);
 }
 
 // ── 4단계: 선이 지나는 길 ────────────────────────────────────────
