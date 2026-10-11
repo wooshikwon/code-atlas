@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { repoFixture } from "./fixture";
 import { flow } from "./flow";
-import { concealed, degrees, drawn, picked, ubiquitous, type DrawnEdge } from "./scope";
+import { concealed, degrees, drawn, neighbors, picked, ubiquitous, type DrawnEdge } from "./scope";
 import { hidden, shown } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
@@ -19,13 +19,13 @@ describe("ubiquitous", () => {
   const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null });
 
   it("상자 수의 절반 이상에서 선이 들어오는 상자와 선을 보내는 상자 수를 낸다", () => {
-    expect([...ubiquitous(repoFixture, closed)]).toEqual([["common", 4]]);
+    expect([...ubiquitous(repoFixture, closed)]).toEqual([["common", 5]]);
   });
 
   it("파일 상자를 펼쳐도 결과가 같다", () => {
     const focus = flow(repoFixture, "cli:main", 2, off);
     const visible = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus });
-    expect([...ubiquitous(repoFixture, visible)]).toEqual([["common", 4]]);
+    expect([...ubiquitous(repoFixture, visible)]).toEqual([["common", 5]]);
   });
 });
 
@@ -36,7 +36,7 @@ describe("concealed", () => {
   };
 
   it("초점이 없으면 편재 노드마다 숨긴 선의 출발 노드 수를 낸다", () => {
-    expect([...concealed(repoFixture, ...scene(null))]).toEqual([["common", 4]]);
+    expect([...concealed(repoFixture, ...scene(null))]).toEqual([["common", 5]]);
   });
 
   it("편재 노드를 쓰는 노드나 편재 노드 안의 노드를 고르면 뺀다", () => {
@@ -46,7 +46,7 @@ describe("concealed", () => {
   });
 
   it("편재 노드와 관계없는 노드를 고르면 남긴다", () => {
-    expect([...concealed(repoFixture, ...scene("app.text:pad"))]).toEqual([["common", 4]]);
+    expect([...concealed(repoFixture, ...scene("app.text:pad"))]).toEqual([["common", 5]]);
   });
 });
 
@@ -56,6 +56,23 @@ describe("degrees", () => {
     expect(result.get("main:helper")).toEqual({ incoming: 3, outgoing: 0 });
     expect(result.get("pkg.mod:Store.load")).toEqual({ incoming: 2, outgoing: 2 });
     expect(result.has("scratch:todo")).toBe(false);
+  });
+});
+
+describe("neighbors", () => {
+  const count = (selection: string, collapsed: string[] = []) => neighbors([...draw(selection, collapsed).values()], selection);
+
+  it("파일 상자는 경계를 넘는 선을 올린 집계 선으로 이어진 상자를 센다", () => {
+    // main은 pkg.mod, cli, common을 쓰고 pkg.mod와 cli가 main을 쓴다. degrees는 import 선 세 개만 센다.
+    expect(count("main")).toEqual({ incoming: 2, outgoing: 3 });
+    expect(degrees(repoFixture).get("main")).toEqual({ incoming: 1, outgoing: 3 });
+  });
+
+  it("접힌 폴더 상자는 안에 든 노드의 선을 올려 세고, 상대 상자가 접힌 폴더면 그 폴더를 하나로 센다", () => {
+    expect(count("pkg", ["pkg"])).toEqual({ incoming: 1, outgoing: 2 });
+    expect(degrees(repoFixture).has("pkg")).toBe(false);
+    expect(count("main", ["pkg"])).toEqual({ incoming: 2, outgoing: 3 });
+    expect(count("common", ["app"])).toEqual({ incoming: 4, outgoing: 0 });
   });
 });
 
@@ -163,6 +180,7 @@ describe("drawn", () => {
     const edges = draw(null, [], "common");
     expect([...edges.keys()].filter((key) => key.includes("common")).sort()).toEqual([
       "agg|cli|common",
+      "app.__init__|common|import",
       "app.web|common|import",
       "main|common|import",
       "pkg.mod|common|import",

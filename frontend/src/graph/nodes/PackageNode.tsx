@@ -5,8 +5,8 @@ import { Badges, Handles, Inflow, Label, nodeProps, sameNode, type AtlasFlowNode
 
 /**
  * 접힌 폴더는 폴더 경로를 가운데 적은 상자다. 펼친 폴더는 상자를 그리지 않고 자식 파일 상자의 자리만 잡는다.
- * 접힌 폴더 안에 마지막 커밋 뒤에 바뀐 노드가 있으면 수정으로 표시한다. `__init__.py` 최상위에 미확인 호출이 있으면
- * 오른쪽 위에 배지를 단다.
+ * 접힌 폴더 안에 마지막 커밋 뒤에 바뀐 노드가 있으면 수정으로 표시하고, 안에 든 노드의 미확인 호출 수를 합쳐
+ * 오른쪽 위 배지에 적는다.
  */
 export const PackageNode = memo(function PackageNode({ data }: NodeProps<AtlasFlowNode>) {
   const change = useFolderChange(data.node.id);

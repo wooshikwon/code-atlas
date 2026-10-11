@@ -130,7 +130,7 @@ def _source(site: ResolvedSite, nodes: dict[str, Node], modules: dict[str, str])
 def build(repo: RepoFiles, facts: list[FileFacts], resolution: Resolution, texts: dict[str, str]) -> Analysis:
     nodes: dict[str, Node] = {n.id: n for f in facts for n in f.nodes}
     _package_nodes(repo, facts, nodes)
-    modules = {f.file.path: f.file.module_id for f in facts}
+    modules = {f.file.path: f.nodes[0].id for f in facts}
     lines = {path: text.splitlines() for path, text in texts.items()}
 
     def site_ref(path: str, line: int, col: int) -> SiteRef:

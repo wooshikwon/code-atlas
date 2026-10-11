@@ -1,5 +1,5 @@
 // 그래프 선택과 무관하게 정보 패널에 연 파일. 그래프 노드가 없는 `__init__.py`를 파일트리에서 누르면 여기에 담는다.
-// 탐색 이력에 넣지 않고, 그래프의 선택이나 뷰가 바뀌면 비운다.
+// 탐색 이력에 넣지 않고, 그래프의 선택이나 뷰가 바뀌거나 그 파일이 든 폴더를 접으면 비운다.
 import { create } from "zustand";
 import { useAtlas } from "../state/store";
 
@@ -18,7 +18,20 @@ export const useOpened = create<OpenedStore>()((set, get) => ({
 }));
 
 useAtlas.subscribe((state, before) => {
-  if (state.selection !== before.selection || state.view !== before.view) {
-    useOpened.getState().close();
+  const { path, close } = useOpened.getState();
+  if (path === null) {
+    return;
+  }
+  /** 접은 폴더의 레포 루트 기준 경로. 패키지 노드의 path는 폴더이거나 그 폴더의 `__init__.py`다. */
+  const folded = () =>
+    (state.graph?.nodes ?? [])
+      .filter((n) => n.kind === "package" && n.path !== null && state.collapsed.has(n.id))
+      .map((n) => n.path!.replace(/\/?__init__\.py$/, ""));
+  if (
+    state.selection !== before.selection ||
+    state.view !== before.view ||
+    (state.collapsed !== before.collapsed && folded().some((folder) => path.startsWith(`${folder}/`)))
+  ) {
+    close();
   }
 });

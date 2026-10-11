@@ -110,7 +110,7 @@ describe("elkGraphs", () => {
     const root = closed.components[0];
     expect(root.children?.map((c) => c.id)).toEqual(["app", "pkg", "cli", "common", "main"]);
     expect(root.children?.map((c) => c.layoutOptions?.["elk.partitioning.partition"])).toEqual(["0", "1", "0", "2", "0"]);
-    expect(find(root, "app")?.children?.map((c) => c.id)).toEqual(["app.text", "app.web"]);
+    expect(find(root, "app")?.children?.map((c) => c.id)).toEqual(["app.__init__", "app.text", "app.web"]);
     expect(find(root, "app.text")?.layoutOptions?.["elk.partitioning.partition"]).toBe("1");
     expect(closed.shelf.map((n) => n.id)).toEqual(["scratch"]);
   });

@@ -19,7 +19,6 @@ const graph: Graph = {
     node("arbiter:State", "dataclass", "arbiter", "src/arbiter.py", 2),
     node("empty", "module", null, "src/empty.py"),
     node("parser", "package", null, "src/parser/__init__.py"),
-    node("parser:version", "function", "parser", "src/parser/__init__.py", 3),
     node("parser.plan", "module", "parser", "src/parser/plan.py"),
     node("parser.plan:parse_plan", "function", "parser.plan", "src/parser/plan.py", 8),
     node("tests", "package", null, "tests", 1, true),
@@ -75,11 +74,11 @@ const changes: Changes = {
   git: true,
   branch: "main",
   files: [
-    { path: "src/arbiter.py", status: "modified", stale: false },
-    { path: "src/gone.py", status: "deleted", stale: false },
-    { path: "src/parser/plan.py", status: "modified", stale: true },
-    { path: "src/parser/note.py", status: "added", stale: false },
-    { path: "src/tools/new/late.py", status: "added", stale: false },
+    { path: "src/arbiter.py", status: "modified", stale: false, test: false },
+    { path: "src/gone.py", status: "deleted", stale: false, test: false },
+    { path: "src/parser/plan.py", status: "modified", stale: true, test: false },
+    { path: "src/parser/note.py", status: "added", stale: false, test: false },
+    { path: "src/tools/new/late.py", status: "added", stale: false, test: false },
   ],
   nodes: { arbiter: "modified", "arbiter:Arbiter.sync": "modified", "parser.plan": "modified" },
 };
@@ -148,8 +147,26 @@ describe("rows", () => {
     const list = rows(tree, graph, state({ selected: "parser" }));
     expect(list.filter((row) => row.selected).map((row) => row.key)).toEqual(["src/parser"]);
     expect(list.find((row) => row.key === "src/parser/__init__.py")).toMatchObject({ node: null, file: "src/parser/__init__.py", expanded: null });
-    expect(list.some((row) => row.key === "parser:version")).toBe(false);
     expect(list.filter((row) => row.file !== null)).toHaveLength(1);
+  });
+
+  it("모듈 노드가 있는 __init__.py 행은 그 노드를 가리키고 정의를 고르면 아래에 목록을 잇는다", () => {
+    const defined: Graph = {
+      nodes: [
+        ...graph.nodes.map((n) => (n.id === "parser" ? { ...n, path: "src/parser" } : n)),
+        node("parser.__init__", "module", "parser", "src/parser/__init__.py"),
+        node("parser:version", "function", "parser.__init__", "src/parser/__init__.py", 3),
+      ],
+      edges: [],
+    };
+    const linked = structuredClone(tree);
+    linked.entries[0].children![0].children![0].node = "parser.__init__";
+    const init = (selected: string | null) => rows(linked, defined, state({ selected })).find((row) => row.key === "src/parser/__init__.py");
+    expect(init(null)).toMatchObject({ node: "parser.__init__", file: null, expanded: false, selected: false });
+    expect(init("parser.__init__")).toMatchObject({ expanded: true, selected: true });
+    const list = rows(linked, defined, state({ selected: "parser:version" }));
+    expect(list.filter((row) => row.selected).map((row) => row.key)).toEqual(["parser:version"]);
+    expect(list[list.findIndex((row) => row.key === "parser:version") - 1].key).toBe("src/parser/__init__.py");
   });
 
   it("__init__.py 행이 패키지 노드 id를 담은 파일트리에서도 그 행은 노드 없이 파일 경로를 담는다", () => {
@@ -220,26 +237,39 @@ describe("변경 표시", () => {
   });
 
   it("마지막 커밋과 같고 분석한 뒤에만 바뀐 파일은 변경 상태를 붙이지 않는다", () => {
-    const stale: Changes = { git: true, branch: "main", files: [{ path: "src/empty.py", status: "unchanged", stale: true }], nodes: {} };
+    const stale: Changes = { git: true, branch: "main", files: [{ path: "src/empty.py", status: "unchanged", stale: true, test: false }], nodes: {} };
     expect(rows(tree, graph, state({ changes: stale })).every((row) => row.change === null)).toBe(true);
   });
 
-  it("분석한 뒤 생긴 파일은 테스트 코드 폴더 아래에 있거나 이름이 테스트 코드 규칙에 맞으면 토글이 켜졌을 때만 넣는다", () => {
-    const added = (path: string) => ({ path, status: "added" as const, stale: false });
+  it("분석한 뒤 생긴 파일은 서버가 테스트 코드로 판정했으면 토글이 켜졌을 때만 넣고, 새 폴더는 안의 파일이 모두 테스트 코드일 때 테스트 코드다", () => {
+    const added = (path: string, test: boolean) => ({ path, status: "added" as const, stale: false, test });
     const fresh: Changes = {
       git: true,
       branch: "main",
-      files: ["src/test_new.py", "src/conftest.py", "src/tools/tests/case.py", "src/parser/plan_test.py", "src/latest.py"].map(added),
+      files: [
+        added("src/test_new.py", true),
+        added("src/tools/tests/case.py", true),
+        added("src/tools/tests/deep/case.py", true),
+        added("src/mixed/test_one.py", true),
+        added("src/mixed/two.py", false),
+        added("src/latest.py", false),
+      ],
       nodes: {},
     };
-    const made = (showTests: boolean) =>
-      rows(tree, graph, state({ changes: fresh, showTests }))
-        .filter((row) => row.change === "added")
-        .map((row) => row.key);
-    expect(made(false)).toEqual(["src/latest.py"]);
-    expect(made(true).sort()).toEqual(
-      ["src/conftest.py", "src/latest.py", "src/parser/plan_test.py", "src/test_new.py", "src/tools/tests/case.py"].sort(),
-    );
+    const made = (showTests: boolean) => rows(tree, graph, state({ changes: fresh, showTests })).map((row) => row.key);
+    expect(made(false).filter((key) => !keys().includes(key))).toEqual(["src/mixed", "src/mixed/two.py", "src/latest.py"]);
+    expect(made(true).filter((key) => !keys({ showTests: true }).includes(key))).toEqual([
+      "src/mixed",
+      "src/mixed/test_one.py",
+      "src/mixed/two.py",
+      "src/tools",
+      "src/tools/tests",
+      "src/tools/tests/deep",
+      "src/tools/tests/deep/case.py",
+      "src/tools/tests/case.py",
+      "src/latest.py",
+      "src/test_new.py",
+    ]);
   });
 
   it("지워진 파일과 변경 내용이 없을 때는 행을 더하지 않는다", () => {

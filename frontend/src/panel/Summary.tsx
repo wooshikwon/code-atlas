@@ -1,5 +1,6 @@
 // LLM 요약 칸. 고른 노드의 요약을 캐시에서 읽어 보이고, 캐시에 없으면 "요약 생성" 버튼을 눌렀을 때 만든다.
-// 상단 줄의 "자동 요약"이 켜져 있으면 노드를 고른 채 잠시 머문 뒤에 만든다.
+// 상단 줄의 "자동 요약"이 켜져 있으면 노드를 고른 채 잠시 머문 뒤에 만든다. 노드를 떠나거나 "자동 요약"을 끄면
+// 만들고 있던 요청을 끊는다.
 import { useEffect, useState } from "react";
 import { getSummary, makeSummary } from "../api/client";
 import { useAtlas } from "../state/store";
@@ -22,11 +23,12 @@ type State =
 export function Summary({ node }: { node: string }) {
   const auto = useAtlas((s) => s.autoSummary);
   const [state, setState] = useState<State>({ phase: "reading" });
-  /** 지금 요청. 버튼을 누를 때마다 count를 올려 다시 보낸다. */
-  const [asked, setAsked] = useState<{ count: number; mode: Mode }>({ count: 0, mode: "read" });
+  /** 지금 요청. 버튼을 누를 때마다 count를 올려 다시 보낸다. auto는 "자동 요약"이 보낸 요청이다. */
+  const [asked, setAsked] = useState<{ count: number; mode: Mode; auto: boolean }>({ count: 0, mode: "read", auto: false });
 
   useEffect(() => {
     let cancelled = false;
+    const making = new AbortController();
     const { mode } = asked;
     const fail = (error: unknown) =>
       !cancelled && setState({ phase: "failed", error: error instanceof Error ? error.message : String(error), mode });
@@ -45,26 +47,35 @@ export function Summary({ node }: { node: string }) {
       }, fail);
     } else {
       setState({ phase: "making" });
-      makeSummary(node, mode === "refresh").then(
+      makeSummary(node, mode === "refresh", making.signal).then(
         (made) => !cancelled && setState({ phase: "done", summary: made.summary, available: true }),
         fail,
       );
     }
     return () => {
       cancelled = true;
+      making.abort();
     };
   }, [node, asked]);
 
-  const ask = (mode: Mode) => setAsked((prev) => ({ count: prev.count + 1, mode }));
+  const ask = (mode: Mode, auto = false) => setAsked((prev) => ({ count: prev.count + 1, mode, auto }));
 
   const waiting = state.phase === "empty" && auto;
   useEffect(() => {
     if (!waiting) {
       return;
     }
-    const timer = window.setTimeout(() => ask("make"), DELAY);
+    const timer = window.setTimeout(() => ask("make", true), DELAY);
     return () => window.clearTimeout(timer);
   }, [waiting]);
+
+  // "자동 요약"을 끄면 그 토글이 보낸 요청을 끊고 캐시를 다시 읽는다.
+  const dropped = !auto && asked.auto && state.phase === "making";
+  useEffect(() => {
+    if (dropped) {
+      ask("read");
+    }
+  }, [dropped]);
 
   return (
     <div className="info-panel-summary">

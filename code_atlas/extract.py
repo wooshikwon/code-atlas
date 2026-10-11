@@ -197,13 +197,16 @@ class _Extractor:
     # 노드
 
     def _module_node(self) -> Node:
+        """파일의 노드. 패키지의 `__init__.py`는 함수·클래스 정의가 있으면 `{패키지}.__init__` 모듈 노드이고 없으면 패키지 노드다."""
         f = self.file
-        kind = "package" if f.is_init and f.module_id != "__init__" else "module"
+        packaged = f.is_init and f.module_id != "__init__"
+        defines = any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for n in ast.walk(self.tree))
+        node_id = f"{f.module_id}.__init__" if packaged and defines else f.module_id
         node = Node(
-            id=f.module_id,
-            kind=kind,
-            name=f.module_id.rsplit(".", 1)[-1],
-            parent=f.module_id.rsplit(".", 1)[0] if "." in f.module_id else None,
+            id=node_id,
+            kind="package" if packaged and not defines else "module",
+            name=node_id.rsplit(".", 1)[-1],
+            parent=node_id.rsplit(".", 1)[0] if "." in node_id else None,
             path=f.path,
             range=(1, max(len(self.lines), 1)),
             loc=_loc(self.lines, 1, len(self.lines)),
@@ -216,7 +219,7 @@ class _Extractor:
         qual = ".".join([*self.qual, d.name])
         start = min([d.lineno, *(dec.lineno for dec in d.decorator_list)])
         node = Node(
-            id=f"{self.module.id}:{qual}",
+            id=f"{self.file.module_id}:{qual}",
             kind=kind,
             name=d.name,
             parent=self.enclosing,

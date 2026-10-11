@@ -372,7 +372,10 @@ ul {
   min-width: 0;
 }
 
+/* 줄 폭에 따라 요소를 줄이는 container다. container는 쌓임 맥락을 만들므로 펼친 목록이 그래프 위에 그려지게 z-index를 준다. */
 .toolbar {
+  position: relative;
+  z-index: 30;
   display: flex;
   flex: none;
   align-items: center;
@@ -380,6 +383,7 @@ ul {
   height: 32px;
   padding: 0 8px;
   border-bottom: 1px solid var(--line);
+  container: toolbar / inline-size;
 }
 
 .toolbar-stats,
@@ -395,6 +399,10 @@ ul {
   overflow: hidden;
   color: var(--muted);
   text-overflow: ellipsis;
+}
+
+.toolbar-stats-brief {
+  display: none;
 }
 
 .toolbar-branch {
@@ -444,13 +452,24 @@ ul {
 }
 
 .trail-root,
-.trail-gap {
+.trail-gap,
+.trail-cut {
+  flex: none;
   color: var(--muted);
 }
 
 .trail-step {
+  flex: none;
   padding: 1px 4px;
   border-radius: 3px;
+}
+
+/* 줄 폭이 모자라면 마지막 단계만 줄어든다. Trail이 이 단계의 글자가 잘리지 않을 때까지 앞 단계를 `…`로 줄인다. */
+.trail-last {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .trail-step:hover {
@@ -458,6 +477,7 @@ ul {
 }
 
 .trail-view {
+  flex: none;
   margin-left: 6px;
   padding: 0 7px;
   border: 1px solid var(--line);
@@ -477,6 +497,58 @@ ul {
 
 .toolbar-toggle input[type="range"] {
   width: 72px;
+}
+
+.toolbar-toggles,
+.toolbar-toggles-list {
+  display: contents;
+}
+
+.toolbar-toggles-button {
+  display: none;
+}
+
+/* 상단 줄이 1360px보다 좁으면 통계 문구는 호출 확인 비율만 적고, 토글 세 개는 "설정" 버튼 아래 목록으로 접는다. */
+@container toolbar (max-width: 1360px) {
+  .toolbar-stats {
+    flex: none;
+  }
+
+  .toolbar-stats-full {
+    display: none;
+  }
+
+  .toolbar-stats-brief {
+    display: inline;
+  }
+
+  .toolbar-toggles {
+    display: block;
+    position: relative;
+    flex: none;
+  }
+
+  .toolbar-toggles-button {
+    display: block;
+  }
+
+  .toolbar-toggles-list {
+    display: none;
+  }
+
+  .toolbar-toggles-list[data-open] {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--surface);
+  }
 }
 
 .toolbar-button {

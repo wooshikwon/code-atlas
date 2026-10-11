@@ -48,12 +48,12 @@ class Index:
 
     def __init__(self, root: Path, facts: list[FileFacts]):
         self.root = Path(root).resolve()
-        self.modules: dict[str, str] = {}  # 레포 루트 기준 경로 → 모듈 id
+        self.modules: dict[str, str] = {}  # 레포 루트 기준 경로 → 그 파일의 노드 id
         self.names: dict[tuple[str, int, int], str] = {}  # (경로, 줄, 열) → 노드 id
         self.kinds: dict[str, str] = {}
         self.ranges: dict[str, list[tuple[int, int, str]]] = {}  # 레포 루트 기준 경로 → (시작 줄, 끝 줄, 노드 id)
         for f in facts:
-            self.modules[f.file.path] = f.file.module_id
+            self.modules[f.file.path] = f.nodes[0].id
             for node in f.nodes:
                 self.kinds[node.id] = node.kind
                 self.ranges.setdefault(f.file.path, []).append((*node.range, node.id))

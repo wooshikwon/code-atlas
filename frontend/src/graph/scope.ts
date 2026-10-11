@@ -208,6 +208,13 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
   return result;
 }
 
+/** 그린 선 edges에서 상자 id가 쓰는 상자 수(outgoing)와 그 상자를 쓰는 상자 수(incoming). */
+export function neighbors(edges: DrawnEdge[], id: string): { incoming: number; outgoing: number } {
+  const users = new Set(edges.filter((e) => e.target === id).map((e) => e.source));
+  const used = new Set(edges.filter((e) => e.source === id).map((e) => e.target));
+  return { incoming: users.size, outgoing: used.size };
+}
+
 /**
  * 선 키가 가리키는 선과 그 선에 합친 원래 선. 집계 선은 `drawn`이 그 키로 합친 선이고, 마우스를 올려야 그려지는
  * 집계 선은 양 끝에 마우스를 올린 것으로 보고 찾는다. 집계 선이 아닌 키는 원래 선 하나다. 없으면 null이다.

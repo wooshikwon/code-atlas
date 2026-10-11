@@ -17,6 +17,8 @@ export interface AtlasNodeData extends Record<string, unknown> {
   local: boolean;
   /** 편재 노드면 숨긴 선의 출발 노드 수 */
   inflow: number | null;
+  /** 배지에 적는 미확인 호출 수. 접힌 파일 상자와 접힌 폴더 상자는 안에 든 노드의 수를 합친 값이고 펼친 파일 상자는 0이다. */
+  unresolved: number;
 }
 
 export type AtlasFlowNode = Node<AtlasNodeData>;
@@ -72,7 +74,7 @@ export function Mark({ change }: { change: Change | null }) {
 export function Badges({ data }: { data: AtlasNodeData }) {
   return (
     <>
-      {data.node.unresolved > 0 && <span className="badge badge-unresolved">?{data.node.unresolved}</span>}
+      {data.unresolved > 0 && <span className="badge badge-unresolved">?{data.unresolved}</span>}
       {data.node.global_write && <span className="badge badge-global">g</span>}
     </>
   );

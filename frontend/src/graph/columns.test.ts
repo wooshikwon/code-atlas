@@ -103,6 +103,27 @@ describe("columns", () => {
     expect(result.shelf).toEqual(["scratch"]);
   });
 
+  it("안의 노드 사이에만 선이 있는 최상위 폴더는 단위 하나짜리 묶음이고, 선이 없는 폴더와 파일은 선반이다", () => {
+    const graph: Graph = {
+      nodes: [
+        unit("app", { kind: "package" }),
+        unit("app.cli", { parent: "app" }),
+        unit("app.core", { parent: "app" }),
+        unit("app.lone", { parent: "app" }),
+        unit("docs", { kind: "package" }),
+        unit("docs.conf", { parent: "docs" }),
+        unit("setup"),
+        unit("setup:main", { kind: "function", parent: "setup" }),
+        unit("setup:helper", { kind: "function", parent: "setup" }),
+      ],
+      edges: [link("app.cli", "app.core"), link("setup:main", "setup:helper")],
+    };
+    const result = columns(graph, off);
+    expect(result.components).toEqual([["app"]]);
+    expect(result.shelf).toEqual(["docs", "setup"]);
+    expect([result.column.get("app.cli"), result.column.get("app.core"), result.column.get("app.lone")]).toEqual([0, 1, 0]);
+  });
+
   it("토글로 숨긴 노드는 열과 순서를 받지 않는다", () => {
     expect(result.column.has("tests.test_mod")).toBe(false);
     expect(result.column.has("pkg.conftest")).toBe(false);

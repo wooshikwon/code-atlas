@@ -1,6 +1,6 @@
 // 파일트리를 화면에 그리는 행 배열로 편다. 폴더의 열림은 접은 폴더 집합에서, 파일 아래 목록은 선택에서 정한다.
 // 검색 칸에 질의가 있으면 행 배열 대신 검색 결과 행을 낸다.
-import type { AtlasNode, Change, Changes, Graph, Tree, TreeEntry } from "../api/types";
+import type { AtlasNode, Change, ChangedFile, Changes, Graph, Tree, TreeEntry } from "../api/types";
 import { nodeIndex } from "../graph/visible";
 import { find, type Entry, type Hit } from "../search/index";
 import type { IconKind } from "./Icon";
@@ -97,18 +97,11 @@ function pathsOf(entries: TreeEntry[], found = new Set<string>()): Set<string> {
   return found;
 }
 
-const TEST_FOLDERS = new Set(["tests", "test"]);
-
-/** 파일 이름이 테스트 코드의 이름 규칙(`test_*.py`, `*_test.py`, `conftest.py`)에 맞는지 */
-function testFile(name: string): boolean {
-  return name.startsWith("test_") || name.endsWith("_test.py") || name === "conftest.py";
-}
-
 /**
  * 파일트리에 없는 추가된 파일 fresh를 제 폴더에 끼워 넣는다. 그래프에 노드가 없는 파일이므로 node는 null이다.
- * 테스트 코드 폴더 아래에 있거나 이름이 테스트 코드의 이름 규칙에 맞으면 테스트 코드다.
+ * 폴더는 안의 파일이 모두 테스트 코드일 때 테스트 코드다.
  */
-function grown(entries: TreeEntry[], fresh: string[]): TreeEntry[] {
+function grown(entries: TreeEntry[], fresh: ChangedFile[]): TreeEntry[] {
   if (fresh.length === 0) {
     return entries;
   }
@@ -118,26 +111,17 @@ function grown(entries: TreeEntry[], fresh: string[]): TreeEntry[] {
     list.sort((a, b) => Number(a.kind !== "dir") - Number(b.kind !== "dir") || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return entry;
   };
-  for (const path of fresh) {
+  for (const { path, test } of fresh) {
     const parts = path.split("/");
     let list = root;
-    let test = false;
     parts.slice(0, -1).forEach((name, depth) => {
       const folder =
         list.find((e) => e.kind === "dir" && e.name === name) ??
-        put(list, {
-          path: parts.slice(0, depth + 1).join("/"),
-          name,
-          kind: "dir",
-          test: test || TEST_FOLDERS.has(name),
-          node: null,
-          children: [],
-        });
-      test = folder.test;
+        put(list, { path: parts.slice(0, depth + 1).join("/"), name, kind: "dir", test, node: null, children: [] });
+      folder.test &&= test;
       list = folder.children ??= [];
     });
-    const name = parts.at(-1)!;
-    put(list, { path, name, kind: "file", test: test || testFile(name), node: null });
+    put(list, { path, name: parts.at(-1)!, kind: "file", test, node: null });
   }
   return root;
 }
@@ -145,7 +129,7 @@ function grown(entries: TreeEntry[], fresh: string[]): TreeEntry[] {
 /**
  * 펼친 폴더, 파일, 고른 노드가 든 파일의 클래스·함수 목록을 위에서 아래로 그리는 순서로 낸다.
  * 레포를 열어 분석한 뒤 생긴 파일은 그래프에 노드가 없는 행으로 넣는다. 파일 행은 모듈 노드만 가리키므로
- * `__init__.py` 행은 node 없이 file에 경로를 담는다.
+ * 모듈 노드가 없는 `__init__.py` 행은 node 없이 file에 경로를 담는다.
  */
 export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
   const nodes = nodeIndex(graph);
@@ -158,7 +142,7 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
     }
   }
   const analyzed = pathsOf(tree.entries);
-  const fresh = [...changed].filter(([path, status]) => status === "added" && !analyzed.has(path)).map(([path]) => path);
+  const fresh = (state.changes?.files ?? []).filter((file) => file.status === "added" && !analyzed.has(file.path));
   const within = (folder: string) => [...changed.keys()].some((path) => path.startsWith(`${folder}/`));
   const out: Row[] = [];
 

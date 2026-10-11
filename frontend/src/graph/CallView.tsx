@@ -49,6 +49,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string |
         flow: false,
         local: false,
         inflow: null,
+        unresolved: node.unresolved,
         label: callLabel(nodes, node),
         file: fileLabel(nodes, node),
         side: scene.calls.side.get(id)!,
