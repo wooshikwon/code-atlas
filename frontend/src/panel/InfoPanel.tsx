@@ -16,7 +16,7 @@ import { usePanelRect } from "./usePanelRect";
 
 const DIRS: Dir[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 const SUMMARIZED = new Set<AtlasNode["kind"]>(["module", "class", "dataclass", "function", "method"]);
-/** 코드 뷰어를 열지 않고 머리 줄 수치를 상자 단위로 세는 종류 */
+/** 머리 줄 수치를 상자 단위로 세는 종류 */
 const UNITS = new Set<AtlasNode["kind"]>(["module", "package"]);
 /** 그래프가 그린 선 edge를 머리 줄과 지점 목록에 쓰는 값으로 바꾼다. 집계 선이면 kind가 null이다. */
 function pickedEdge(edge: DrawnEdge): PickedEdge {
@@ -31,12 +31,12 @@ function pickedEdge(edge: DrawnEdge): PickedEdge {
   };
 }
 
-/** 지점을 품은 가장 안쪽 노드의 줄 범위. 파일 안 어느 정의에도 들지 않으면 모듈 노드의 범위다. */
+/** 지점을 품은 가장 안쪽 정의의 줄 범위. 파일 안 어느 정의에도 들지 않으면 null이다. */
 function rangeAround(graph: Graph, site: SiteRef): [number, number] | null {
   let found: [number, number] | null = null;
   for (const node of graph.nodes) {
     const range = node.range;
-    if (node.path !== site.path || range === null) {
+    if (node.path !== site.path || range === null || UNITS.has(node.kind)) {
       continue;
     }
     if (range[0] <= site.line && site.line <= range[1] && (found === null || range[1] - range[0] < found[1] - found[0])) {
@@ -122,13 +122,13 @@ export function InfoPanel() {
   }
 
   const siteRange = graph !== null && site !== null ? rangeAround(graph, site) : null;
-  /** 코드 뷰어에 열 범위. 파일·폴더를 골랐거나 선의 지점을 누르지 않았으면 null이다. 연 파일은 파일 전체다. */
+  /** 코드 뷰어에 열 파일과 문법 색으로 그릴 범위. 폴더를 골랐거나 선의 지점을 누르지 않았으면 null이다. 연 파일과 고른 파일은 범위가 파일 전체다. */
   const code =
     file !== null
       ? { path: file, range: null }
-      : node !== undefined && !UNITS.has(node.kind) && node.path !== null && node.range !== null
-        ? { path: node.path, range: node.range }
-        : site !== null && siteRange !== null
+      : node !== undefined && node.kind !== "package" && node.path !== null
+        ? { path: node.path, range: node.kind === "module" ? null : node.range }
+        : site !== null
           ? { path: site.path, range: siteRange, highlight: site.line }
           : null;
   const { ref, rect, grip, reset } = usePanelRect();

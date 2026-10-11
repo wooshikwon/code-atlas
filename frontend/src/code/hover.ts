@@ -2,37 +2,21 @@
 import * as monaco from "monaco-editor/editor";
 import { getHover } from "../api/client";
 
-/** 코드 뷰어 모델의 주소. 노드의 줄 범위만 담은 모델은 파일 경로 뒤에 `#L{시작}-{끝}`을, 파일 전체를 담은 모델은 `#L1`을 붙인다. */
-export function modelPath(path: string, range: [number, number] | null): string {
-  return range === null ? `${path}#L1` : `${path}#L${range[0]}-${range[1]}`;
-}
-
-/** 모델이 담은 파일 경로와 모델 첫 줄의 파일 줄 번호 */
-function located(model: monaco.editor.ITextModel): { path: string; start: number } | null {
-  const match = /^L(\d+)(?:-\d+)?$/.exec(model.uri.fragment);
-  return match === null ? null : { path: model.uri.path.replace(/^\//, ""), start: Number(match[1]) };
-}
-
 monaco.languages.registerHoverProvider("python", {
   async provideHover(model, position, token) {
-    const at = located(model);
-    if (at === null) {
-      return null;
-    }
+    // 코드 뷰어는 레포 루트 기준 파일 경로를 모델의 주소로 쓴다.
+    const path = model.uri.path.replace(/^\//, "");
     const controller = new AbortController();
     token.onCancellationRequested(() => controller.abort());
     try {
-      const hover = await getHover(at.path, position.lineNumber + at.start - 1, position.column - 1, controller.signal);
+      const hover = await getHover(path, position.lineNumber, position.column - 1, controller.signal);
       if (hover.markdown === null) {
         return null;
       }
       const range = hover.range;
       return {
         contents: [{ value: hover.markdown }],
-        range:
-          range === null
-            ? undefined
-            : new monaco.Range(range[0] - at.start + 1, range[1] + 1, range[2] - at.start + 1, range[3] + 1),
+        range: range === null ? undefined : new monaco.Range(range[0], range[1] + 1, range[2], range[3] + 1),
       };
     } catch {
       // 취소한 요청과 LSP 세션이 없는 서버의 응답은 hover를 비운다.
