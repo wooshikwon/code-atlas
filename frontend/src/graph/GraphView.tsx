@@ -1,7 +1,7 @@
 // 관계 그래프. 저장소의 뷰 종류에 따라 구조 뷰나 함수 시점 뷰를 그린다. 구조 뷰는 저장소 상태에서 보이는 노드와
 // 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드로 화면을 옮긴다. 경로 고정 중에는 고른 노드의 흐름 대신
 // 강조하는 경로를 그리고, finder.focus를 정할 때마다 그 노드와 다음 걸음이 보이게 화면을 옮긴다. 전체 맞춤 상태(저장소의 fitted)에서는
-// 배치가 바뀔 때마다 그래프 전체를 다시 맞춘다.
+// 배치가 바뀔 때마다 화면을 다시 맞추고, 이름표가 읽히는 확대 비율 아래로 줄이지 않는다.
 import {
   getViewportForBounds,
   ReactFlow,
@@ -41,7 +41,7 @@ import { drawn, type EdgeKey } from "./scope";
 import { nodeTip, packTip, tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
-import { anchorOn, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
+import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -171,9 +171,15 @@ function shelfCorner(scene: Scene, at: Layout): Point | null {
   return { x: Math.min(...boxes.map((b) => b.x)), y: Math.min(...boxes.map((b) => b.y)) };
 }
 
-/** 배치 전체를 정보 패널이 가리지 않는 영역에 맞춘 화면. 확대 비율을 100%보다 키우지 않는다. */
-function wholeView(at: Layout, { area, free }: Stage): Viewport {
-  return getViewportForBounds(boundsOf(at.boxes.values()), area.width, area.height, ZOOM_MIN, FRAME_ZOOM, fitPadding(area, free));
+/**
+ * 코드가 스스로 맞추는 화면(`autoView`). 배치 전체가 이름표가 읽히는 확대 비율로 정보 패널이 가리지 않는 영역에 들어오면 전체를 맞추고
+ * (확대 비율을 100%보다 키우지 않는다), 들어오지 않으면 사용자가 방금 펼치거나 접은 상자 pressed의 왼쪽 위를, 그런 상자가 없으면
+ * 그래프의 왼쪽 위를 그 영역의 왼쪽 위에 놓는다.
+ */
+function fittedView(at: Layout, { area, free }: Stage, pressed: string | null): Viewport {
+  const bounds = boundsOf(at.boxes.values());
+  const whole = getViewportForBounds(bounds, area.width, area.height, ZOOM_MIN, FRAME_ZOOM, fitPadding(area, free));
+  return autoView(whole, at.boxes.get(pressed ?? "") ?? bounds, free);
 }
 
 export function GraphView() {
@@ -290,7 +296,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     if (scene === null || home.current !== null || root.current === null) {
       return;
     }
-    home.current = wholeView(scene.layout, stageOf(root.current));
+    home.current = fittedView(scene.layout, stageOf(root.current), null);
     void setViewport(home.current);
     useAtlas.setState({ fitted: true });
   }, [scene, home, setViewport]);
@@ -351,10 +357,10 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       }
     }
 
-    // 전체 맞춤 상태에서 배치가 바뀌면 그래프 전체를 다시 맞춘다. 확대 비율이 줄 수 있다.
+    // 전체 맞춤 상태에서 배치가 바뀌면 화면을 다시 맞춘다(`fittedView`).
     const whole = useAtlas.getState().fitted;
     if (whole && from !== null && !settled(from, to) && root.current !== null) {
-      void setViewport(wholeView(to, stageOf(root.current)), { duration: still ? 0 : PAN_MS });
+      void setViewport(fittedView(to, stageOf(root.current), changed.length === 1 ? changed[0] : null), { duration: still ? 0 : PAN_MS });
     }
 
     // 전체 맞춤 상태가 아닐 때 폴더나 손잡이를 눌러 상자 하나를 펼치거나 접었으면 그 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 둔다.

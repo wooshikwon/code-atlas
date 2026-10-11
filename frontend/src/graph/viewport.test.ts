@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorOn, boundsOf, centerOn, cornerInto, fitPadding, fitTarget, frameOn, freeRect } from "./viewport";
+import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, fitTarget, frameOn, freeRect } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -88,6 +88,21 @@ describe("cornerInto", () => {
     expect(cornerInto({ x: 1100, y: 100 }, clear, view)).toEqual({ x: -120, y: 0, zoom: 1 });
     expect(cornerInto({ x: 100, y: -50 }, clear, view)).toEqual({ x: 0, y: 70, zoom: 1 });
     expect(cornerInto({ x: 100, y: 1700 }, clear, { x: 0, y: 0, zoom: 0.5 })).toEqual({ x: 0, y: -70, zoom: 0.5 });
+  });
+});
+
+describe("autoView", () => {
+  const free = { x: 10, y: 30, width: 900, height: 600 };
+
+  it("전체를 맞춘 확대 비율이 이름표가 읽히는 값 이상이면 그 화면을 쓴다", () => {
+    const whole = { x: 40, y: 50, zoom: 0.8 };
+    expect(autoView(whole, { x: 100, y: 200 }, free)).toBe(whole);
+  });
+
+  it("그보다 작으면 확대 비율을 0.8에 두고 가리킨 모서리를 빈 사각형의 왼쪽 위에서 24px 안쪽에 놓는다", () => {
+    const view = autoView({ x: 40, y: 50, zoom: 0.38 }, { x: 100, y: 200 }, free);
+    expect(view.zoom).toBe(0.8);
+    expect([100 * view.zoom + view.x, 200 * view.zoom + view.y]).toEqual([34, 54]);
   });
 });
 

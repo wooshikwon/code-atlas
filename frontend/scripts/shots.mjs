@@ -4978,10 +4978,12 @@ async function start(t, page) {
   const { free } = await stageOf(page);
   const rects = await Promise.all(shown.map((id) => rectOf(page, node(id))));
   const zoom = await zoomOf(page);
+  const fits = rects.every((r) => r.x >= free.x && r.y >= free.y && r.x + r.width <= free.x + free.width && r.y + r.height <= free.y + free.height);
+  const corner = { x: Math.min(...rects.map((r) => r.x)), y: Math.min(...rects.map((r) => r.y)) };
   t.check(
-    "그래프 전체가 정보 패널이 가리지 않는 영역에 들어오고 확대 비율이 100%를 넘지 않는다",
-    zoom <= 1 && rects.every((r) => r.x >= free.x && r.y >= free.y && r.x + r.width <= free.x + free.width && r.y + r.height <= free.y + free.height),
-    `확대 비율 ${zoom.toFixed(3)}`,
+    "확대 비율이 0.8과 100% 사이이고, 그래프 전체가 정보 패널이 가리지 않는 영역에 들어오거나 0.8에서 그래프의 왼쪽 위가 그 영역의 왼쪽 위에 있다",
+    zoom <= 1 && zoom >= NAMED_ZOOM - 0.001 && (fits || (near(zoom, NAMED_ZOOM, 0.001) && near(corner.x, free.x + 24, 1.5) && near(corner.y, free.y + 24, 1.5))),
+    `확대 비율 ${zoom.toFixed(3)}, 전체가 들어옴 ${fits}, 왼쪽 위 (${Math.round(corner.x - free.x)}, ${Math.round(corner.y - free.y)})`,
   );
   await t.shot();
 
@@ -5101,7 +5103,8 @@ async function arranging(t, page) {
   );
 
   await slow(DELAY);
-  await clickNode(page, FILE);
+  // 펼친 영역을 화면 왼쪽 위에 맞춘 화면에서는 왼쪽 열의 파일 상자가 화면 밖에 있으므로 파일트리의 행으로 고른다.
+  await page.click(`.tree-row.tree-file[data-node="${FILE}"]`);
   await page.waitForSelector(".arranging", { timeout: 5_000 });
   const picked = (await headOf(page)).split("\n")[0];
   await page.keyboard.press("Alt+ArrowLeft");
@@ -6015,27 +6018,56 @@ async function packFolder(t, page) {
     await rest(page);
   };
 
-  // 전체 맞춤 상태: 레포를 연 처음 화면
+  // 전체 맞춤 상태: 레포를 연 처음 화면. 스스로 맞추는 화면은 이름표가 읽히는 확대 비율 아래로 줄이지 않는다.
+  /** 상자 id의 왼쪽 위 모서리가 정보 패널이 가리지 않는 영역의 왼쪽 위에서 24px 안쪽에 있는지 */
+  const cornered = async (id) => {
+    const { free } = await stageOf(page);
+    const rect = await rectOf(page, node(id));
+    return near(rect.x, free.x + 24, 1.5) && near(rect.y, free.y + 24, 1.5);
+  };
+  /** 이름표 전체가 정보 패널이 가리지 않는 영역 안에 보이는 상자 수 */
+  const readable = async (ids) => {
+    const { free } = await stageOf(page);
+    const rects = await page.evaluate((list) => list.map((id) => document.querySelector(`.react-flow__node[data-id="${id}#face"] .node-label`)?.getBoundingClientRect()).filter(Boolean).map((r) => ({ x: r.left, y: r.top, width: r.width, height: r.height })), ids);
+    return rects.filter((rect) => within(rect, free)).length;
+  };
   const first = { zoom: await zoomOf(page), view: await viewport() };
-  await expand();
-  const beyond = await outside();
+  const firstOut = await outside();
   t.check(
-    "처음 화면에서 폴더 상자를 눌러 펼치면 그래프 전체를 다시 맞춰 모든 상자가 정보 패널이 가리지 않는 영역 안에 있다",
-    beyond.length === 0 && (await zoomOf(page)) <= 1.001,
-    `확대 비율 ${first.zoom.toFixed(3)} → ${(await zoomOf(page)).toFixed(3)}, 영역을 벗어난 상자 ${beyond.length}개`,
+    "처음 화면은 확대 비율이 이름표가 읽히는 값(0.8) 이상이고, 전체가 들어오지 않으면 그래프의 왼쪽 위를 가리지 않는 영역의 왼쪽 위에 놓는다",
+    first.zoom >= NAMED_ZOOM - 0.001 && first.zoom <= 1.001 && (firstOut.length === 0 || near(first.zoom, NAMED_ZOOM, 0.001)),
+    `확대 비율 ${first.zoom.toFixed(3)}, 영역을 벗어난 상자 ${firstOut.length}개`,
+  );
+  await expand();
+  const inside = graph.nodes.filter((n) => n.parent === "parser" && !n.test).map((n) => n.id);
+  const opened = { zoom: await zoomOf(page), out: (await outside()).length, corner: await cornered("parser"), names: await readable(inside) };
+  t.check(
+    "처음 화면에서 폴더 상자를 눌러 펼치면 확대 비율이 0.8 아래로 줄지 않고, 전체가 들어오지 않으면 펼친 영역의 왼쪽 위가 가리지 않는 영역의 왼쪽 위에 온다",
+    opened.zoom >= NAMED_ZOOM - 0.001 && (opened.out === 0 || (near(opened.zoom, NAMED_ZOOM, 0.001) && opened.corner)) && opened.names > 0,
+    `확대 비율 ${first.zoom.toFixed(3)} → ${opened.zoom.toFixed(3)}, 영역을 벗어난 상자 ${opened.out}개, 이름표가 영역 안에 보이는 파일 ${opened.names}/${inside.length}개`,
   );
   await t.shot();
-  const inside = graph.nodes.filter((n) => n.parent === "parser" && !n.test).map((n) => n.id);
   const files = await drawnIn(page, graph, "parser");
   t.check(
     `parser/를 펼치면 안의 파일 ${inside.length}개를 모두 그리고 폴더에는 손잡이가 없다`,
     same(files, inside) && (await packOf(page, "parser")) === null,
     `그린 파일 ${files.length}개`,
   );
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await rest(page);
+  const fit = { zoom: await zoomOf(page), out: (await outside()).length };
+  t.check('"화면 맞춤"을 누르면 확대 비율을 줄여서라도 모든 상자가 정보 패널이 가리지 않는 영역 안에 들어온다', fit.out === 0 && fit.zoom <= opened.zoom + 0.001, `확대 비율 ${fit.zoom.toFixed(3)}, 영역을 벗어난 상자 ${fit.out}개`);
   await fold();
-  t.check("머리 줄을 눌러 접으면 그래프 전체를 다시 맞춰 화면이 펼치기 전과 같다", (await viewport()) === first.view, `${first.view} → ${await viewport()}`);
+  const folded0 = { zoom: await zoomOf(page), out: (await outside()).length, corner: await cornered("parser") };
+  t.check(
+    '"화면 맞춤" 뒤에 머리 줄을 눌러 접으면 다시 스스로 맞춰 확대 비율이 0.8 이상이다',
+    folded0.zoom >= NAMED_ZOOM - 0.001 && (folded0.out === 0 || folded0.corner),
+    `확대 비율 ${folded0.zoom.toFixed(3)}, 영역을 벗어난 상자 ${folded0.out}개`,
+  );
 
   // 사용자가 화면을 끈 뒤: 확대 비율을 그대로 두고 누른 상자의 모서리를 붙잡는다
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await rest(page);
   const spot = await page.evaluate(() => {
     const area = document.querySelector(".graph").getBoundingClientRect();
     for (let y = area.top + 30; y < area.bottom - 30; y += 20) {
@@ -6067,12 +6099,35 @@ async function packFolder(t, page) {
     `(${Math.round(region.x)}, ${Math.round(region.y)}) → (${Math.round(folded.x)}, ${Math.round(folded.y)})`,
   );
 
-  // "화면 맞춤"이 전체 맞춤 상태를 다시 켠다
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서도 펼칠 때마다 확대 비율이 0.8 이상이다", "--wide-url을 주지 않았다");
+    return;
+  }
+  // 폴더가 여러 겹인 레포: 가장 큰 최상위 폴더와 그 안에서 자식이 가장 많은 폴더를 차례로 눌러 펼친다
+  const wide = await api("/api/graph", wideUrl);
+  await page.goto(wideUrl);
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  const size = (id) => wide.nodes.filter((n) => n.id.startsWith(`${id}.`)).length;
+  const top = wide.nodes.filter((n) => n.kind === "package" && n.parent === null && !n.test).sort((a, b) => size(b.id) - size(a.id))[0];
+  const inner = wide.nodes.filter((n) => n.kind === "package" && n.parent === top.id).sort((a, b) => wide.nodes.filter((n) => n.parent === b.id).length - wide.nodes.filter((n) => n.parent === a.id).length)[0];
+  const seen = [`처음 ${(await zoomOf(page)).toFixed(3)}`];
+  let kept = (await zoomOf(page)) >= NAMED_ZOOM - 0.001;
+  for (const folder of [top, inner]) {
+    await clickNode(page, folder.id);
+    await page.waitForSelector(`${node(folder.id)} > .node-region`, { timeout: 30_000 });
+    await page.mouse.move(5, 5);
+    await rest(page);
+    const zoom = await zoomOf(page);
+    const kids = wide.nodes.filter((n) => n.parent === folder.id && !n.test).map((n) => n.id);
+    const names = await readable(kids);
+    kept = kept && zoom >= NAMED_ZOOM - 0.001 && ((await outside()).length === 0 || (await cornered(folder.id))) && names > 0;
+    seen.push(`${folder.name}/ ${zoom.toFixed(3)}(이름표 ${names}/${kids.length}개)`);
+  }
+  t.check("폴더가 여러 겹인 레포에서도 펼칠 때마다 확대 비율이 0.8 이상이고 펼친 영역의 왼쪽 위와 그 안의 이름표가 가리지 않는 영역 안에 보인다", kept, seen.join(" → "));
   await page.getByRole("button", { name: "화면 맞춤" }).click();
   await rest(page);
-  await expand();
-  const refit = await outside();
-  t.check('"화면 맞춤"을 누른 뒤 펼치면 다시 모든 상자가 정보 패널이 가리지 않는 영역 안에 있다', refit.length === 0, `영역을 벗어난 상자 ${refit.length}개`);
+  t.check('그 화면에서 "화면 맞춤"을 누르면 모든 상자가 들어온다', (await outside()).length === 0, `확대 비율 ${(await zoomOf(page)).toFixed(3)}`);
 }
 
 // ── 4단계: 선이 지나는 길 ────────────────────────────────────────
