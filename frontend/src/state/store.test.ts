@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { repoFixture, routeFixture } from "../graph/fixture";
 import { back, jump, push, type History, type Place } from "./history";
+import { useOverlay } from "./overlay";
 import { barred, chosenOf, litOf, nestedFolders, parseUi, pinned, useAtlas, type AtlasStore } from "./store";
 
 const [a, b, c] = repoFixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
@@ -623,5 +624,57 @@ describe("화면 설정", () => {
     expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, split: 1.5, legendOpen: "yes", minimapOpen: 0, theme: "blue", depth: 4, autoSummary: 1 }), "dark")).toEqual(
       defaults,
     );
+  });
+});
+
+describe("reopen", () => {
+  const repo = { name: "repo", root: "/repo", source_root: "", python: null, stats: {} } as unknown as NonNullable<AtlasStore["repo"]>;
+  const tree = { entries: [] };
+
+  it("보기 설정, 선택과 뷰, 탐색 이력, 접은 폴더, 경로 고정을 레포를 처음 연 상태로 되돌린다", () => {
+    const saved = new Map<string, string>();
+    vi.stubGlobal("localStorage", { setItem: (key: string, value: string) => saved.set(key, value) });
+    store().setDepth(3);
+    store().toggleAutoSummary();
+    store().toggleTests();
+    store().toggleExternal();
+    store().select(a);
+    store().enterFunction(b);
+    store().toggleFinder();
+    useOverlay.getState().set("unused");
+    useAtlas.setState({ reloadError: "앞의 실패" });
+    store().reopen(repo, repoFixture, tree);
+    vi.unstubAllGlobals();
+    const now = store();
+    expect([now.depth, now.autoSummary, now.showTests, now.showExternal]).toEqual([2, false, false, false]);
+    expect([now.view, now.selection]).toEqual([{ kind: "structure" }, null]);
+    expect(now.collapsed).toEqual(nestedFolders(repoFixture));
+    expect(now.history).toEqual({ entries: [{ view: { kind: "structure" }, selection: null, collapsed: [...nestedFolders(repoFixture)].sort() }], index: 0 });
+    expect([now.finder.open, now.finder.from, now.finder.route]).toEqual([false, null, null]);
+    expect([now.repo, now.graph, now.tree, now.epoch]).toEqual([repo, repoFixture, tree, 1]);
+    expect(useOverlay.getState().kind).toBe("cycles");
+    expect(parseUi(saved.get("code-atlas:ui:v1")!, "light")).toMatchObject({ depth: 2, autoSummary: false });
+  });
+
+  it("화면 색, 정보 패널의 사각형과 요약 칸 비율, 미니맵·범례의 접힘은 그대로 둔다", () => {
+    vi.stubGlobal("localStorage", { setItem: () => undefined });
+    vi.stubGlobal("document", { documentElement: { style: { setProperty: () => undefined }, dataset: {} } });
+    store().setTheme("dark");
+    store().setPanel({ x: 10, y: 20, width: 300, height: 200 });
+    store().setSplit(0.4);
+    store().toggleLegend();
+    store().toggleMinimap();
+    store().reopen(repo, repoFixture, tree);
+    vi.unstubAllGlobals();
+    const now = store();
+    expect([now.theme, now.panel, now.split, now.legendOpen, now.minimapOpen]).toEqual(["dark", { x: 10, y: 20, width: 300, height: 200 }, 0.4, true, false]);
+  });
+
+  it("순환 묶음이 없는 그래프를 받으면 덮개를 끈다", () => {
+    vi.stubGlobal("localStorage", { setItem: () => undefined });
+    useOverlay.getState().set("unused");
+    store().reopen(repo, { ...repoFixture, edges: [] }, tree);
+    vi.unstubAllGlobals();
+    expect(useOverlay.getState().kind).toBeNull();
   });
 });

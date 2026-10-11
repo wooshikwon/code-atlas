@@ -30,7 +30,7 @@ async function request<T>(path: string, signal?: AbortSignal, method = "GET"): P
   if (response.ok) {
     return (await response.json()) as T;
   }
-  if (response.status === 404 || response.status === 503) {
+  if (response.status === 404 || response.status === 500 || response.status === 503) {
     const body = (await response.json()) as ApiErrorBody;
     throw new ApiError(body.error, response.status);
   }
@@ -39,6 +39,11 @@ async function request<T>(path: string, signal?: AbortSignal, method = "GET"): P
 
 export function getRepo(): Promise<Repo> {
   return request("/api/repo");
+}
+
+/** 서버가 레포를 다시 분석하게 하고 끝날 때까지 기다린다. 분석하지 못하면 서버는 앞의 분석 결과를 그대로 둔다. */
+export function postReload(): Promise<Repo> {
+  return request("/api/reload", undefined, "POST");
 }
 
 export function getTree(): Promise<Tree> {
@@ -60,6 +65,11 @@ export function getFile(path: string): Promise<FileText> {
     files.set(path, file);
   }
   return file;
+}
+
+/** 받아 둔 파일 본문을 버린다. 서버가 레포를 다시 분석한 뒤에 부른다. */
+export function forgetFiles(): void {
+  files.clear();
 }
 
 function position(path: string, line: number, col: number): string {

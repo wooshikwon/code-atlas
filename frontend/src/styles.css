@@ -381,7 +381,7 @@ ul {
   min-width: 0;
 }
 
-/* 상단 줄은 뒤로·앞으로 버튼과 탐색 경로를 담은 .toolbar-nav와 필터 버튼, 화면 맞춤, 화면 색 버튼을 담은 .toolbar-tools로 나뉜다.
+/* 상단 줄은 뒤로·앞으로 버튼과 탐색 경로를 담은 .toolbar-nav와 필터 버튼, 화면 맞춤, 화면 색, 새로고침 버튼을 담은 .toolbar-tools로 나뉜다.
    줄 폭이 모자라면 탐색 경로가 줄어든다. */
 .toolbar {
   display: flex;
@@ -411,8 +411,61 @@ ul {
   flex: none;
 }
 
+/* 새로고침 버튼. 분석 뒤 바뀐 파일 수를 글자 뒤에 적고, 분석하는 동안에는 글자 앞에 도는 원을 그린다. */
+.toolbar-reload {
+  flex: none;
+}
+
+.reload-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.reload-button[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: default;
+}
+
 .toolbar-stale {
-  white-space: nowrap;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  color: var(--surface);
+  background: var(--changed);
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.reload-spin {
+  width: 10px;
+  height: 10px;
+  border: 2px solid color-mix(in srgb, var(--muted) 45%, var(--surface));
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: busy-spin 900ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reload-spin {
+    animation: none;
+  }
+}
+
+/* 새로고침이 실패한 까닭. 상단 줄 오른쪽 끝 아래에 뜨고 누르면 닫힌다. */
+.reload-error {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: var(--z-menu);
+  max-width: 320px;
+  padding: 4px 8px;
+  border: 1px solid var(--critical);
+  border-radius: 4px;
+  background: var(--surface);
+  text-align: left;
 }
 
 .toolbar-trail {

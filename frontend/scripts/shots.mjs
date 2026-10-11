@@ -1,8 +1,9 @@
 // 화면을 시나리오마다 조작해 확인 항목의 통과 여부를 한 줄씩 출력하고 스크린샷을 남긴다.
-// 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--only 이름,이름] [--with-summary]
+// 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--only 이름,이름] [--with-summary]
 // 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름은 sync-engine을 연 서버가 기준이고 노드 수·선 수·줄 범위,
 // 경로와 미사용 후보는 서버 응답에서 읽는다. 순환 시나리오(cycles, cycles-change, cycles-pin)는 tests/fixtures/cycle_repo를 연 서버의 주소를
-// --cycle-url로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다.
+// --cycle-url로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다. 새로고침 시나리오(reload)는 대상 레포의 파일을 고쳤다가 되돌리므로
+// tests/fixtures/sample_repo를 임시 폴더로 복사해 연 서버의 주소를 --reload-url로 받았을 때만 돈다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
 // 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 "건너뜀"으로 출력하고 실패로 세지 않는다.
 // summary 시나리오는 Claude Code 구독 사용량을 쓰므로 --only로 지정하거나 --with-summary를 줬을 때만 돈다.
@@ -10,7 +11,7 @@
 // changes 시나리오는 /api/repo의 root에서 git status와 git diff를 읽기 전용으로 부르므로 서버와 같은 기계에서 돌린다.
 // 수정한 .py 파일이 없는 레포에서는 changes의 확인 항목을 건너뛴다.
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -28,7 +29,7 @@ const NAMED_ZOOM = 0.8;
 const INSET = 20;
 const DARK = { surface: "#1a1a19", ink: "#ffffff" };
 /** 상단 줄 오른쪽 칸의 버튼. 왼쪽부터다. */
-const TOOLS = ["필터", "화면 맞춤", "어두운 화면"];
+const TOOLS = ["필터", "화면 맞춤", "어두운 화면", "새로고침"];
 /** 좁은 창에서 상단 줄을 확인할 때 고르는 함수와 창 폭 */
 const NARROW = { owner: "parser.plan", id: "parser.plan:_parse_week_header", label: "_parse_week_header()", widths: [1700, 1440, 1280, 1160, 980, 900, 720] };
 /** 글자 요소가 그리는 글자와 배지. 이 요소의 가운데 점에서는 늘 그 노드가 눌린다. */
@@ -37,6 +38,8 @@ const TEXTS = ".node-label, .loc, .change-mark, .badge, .node-aside, .node-below
 let url = "http://127.0.0.1:8766";
 /** 순환이 있는 고정 레포를 연 서버의 주소. 주지 않으면 순환 시나리오를 건너뛴다. */
 let cycleUrl = null;
+/** 고정 레포 sample_repo의 임시 복사본을 연 서버의 주소. 주지 않으면 새로고침 시나리오를 건너뛴다. */
+let reloadUrl = null;
 let only = null;
 let withSummary = false;
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -45,6 +48,8 @@ for (let i = 2; i < process.argv.length; i += 1) {
     only = (process.argv[++i] ?? "").split(",").filter((name) => name !== "");
   } else if (arg === "--cycle-url") {
     cycleUrl = process.argv[++i] ?? null;
+  } else if (arg === "--reload-url") {
+    reloadUrl = process.argv[++i] ?? null;
   } else if (arg === "--with-summary") {
     withSummary = true;
   } else {
@@ -2657,7 +2662,7 @@ async function toolbar(t, page) {
     const bar = await read();
     t.check(
       `${name}: 상단 줄이 한 줄이고 ${["뒤로", "앞으로", ...TOOLS].join("·")} 버튼이 모두 창 안에서 가운데 점으로 눌린다`,
-      bar.height < 40 && bar.fits && bar.missed.length === 0 && ["뒤로", "앞으로", ...TOOLS].every((title) => bar.controls.includes(title)) && (!stale || bar.stale !== null),
+      bar.height < 40 && bar.fits && bar.missed.length === 0 && ["뒤로", "앞으로", ...TOOLS].every((title) => bar.controls.includes(title)) && (!stale || bar.stale === "1"),
       `상단 줄 ${bar.width}×${bar.height}, 눌리지 않는 요소 ${bar.missed.join("·") || "없음"}, 요소 ${bar.controls.join("·")}`,
     );
     t.check(
@@ -2686,6 +2691,161 @@ async function toolbar(t, page) {
         (await selectedOf(page)) === NARROW.id,
       `창 안 ${opened.filters?.inside}, 눌리지 않는 요소 ${opened.missed.join("·") || "없음"}, 선택 ${await selectedOf(page)}`,
     );
+  }
+}
+
+/**
+ * 새로고침. 고정 레포의 임시 복사본에서 보기 설정과 선택을 바꾸고 파일에 함수를 더한 뒤 새로고침을 눌러, 분석하는 동안의 표시와
+ * 끝난 뒤의 그래프·화면 상태를 본다. 더한 함수는 시나리오가 끝날 때 지운다.
+ */
+async function reloadScenario(t, page) {
+  const repo = await api("/api/repo", reloadUrl);
+  if (repo.root.includes("/tests/fixtures/")) {
+    t.check("--reload-url의 서버가 고정 레포의 임시 복사본을 열었다", false, repo.root);
+    return;
+  }
+  const core = join(repo.root, "src", "app", "core.py");
+  const source = readFileSync(core, "utf8");
+  const [file, target, added] = ["app.core", "app.core:helper", "app.core:added"];
+  const buttonOf = () =>
+    page.evaluate(() => {
+      const button = document.querySelector(".reload-button");
+      return { text: button.textContent, busy: button.getAttribute("aria-busy"), spin: button.querySelector(".reload-spin") !== null, stale: button.querySelector(".toolbar-stale")?.textContent ?? null };
+    });
+  const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+  const numbers = (transform) => (transform.match(/-?[\d.]+/g) ?? []).map(Number);
+  /** 다시 분석하는 요청. 붙잡아 두었다가 release를 부르면 서버로 보낸다. */
+  const posts = [];
+  let failing = false;
+  await page.route(
+    (at) => at.pathname === "/api/reload",
+    (route) => (failing ? route.fulfill({ status: 500, json: { error: "다시 분석하지 못했다: 분석이 멈췄다" } }) : void posts.push(route)),
+  );
+  try {
+    await load(page, reloadUrl);
+    const home = await viewport();
+    const boxed = Object.keys(await flowBoxes(page)).length;
+
+    // 보기 설정, 화면 색, 범례, 선택, 파일트리 검색어를 바꾼다.
+    await page.getByRole("button", { name: "어두운 화면" }).click();
+    await page.click(".legend-button");
+    await inFilters(page, async () => {
+      const filters = page.locator(".filter-panel");
+      await filters.getByLabel("테스트 코드").check();
+      await filters.getByLabel("자동 요약").check();
+      await filters.locator('input[type="range"]').fill("3");
+      await page.click('.overlay-option[data-kind="unused"]');
+    });
+    await settle(page);
+    await pickInTree(page, { id: target, owner: file });
+    await page.mouse.move(600, 500);
+    await page.mouse.wheel(0, -300);
+    await page.fill(".tree-search-input", "help");
+    appendFileSync(core, "\n\ndef added():\n    return helper(1)\n");
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForSelector(".reload-button .toolbar-stale", { timeout: 10_000 }).catch(() => {});
+    await page.mouse.move(0, 0);
+    await page.hover(".reload-button");
+    await page.waitForSelector(".tooltip", { timeout: 5_000 }).catch(() => {});
+    const tip = await page.evaluate(() => document.querySelector(".tooltip")?.innerText.split("\n") ?? []);
+    const idle = await buttonOf();
+    t.check(
+      "파일을 고치면 새로고침 버튼이 분석 뒤 바뀐 파일 수 1을 적고 말풍선이 그 뜻을 적는다",
+      idle.text === "새로고침1" && idle.stale === "1" && idle.busy === "false" && tip.at(-1) === "분석 뒤 바뀐 파일 1개" && tip[0].startsWith("새로고침"),
+      `버튼 "${idle.text}", 말풍선 ${tip.join(" / ")}`,
+    );
+
+    await page.click(".reload-button");
+    await page.waitForFunction(() => document.querySelector(".reload-button").getAttribute("aria-busy") === "true", null, { timeout: 5_000 }).catch(() => {});
+    const busy = await buttonOf();
+    await page.click(".reload-button", { force: true });
+    await page.waitForTimeout(300);
+    t.check(
+      "새로고침을 누르면 버튼이 도는 원과 \"분석 중\"으로 바뀌고, 그동안 다시 눌러도 요청을 한 번만 보낸다",
+      busy.text === "분석 중" && busy.spin && busy.busy === "true" && posts.length === 1,
+      `버튼 "${busy.text}", POST ${posts.length}번`,
+    );
+    await page.fill(".tree-search-input", "");
+    await page.click(`.tree-row.tree-file[data-node="app.models"]`);
+    await waitSelected(page, "app.models").catch(() => {});
+    t.check("분석하는 동안 앞의 그래프에서 다른 노드를 고를 수 있다", (await selectedOf(page)) === "app.models" && (await count(page, `.tree-row[data-node="${added}"]`)) === 0, `선택 ${await selectedOf(page)}`);
+    await page.fill(".tree-search-input", "help");
+    await t.shot();
+
+    await posts[0].continue();
+    await page.waitForFunction(() => document.querySelector(".reload-button").getAttribute("aria-busy") === "false", null, { timeout: 120_000 });
+    await page.waitForSelector(".react-flow__node", { timeout: 60_000 });
+    await settle(page);
+    const done = await buttonOf();
+    const state = await inFilters(page, async () => {
+      const filters = page.locator(".filter-panel");
+      return {
+        tests: await filters.getByLabel("테스트 코드").isChecked(),
+        auto: await filters.getByLabel("자동 요약").isChecked(),
+        depth: await filters.locator('input[type="range"]').inputValue(),
+        overlay: (await overlayOptions(page)).find((option) => option.checked)?.kind,
+        nodes: await page.evaluate(() => document.querySelector(".filter-stats").textContent),
+      };
+    });
+    const fresh = await api("/api/repo", reloadUrl);
+    t.check(
+      "분석이 끝나면 버튼이 \"새로고침\"으로 돌아오고 바뀐 파일 수가 사라지며 레포 정보가 새 분석 결과의 수를 적는다",
+      done.text === "새로고침" && done.stale === null && fresh.stats.nodes === repo.stats.nodes + 1 && state.nodes.includes(`노드 ${fresh.stats.nodes} `),
+      `버튼 "${done.text}", ${state.nodes}`,
+    );
+    const groups = cyclesOf(await api("/api/graph", reloadUrl), hiddenOf(await api("/api/graph", reloadUrl))).groups.length;
+    t.check(
+      "보기 설정이 기본값으로 돌아온다. 흐름 단계 2, 테스트 코드와 자동 요약 꺼짐, 덮개는 레포를 처음 열 때의 규칙이다",
+      !state.tests && !state.auto && state.depth === "2" && state.overlay === (groups > 0 ? "cycles" : "none") && (await count(page, ".filter-count")) === (groups > 0 ? 1 : 0),
+      JSON.stringify(state),
+    );
+    const now = numbers(await viewport());
+    const first = numbers(home);
+    t.check(
+      "선택, 탐색 경로, 탐색 이력, 파일트리 검색어가 비고 폴더와 파일 상자가 처음 연 상태로 접히며 화면이 그래프 전체에 맞춰진다",
+      (await selectedOf(page)) === null &&
+        (await count(page, ".trail-step")) === 0 &&
+        (await page.getByRole("button", { name: "뒤로" }).isDisabled()) &&
+        (await page.inputValue(".tree-search-input")) === "" &&
+        (await count(page, ".react-flow__node .node-body.node-function")) === 0 &&
+        Object.keys(await flowBoxes(page)).length === boxed &&
+        now.length === 3 && now.every((n, i) => near(n, first[i], 1)),
+      `선택 ${await selectedOf(page)}, 상자 ${Object.keys(await flowBoxes(page)).length}개(처음 ${boxed}개), 화면 ${now.join(", ")}(처음 ${first.join(", ")})`,
+    );
+    t.check(
+      "화면 색과 범례의 펼침은 그대로다",
+      (await page.evaluate(() => document.documentElement.dataset.theme)) === "dark" && (await count(page, ".legend")) === 1,
+      `화면 색 ${await page.evaluate(() => document.documentElement.dataset.theme)}, 범례 ${await count(page, ".legend")}개`,
+    );
+    await page.click(`.tree-row.tree-file[data-node="${file}"]`);
+    await page.waitForSelector(`.tree-row.tree-symbol[data-node="${added}"]`, { timeout: 10_000 }).catch(() => {});
+    await page.click(`.tree-row.tree-symbol[data-node="${added}"]`).catch(() => {});
+    await waitSelected(page, added).catch(() => {});
+    await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    const shownCode = await page.evaluate(() => [...document.querySelectorAll(".info-panel .monaco-editor .view-line")].map((line) => line.textContent.replaceAll("\u00a0", " ")).join("\n"));
+    t.check(
+      "새 그래프에 더한 함수 added()가 있고 코드 뷰어가 고친 파일의 본문을 보인다",
+      (await selectedOf(page)) === added && shownCode.includes("def added():") && (await count(page, `${node(added)}`)) === 1,
+      `선택 ${await selectedOf(page)}`,
+    );
+
+    // 다시 분석하지 못하면 화면을 바꾸지 않고 까닭을 적는다.
+    failing = true;
+    t.expected.push("status of 500");
+    await page.click(".reload-button");
+    await page.waitForSelector(".reload-error", { timeout: 10_000 }).catch(() => {});
+    const error = await page.evaluate(() => document.querySelector(".reload-error")?.textContent ?? null);
+    const kept = (await selectedOf(page)) === added && (await buttonOf()).text === "새로고침";
+    await page.click(".reload-error").catch(() => {});
+    t.check(
+      "다시 분석하지 못하면 선택과 그래프를 그대로 두고 까닭을 적으며, 그 글을 누르면 닫힌다",
+      error === "다시 분석하지 못했다: 분석이 멈췄다" && kept && (await count(page, ".reload-error")) === 0,
+      `${error}`,
+    );
+  } finally {
+    writeFileSync(core, source);
+    await fetch(new URL("/api/reload", reloadUrl), { method: "POST" }).catch(() => {});
   }
 }
 
@@ -4367,6 +4527,7 @@ const SCENARIOS = [
   ["finder-change", finderChange],
   ["finder-ends", finderEnds],
   ["overlay-menu", overlayMenu],
+  ["reload", reloadScenario],
   ["unused", unusedScenario],
   ["finder-overlay", finderOverlay],
   ["overlay-dark", overlayDark],
@@ -4387,6 +4548,10 @@ async function run(browser, name, scenario) {
     console.log(`[${name}]\n  건너뜀  순환이 있는 고정 레포로 연 화면 — --cycle-url을 주지 않았다`);
     return [{ label: name, ok: null, actual: "" }];
   }
+  if (name === "reload" && reloadUrl === null) {
+    console.log(`[${name}]\n  건너뜀  고정 레포의 임시 복사본으로 연 화면 — --reload-url을 주지 않았다`);
+    return [{ label: name, ok: null, actual: "" }];
+  }
   const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 2, colorScheme: "light" });
   // 화면의 단축키 처리(window의 capture 단계)가 끝난 뒤에 keydown의 defaultPrevented를 적어 둔다.
   await context.addInitScript(() => {
@@ -4403,6 +4568,8 @@ async function run(browser, name, scenario) {
   const t = {
     /** 이 시나리오가 서버로 보내도 되는 POST /api/summary의 노드 id */
     summaries: new Set(),
+    /** 이 시나리오가 일부러 낸 콘솔 오류에 든 글자. 이 글자가 든 콘솔 오류는 세지 않는다. */
+    expected: [],
     check: (label, ok, actual = "") => results.push({ label, ok: Boolean(ok), actual }),
     /** 대상 레포에 입력이 없어 볼 수 없는 확인 항목을 적는다. 통과로도 실패로도 세지 않는다. */
     skip: (label, reason) => results.push({ label, ok: null, actual: reason }),
@@ -4429,7 +4596,7 @@ async function run(browser, name, scenario) {
   );
   page.on("pageerror", (error) => errors.push(`페이지 오류: ${error.message}`));
   page.on("console", (message) => {
-    if (message.type() === "error") {
+    if (message.type() === "error" && !t.expected.some((text) => message.text().includes(text))) {
       errors.push(`콘솔 오류: ${message.text()}`);
     }
   });

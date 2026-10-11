@@ -64,9 +64,21 @@ export interface AtlasStore {
   legendOpen: boolean;
   minimapOpen: boolean;
   paletteOpen: boolean;
+  /** 서버가 레포를 다시 분석하는 중이다(`state/reload.ts`) */
+  reloading: boolean;
+  /** 마지막 새로고침이 실패한 까닭. 실패하지 않았으면 null이다. */
+  reloadError: string | null;
+  /** 레포를 다시 연 횟수. 파일트리와 그래프가 이 값이 바뀌면 처음 상태로 다시 그린다. */
+  epoch: number;
 
   /** 저장해 둔 화면 설정을 되살리고 레포·그래프·파일트리를 받는다. */
   load(): void;
+  /**
+   * 다시 분석한 결과를 받아 화면 상태를 레포를 처음 연 상태로 되돌린다. 보기 설정(흐름 단계, 테스트 코드, 외부 노드, 자동 요약, 덮개),
+   * 선택과 뷰, 탐색 이력, 접은 폴더, 경로 탐색 창과 경로 고정을 되돌리고, 화면 색, 정보 패널의 사각형과 요약 칸 비율,
+   * 미니맵·범례의 접힘은 그대로 둔다.
+   */
+  reopen(repo: Repo, graph: Graph, tree: Tree): void;
   /**
    * 경로 고정 중에는 selectEdge, toggleFolder, setDepth, enterFunction, expandFunction, open, back, forward, jump,
    * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다(`barred`). select와 show는
@@ -202,6 +214,20 @@ const START: Pick<AtlasStore, "view" | "selection" | "collapsed"> = {
   collapsed: new Set(),
 };
 
+const FINDER: Finder = { open: false, from: null, to: null, route: null, pick: 0, focus: null, blocked: 0, aimed: 0 };
+
+/** 받은 분석 결과와, 레포를 처음 열 때의 뷰·선택·접은 폴더·탐색 이력 */
+function opened(repo: Repo, graph: Graph, tree: Tree) {
+  const collapsed = nestedFolders(graph);
+  const place = placeOf({ ...START, collapsed });
+  return { repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 } };
+}
+
+/** 레포를 열 때의 덮개. 지금 토글에서 순환 묶음이 하나라도 있으면 순환 덮개를 켜고 없으면 끈다. */
+function cover(graph: Graph, toggles: { showTests: boolean; showExternal: boolean }): void {
+  useOverlay.getState().set(cycles(graph, hidden(graph, toggles)).groups.length > 0 ? "cycles" : null);
+}
+
 export const useAtlas = create<AtlasStore>()((set, get) => {
   /** 뷰·선택·접은 폴더를 바꾸고 바뀐 뒤의 단계를 이력에 넣는다. */
   const visit = (change: Partial<Pick<AtlasStore, "view" | "selection" | "collapsed">>) =>
@@ -306,12 +332,15 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     autoSummary: false,
     theme: "light",
     history: { entries: [placeOf(START)], index: 0 },
-    finder: { open: false, from: null, to: null, route: null, pick: 0, focus: null, blocked: 0, aimed: 0 },
+    finder: FINDER,
     panel: null,
     split: null,
     legendOpen: false,
     minimapOpen: true,
     paletteOpen: false,
+    reloading: false,
+    reloadError: null,
+    epoch: 0,
 
     load: () => {
       const ui = parseUi(localStorage.getItem(UI_KEY), preferredTheme());
@@ -319,14 +348,15 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       applyTheme(ui.theme);
       Promise.all([getRepo(), getGraph(), getTree()])
         .then(([repo, graph, tree]) => {
-          const collapsed = nestedFolders(graph);
-          const place = placeOf({ ...START, collapsed });
-          set({ repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 } });
-          // 순환 묶음이 하나라도 있으면 순환 덮개를 켠 채로 연다.
-          const { showTests, showExternal } = get();
-          useOverlay.getState().set(cycles(graph, hidden(graph, { showTests, showExternal })).groups.length > 0 ? "cycles" : null);
+          set(opened(repo, graph, tree));
+          cover(graph, get());
         })
         .catch((caught: unknown) => set({ error: caught instanceof Error ? caught.message : String(caught) }));
+    },
+    reopen: (repo, graph, tree) => {
+      set({ ...opened(repo, graph, tree), showTests: false, showExternal: false, finder: FINDER, paletteOpen: false, epoch: get().epoch + 1 });
+      keep({ depth: 2, autoSummary: false });
+      cover(graph, get());
     },
 
     select: (id) =>

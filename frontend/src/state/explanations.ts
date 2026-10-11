@@ -25,6 +25,8 @@ export interface ExplanationStore {
   make(path: string, start: number, end: number, refresh: boolean): void;
   /** 줄 범위의 설명을 지운다. */
   remove(path: string, start: number, end: number): void;
+  /** 읽어 둔 설명을 버려 다음에 파일을 열 때 다시 읽게 한다. */
+  forget(): void;
 }
 
 export function noteKey(note: { start: number; end: number }): string {
@@ -82,6 +84,10 @@ export const useExplanations = create<ExplanationStore>()((set, get) => {
       deleteExplanation(path, start, end).catch(() => {
         // 저장한 적이 없는 설명(만들다 실패한 범위)은 서버에 지울 것이 없다.
       });
+    },
+    forget: () => {
+      loading.clear();
+      set({ files: {} });
     },
   };
 });

@@ -2,6 +2,7 @@
 
 세션은 lifespan이 띄워 분석에 쓴 뒤 서버가 내려갈 때 닫는다. 분석은 `app.state.starting` 태스크가 돌리고,
 이 태스크를 취소하면 lifespan이 세션을 닫고 분석 결과 없이 서버가 내려가기를 기다린다.
+`POST /api/reload`는 새 세션으로 레포를 다시 분석한다. 분석 결과와 세션은 `install` 한 곳에서 한꺼번에 바꾼다.
 """
 
 from __future__ import annotations
@@ -101,52 +102,71 @@ def create_app(
     on_ready: Callable[[Analysis], None] | None = None,
     style_guide: Path | None = None,
 ) -> FastAPI:
+    async def start() -> tuple[AsyncExitStack, Session, Analyzed]:
+        """새 세션을 띄워 레포를 분석한다. 돌려준 묶음을 닫으면 그 세션이 닫힌다. 분석하지 못하면 세션을 닫고 예외를 낸다."""
+        files = collect(repo)
+        async with AsyncExitStack() as opened:
+            session = await opened.enter_async_context(
+                Session(files.root, require_python(repo, python), files.extra_paths)
+            )
+            analyzed = await analyze_async(files, session)
+            return opened.pop_all(), session, analyzed
+
+    def install(sessions: AsyncExitStack, session: Session, analyzed: Analyzed) -> None:
+        """분석 결과와 세션을 응답이 읽는 상태에 한꺼번에 넣는다. 응답이 쓰는 분석 결과는 이 함수만 바꾼다."""
+        analysis, files = analyzed.analysis, analyzed.files
+        state = app.state
+        state.analyzed = analyzed
+        state.session = session
+        state.sessions = sessions
+        state.nodes = {n.id: n for n in analysis.nodes}
+        state.repo = {
+            "name": files.root.name,
+            "root": str(files.root),
+            "source_root": files.source_root,
+            "python": session.python,
+            "stats": analysis.stats,
+        }
+        state.tree = {"entries": _tree(files, analysis)}
+        state.graph = {
+            "nodes": [to_dict(n) for n in analysis.nodes],
+            "edges": [to_dict(e) for e in analysis.edges],
+        }
+        state.unused = to_dict(analyzed.unused)
+
+    async def reload() -> None:
+        """레포를 다시 분석한 뒤 분석 결과와 세션을 바꾸고 앞의 세션을 닫는다. 분석이 끝날 때까지 앞의 결과로 답한다."""
+        opened, session, analyzed = await start()
+        async with app.state.reopening:
+            replaced: AsyncExitStack = app.state.sessions
+            install(opened, session, analyzed)
+        await replaced.aclose()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        async with AsyncExitStack() as sessions:
-
-            async def start() -> tuple[Session, Analyzed]:
-                files = collect(repo)
-                async with AsyncExitStack() as opened:
-                    session = await opened.enter_async_context(
-                        Session(files.root, require_python(repo, python), files.extra_paths)
-                    )
-                    analyzed = await analyze_async(files, session)
-                    sessions.push_async_exit(opened.pop_all())
-                return session, analyzed
-
-            app.state.starting = asyncio.create_task(start())
-            try:
-                session, analyzed = await app.state.starting
-            except asyncio.CancelledError:
-                if asyncio.current_task().cancelling():
-                    raise
-                yield
-                return
-            analysis, files = analyzed.analysis, analyzed.files
-            app.state.analyzed = analyzed
-            app.state.session = session
-            app.state.sessions = sessions
-            app.state.reopening = asyncio.Lock()
-            app.state.nodes = {n.id: n for n in analysis.nodes}
-            app.state.summaries = Summaries(style_guide=style_guide)
-            await app.state.summaries.unavailable()
-            app.state.repo = {
-                "name": files.root.name,
-                "root": str(files.root),
-                "source_root": files.source_root,
-                "python": session.python,
-                "stats": analysis.stats,
-            }
-            app.state.tree = {"entries": _tree(files, analysis)}
-            app.state.graph = {
-                "nodes": [to_dict(n) for n in analysis.nodes],
-                "edges": [to_dict(e) for e in analysis.edges],
-            }
-            app.state.unused = to_dict(analyzed.unused)
-            if on_ready is not None:
-                on_ready(analysis)
+        app.state.starting = asyncio.create_task(start())
+        try:
+            sessions, session, analyzed = await app.state.starting
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                raise
             yield
+            return
+        install(sessions, session, analyzed)
+        app.state.reopening = asyncio.Lock()
+        app.state.reloading = None
+        app.state.summaries = Summaries(style_guide=style_guide)
+        await app.state.summaries.unavailable()
+        if on_ready is not None:
+            on_ready(analyzed.analysis)
+        try:
+            yield
+        finally:
+            reloading: asyncio.Task | None = app.state.reloading
+            if reloading is not None and not reloading.done():
+                reloading.cancel()
+                await asyncio.gather(reloading, return_exceptions=True)
+            await app.state.sessions.aclose()
 
     app = FastAPI(title="code-atlas", lifespan=lifespan)
     app.state.starting = None
@@ -180,6 +200,21 @@ def create_app(
     @app.get("/api/repo")
     def get_repo() -> dict:
         return app.state.repo
+
+    @app.post("/api/reload")
+    async def post_reload() -> dict:
+        """레포를 다시 분석하고 새 `/api/repo` 값을 돌려준다. 분석하는 중에 들어온 요청은 그 분석이 끝나기를 함께 기다린다.
+
+        분석하지 못하면 앞의 분석 결과를 그대로 두고 까닭을 적은 500을 돌려준다.
+        """
+        state = app.state
+        if state.reloading is None or state.reloading.done():
+            state.reloading = asyncio.create_task(reload())
+        try:
+            await asyncio.shield(state.reloading)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"다시 분석하지 못했다: {exc}") from exc
+        return state.repo
 
     @app.get("/api/tree")
     def get_tree() -> dict:

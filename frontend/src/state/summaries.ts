@@ -19,6 +19,8 @@ export interface SummaryStore {
   read(node: string): void;
   /** 캐시에 없으면 요약을 만든다. refresh면 캐시에 있어도 다시 만든다. 만드는 중인 노드에는 요청을 다시 보내지 않는다. */
   make(node: string, refresh: boolean): void;
+  /** 읽어 둔 요약을 버려 다음에 고를 때 다시 읽게 한다. 만드는 중인 노드는 그대로 둔다. */
+  forget(): void;
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -62,6 +64,7 @@ export const useSummaries = create<SummaryStore>()((set, get) => {
         (error: unknown) => put(node, { phase: "failed", error: message(error), refresh }),
       );
     },
+    forget: () => set((store) => ({ states: Object.fromEntries(Object.entries(store.states).filter(([, state]) => state.phase === "making")) })),
   };
 });
 

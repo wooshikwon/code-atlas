@@ -607,3 +607,90 @@ def test_changes_outside_git_list_only_stale_files(client, module_repo):
     finally:
         models.write_text(text)
     assert client.get("/api/changes").json()["files"] == []
+
+
+def add_function(repo) -> None:
+    """고정 레포의 `core.py` 끝에 함수 `added`를 더한다."""
+    core = repo / "src" / "app" / "core.py"
+    core.write_text(core.read_text() + "\n\ndef added():\n    return helper(1)\n")
+
+
+@pytest.mark.asyncio
+async def test_reload_replaces_the_analysis_and_ends_the_previous_session(sample_repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+    monkeypatch.setattr(summary, "find_cli", lambda: None)
+    app = create_app(sample_repo, sys.executable)
+    async with app.router.lifespan_context(app):
+        state = app.state
+        before, first = state.graph, state.session
+        assert "app.core:added" not in state.nodes
+        add_function(sample_repo)
+        _, changed = await call(app, "GET", "/api/changes", {})
+        assert [f["path"] for f in changed["files"] if f["stale"]] == ["src/app/core.py"]
+
+        status, body = await call(app, "POST", "/api/reload", {})
+        assert status == 200 and body == state.repo
+        assert state.graph is not before and "app.core:added" in state.nodes
+        assert any(e["source"] == "app.core:added" and e["target"] == "app.core:helper" for e in state.graph["edges"])
+        _, file = await call(app, "GET", "/api/file", {"path": "src/app/core.py"})
+        assert file["text"].endswith("def added():\n    return helper(1)\n")
+        _, changed = await call(app, "GET", "/api/changes", {})
+        assert not any(f["stale"] for f in changed["files"])
+        assert state.session is not first and not state.session.stopped
+        assert first.stopped and group_ended(first.client._server.pid)
+        status, hover = await call(app, "GET", "/api/hover", RUN_ENGINE_CALL)
+        assert status == 200 and hover["range"] == [10, 21, 10, 31]
+        last = state.session
+    assert last.stopped and group_ended(last.client._server.pid)
+
+
+@pytest.mark.asyncio
+async def test_reloads_asked_together_analyze_once(sample_repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+    monkeypatch.setattr(summary, "find_cli", lambda: None)
+    analyze_async = api.analyze_async
+    runs = []
+
+    async def counted(files, session):
+        runs.append(session)
+        return await analyze_async(files, session)
+
+    monkeypatch.setattr(api, "analyze_async", counted)
+    app = create_app(sample_repo, sys.executable)
+    async with app.router.lifespan_context(app):
+        assert len(runs) == 1
+        add_function(sample_repo)
+        replies = await asyncio.gather(*(call(app, "POST", "/api/reload", {}) for _ in range(3)))
+        assert [status for status, _ in replies] == [200, 200, 200]
+        assert len(runs) == 2 and "app.core:added" in app.state.nodes
+        await call(app, "POST", "/api/reload", {})
+        assert len(runs) == 3
+
+
+@pytest.mark.asyncio
+async def test_failed_reload_keeps_the_previous_analysis(sample_repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+    monkeypatch.setattr(summary, "find_cli", lambda: None)
+    app = create_app(sample_repo, sys.executable)
+    async with app.router.lifespan_context(app):
+        state = app.state
+        before, first = state.graph, state.session
+        add_function(sample_repo)
+        opened = []
+
+        async def fail(files, session):
+            opened.append(session)
+            raise RuntimeError("분석이 멈췄다")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(api, "analyze_async", fail)
+            status, body = await call(app, "POST", "/api/reload", {})
+        assert status == 500 and body == {"error": "다시 분석하지 못했다: 분석이 멈췄다"}
+        assert state.graph is before and state.session is first and not first.stopped
+        [session] = opened
+        assert session.stopped and group_ended(session.client._server.pid)
+        status, hover = await call(app, "GET", "/api/hover", RUN_ENGINE_CALL)
+        assert status == 200 and hover["range"] == [10, 21, 10, 31]
+
+        status, _ = await call(app, "POST", "/api/reload", {})
+        assert status == 200 and "app.core:added" in state.nodes

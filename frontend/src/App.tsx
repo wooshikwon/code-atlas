@@ -4,17 +4,17 @@ import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panel
 import { GraphView } from "./graph/GraphView";
 import { fitTarget, FRAME_ZOOM, stageOf } from "./graph/viewport";
 import { Filters } from "./nav/Filters";
+import { Reload } from "./nav/Reload";
 import { bind } from "./nav/keys";
 import { Trail } from "./nav/Trail";
 import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
 import { Palette } from "./search/Palette";
-import { useStaleCount, watch } from "./state/changes";
+import { watch } from "./state/changes";
 import { litOf, pinned, useAtlas } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
 function Toolbar() {
-  const stale = useStaleCount();
   const functionView = useAtlas((s) => s.view.kind === "function");
   const canBack = useAtlas((s) => s.history.index > 0);
   const canForward = useAtlas((s) => s.history.index < s.history.entries.length - 1);
@@ -57,11 +57,7 @@ function Toolbar() {
         <button className="toolbar-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
           {theme === "light" ? "어두운 화면" : "밝은 화면"}
         </button>
-        {stale > 0 && (
-          <span className="toolbar-stale" title="그래프의 노드와 줄 범위는 레포를 열 때 분석한 값이다">
-            분석 뒤 바뀐 파일 {stale}개
-          </span>
-        )}
+        <Reload />
       </div>
     </div>
   );
@@ -70,6 +66,7 @@ function Toolbar() {
 export function App() {
   const main = useDefaultLayout({ id: "main", storage: localStorage });
   const opened = useAtlas((s) => s.repo !== null);
+  const epoch = useAtlas((s) => s.epoch);
 
   useEffect(() => (opened ? watch() : undefined), [opened]);
 
@@ -104,7 +101,7 @@ export function App() {
       onLayoutChanged={main.onLayoutChanged}
     >
       <Panel id="explorer" defaultSize={260} minSize={160} maxSize="40">
-        <FileTree />
+        <FileTree key={epoch} />
       </Panel>
       <Separator className="separator" />
       <Panel id="workspace" minSize="30">
@@ -112,7 +109,7 @@ export function App() {
           <div className="workspace">
             <Toolbar />
             <div className="stage">
-              <GraphView />
+              <GraphView key={epoch} />
               <InfoPanel />
             </div>
             <Palette />
