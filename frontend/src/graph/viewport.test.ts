@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsOf, centerOn, fitPadding, fitTarget, frameOn, freeRect } from "./viewport";
+import { anchorOn, boundsOf, centerOn, fitPadding, fitTarget, frameOn, freeRect, headInto } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -64,6 +64,37 @@ describe("centerOn", () => {
     const { x, y } = centerOn({ x: 300, y: 100, width: 1000, height: 200 }, free, 1);
     expect(300 + x).toBe(20);
     expect(100 + 100 + y).toBe(450);
+  });
+});
+
+describe("anchorOn", () => {
+  it("상자가 옮겨 간 만큼 화면을 옮겨 왼쪽 위 모서리를 화면의 같은 좌표에 두고 확대 비율은 그대로 둔다", () => {
+    const view = { x: 100, y: 50, zoom: 0.5 };
+    const next = anchorOn({ x: 200, y: 300 }, { x: 260, y: 280 }, view);
+    expect(next).toEqual({ x: 70, y: 60, zoom: 0.5 });
+    expect([260 * next.zoom + next.x, 280 * next.zoom + next.y]).toEqual([200 * view.zoom + view.x, 300 * view.zoom + view.y]);
+  });
+});
+
+describe("headInto", () => {
+  const clear = { x: 0, y: 0, width: 1000, height: 800 };
+  const view = { x: 0, y: 0, zoom: 1 };
+
+  it("머리 줄이 영역의 20px 안쪽에 들어 있으면 화면을 그대로 둔다", () => {
+    expect(headInto({ x: 100, y: 100, width: 400, height: 900 }, 32, clear, view)).toEqual(view);
+  });
+
+  it("머리 줄이 오른쪽으로 벗어났으면 머리 줄의 오른쪽 끝이 영역의 20px 안쪽에 오게만 옮긴다", () => {
+    expect(headInto({ x: 700, y: 100, width: 400, height: 300 }, 32, clear, view)).toEqual({ x: -120, y: 0, zoom: 1 });
+  });
+
+  it("머리 줄이 영역보다 넓으면 왼쪽 끝을 20px 안쪽에 맞춘다", () => {
+    expect(headInto({ x: 300, y: 100, width: 1500, height: 300 }, 32, clear, view)).toEqual({ x: -280, y: 0, zoom: 1 });
+  });
+
+  it("머리 줄이 위나 아래로 벗어났으면 세로로만 옮기고 확대 비율은 그대로 둔다", () => {
+    expect(headInto({ x: 100, y: -50, width: 400, height: 300 }, 32, clear, view)).toEqual({ x: 0, y: 70, zoom: 1 });
+    expect(headInto({ x: 100, y: 1600, width: 400, height: 300 }, 32, clear, { x: 0, y: 0, zoom: 0.5 })).toEqual({ x: 0, y: -36, zoom: 0.5 });
   });
 });
 

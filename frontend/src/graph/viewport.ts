@@ -89,6 +89,31 @@ export function frameOn(path: Box[], step: Box, focus: Box, clear: Rect, view: V
   };
 }
 
+/**
+ * 배치가 바뀌어 상자가 before에서 after로 옮겨 갔을 때 그 상자의 왼쪽 위 모서리가 화면의 같은 좌표에 남는 화면 위치.
+ * 확대 비율은 그대로다. 손잡이와 폴더를 눌러 상자를 펼치거나 접을 때 쓴다.
+ */
+export function anchorOn(before: Point, after: Point, view: View): View {
+  return { x: view.x + (before.x - after.x) * view.zoom, y: view.y + (before.y - after.y) * view.zoom, zoom: view.zoom };
+}
+
+/**
+ * 상자의 머리 줄(상자 위쪽 높이 head)이 clear의 20px 안쪽에 들어오도록 가장 적게 옮긴 화면 위치. 이미 들어 있는 축은 그대로 두고,
+ * 머리 줄이 clear보다 긴 축은 시작 끝을 맞춘다. 확대 비율은 그대로다.
+ */
+export function headInto(box: Box, head: number, clear: Rect, view: View): View {
+  const along = (start: number, length: number, low: number, room: number, at: number) => {
+    const [from, size] = [start * view.zoom + at, length * view.zoom];
+    const [least, most] = [low + INSET, Math.max(low + INSET, low + room - INSET - size)];
+    return at + Math.min(Math.max(from, least), most) - from;
+  };
+  return {
+    x: along(box.x, box.width, clear.x, clear.width, view.x),
+    y: along(box.y, Math.min(head, box.height), clear.y, clear.height, view.y),
+    zoom: view.zoom,
+  };
+}
+
 /** 상자를 모두 품는 가장 작은 사각형 */
 export function boundsOf(boxes: Iterable<Box>): Box {
   let left = Infinity;

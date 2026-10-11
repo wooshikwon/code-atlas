@@ -4746,8 +4746,9 @@ async function arranging(t, page) {
     `worker ${workers}개 → ${await page.evaluate(() => window.__shotsWorkers)}개`,
   );
 
+  // 폴더를 펼치면 영역의 머리 줄이 보이게 화면을 옮기므로 파일 상자가 화면 밖에 있을 수 있다. 파일트리에서 고른다.
   await slow(DELAY);
-  await clickNode(page, FILE);
+  await page.click(`.tree-row.tree-file[data-node="${FILE}"]`);
   await page.waitForSelector(".arranging", { timeout: 5_000 });
   const picked = (await headOf(page)).split("\n")[0];
   await page.keyboard.press("Alt+ArrowLeft");

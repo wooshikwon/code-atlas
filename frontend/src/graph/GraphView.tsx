@@ -25,7 +25,7 @@ import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
 import { edgeTypes, flowEdges, isTrunk, Markers, type FlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
-import { functionCounts, layout, titleOf, type Layout, type Point, type RouteEnd } from "./layout";
+import { functionCounts, HEADER, layout, REGION_HEAD, titleOf, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { GROUP_NAMES, KIND_NAMES, STEP_NAMES } from "./names";
@@ -38,7 +38,7 @@ import { drawn, type EdgeKey } from "./scope";
 import { nodeTip, tipOf, trunkTip } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst, type Lines } from "./view";
-import { boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { anchorOn, boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, headInto, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, lift, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -56,6 +56,8 @@ interface Scene {
   focus: string | null;
   /** 토글, 접은 폴더, 초점을 둔 노드, 흐름 단계를 적은 글. 같은 그래프와 경로에서 이 글이 같으면 배치가 같다. */
   key: string;
+  /** 접은 폴더 */
+  collapsed: Set<string>;
   layout: Layout;
 }
 
@@ -186,6 +188,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const onScreen = useRef<Layout | null>(null);
   /** 화면에 그린 배치의 입력 */
   const arranged = useRef<Pick<Scene, "graph" | "columns" | "lit" | "key"> | null>(null);
+  /** 화면에 그린 배치의 그래프와 접은 폴더. 다음 배치에서 펼치거나 접은 폴더 하나를 찾는 데 쓴다. */
+  const folds = useRef<Pick<Scene, "graph" | "collapsed"> | null>(null);
   /** 화면을 옮겨 둔 노드나 경로와 그때의 finder.aimed */
   const panned = useRef<{ aim: string | Lit | null; aimed: number }>({ aim: null, aimed: 0 });
   /** 직전에 한 번 누른 노드와 누르기 전의 이력. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
@@ -212,12 +216,12 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const folds = [...collapsed].sort();
     if (lit !== null) {
       const key = JSON.stringify([toggles, folds]);
-      return { flow: null, lit, focus: null, key, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
+      return { flow: null, lit, focus: null, key, collapsed, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
     }
     const off = hidden(graph, toggles);
     const picked = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
     const key = JSON.stringify([toggles, folds, picked === null ? null : [focus, depth]]);
-    return { flow: picked, lit, focus: picked === null ? null : focus, key, shown: shown(graph, { ...toggles, collapsed, flow: picked, lit }) };
+    return { flow: picked, lit, focus: picked === null ? null : focus, key, collapsed, shown: shown(graph, { ...toggles, collapsed, flow: picked, lit }) };
   }, [graph, index, showTests, showExternal, collapsed, focus, depth, lit]);
 
   // 느린 배치를 취소하면 입력이 화면에 그린 배치의 입력으로 돌아오므로 다시 계산하지 않는다.
@@ -279,16 +283,44 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
+
+    // 고른 노드나 강조하는 경로가 바뀌면 아래에서 화면을 옮긴다.
+    // 폴더를 눌러 상자 하나를 펼치거나 접었으면 그 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 둔다. 확대 비율은 그대로다.
+    const last = folds.current;
+    folds.current = scene;
+    const differ = (a: Set<string>, b: Set<string>) => [...a].filter((id) => !b.has(id)).concat([...b].filter((id) => !a.has(id)));
+    const changed = last === null || last.graph !== scene.graph ? [] : differ(last.collapsed, scene.collapsed);
+    const aim = scene.lit ?? scene.focus;
+    const fresh = aim !== panned.current.aim;
+    // 노드를 골라 그 노드를 품은 폴더가 펼쳐졌으면 고른 노드로 화면을 옮기므로 상자를 붙잡지 않는다.
+    const toggled = changed.length === 1 && (aim === null || !fresh) ? changed[0] : null;
+    const before = toggled === null ? undefined : from?.boxes.get(toggled);
+    const held = before === undefined ? null : { id: toggled!, before, view: getViewport() };
+
     const draw = (at: Layout, fresh: Set<string> | null) => {
       onScreen.current = at;
       setNodes(flowNodes(items, at.boxes, fresh));
       setShelf(shelfCorner(scene, at));
+      const box = held === null ? undefined : at.boxes.get(held.id);
+      if (held !== null && box !== undefined) {
+        void setViewport(anchorOn(held.before, box, held.view));
+      }
+    };
+    /** 펼치거나 접은 상자의 머리 줄이 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역을 벗어났으면 머리 줄이 들어오게만 옮긴다. */
+    const reveal = () => {
+      const box = toggled === null ? undefined : to.boxes.get(toggled);
+      if (box === undefined || root.current === null) {
+        return;
+      }
+      const view = held === null ? getViewport() : anchorOn(held.before, box, held.view);
+      const head = index.nodes.get(toggled!)?.kind === "package" ? REGION_HEAD : HEADER;
+      const next = headInto(box, head, stageOf(root.current).clear, view);
+      if (next.x !== view.x || next.y !== view.y) {
+        void setViewport(next, { duration: still ? 0 : PAN_MS });
+      }
     };
 
-    // 고른 노드나 강조하는 경로가 바뀌면 화면을 옮긴다. 경로 고정 중에는 finder.focus를 정할 때마다 옮긴다.
-    // 강조하는 경로의 배치가 아직 오지 않았으면 그 배치가 올 때까지 기다린다.
-    const aim = scene.lit ?? scene.focus;
-    const fresh = aim !== panned.current.aim;
+    // 경로 고정 중에는 finder.focus를 정할 때마다 화면을 옮긴다. 강조하는 경로의 배치가 아직 오지 않았으면 그 배치가 올 때까지 기다린다.
     if (scene.lit === lit && (fresh || (lit !== null && aimed !== panned.current.aimed)) && root.current !== null) {
       panned.current = { aim, aimed };
       const { clear } = stageOf(root.current);
@@ -310,6 +342,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     if (from === null || still || settled(from, to)) {
       draw(to, null);
       setMoving(false);
+      reveal();
       return;
     }
     const added = new Set(items.filter((item) => !from.boxes.has(item.id)).map((item) => item.id));
@@ -319,7 +352,10 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       from,
       to,
       (at) => draw(at, null),
-      () => setMoving(false),
+      () => {
+        setMoving(false);
+        reveal();
+      },
     );
   }, [scene, index, making, lit, pinFocus, aimed, cover, getViewport, setViewport]);
 
