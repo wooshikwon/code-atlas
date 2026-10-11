@@ -650,11 +650,6 @@ ul {
   color: var(--muted) !important;
 }
 
-/* 고른 정의의 줄 번호와 코드 사이에 긋는 세로 줄 */
-.code .code-scope {
-  border-left: 2px solid var(--muted);
-}
-
 /* 코드 범위 설명. 고른 끝의 "요약 생성" 버튼, 범위 아래에 뜨는 창, 범위 시작 줄 왼쪽의 말풍선 표지다. */
 .code-notes {
   position: absolute;

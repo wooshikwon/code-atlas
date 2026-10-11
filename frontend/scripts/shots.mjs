@@ -512,8 +512,8 @@ async function file(t, page) {
   );
   const rows = await codeRows(page);
   t.check(
-    "코드 뷰어가 파일의 1번 줄부터 보이고 흐린 줄과 범위 세로 줄이 없다",
-    rows[0]?.line === 1 && rows.every((row) => !row.dim) && (await count(page, ".info-panel .code-scope")) === 0,
+    "코드 뷰어가 파일의 1번 줄부터 보이고 흐린 줄이 없다",
+    rows[0]?.line === 1 && rows.every((row) => !row.dim),
     `첫 줄 번호 ${rows[0]?.line}, 흐린 줄 ${rows.filter((row) => row.dim).length}개`,
   );
   const zoom = await zoomOf(page);
@@ -733,8 +733,12 @@ async function codeScope(t, page) {
   /** 줄 번호가 range 밖인 줄만, 그리고 빈 줄이 아니면 모두 흐린가 */
   const dimmedOutside = (rows, range) => rows.every((row) => (row.line < range[0] || row.line > range[1] ? row.dim || row.blank : !row.dim));
 
+  /** 코드 뷰어에 line번 줄 번호가 보일 때까지 기다린다. */
+  const waitLine = (line) =>
+    page.waitForFunction((n) => [...document.querySelectorAll(".info-panel .monaco-editor .line-numbers")].some((e) => e.textContent === String(n)), line, { timeout: 30_000 }).catch(() => {});
+
   await pickInTree(page, { id: FUNCTION, owner: FILE });
-  await page.waitForSelector(".info-panel .code-scope", { timeout: 30_000 });
+  await waitLine(target.range[0]);
   await page.waitForTimeout(300);
   const code = await rectOf(page, ".info-panel .code");
   const opened = await codeRows(page);
@@ -757,11 +761,12 @@ async function codeScope(t, page) {
   const colors = await page.evaluate(() => {
     const editor = document.querySelector(".info-panel .monaco-editor");
     const dim = getComputedStyle(editor.querySelector(".code-dim")).color;
-    const mark = getComputedStyle(editor.querySelector(".code-scope")).borderLeftColor;
-    return { dim, mark };
+    /** 줄 번호와 코드 사이 칸에서 테두리를 그리는 장식 수 */
+    const marks = [...editor.querySelectorAll(".margin-view-overlays .cldr")].filter((mark) => parseFloat(getComputedStyle(mark).borderLeftWidth) > 0).length;
+    return { dim, marks };
   });
   const muted = await colorOf(page, "--muted");
-  t.check("흐린 글자와 범위 세로 줄의 색이 --muted다", colors.dim === muted.rgb && colors.mark === muted.rgb, `${colors.dim}, ${colors.mark}`);
+  t.check("흐린 글자의 색이 --muted이고 줄 번호 옆에 세로 줄이 없다", colors.dim === muted.rgb && colors.marks === 0, `${colors.dim}, 세로 줄 ${colors.marks}개`);
   await t.shot();
   await drag(page, center(await rectOf(page, ".info-panel .monaco-editor .scrollbar.vertical .slider")), 0, code.height);
   await page.waitForTimeout(300);
@@ -774,7 +779,7 @@ async function codeScope(t, page) {
 
   await page.click(`.tree-row.tree-symbol[data-node="${later.id}"]`);
   await waitSelected(page, later.id);
-  await page.waitForFunction((line) => [...document.querySelectorAll(".info-panel .monaco-editor .line-numbers")].some((n) => n.textContent === String(line)), later.range[0], { timeout: 10_000 }).catch(() => {});
+  await waitLine(later.range[0]);
   await page.waitForTimeout(300);
   const moved = await codeRows(page);
   t.check(
@@ -784,12 +789,12 @@ async function codeScope(t, page) {
   );
   await page.click(`.tree-row.tree-file[data-node="${FILE}"]`);
   await waitSelected(page, FILE);
-  await page.waitForFunction(() => document.querySelector(".info-panel .code-scope") === null, null, { timeout: 10_000 }).catch(() => {});
+  await waitLine(1);
   await page.waitForTimeout(300);
   const whole = await codeRows(page);
   t.check(
     "그 파일을 고르면 1번 줄부터 보이고 흐린 줄이 없다",
-    whole[0]?.line === 1 && whole.every((row) => !row.dim) && (await count(page, ".info-panel .code-scope")) === 0,
+    whole[0]?.line === 1 && whole.every((row) => !row.dim),
     `첫 줄 번호 ${whole[0]?.line}, 흐린 줄 ${whole.filter((row) => row.dim).length}개`,
   );
   t.check(`함수 둘과 파일을 차례로 고르는 동안 /api/file 요청이 ${path} 한 번뿐이다`, same(asked, [path]), asked.join(", "));

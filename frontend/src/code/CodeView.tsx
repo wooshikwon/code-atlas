@@ -66,7 +66,7 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
     }
   }, [path, code]);
 
-  // 범위 밖의 줄을 흐리게 그리고 범위의 줄 번호 옆에 세로 줄을 긋는다. 범위의 첫 줄을 코드 뷰어 맨 위로 옮긴다.
+  // 범위 밖의 줄을 흐리게 그리고 범위의 첫 줄을 코드 뷰어 맨 위로 옮긴다.
   useEffect(() => {
     if (editor === null || code === undefined) {
       return;
@@ -80,7 +80,6 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
     const decorations = editor.createDecorationsCollection([
       ...(start > 1 ? [{ range: lines(1, start - 1), options: { isWholeLine: true, inlineClassName: "code-dim" } }] : []),
       ...(end < last ? [{ range: lines(end + 1, last), options: { isWholeLine: true, inlineClassName: "code-dim" } }] : []),
-      { range: lines(start, end), options: { isWholeLine: true, linesDecorationsClassName: "code-scope" } },
     ]);
     editor.setScrollTop(editor.getTopForLineNumber(start));
     return () => decorations.clear();
