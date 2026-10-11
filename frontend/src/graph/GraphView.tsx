@@ -29,6 +29,7 @@ import { LAYER } from "./layers";
 import { flowNodes, parts, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
 import { concealed, drawn, type EdgeKey } from "./scope";
+import { tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst } from "./view";
 import { boundsOf, centerOn, fitPadding, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
@@ -54,8 +55,12 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<str
   const dim = opacities(scene.graph, scene.flow);
   const marks = concealed(scene.graph, scene.shown, scene.flow);
   const unresolved = unresolvedWithin(scene.graph, scene.shown.hidden);
-  /** 요약을 만드는 중인 노드를 화면에 보이는 가장 가까운 조상으로 올린 노드 */
-  const busy = new Set(making.map((id) => lift(nodes, scene.shown, id)));
+  /** 화면에 보이는 노드마다, 그 노드로 올린 노드 가운데 요약을 만드는 중인 노드 수 */
+  const busy = new Map<string | null, number>();
+  for (const id of making) {
+    const shownId = lift(nodes, scene.shown, id);
+    busy.set(shownId, (busy.get(shownId) ?? 0) + 1);
+  }
   return order.map((node) => {
     const opacity = dim.get(node.id) ?? 1;
     const expanded = parents.has(node.id);
@@ -68,7 +73,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<str
       local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
       inflow: marks.get(node.id) ?? null,
       unresolved: node.kind !== "module" && node.kind !== "package" ? node.unresolved : expanded ? 0 : (unresolved.get(node.id) ?? 0),
-      busy: busy.has(node.id),
+      busy: busy.get(node.id) ?? 0,
     });
     return { id: node.id, type: nodeType(node.kind), opacity, body, face };
   });
@@ -298,9 +303,14 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
   };
 
+  /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. */
+  const onNodeOver: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
+    const text = tipOf(event.target) ?? `${titleOf(node.data.node)} · ${KIND_NAMES[node.data.node.kind]}`;
+    tip.current?.show(text, event.clientX, event.clientY);
+  };
   const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
     setHover(node.data.node.id);
-    tip.current?.show(`${titleOf(node.data.node)} · ${KIND_NAMES[node.data.node.kind]}`, event.clientX, event.clientY);
+    onNodeOver(event, node);
   };
   const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
     setPointed(edge.id);
@@ -341,7 +351,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         onNodeMouseEnter={onNodeEnter}
-        onNodeMouseMove={onMove}
+        onNodeMouseMove={onNodeOver}
         onNodeMouseLeave={onNodeLeave}
         onEdgeClick={onEdgeClick}
         onEdgeMouseEnter={onEdgeEnter}

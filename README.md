@@ -55,6 +55,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | 접힌 폴더 상자 클릭 | 폴더를 한 단계 펼친다. 안의 파일 상자와 하위 폴더 상자가 폴더 영역 안에 나온다 |
 | 펼친 폴더 영역의 머리 줄(폴더 경로가 적힌 줄) 클릭 | 그 폴더를 접는다. 영역의 빈 곳은 그래프 바탕과 같아 눌러도 접히지 않는다 |
 | 파일트리의 폴더 행 클릭 | 폴더를 펼치거나 접는다 |
+| 배지·줄 수 숫자·진입점 표시에 마우스 올리기 | 그 배지의 뜻과 값을 말풍선에 적는다(`?4`는 대상을 확인하지 못한 호출 4곳) |
 | 선에 마우스 올리기 | 그 선을 굵게 그려 다른 선 위에 보여 주고 출발·도착 노드를 말풍선에 적는다 |
 | 선 클릭 | 그 선의 도착 노드를 클릭한 것처럼 고른다. 도착 노드가 접힌 폴더 상자면 그 폴더를 펼친다 |
 | 선 `Shift`+클릭 | 정보 패널에 관계가 일어난 코드 줄 목록을 띄운다 |
@@ -129,7 +130,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | `frontend/src/nav/` | 상단 줄. `Trail.tsx`는 탐색 경로 표시, `Entries.tsx`는 진입점 목록, `Toggles.tsx`는 토글 세 개와 "설정" 목록, `fit.ts`는 줄 폭에 맞춰 상단 줄을 줄이는 단계, `keys.ts`는 이력 이동·`Esc`·팔레트 열기 단축키다 |
 | `frontend/src/panel/` | 그래프 위에 떠 있는 정보 패널. 머리 줄(`Header.tsx`), LLM 요약 칸(`Summary.tsx`, 요약 상태와 요청은 `state/summaries.ts`, 문단 안의 식별자와 정의 표기를 그리는 `inline.tsx`, 설명을 세 부분과 정의 표기로 나누는 `parts.ts`), 선의 지점 목록(`Sites.tsx`), 끌기와 크기 조절(`usePanelRect.ts`·`rect.ts`), 그래프 노드가 없는 `__init__.py`를 여는 `opened.ts` |
 | `frontend/src/code/` | 고른 노드의 줄 범위만 여는 읽기 전용 Monaco 코드 뷰어. `hover.ts`가 이름 위 hover를, `CodeView.tsx`가 `Mod`+클릭 정의 이동을 백엔드에 연결한다. `RangeNotes.tsx`는 고른 줄 범위의 설명 버튼·창·말풍선 표지를 그린다. Monaco는 CDN 없이 번들에 넣는다 |
-| `frontend/src/graph/` | 구조 뷰와 함수 시점 뷰. `visible.ts`가 보이는 노드를, `flow.ts`가 고른 노드에서 나가는 흐름과 불투명도를, `scope.ts`가 그릴 선을, `columns.ts`가 열 번호와 연결 묶음·선반을 정한다. `layout.ts`가 ELK를 Web Worker로 돌려 좌표를 정하고, `view.ts`가 선마다 경로를, `motion.ts`가 배치 움직임을, `viewport.ts`가 화면 이동 좌표를, `layers.ts`가 노드·선·글자의 겹침 순서를 낸다. `calls.ts`·`CallView.tsx`는 함수 시점 뷰, `nodes/`·`edges/`는 React Flow 노드·선 컴포넌트, `Dock.tsx`는 왼쪽 아래 칸, `Minimap.tsx`·`Legend.tsx`·`Tooltip.tsx`는 미니맵·범례·말풍선이다 |
+| `frontend/src/graph/` | 구조 뷰와 함수 시점 뷰. `visible.ts`가 보이는 노드를, `flow.ts`가 고른 노드에서 나가는 흐름과 불투명도를, `scope.ts`가 그릴 선을, `columns.ts`가 열 번호와 연결 묶음·선반을 정한다. `layout.ts`가 ELK를 Web Worker로 돌려 좌표를 정하고, `view.ts`가 선마다 경로를, `motion.ts`가 배치 움직임을, `viewport.ts`가 화면 이동 좌표를, `layers.ts`가 노드·선·글자의 겹침 순서를 낸다. `calls.ts`·`CallView.tsx`는 함수 시점 뷰, `nodes/`·`edges/`는 React Flow 노드·선 컴포넌트, `Dock.tsx`는 왼쪽 아래 칸, `Minimap.tsx`·`Legend.tsx`·`Tooltip.tsx`는 미니맵·범례·말풍선이고 `tips.ts`는 배지 말풍선의 글이다 |
 | `frontend/scripts/shots.mjs` | 화면 시나리오 스크립트. 떠 있는 서버에서 정해진 조작을 하고 확인 항목의 통과 여부와 스크린샷을 남긴다 |
 | `scripts/measure_resolution.py` | 호출 지점 해석 상태별 비율 출력, 고정 시드 표본 JSONL 작성(`~/data/code-atlas/resolution-sample.jsonl`), `--report`로 직접 채운 판정 집계 |
 | `tests/fixtures/sample_repo/` | 시험용 고정 레포. `src/` 소스 루트, 하위 패키지, 함수 안 import, 상속, dataclass, `__main__` 블록, 한글 문자열 뒤 호출, 동적 호출을 담는다 |
@@ -153,9 +154,9 @@ node scripts/shots.mjs [주소] [--only 이름,이름] [--with-summary]
 
 떠 있는 서버의 주소를 받고(기본 `http://127.0.0.1:8766`) 서버를 띄우지 않는다. 시나리오마다 새 브라우저 컨텍스트에서 조작하고 확인 항목을 `통과`·`실패`·`건너뜀`과 함께 한 줄씩 출력한다. 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 `건너뜀`이고 실패로 세지 않는다. 실패한 확인 항목이나 페이지 오류·콘솔 오류가 있으면 종료 코드 1로 끝난다.
 
-- **시나리오**: `open`, `file`, `function`, `body`, `panel`, `hover`, `edge`, `minimap`, `region`, `folder`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `summary-busy`, `summary-stale`, `explain`, `summary-ask`, `summary-ref`, `summary` 30개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
+- **시나리오**: `open`, `file`, `function`, `body`, `panel`, `hover`, `edge`, `badge-tip`, `minimap`, `region`, `folder`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `summary-busy`, `summary-stale`, `explain`, `summary-ask`, `summary-ref`, `summary` 31개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
 - **기대값**: 노드 이름은 sync-engine을 연 서버가 기준이고, 노드 수·선 수·줄 범위는 서버 응답에서 읽는다.
-- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 29개 시나리오는 요약을 만드는 요청을 서버로 보내지 않는다.
+- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 30개 시나리오는 요약을 만드는 요청을 서버로 보내지 않는다.
 - **`changes`**: 대상 레포에서 `git status`·`git diff`를 직접 읽어 화면과 비교하므로 서버와 같은 컴퓨터에서 돌린다. 수정한 `.py` 파일이 없는 레포에서는 확인 항목을 건너뛴다.
 - **스크린샷**: `~/data/code-atlas/screenshots/s2-{이름}.png`(1700×1000, 배율 2)에 남긴다. `toolbar`는 창 폭 1700·1440·1280·1160·980·900·720px마다 `s2-toolbar-{폭}.png`를 더 남긴다.
 - **브라우저**: Playwright가 받은 chromium과 다른 실행 파일을 쓰려면 환경 변수 `CHROMIUM_PATH`에 경로를 넣는다.

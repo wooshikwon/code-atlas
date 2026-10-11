@@ -20,6 +20,7 @@ import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { flowNodes, parts, type Drawn } from "./nodes/common";
+import { tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { GROUP_NAMES, KIND_NAMES } from "./names";
 import type { EdgeKey } from "./scope";
@@ -48,7 +49,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string |
       local: false,
       inflow: null,
       unresolved: node.unresolved,
-      busy: making.includes(id),
+      busy: making.includes(id) ? 1 : 0,
       label: callLabel(nodes, node),
       file: fileLabel(nodes, node),
       side: scene.calls.side.get(id)!,
@@ -202,9 +203,10 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     }
   };
 
-  const onNodeEnter: NodeMouseHandler<CallFlowNode> = (event, node) => {
+  /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. */
+  const onNodeOver: NodeMouseHandler<CallFlowNode> = (event, node) => {
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
-    tip.current?.show(`${title} · ${KIND_NAMES[node.data.node.kind]}`, event.clientX, event.clientY);
+    tip.current?.show(tipOf(event.target) ?? `${title} · ${KIND_NAMES[node.data.node.kind]}`, event.clientX, event.clientY);
   };
   const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
     setPointed(edge.id);
@@ -241,8 +243,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
-        onNodeMouseEnter={onNodeEnter}
-        onNodeMouseMove={onMove}
+        onNodeMouseEnter={onNodeOver}
+        onNodeMouseMove={onNodeOver}
         onNodeMouseLeave={onLeave}
         onEdgeClick={onEdgeClick}
         onEdgeMouseEnter={onEdgeEnter}

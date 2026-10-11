@@ -879,6 +879,43 @@ async function edge(t, page) {
   );
 }
 
+async function badgeTip(t, page) {
+  await load(page);
+  const tipText = () => page.evaluate(() => document.querySelector(".tooltip")?.textContent ?? "");
+  /** 요소 가운데에 마우스를 올리고 말풍선 글을 읽는다. */
+  const over = async (selector) => {
+    const rect = await rectOf(page, selector);
+    await page.mouse.move(rect.x + rect.width / 2 - 1, rect.y + rect.height / 2);
+    await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+    return tipText();
+  };
+  const counted = await page.evaluate(() => {
+    const badge = document.querySelector(".node-face.node-module .badge-unresolved");
+    return { id: badge.closest(".react-flow__node").dataset.id, count: badge.textContent.slice(1) };
+  });
+  const id = counted.id.replace(/#face$/, "");
+  const unresolved = await over(`${face(id)} .badge-unresolved`);
+  t.check(
+    "접힌 파일 상자의 ?N 배지에 올리면 말풍선이 수와 뜻, 합친 수임, 확인하지 못하는 까닭을 적는다",
+    unresolved.startsWith(`대상을 확인하지 못한 호출 ${counted.count}곳 · 이 파일 안의 함수에서 합친 수`) && unresolved.includes("정적 분석으로 대상을 확인하지 못해"),
+    unresolved.replaceAll("\n", " / "),
+  );
+  await t.shot();
+  const name = await over(`${face(id)} .node-label`);
+  t.check("같은 상자의 이름표로 옮기면 말풍선이 그 파일의 이름과 종류로 바뀐다", name.endsWith(" · 파일") && !name.includes("확인하지"), name);
+  const loc = await over(`${face(id)} .loc`);
+  t.check("이름표 옆 숫자에 올리면 줄 수임을 적는다", /^줄 수 \d+줄 · 빈 줄을 뺀 수$/.test(loc), loc);
+  const inflow = await over(".node-face .node-inflow");
+  t.check("편재 노드 배지에 올리면 선을 숨긴 출발 노드 수를 적는다", /^편재 노드: 선을 숨긴 출발 노드 \d+개/.test(inflow), inflow.replaceAll("\n", " / "));
+  const entry = await over(`${face(FILE)} .node-entry`);
+  t.check("진입점 표시에 올리면 진입점임을 적는다", entry.startsWith("진입점"), entry);
+  t.check("배지와 표시가 브라우저 기본 말풍선(title)을 쓰지 않는다", (await count(page, ".react-flow__node [title]")) === 0, `title 속성 ${await count(page, ".react-flow__node [title]")}개`);
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(() => document.querySelector(".tooltip") === null, null, { timeout: 3_000 }).catch(() => {});
+  t.check("노드 밖으로 나가면 말풍선이 사라진다", (await count(page, ".tooltip")) === 0);
+}
+
 async function minimap(t, page) {
   await load(page);
   const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
@@ -2299,6 +2336,7 @@ const SCENARIOS = [
   ["panel", panel],
   ["hover", hover],
   ["edge", edge],
+  ["badge-tip", badgeTip],
   ["minimap", minimap],
   ["region", region],
   ["folder", folder],

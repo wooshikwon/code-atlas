@@ -6,6 +6,7 @@ import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
 import { BADGE_OVERHANG, CIRCLE_GAP, ENTRY_MARK, labelOf, type Box } from "../layout";
+import { busyTip, CHANGE_TIPS, ENTRY_TIP, globalTip, inflowTip, locTip, unresolvedTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
@@ -24,8 +25,8 @@ export interface AtlasNodeData extends Record<string, unknown> {
   inflow: number | null;
   /** 배지에 적는 미확인 호출 수. 접힌 파일 상자와 접힌 폴더 상자는 안에 든 노드의 수를 합친 값이고 펼친 파일 상자는 0이다. */
   unresolved: number;
-  /** 이 노드나 이 노드로 올린 안쪽 노드의 LLM 요약을 만드는 중이다 */
-  busy: boolean;
+  /** 이 노드와 이 노드로 올린 안쪽 노드 가운데 LLM 요약을 만드는 중인 노드 수 */
+  busy: number;
 }
 
 export type AtlasFlowNode = Node<AtlasNodeData>;
@@ -105,10 +106,10 @@ export function nodeProps(base: string, data: AtlasNodeData, change: Change | nu
   };
 }
 
-/** 진입점 표지 ▶. 마우스를 올리면 "진입점"이 보이고 접근성 이름도 "진입점"이다. */
+/** 진입점 표지 ▶. 마우스를 올리면 말풍선이 뜨고 접근성 이름은 "진입점"이다. */
 export function EntryMark({ className }: { className?: string }) {
   return (
-    <span className={className} role="img" aria-label="진입점" title="진입점">
+    <span className={className} role="img" aria-label="진입점" data-tip={ENTRY_TIP}>
       {ENTRY_MARK}
     </span>
   );
@@ -125,18 +126,26 @@ export function Label({ data, bold = false }: { data: AtlasNodeData; bold?: bool
 
 /** 이름표 오른쪽의 줄 수 숫자 */
 export function Loc({ data }: { data: AtlasNodeData }) {
-  return <span className="loc">{data.node.loc}</span>;
+  return (
+    <span className="loc" data-tip={locTip(data.node)}>
+      {data.node.loc}
+    </span>
+  );
 }
 
 /** 파일 상자의 줄 수 숫자 뒤에 적는 변경 상태 글자 */
 export function Mark({ change }: { change: Change | null }) {
-  return change === null ? null : <span className="change-mark">{CHANGE_LETTERS[change]}</span>;
+  return change === null ? null : (
+    <span className="change-mark" data-tip={CHANGE_TIPS[change]}>
+      {CHANGE_LETTERS[change]}
+    </span>
+  );
 }
 
 /**
  * 감싼 모양의 오른쪽 위 모서리에 미확인 호출 수를, 오른쪽 아래 모서리에 모듈 변수 변경을 단다. 글자 요소에만 그린다.
  * 배지의 오른쪽 끝은 모양의 오른쪽 끝에서 `BADGE_OVERHANG`만큼 나간다. LLM 요약을 만드는 중이면 오른쪽 위 모서리에
- * 도는 원을 달고, 미확인 호출 수 배지가 있으면 그 왼쪽에 나란히 둔다.
+ * 도는 원을 달고, 미확인 호출 수 배지가 있으면 그 왼쪽에 나란히 둔다. 배지마다 뜻을 적은 말풍선 글(`tips.ts`)을 `data-tip`에 담는다.
  */
 export function Badges({ data }: { data: AtlasNodeData }) {
   if (data.part === "body") {
@@ -145,14 +154,18 @@ export function Badges({ data }: { data: AtlasNodeData }) {
   const style = { "--overhang": `${BADGE_OVERHANG}px` } as CSSProperties;
   return (
     <>
-      {(data.busy || data.unresolved > 0) && (
+      {(data.busy > 0 || data.unresolved > 0) && (
         <span className="badges" style={style}>
-          {data.busy && <span className="badge badge-busy" role="img" aria-label="요약을 만드는 중" title="요약을 만드는 중" />}
-          {data.unresolved > 0 && <span className="badge badge-unresolved">?{data.unresolved}</span>}
+          {data.busy > 0 && <span className="badge badge-busy" role="img" aria-label="요약을 만드는 중" data-tip={busyTip(data.node, data.busy)} />}
+          {data.unresolved > 0 && (
+            <span className="badge badge-unresolved" data-tip={unresolvedTip(data.node, data.unresolved, data.expanded)}>
+              ?{data.unresolved}
+            </span>
+          )}
         </span>
       )}
       {data.node.global_write && (
-        <span className="badge badge-global" style={style}>
+        <span className="badge badge-global" style={style} data-tip={globalTip(data.node)}>
           g
         </span>
       )}
@@ -171,5 +184,9 @@ export function Circle({ data }: { data: AtlasNodeData }) {
 
 /** 편재 노드 배지. 노드 왼쪽에 숨긴 선의 출발 노드 수를 적는다. */
 export function Inflow({ data }: { data: AtlasNodeData }) {
-  return data.inflow === null ? null : <span className="node-inflow">←{data.inflow}</span>;
+  return data.inflow === null ? null : (
+    <span className="node-inflow" data-tip={inflowTip(data.inflow)}>
+      ←{data.inflow}
+    </span>
+  );
 }
