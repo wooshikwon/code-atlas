@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import changes
-from .analyze import Analyzed
+from .analyze import Analyzed, Progress
 from .collect import RepoFiles, collected, is_test_path
 from .lsp import Location, Session
 from .model import Analysis, to_dict
@@ -229,14 +229,19 @@ def create_app(
     def get_repo() -> dict:
         return app.state.repo
 
-    @app.post("/api/reload", dependencies=ready)
+    @app.post("/api/reload")
     async def post_reload() -> dict:
         """레포를 다시 분석하고 새 `/api/repo` 값을 돌려준다. 분석하는 중에 들어온 요청은 그 분석이 끝나기를 함께 기다린다.
 
-        분석하지 못하면 앞의 분석 결과를 그대로 두고 까닭을 적은 500을 돌려준다.
+        분석하지 못하면 앞의 분석 결과를 그대로 두고 까닭을 적은 500을 돌려준다. 첫 분석이 실패해 결과가 없으면 첫 분석을 다시 한다.
         """
         state = app.state
-        if state.running.done():
+        if state.revision == 0:
+            if not state.running.done():
+                analysed()
+            runner.progress = Progress("collect")
+            state.running = asyncio.create_task(begin())
+        elif state.running.done():
             state.running = asyncio.create_task(reload())
         try:
             await asyncio.shield(state.running)

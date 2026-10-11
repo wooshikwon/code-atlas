@@ -375,6 +375,14 @@ async def test_failed_first_analysis_keeps_the_server_up(sample_repo, tmp_path, 
         assert "실행할 수 없다" in status["error"]
         assert await call(app, "GET", "/api/graph", {}) == (503, {"error": "분석 중이다"})
 
+        code, body = await call(app, "POST", "/api/reload", {})
+        assert code == 500 and "실행할 수 없다" in body["error"]
+        app.state.runner.python = sys.executable
+        code, body = await call(app, "POST", "/api/reload", {})
+        _, status = await call(app, "GET", "/api/status", {})
+        assert (code, body["name"]) == (200, sample_repo.name)
+        assert (status["phase"], status["revision"], status["error"]) == ("ready", 1, None)
+
 
 @pytest.mark.asyncio
 async def test_cached_repo_opens_as_a_draft_and_is_replaced_after_asking(sample_repo, tmp_path, monkeypatch):

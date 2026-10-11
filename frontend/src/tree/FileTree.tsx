@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useOpened } from "../panel/opened";
 import { useChanges } from "../state/changes";
+import { running, useStatus } from "../state/status";
 import { chosenOf, useAtlas } from "../state/store";
 import { build } from "../search/index";
 import { parentOf, results, rows, type Result, type Row } from "./rows";
@@ -14,6 +15,8 @@ export function FileTree() {
   const tree = useAtlas((s) => s.tree);
   const graph = useAtlas((s) => s.graph);
   const error = useAtlas((s) => s.error);
+  /** 서버가 첫 분석을 하는 중이거나 하지 못했다. 그동안은 관계 그래프 영역의 진행 표시가 상태를 적는다. */
+  const analysing = useStatus((s) => running(s.status) || s.status?.phase === "failed");
   const collapsed = useAtlas((s) => s.collapsed);
   const showTests = useAtlas((s) => s.showTests);
   const structure = useAtlas((s) => s.view.kind === "structure");
@@ -138,7 +141,7 @@ export function FileTree() {
       />
       <div className="explorer-body">
         {error !== null && <div className="explorer-error">{error}</div>}
-        {error === null && tree === null && <div className="explorer-empty">불러오는 중</div>}
+        {error === null && tree === null && !analysing && <div className="explorer-empty">불러오는 중</div>}
         {searching && graph !== null && found.length === 0 && <div className="explorer-empty">이름이 맞는 항목 없음</div>}
         {searching ? (
           <TreeResults list={found} active={mark} onPick={pickResult} />

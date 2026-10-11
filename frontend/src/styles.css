@@ -413,7 +413,7 @@ ul {
   flex: none;
 }
 
-/* 새로고침 버튼. 분석 뒤 바뀐 파일 수를 글자 뒤에 적고, 분석하는 동안에는 글자 앞에 도는 원을 그린다. */
+/* 새로고침 버튼. 글자 앞에 새로고침 기호를, 분석 뒤 바뀐 파일 수를 글자 뒤에 적고, 분석하는 동안에는 기호 대신 도는 원을 그린다. */
 .toolbar-reload {
   flex: none;
 }
@@ -2597,4 +2597,87 @@ ol.summary-list {
 
 .info-panel-end:hover {
   background: var(--hover-bg);
+}
+
+/* 분석 상태 */
+
+/* 새로고침 기호. 분석 뒤 바뀐 파일이 있으면 수정 표시의 색으로 그린다. */
+.reload-mark {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.reload-button[data-stale] .reload-mark {
+  stroke: var(--changed);
+}
+
+/* 진행 표시. 분석 결과가 없는 동안 관계 그래프 영역 가운데에 단계의 이름과 가로 막대를 그린다. */
+.progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 16px;
+  color: var(--muted);
+}
+
+.progress-phase {
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-bar {
+  width: min(320px, 100%);
+  height: 2px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--muted);
+  transition: width 200ms linear;
+}
+
+/* 수를 세지 않는 단계는 막대의 3분의 1 폭이 왼쪽에서 오른쪽으로 지나간다. */
+.progress-bar:not([data-share]) .progress-fill {
+  width: 33%;
+  animation: progress-pass 1200ms ease-in-out infinite;
+}
+
+@keyframes progress-pass {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill {
+    transition: none;
+  }
+
+  .progress-bar:not([data-share]) .progress-fill {
+    width: 100%;
+    animation: none;
+  }
+}
+
+.progress[role="alert"] .progress-phase {
+  color: var(--ink);
+}
+
+.progress-error {
+  max-width: 560px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: center;
 }

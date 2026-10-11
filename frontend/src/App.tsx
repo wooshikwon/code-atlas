@@ -2,6 +2,7 @@ import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { GraphView } from "./graph/GraphView";
+import { Progress } from "./graph/Progress";
 import { fitTarget, stageOf } from "./graph/viewport";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
@@ -109,8 +110,8 @@ export function App() {
           <div className="workspace">
             <Toolbar />
             <div className="stage">
-              <GraphView key={epoch} />
-              <InfoPanel />
+              {opened ? <GraphView key={epoch} /> : <Progress />}
+              {opened && <InfoPanel />}
             </div>
             <Palette />
           </div>

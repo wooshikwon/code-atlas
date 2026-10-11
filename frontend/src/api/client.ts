@@ -10,6 +10,7 @@ import type {
   Hover,
   MadeSummary,
   Repo,
+  Status,
   SummaryStatus,
   Tree,
   Unused,
@@ -35,6 +36,11 @@ async function request<T>(path: string, signal?: AbortSignal, method = "GET"): P
     throw new ApiError(body.error, response.status);
   }
   throw new ApiError(`HTTP ${response.status} ${response.statusText}`, response.status);
+}
+
+/** 분석 결과가 없는 동안에도 응답한다. */
+export function getStatus(): Promise<Status> {
+  return request("/api/status");
 }
 
 export function getRepo(): Promise<Repo> {

@@ -75,8 +75,10 @@ export interface AtlasStore {
   /** 화면에 그린 배치를 계산하기 시작한 때의 탐색 이력. 그린 배치가 없으면 null이다. */
   arranged: History | null;
 
-  /** 저장해 둔 화면 설정을 되살리고 레포·그래프·파일트리를 받는다. */
-  load(): void;
+  /** 저장해 둔 화면 설정을 되살린다. */
+  restore(): void;
+  /** 레포·그래프·파일트리를 받는다. 받지 못하면 까닭을 error에 적는다. */
+  load(): Promise<void>;
   /**
    * 다시 분석한 결과를 받아 화면 상태를 레포를 처음 연 상태로 되돌린다. 보기 설정(흐름 단계, 테스트 코드, 외부 노드, 자동 요약, 덮개),
    * 선택과 뷰, 탐색 이력, 접은 폴더, 경로 탐색 창과 경로 고정을 되돌리고, 화면 색, 정보 패널의 사각형과 요약 칸 비율,
@@ -376,17 +378,18 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     arranging: false,
     arranged: null,
 
-    load: () => {
+    restore: () => {
       const ui = parseUi(localStorage.getItem(UI_KEY), preferredTheme());
       set(ui);
       applyTheme(ui.theme);
+    },
+    load: () =>
       Promise.all([getRepo(), getGraph(), getTree()])
         .then(([repo, graph, tree]) => {
           set(opened(repo, graph, tree, get().showTests));
           cover(graph, get());
         })
-        .catch((caught: unknown) => set({ error: caught instanceof Error ? caught.message : String(caught) }));
-    },
+        .catch((caught: unknown) => set({ error: caught instanceof Error ? caught.message : String(caught) })),
     reopen: (repo, graph, tree) => {
       set({ ...opened(repo, graph, tree, false), showTests: false, showExternal: false, finder: FINDER, paletteOpen: false, epoch: get().epoch + 1 });
       keep({ depth: 2, autoSummary: false });
