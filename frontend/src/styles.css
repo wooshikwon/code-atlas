@@ -1067,9 +1067,15 @@ ul {
 
 /* 배지는 감싼 모양의 오른쪽 위·아래 모서리에 세로 가운데를 맞춘다. 오른쪽으로 나가는 폭 --overhang은 layout.ts의 BADGE_OVERHANG을
    컴포넌트가 넣는다. 글자 요소는 테두리가 없으므로 배지의 위치를 모양의 바깥 변에서 잰다. */
-.badge {
+.badges {
   position: absolute;
+  top: -7px;
   right: calc(0px - var(--overhang));
+  display: flex;
+  gap: 3px;
+}
+
+.badge {
   min-width: 14px;
   /* layout.ts의 BADGE_HEIGHT와 같다. */
   height: 14px;
@@ -1082,12 +1088,35 @@ ul {
 }
 
 .badge-unresolved {
-  top: -7px;
   color: var(--surface);
   background: var(--muted);
 }
 
+/* LLM 요약을 만드는 중인 노드의 도는 원 */
+.badge-busy {
+  width: 14px;
+  padding: 0;
+  border: 2px solid color-mix(in srgb, var(--muted) 45%, var(--surface));
+  border-top-color: var(--ink);
+  background: var(--surface);
+  animation: busy-spin 900ms linear infinite;
+}
+
+@keyframes busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-busy {
+    animation: none;
+  }
+}
+
 .badge-global {
+  position: absolute;
+  right: calc(0px - var(--overhang));
   bottom: -7px;
   color: var(--surface);
   background: var(--ink);

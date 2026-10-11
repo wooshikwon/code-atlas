@@ -144,7 +144,7 @@ export function InfoPanel() {
           <div className="info-panel-head" onPointerDown={grip("move")} onDoubleClick={reset} title="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다">
             <Header item={item} nodes={index.nodes} />
           </div>
-          {node !== undefined && SUMMARIZED.has(node.kind) && <Summary key={node.id} node={node.id} />}
+          {node !== undefined && SUMMARIZED.has(node.kind) && <Summary node={node.id} />}
           {file === null && edge !== null && <Sites sites={edge.sites} opened={site} open={(picked) => setOpened({ selection, site: picked })} />}
           {code !== null && <CodeView {...code} />}
         </>

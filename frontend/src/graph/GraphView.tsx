@@ -16,6 +16,7 @@ import type { AtlasNode, Graph } from "../api/types";
 import { useOpened } from "../panel/opened";
 import { focusOf, type History } from "../state/history";
 import { useAtlas } from "../state/store";
+import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
@@ -31,7 +32,7 @@ import { concealed, drawn, type EdgeKey } from "./scope";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst } from "./view";
 import { boundsOf, centerOn, fitPadding, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
-import { hidden, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
+import { hidden, lift, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
 const SHELF_NAME_HEIGHT = 22;
@@ -47,12 +48,14 @@ interface Scene {
   layout: Layout;
 }
 
-function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<string, number>): Drawn<AtlasNodeData>[] {
+function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<string, number>, making: string[]): Drawn<AtlasNodeData>[] {
   const order = parentFirst(scene.graph, scene.shown.nodes);
   const parents = new Set(order.map((n) => n.parent));
   const dim = opacities(scene.graph, scene.flow);
   const marks = concealed(scene.graph, scene.shown, scene.flow);
   const unresolved = unresolvedWithin(scene.graph, scene.shown.hidden);
+  /** 요약을 만드는 중인 노드를 화면에 보이는 가장 가까운 조상으로 올린 노드 */
+  const busy = new Set(making.map((id) => lift(nodes, scene.shown, id)));
   return order.map((node) => {
     const opacity = dim.get(node.id) ?? 1;
     const expanded = parents.has(node.id);
@@ -65,6 +68,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<str
       local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
       inflow: marks.get(node.id) ?? null,
       unresolved: node.kind !== "module" && node.kind !== "package" ? node.unresolved : expanded ? 0 : (unresolved.get(node.id) ?? 0),
+      busy: busy.has(node.id),
     });
     return { id: node.id, type: nodeType(node.kind), opacity, body, face };
   });
@@ -101,6 +105,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const selectEdge = useAtlas((s) => s.selectEdge);
   const toggleFolder = useAtlas((s) => s.toggleFolder);
   const open = useAtlas((s) => s.open);
+  const making = useSummaries(makingKey);
   const { getViewport, setViewport } = useReactFlow();
   /** 확대 비율 구간. 구간이 바뀔 때만 다시 그린다. */
   const zoom = useStore((s) => (s.transform[2] < 0.4 ? 0 : s.transform[2] < NAMED_ZOOM ? 1 : 2));
@@ -183,7 +188,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     if (scene === null || index === null) {
       return;
     }
-    const items = itemsOf(scene, index.nodes, index.functions);
+    const items = itemsOf(scene, index.nodes, index.functions, makingOf(making));
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
@@ -217,7 +222,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, index, getViewport, setViewport]);
+  }, [scene, index, making, getViewport, setViewport]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
   const views = useMemo(

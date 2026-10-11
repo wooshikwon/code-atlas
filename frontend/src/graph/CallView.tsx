@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import type { AtlasNode } from "../api/types";
 import type { History } from "../state/history";
 import { useAtlas } from "../state/store";
+import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
 import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
@@ -35,7 +36,7 @@ interface Scene {
 }
 
 /** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. */
-function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string | null): Drawn<CallNodeData>[] {
+function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string | null, making: string[]): Drawn<CallNodeData>[] {
   return scene.calls.nodes.map((id) => {
     const node = nodes.get(id)!;
     const data = parts({
@@ -47,6 +48,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string |
       local: false,
       inflow: null,
       unresolved: node.unresolved,
+      busy: making.includes(id),
       label: callLabel(nodes, node),
       file: fileLabel(nodes, node),
       side: scene.calls.side.get(id)!,
@@ -65,6 +67,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const selectEdge = useAtlas((s) => s.selectEdge);
   const open = useAtlas((s) => s.open);
   const expandFunction = useAtlas((s) => s.expandFunction);
+  const making = useSummaries(makingKey);
   const { setViewport } = useReactFlow();
   const selected = selection?.type === "node" ? selection.id : null;
 
@@ -107,7 +110,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     if (scene === null || index === null) {
       return;
     }
-    const items = itemsOf(scene, index, selected);
+    const items = itemsOf(scene, index, selected, makingOf(making));
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
@@ -140,7 +143,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, index, selected, setViewport]);
+  }, [scene, index, selected, making, setViewport]);
 
   const edges = useMemo((): AtlasFlowEdge[] => {
     if (scene === null) {

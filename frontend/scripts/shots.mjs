@@ -1489,6 +1489,109 @@ async function summaryPanel(t, page) {
   );
 }
 
+/**
+ * POST /api/summary를 서버로 보내지 않고 붙잡아 둔다. 돌려준 배열의 항목마다 노드 id와, 요약으로 답하는 answer가 있다.
+ */
+async function holdSummaryPosts(page) {
+  const held = [];
+  await page.route(
+    (at) => at.pathname === "/api/summary",
+    (route) => {
+      const request = route.request();
+      if (request.method() !== "POST") {
+        return route.fallback();
+      }
+      held.push({ node: new URL(request.url()).searchParams.get("node"), answer: (summary) => route.fulfill({ json: { summary } }) });
+    },
+  );
+  return held;
+}
+
+/** 요약을 만들지 않고 서버 대신 답해, 요약을 만드는 동안 다른 노드를 고르고 폴더를 접어도 요청이 끝까지 가는지 본다. */
+async function summaryBusy(t, page) {
+  // 폴더 안에 있는 파일의 함수 하나와 미확인 호출이 있는 파일의 함수 하나를 고른다.
+  const graph = await api("/api/graph");
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const ownerOf = (n) => (n.kind === "module" || n.parent === null ? n : ownerOf(byId.get(n.parent)));
+  const functions = graph.nodes.filter((n) => n.kind === "function" && !n.test && n.id !== FUNCTION && ownerOf(n).id !== FILE);
+  const unresolved = new Set(graph.nodes.filter((n) => n.unresolved > 0).map((n) => ownerOf(n).id));
+  const chosen = functions.find((n) => ownerOf(n).parent !== null) ?? functions[0];
+  const target = { id: chosen.id, owner: ownerOf(chosen).id };
+  const folderId = ownerOf(chosen).parent;
+  const counted = functions.find((n) => unresolved.has(ownerOf(n).id) && ownerOf(n).id !== target.owner);
+  const extra = counted === undefined ? null : { id: counted.id, owner: ownerOf(counted).id };
+  await answerSummaryReads(page, () => ({ summary: null, available: true, reason: null }));
+  const held = await holdSummaryPosts(page);
+  const aborted = summaryAborts(page);
+  const busy = (id) => count(page, `${face(id)} .badge-busy`);
+  await load(page);
+  await pickInTree(page, target);
+  await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 });
+  await page.click(".info-panel-summary .summary-make");
+  await page.waitForSelector(`${face(target.id)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
+  const spinning = await page.evaluate((sel) => {
+    const badge = document.querySelector(sel);
+    const [rect, circle] = [badge.getBoundingClientRect(), badge.closest(".node-circle").getBoundingClientRect()];
+    return { animated: getComputedStyle(badge).animationName !== "none", right: rect.right - circle.right, above: circle.top - rect.top };
+  }, `${face(target.id)} .badge-busy`);
+  t.check(
+    '"요약 생성"을 누르면 그 함수의 원 오른쪽 위 모서리에 도는 원이 붙는다',
+    held.length === 1 && (await busy(target.id)) === 1 && spinning.animated && spinning.right > 0 && spinning.above > 0,
+    `POST ${held.length}번, 원 오른쪽으로 ${spinning.right.toFixed(1)}px, 위로 ${spinning.above.toFixed(1)}px`,
+  );
+  await t.shot();
+
+  // 다른 파일의 함수를 고르면 요약을 만들던 함수가 화면에서 사라지고 그 함수가 든 파일 상자가 배지를 단다.
+  await pickInTree(page, { id: FUNCTION, owner: FILE });
+  await page.waitForSelector(`${face(target.owner)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
+  t.check(
+    "다른 파일의 함수를 골라도 요청을 끊지 않고, 접힌 파일 상자의 오른쪽 위에 도는 원이 붙는다",
+    aborted.length === 0 && (await count(page, node(target.id))) === 0 && (await busy(target.owner)) === 1,
+    `끊은 POST ${aborted.length}번, ${target.owner} 상자의 도는 원 ${await busy(target.owner)}개`,
+  );
+  if (folderId === null) {
+    t.skip("그 파일이 든 폴더를 접으면 접힌 폴더 상자의 오른쪽 위에 도는 원이 붙는다", `${target.owner}가 폴더 안에 있지 않다`);
+  } else {
+    const row = `.tree-row.tree-dir[data-node="${folderId}"]`;
+    await page.click(row);
+    await page.waitForSelector(`${node(folderId)} > .node-body.node-package`, { timeout: 30_000 });
+    await settle(page);
+    t.check("그 파일이 든 폴더를 접으면 접힌 폴더 상자의 오른쪽 위에 도는 원이 붙는다", (await busy(folderId)) === 1 && aborted.length === 0, `${folderId}/ 상자의 도는 원 ${await busy(folderId)}개`);
+    await page.click(row);
+    await page.waitForSelector(`.tree-row.tree-file[data-node="${target.owner}"]`, { timeout: 10_000 });
+  }
+
+  if (extra === null) {
+    t.skip("도는 원이 미확인 호출 수 배지의 왼쪽에 3px 띄워 나란히 놓인다", "미확인 호출이 있는 파일이 없다");
+  } else {
+    await pickInTree(page, extra);
+    await page.click(".info-panel-summary .summary-make");
+    await pickInTree(page, { id: FUNCTION, owner: FILE });
+    await page.waitForSelector(`${face(extra.owner)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
+    const beside = await page.evaluate((sel) => {
+      const row = document.querySelector(sel)?.closest(".badges");
+      const [spin, mark] = [row?.querySelector(".badge-busy"), row?.querySelector(".badge-unresolved")];
+      return spin == null || mark == null ? null : { gap: mark.offsetLeft - spin.offsetLeft - spin.offsetWidth, level: mark.offsetTop - spin.offsetTop };
+    }, `${face(extra.owner)} .badge-busy`);
+    t.check(
+      "도는 원이 미확인 호출 수 배지의 왼쪽에 3px 띄워 나란히 놓인다",
+      beside !== null && beside.gap === 3 && beside.level === 0 && (await count(page, ".badge-busy")) === 2,
+      beside === null ? "배지가 없다" : `사이 ${beside.gap}px, 도는 원 ${await count(page, ".badge-busy")}개`,
+    );
+    held[1].answer(longSummary(1));
+  }
+  held[0].answer(longSummary(1));
+  await page.waitForFunction(() => document.querySelector(".badge-busy") === null, null, { timeout: 5_000 }).catch(() => {});
+  t.check("요약이 다 만들어지면 도는 원이 사라진다", (await count(page, ".badge-busy")) === 0);
+  await pickInTree(page, target);
+  await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 5_000 }).catch(() => {});
+  t.check(
+    "그 함수를 다시 고르면 POST를 다시 보내지 않고 만들어 둔 요약을 보인다",
+    held.length === (extra === null ? 1 : 2) && (await count(page, ".info-panel-summary .summary-text")) === 1,
+    `POST ${held.length}번`,
+  );
+}
+
 /** 요약을 실제로 만들지 않고 "요약 생성" 버튼과 "자동 요약" 토글이 POST를 언제 보내는지만 본다. 보낸 POST는 붙잡혀 서버에 닿지 않는다. */
 async function summaryAsk(t, page) {
   const { found, available, reason } = await uncached(2);
@@ -1527,13 +1630,13 @@ async function summaryAsk(t, page) {
     same(posts, [first.id, second.id]),
     `POST ${posts.join(", ") || "없음"}`,
   );
-  t.check(`${first.id}를 떠나면 만들고 있던 그 함수의 POST를 끊는다`, same(aborted, [first.id]), `끊은 POST ${aborted.join(", ") || "없음"}`);
+  t.check(`${first.id}를 떠나도 만들고 있던 그 함수의 POST를 끊지 않는다`, aborted.length === 0, `끊은 POST ${aborted.join(", ") || "없음"}`);
   await page.getByLabel("자동 요약").uncheck();
-  await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 5_000 }).catch(() => {});
+  await page.waitForTimeout(500);
   t.check(
-    '"자동 요약"을 끄면 그 토글이 보낸 POST를 끊고 "요약 생성" 버튼을 다시 보인다',
-    same(aborted, [first.id, second.id]) && (await count(page, ".info-panel-summary .summary-make")) === 1,
-    `끊은 POST ${aborted.join(", ") || "없음"}`,
+    '"자동 요약"을 꺼도 만들고 있던 POST를 끊지 않고 "요약을 만드는 중"을 그대로 보인다',
+    aborted.length === 0 && (await summaryHint(page)) === "요약을 만드는 중",
+    `끊은 POST ${aborted.join(", ") || "없음"}, 문구 ${await summaryHint(page)}`,
   );
   await page.getByLabel("자동 요약").check();
   await page.reload();
@@ -1924,6 +2027,7 @@ const SCENARIOS = [
   ["changes", changes],
   ["zoom-keep", zoomKeep],
   ["summary-panel", summaryPanel],
+  ["summary-busy", summaryBusy],
   ["summary-ask", summaryAsk],
   ["summary-ref", summaryRef],
   ["summary", summary],

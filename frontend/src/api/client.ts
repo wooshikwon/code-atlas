@@ -77,9 +77,9 @@ export function getSummary(node: string): Promise<SummaryStatus> {
   return request(`/api/summary?node=${encodeURIComponent(node)}`);
 }
 
-/** 캐시에 없으면 요약을 만들게 한다. refresh면 캐시에 있어도 다시 만든다. signal로 끊으면 서버가 자리를 기다리던 요약을 만들지 않는다. */
-export function makeSummary(node: string, refresh: boolean, signal: AbortSignal): Promise<MadeSummary> {
-  return request(`/api/summary?node=${encodeURIComponent(node)}${refresh ? "&refresh=true" : ""}`, signal, "POST");
+/** 캐시에 없으면 요약을 만들게 한다. refresh면 캐시에 있어도 다시 만든다. */
+export function makeSummary(node: string, refresh: boolean): Promise<MadeSummary> {
+  return request(`/api/summary?node=${encodeURIComponent(node)}${refresh ? "&refresh=true" : ""}`, undefined, "POST");
 }
 
 /** 마지막 커밋 뒤에 바뀐 파일과 노드 */

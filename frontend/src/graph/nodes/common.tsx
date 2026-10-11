@@ -24,6 +24,8 @@ export interface AtlasNodeData extends Record<string, unknown> {
   inflow: number | null;
   /** 배지에 적는 미확인 호출 수. 접힌 파일 상자와 접힌 폴더 상자는 안에 든 노드의 수를 합친 값이고 펼친 파일 상자는 0이다. */
   unresolved: number;
+  /** 이 노드나 이 노드로 올린 안쪽 노드의 LLM 요약을 만드는 중이다 */
+  busy: boolean;
 }
 
 export type AtlasFlowNode = Node<AtlasNodeData>;
@@ -132,7 +134,8 @@ export function Mark({ change }: { change: Change | null }) {
 
 /**
  * 감싼 모양의 오른쪽 위 모서리에 미확인 호출 수를, 오른쪽 아래 모서리에 모듈 변수 변경을 단다. 글자 요소에만 그린다.
- * 배지의 오른쪽 끝은 모양의 오른쪽 끝에서 `BADGE_OVERHANG`만큼 나간다.
+ * 배지의 오른쪽 끝은 모양의 오른쪽 끝에서 `BADGE_OVERHANG`만큼 나간다. LLM 요약을 만드는 중이면 오른쪽 위 모서리에
+ * 도는 원을 달고, 미확인 호출 수 배지가 있으면 그 왼쪽에 나란히 둔다.
  */
 export function Badges({ data }: { data: AtlasNodeData }) {
   if (data.part === "body") {
@@ -141,9 +144,10 @@ export function Badges({ data }: { data: AtlasNodeData }) {
   const style = { "--overhang": `${BADGE_OVERHANG}px` } as CSSProperties;
   return (
     <>
-      {data.unresolved > 0 && (
-        <span className="badge badge-unresolved" style={style}>
-          ?{data.unresolved}
+      {(data.busy || data.unresolved > 0) && (
+        <span className="badges" style={style}>
+          {data.busy && <span className="badge badge-busy" role="img" aria-label="요약을 만드는 중" title="요약을 만드는 중" />}
+          {data.unresolved > 0 && <span className="badge badge-unresolved">?{data.unresolved}</span>}
         </span>
       )}
       {data.node.global_write && (
