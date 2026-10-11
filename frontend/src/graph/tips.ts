@@ -1,6 +1,8 @@
 // 말풍선에 적는 글. 요소가 `data-tip`에 글을 담으면 마우스를 올리거나 키보드 초점을 받았을 때 말풍선(`Tooltip.tsx`)이 그 글을 띄운다.
 // 그래프에서는 그래프 뷰가 마우스 아래 배지와 표시에서 그 글을 찾아 노드의 말풍선 대신 띄운다. 줄은 `\n`으로 나눈다.
-import type { AtlasNode, Change } from "../api/types";
+import type { AtlasNode, Change, EdgeKind } from "../api/types";
+import { relationsOf, STEP_NAMES } from "./names";
+import type { StepKind } from "./route";
 
 export const ENTRY_TIP = "진입점: 실행을 시작하는 코드";
 
@@ -78,9 +80,18 @@ export function clipped(element: Element | null): boolean {
   return element !== null && [element, ...element.children].some((each) => each.scrollWidth > each.clientWidth);
 }
 
-/** 줄기의 말풍선. 줄기에 든 선을 내보내는 노드 수, 도착 노드의 이름, 줄기에 든 선의 sites 수 합을 적는다. */
-export function trunkTip(sources: number, target: string, sites: number): string {
-  return `노드 ${sources}개 → ${target} · ${sites}곳`;
+/**
+ * 선 하나의 말풍선 줄: `출발 → 도착 · 호출 2곳 · import 1줄`. kinds는 그 선에 합친 관계의 종류마다의 수다.
+ * 실행 선이 없는 경로의 이음(step)은 관계 대신 걸음의 이름을 적는다.
+ */
+export function lineTip(source: string, target: string, kinds: Partial<Record<EdgeKind, number>>, step: StepKind | null): string {
+  const none = Object.keys(kinds).length === 0;
+  return `${source} → ${target} · ${none && step !== null ? STEP_NAMES[step] : relationsOf(kinds)}`;
+}
+
+/** 줄기의 말풍선. 줄기에 든 선을 내보내는 노드 수, 도착 노드의 이름, 줄기에 든 선의 관계를 종류마다 합친 수를 적는다. */
+export function trunkTip(sources: number, target: string, kinds: Partial<Record<EdgeKind, number>>): string {
+  return `노드 ${sources}개 → ${target} · ${relationsOf(kinds)}`;
 }
 
 /**

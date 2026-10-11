@@ -25,7 +25,6 @@ import { flowNodes, parts, pointing, type Drawn } from "./nodes/common";
 import { UNUSED_OPACITY } from "./overlay";
 import { nodeTip, tipOf } from "./tips";
 import { NO_LINES } from "./view";
-import { GROUP_NAMES } from "./names";
 import { tooltip } from "./Tooltip";
 import type { EdgeKey } from "./scope";
 import { boundsOf, fitPadding, FRAME_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
@@ -172,7 +171,6 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     lines,
     boxes: scene?.layout.boxes ?? NO_BOXES,
     name: nameOf,
-    describe: ({ source, target, group, sites }) => `${nameOf(source)} → ${nameOf(target)} · ${GROUP_NAMES[group]} · ${sites}곳`,
     only: null,
     skip: (event) => {
       const again = repeated(event);

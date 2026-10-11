@@ -189,6 +189,7 @@ export function callEdges(calls: Calls, center: string, layout: Layout): Lines {
       opacity: EDGE_OPACITY.full,
       into: null,
       sites: edge.sites.length,
+      kinds: { [edge.kind]: edge.sites.length },
       route: null,
       joins: true,
       below: false,

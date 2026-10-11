@@ -1,14 +1,15 @@
 // 커서 밑을 지나는 선의 집합으로 선의 hover와 클릭을 판정한다. 구조 뷰와 함수 시점 뷰가 함께 쓴다. 화면을 끄는 동안에는 hover를 받지 않는다.
-// 선이 하나면 그 선을 강조하고 누르면 도착 노드를 고른다. 여럿이면 그 구간을 지나는 선만 강조하고 말풍선에 한 줄씩 적는다.
+// 선이 하나면 그 선을 강조하고 누르면 도착 노드를 고른다. 여럿이면 그 구간을 지나는 선만 강조하고 말풍선에 한 줄씩 적는다(`tips.ts`의 `lineTip`).
 // 도착 노드가 모두 같으면 누를 때 그 노드를 고르고, 둘 이상이면 누른 자리에 선을 고르는 목록을 고정한다.
 import { useReactFlow, type EdgeMouseHandler } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
+import type { EdgeKind } from "../api/types";
 import type { FlowEdge } from "./edges/OrthogonalEdge";
 import type { Box, Point } from "./layout";
 import { type EdgeKey } from "./scope";
-import { trunkTip } from "./tips";
+import { lineTip, trunkTip } from "./tips";
 import { tooltip } from "./Tooltip";
 import { trunkKey, type EdgeView, type Lines } from "./view";
 
@@ -66,8 +67,6 @@ interface AimOptions {
   /** 노드의 화면 기준 상자. 목록과 말풍선의 줄을 출발 노드의 위에서 아래, 왼쪽에서 오른쪽 순서로 놓는 데 쓴다. */
   boxes: Map<string, Box>;
   name: (id: string) => string;
-  /** 선 하나를 적는 줄: `출발 → 도착 · 분류 · M곳` */
-  describe: (view: EdgeView) => string;
   /** 경로 고정 중이면 걸음인 선만 대상으로 본다. 고정 중이 아니면 null이다. */
   only: ((view: EdgeView) => boolean) | null;
   /** 누른 것을 받지 않을 때 참을 돌려준다(더블클릭의 둘째 클릭). */
@@ -82,7 +81,7 @@ interface AimOptions {
  * 선의 hover와 클릭 처리. pointed는 마우스를 올린 선으로 그릴 선의 키다. 커서 밑의 선이 하나면 그 선, 여럿이면 그 구간을 지나는 선이고,
  * 고정한 목록의 항목에 올리면 그 선 하나다. menu는 고정한 목록이다.
  */
-export function useAim({ lines, boxes, name, describe, only, skip, pick, open }: AimOptions) {
+export function useAim({ lines, boxes, name, only, skip, pick, open }: AimOptions) {
   const { screenToFlowPosition } = useReactFlow();
   const [aimed, setAimed] = useState<EdgeKey[]>([]);
   const menu = usePick((s) => s.menu);
@@ -103,14 +102,20 @@ export function useAim({ lines, boxes, name, describe, only, skip, pick, open }:
     const place = (view: EdgeView) => state.current.boxes.get(view.source) ?? { x: 0, y: 0 };
     return linesAt(state.current.lines.views, at).sort((a, b) => place(a).y - place(b).y || place(a).x - place(b).x);
   };
+  const describe = (view: EdgeView) => lineTip(name(view.source), name(view.target), view.kinds, view.route);
   const text = (views: EdgeView[]): string => {
     const target = sameTarget(views);
     const rows = views.map(describe);
     if (views.length < 2 || target === null) {
       return rows.join("\n");
     }
-    const sites = views.reduce((sum, view) => sum + view.sites, 0);
-    return [trunkTip(new Set(views.map((view) => view.source)).size, name(target), sites), ...rows].join("\n");
+    const kinds: EdgeView["kinds"] = {};
+    for (const view of views) {
+      for (const [kind, count] of Object.entries(view.kinds) as [EdgeKind, number][]) {
+        kinds[kind] = (kinds[kind] ?? 0) + count;
+      }
+    }
+    return [trunkTip(new Set(views.map((view) => view.source)).size, name(target), kinds), ...rows].join("\n");
   };
   const onEdgeLeave = () => {
     setAimed((before) => (before.length === 0 ? before : []));

@@ -30,7 +30,6 @@ import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, labelOf, layout, packId, packLabel, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
-import { GROUP_NAMES, STEP_NAMES } from "./names";
 import { faceId, LAYER } from "./layers";
 import { flowNodes, parts, pointing, pressable, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
@@ -469,8 +468,6 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     lines: views,
     boxes: scene?.layout.boxes ?? NO_BOXES,
     name: nameOf,
-    describe: ({ source, target, group, sites, route }) =>
-      `${nameOf(source)} → ${nameOf(target)} · ${sites === 0 && route !== null ? STEP_NAMES[route] : `${GROUP_NAMES[group]} · ${sites}곳`}`,
     only: lit === null ? null : (view) => view.route !== null,
     skip: (event) => {
       const again = repeated(event);
