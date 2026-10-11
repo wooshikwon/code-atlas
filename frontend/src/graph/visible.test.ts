@@ -132,12 +132,12 @@ describe("lift", () => {
 });
 
 describe("outward, insideCounts", () => {
-  it("상자마다 상자 밖과 선을 주고받는 바로 아래 자식을 낸다. 클래스는 메서드의 선으로도 밖과 이어진다", () => {
+  it("파일 상자마다 파일 밖과 선을 주고받는 바로 아래 자식을 낸다. 클래스는 메서드의 선으로도 밖과 이어지고 폴더는 판정하지 않는다", () => {
     const linked = outward(repoFixture, off);
     expect([...linked.get("pkg.mod")!]).toEqual(["pkg.mod:Store"]);
     expect([...linked.get("main")!].sort()).toEqual(["main:helper", "main:run"]);
-    expect([...linked.get("pkg")!]).toEqual(["pkg.mod"]);
-    expect([...linked.get("app")!].sort()).toEqual(["app.__init__", "app.web"]);
+    expect(linked.has("pkg")).toBe(false);
+    expect(linked.has("app")).toBe(false);
     expect(linked.has("scratch")).toBe(false);
   });
 
@@ -199,18 +199,26 @@ describe("shown: 세 단계 펼침", () => {
     expect([...at(null).nodes].sort()).toEqual([...closed.nodes].sort());
   });
 
-  it("밖과 이어진 자식이 하나도 없는 상자는 손잡이만 남으므로 모든 자식을 그린다", () => {
-    const result = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
-    expect(["flow.walk", "flow.build", "flow.sink"].every((id) => result.nodes.has(id))).toBe(true);
-    expect(result.packs.has("flow")).toBe(false);
-    const picked = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: flow(routeFixture, "flow.walk:begin", 1, hidden(routeFixture, toggles)), lit: null });
-    expect(["flow.walk", "flow.build", "flow.sink"].every((id) => picked.nodes.has(id))).toBe(true);
+  it("밖과 이어진 자식이 하나도 없는 파일 상자는 손잡이만 남으므로 모든 자식을 그린다", () => {
+    const none = hidden(routeFixture, toggles);
+    expect(outward(routeFixture, none).has("flow.walk")).toBe(false);
+    const result = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: flow(routeFixture, "flow.walk", 1, none), lit: null });
+    const inside = routeFixture.nodes.filter((n) => n.parent === "flow.walk").map((n) => n.id);
+    expect(inside.length).toBeGreaterThan(2);
+    expect(inside.every((id) => result.nodes.has(id))).toBe(true);
+    expect(result.packs.has("flow.walk")).toBe(false);
   });
 
-  it("폴더는 펼침 단계에서 밖과 이어진 파일만 그리고, 안쪽 파일이 하나뿐이면 그 파일도 그린다", () => {
-    const result = at(null);
-    expect(["pkg.mod", "pkg.util", "app.web", "app.__init__", "app.text"].every((id) => result.nodes.has(id))).toBe(true);
-    expect(result.packs.size).toBe(0);
+  it("폴더는 접힘과 펼침 두 단계다. 펼치면 밖과 선이 없는 파일까지 모두 그리고 손잡이를 달지 않으며 unpacked를 보지 않는다", () => {
+    const none = hidden(routeFixture, toggles);
+    for (const unpacked of [new Set<string>(), new Set(["flow"])]) {
+      const result = shown(routeFixture, { ...toggles, collapsed: new Set(), unpacked, flow: flow(routeFixture, "flow.walk:begin", 1, none), lit: null });
+      expect(["flow.walk", "flow.build", "flow.sink"].every((id) => result.nodes.has(id))).toBe(true);
+      expect(result.packs.has("flow")).toBe(false);
+    }
+    const folded = shown(routeFixture, { ...toggles, collapsed: new Set(["flow"]), flow: null, lit: null });
+    expect(folded.nodes.has("flow")).toBe(true);
+    expect(folded.nodes.has("flow.walk")).toBe(false);
   });
 
   it("덮개가 표시하는 노드는 펼침 단계에서 그리고, 미사용 후보 수는 손잡이에 든 자식에서 센다", () => {

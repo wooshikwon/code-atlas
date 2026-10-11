@@ -1,8 +1,7 @@
 // 분석 덮개가 그래프에 더하는 표시. 순환 아이콘을 다는 상자, 순환 선, 파일과 폴더마다의 미사용 후보 수를 정한다.
 // 배치는 순환 아이콘의 폭만 쓰고, 덮개를 켜고 꺼도 결과가 같은 `cycleMarks`만 부른다.
 import type { AtlasNode, Graph } from "../api/types";
-import type { OverlayKind } from "../state/overlay";
-import { cycles as cyclesOf, type Cycles } from "./cycles";
+import type { Cycles } from "./cycles";
 import type { Flow } from "./flow";
 import type { Lit } from "./route";
 import { EDGE_OPACITY, edgeKey, picked, type DrawnEdge, type EdgeKey } from "./scope";
@@ -10,15 +9,6 @@ import { lift, nodeIndex, unitOf, type Shown } from "./visible";
 
 /** 미사용 덮개가 표시하는 후보의 불투명도. 초점 불투명도가 더 낮으면 그 값을 쓴다. */
 export const UNUSED_OPACITY = 0.4;
-
-/**
- * 표시를 다는 노드. 순환 묶음에 든 파일은 덮개와 무관하게 순환 아이콘을 달므로 늘 들고, 미사용 후보 candidates는 미사용 덮개 kind를
- * 켰을 때만 든다. `shown`이 펼친 상자에서 이 노드를 품은 자식을 손잡이에 넣지 않고 그린다. off는 토글로 숨긴 노드다.
- */
-export function markedBy(kind: OverlayKind | null, graph: Graph, off: Set<string>, candidates: Set<string>): Set<string> {
-  const members = cyclesOf(graph, off).member.keys();
-  return new Set(kind === "unused" ? [...members, ...candidates] : members);
-}
 
 /**
  * 순환 아이콘을 다는 상자와 그 상자에 적을 묶음마다의 파일 id. 묶음에 든 파일 상자와, 묶음에 든 파일을 품은 접힌 폴더 상자다.

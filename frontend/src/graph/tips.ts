@@ -39,10 +39,9 @@ function listed(names: string[]): string {
   return names.slice(0, NAMES_MAX).join(", ") + (rest > 0 ? ` 외 ${rest}개` : "");
 }
 
-/** 손잡이. 상자 밖과 선이 없는 자식의 수와 이름을 적는다. box는 손잡이를 단 상자이고 names는 그 자식의 이름표다. */
-export function packTip(box: AtlasNode, names: string[]): string {
-  const what = box.kind === "package" ? "이 폴더 안에서만 쓰이는 파일" : "이 파일 안에서만 쓰이는 정의";
-  return `${what} ${names.length}개 · ${listed(names)}`;
+/** 손잡이. 파일 밖과 선이 없는 정의의 수와 이름을 적는다. names는 그 정의의 이름표다. */
+export function packTip(names: string[]): string {
+  return `이 파일 안에서만 쓰이는 정의 ${names.length}개 · ${listed(names)}`;
 }
 
 /**

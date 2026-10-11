@@ -6,7 +6,6 @@ import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { flow } from "../graph/flow";
 import { EDGE_KIND_NAMES, nameOf } from "../graph/names";
-import { markedBy } from "../graph/overlay";
 import { arriving, degrees, drawn, neighbors, picked, trunkTarget, type DrawnEdge } from "../graph/scope";
 import { hidden, nodeIndex, shown, unresolvedWithin, within } from "../graph/visible";
 import { focusOf } from "../state/history";
@@ -91,7 +90,7 @@ export function InfoPanel() {
     }
     const toggles = { showTests, showExternal };
     const off = hidden(graph, toggles);
-    const boxes = { collapsed, unpacked, marked: markedBy(overlay, graph, off, candidates), candidates };
+    const boxes = { collapsed, unpacked, marked: overlay === "unused" ? candidates : undefined, candidates };
     if (lit !== null) {
       return { flow: null, lit, shown: shown(graph, { ...toggles, ...boxes, flow: null, lit }) };
     }

@@ -19,7 +19,7 @@ export interface Place {
   selection: Selection;
   /** 접은 폴더의 패키지 노드 id. 같은 집합이 같은 배열이 되도록 정렬해 둔다. */
   collapsed: string[];
-  /** 전부 펼침 단계인 상자(파일·폴더 노드 id). 정렬해 둔다. */
+  /** 전부 펼침 단계인 파일 상자의 노드 id. 정렬해 둔다. */
   unpacked: string[];
 }
 

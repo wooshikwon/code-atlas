@@ -3,7 +3,7 @@ import type { AtlasNode, Graph } from "../api/types";
 import type { Flow } from "./flow";
 import type { Lit } from "./route";
 
-/** 펼친 상자의 손잡이. 손잡이는 상자 밖과 선이 없는 자식(안쪽 자식)을 묶는다. */
+/** 펼친 파일 상자의 손잡이. 손잡이는 파일 밖과 선이 없는 자식(안쪽 자식)을 묶는다. */
 export interface Pack {
   /** 안쪽 자식. 그래프의 노드 순서다. */
   ids: string[];
@@ -19,7 +19,7 @@ export interface Shown {
   open: Set<string>;
   /** 토글로 숨긴 노드 */
   hidden: Set<string>;
-  /** 손잡이를 다는 상자(파일·폴더 노드 id)와 그 손잡이 */
+  /** 손잡이를 다는 파일 상자와 그 손잡이 */
   packs: Map<string, Pack>;
 }
 
@@ -104,9 +104,8 @@ export function hidden(graph: Graph, opts: { showTests: boolean; showExternal: b
 }
 
 /**
- * 상자(파일·폴더)마다 상자 밖과 선을 주고받는 바로 아래 자식. 파일 상자의 밖은 그 파일 밖의 노드이고 폴더의 밖은 그 폴더 밖의 노드다.
- * 선은 종류와 무관하게 세고, off에 든 노드(토글로 숨긴 테스트 코드와 외부 노드)와의 선은 세지 않는다. 클래스는 자신이나 메서드에
- * 밖과의 선이 있으면 밖과 이어진 자식이다.
+ * 파일 상자마다 그 파일 밖의 노드와 선을 주고받는 바로 아래 자식. 선은 종류와 무관하게 세고, off에 든 노드(토글로 숨긴 테스트 코드와
+ * 외부 노드)와의 선은 세지 않는다. 클래스는 자신이나 메서드에 밖과의 선이 있으면 밖과 이어진 자식이다.
  */
 export function outward(graph: Graph, off: Set<string>): Map<string, Set<string>> {
   const nodes = nodeIndex(graph);
@@ -118,8 +117,11 @@ export function outward(graph: Graph, off: Set<string>): Map<string, Set<string>
       if (box === undefined) {
         return;
       }
-      if (UNIT_KINDS.has(box.kind) && !within(nodes, other, box.id)) {
-        result.set(box.id, (result.get(box.id) ?? new Set()).add(child.id));
+      if (box.kind === "module") {
+        if (!within(nodes, other, box.id)) {
+          result.set(box.id, (result.get(box.id) ?? new Set()).add(child.id));
+        }
+        return;
       }
       child = box;
     }
@@ -152,16 +154,17 @@ export function drawnOut(graph: Graph, flow: Flow | null, lit: Lit | null): Set<
 }
 
 /**
- * 화면에 그리는 노드를 고른다. 상자(파일 상자, 폴더)는 접힘, 펼침, 전부 펼침 세 단계를 같은 규칙으로 밟는다.
- * - 폴더는 collapsed에 있으면 접힘, 없으면 펼침, unpacked에도 있으면 전부 펼침이다. 파일 상자는 고른 노드가 그 파일이거나 그 파일
- *   안에 있을 때(`flow.file`) 펼침이고, 그때 unpacked에 있으면 전부 펼침이며, 그 밖에는 접힘이다.
- * - 상자 하나에서 그리는 바로 아래 자식은 `꺼낸 자식 ∪ (펼침 이상이면 밖과 이어진 자식 ∪ marked가 표시하는 노드를 품은 자식 ∪ 진입점)
- *   ∪ (전부 펼침이면 나머지)`다. 꺼낸 자식은 `drawnOut`이 정하고, 접힌 폴더 안의 노드는 꺼내지 않는다.
- * - 펼침 이상인 상자의 나머지 자식(안쪽 자식)은 손잡이 하나로 묶어 `packs`에 담는다. 안쪽 자식이 하나뿐이면 그 자식을 그리고,
- *   밖과 이어진 자식이 하나도 없는 상자는 모든 자식을 그린다.
+ * 화면에 그리는 노드를 고른다.
+ * - 폴더는 접힘과 펼침 두 단계다. collapsed에 있으면 폴더 노드만 그리고, 없으면 안의 파일 상자와 하위 폴더를 모두 그린다.
+ * - 파일 상자는 접힘, 펼침, 전부 펼침 세 단계다. 고른 노드가 그 파일이거나 그 파일 안에 있을 때(`flow.file`) 펼침이고, 그때
+ *   unpacked에 있으면 전부 펼침이며, 그 밖에는 접힘이다.
+ * - 파일 상자 하나에서 그리는 바로 아래 자식은 `꺼낸 자식 ∪ (펼침 이상이면 밖과 이어진 자식 ∪ marked가 표시하는 노드를 품은 자식
+ *   ∪ 진입점) ∪ (전부 펼침이면 나머지)`다. 꺼낸 자식은 `drawnOut`이 정하고, 접힌 폴더 안의 노드는 꺼내지 않는다.
+ * - 펼침 이상인 파일 상자의 나머지 자식(안쪽 자식)은 손잡이 하나로 묶어 `packs`에 담는다. 안쪽 자식이 하나뿐이면 그 자식을 그리고,
+ *   밖과 이어진 자식이 하나도 없는 파일 상자는 모든 자식을 그린다.
  * - 펼침 이상인 파일 상자의 클래스는 그려지면 메서드를 모두 그린다. 접힌 파일 상자의 클래스는 꺼낸 메서드만 그린다.
  * - 강조하는 경로 lit이 있으면 흐름을 보지 않는다. 경로 위 노드를 품은 접은 폴더는 펼친 것으로 다루고, 파일 상자는 모두 접힘이다.
- * marked는 표시를 다는 노드(순환 묶음의 파일, 미사용 덮개를 켰을 때의 미사용 후보)이고 candidates는 덮개와 무관한 미사용 후보 전체다.
+ * marked는 미사용 덮개를 켰을 때의 미사용 후보이고 candidates는 덮개와 무관한 미사용 후보 전체다.
  */
 export function shown(
   graph: Graph,
@@ -211,16 +214,21 @@ export function shown(
   const visit = (box: AtlasNode) => {
     result.nodes.add(box.id);
     const kids = children.get(box.id) ?? [];
-    const folder = box.kind === "package";
-    if (kids.length === 0 || (folder && collapsed.has(box.id))) {
+    if (box.kind === "package") {
+      if (!collapsed.has(box.id)) {
+        kids.filter((kid) => UNIT_KINDS.has(kid.kind)).forEach(visit);
+      }
       return;
     }
-    const opened = folder || flow?.file === box.id;
+    if (kids.length === 0) {
+      return;
+    }
+    const opened = flow?.file === box.id;
     const full = opened && unpacked.has(box.id);
     const outer = linked.get(box.id);
     /**
-     * 펼침 단계가 그리는 자식. 밖과 이어진 자식이 하나도 없는 상자(밖이 없는 껍데기 폴더, 안에서만 부르는 파일)는 가를 기준이 없으므로
-     * 모든 자식을 그린다. 선택과 덮개에 따라 달라지지 않게 밖과 이어진 자식만으로 판정한다.
+     * 펼침 단계가 그리는 자식. 밖과 이어진 자식이 하나도 없는 파일 상자는 가를 기준이 없으므로 모든 자식을 그린다.
+     * 선택과 덮개에 따라 달라지지 않게 밖과 이어진 자식만으로 판정한다.
      */
     const staged = outer === undefined ? kids : kids.filter((kid) => outer.has(kid.id) || kid.entry || countIn(kid, marked) > 0);
     let drawn = kids.filter((kid) => pulled.has(kid.id) || (opened && staged.includes(kid)));
@@ -232,13 +240,9 @@ export function shown(
       result.packs.set(box.id, { ids: inner.map((kid) => kid.id), open: full, unused: inner.reduce((sum, kid) => sum + countIn(kid, candidates), 0) });
     }
     for (const kid of full ? kids : drawn) {
-      if (UNIT_KINDS.has(kid.kind)) {
-        visit(kid);
-      } else {
-        addDefinition(kid, opened);
-      }
+      addDefinition(kid, opened);
     }
-    if (!folder && (full || drawn.length > 0)) {
+    if (full || drawn.length > 0) {
       result.open.add(box.id);
     }
   };

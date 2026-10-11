@@ -228,7 +228,7 @@ export function boxCaption(unused: number): string {
   return unused === 0 ? "" : `미사용 후보 ${unused}`;
 }
 
-/** 손잡이 노드의 id. 손잡이는 상자 box의 자식으로 배치한다. */
+/** 손잡이 노드의 id. 손잡이는 파일 상자 box의 자식으로 배치한다. */
 export function packId(box: string): string {
   return `${box}#pack`;
 }
@@ -367,7 +367,7 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
  * 올려 그 부모에 선언하고, 자식을 그리지 않는 노드로 가는 선은 그 노드의 포트(`joined`)에 닿게 한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣어 그 순서를 `ordered`로 적는다.
  * ends는 강조하는 경로의 출발 노드와 도착 노드이고, 그 노드의 크기에 표지의 폭을 더한다.
  * 순환 아이콘을 다는 상자는 아이콘의 폭을 크기에 더한다. 접힌 파일 상자와 접힌 폴더 상자는 아래 글자의 줄을 상자 아래에 잡아 둔다.
- * 손잡이를 다는 상자(`shown.packs`)는 자식 목록 끝에 손잡이 노드를 열0으로 넣는다. 손잡이에는 선이 없으므로 열0의 마지막에 놓인다.
+ * 손잡이를 다는 파일 상자(`shown.packs`)는 자식 목록 끝에 손잡이 노드를 열0으로 넣는다. 손잡이에는 선이 없으므로 열0의 마지막에 놓인다.
  */
 export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure: Measure, ends: Map<string, RouteEnd>): ElkInput {
   const nodes = nodeIndex(graph);

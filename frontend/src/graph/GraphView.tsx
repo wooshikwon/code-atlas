@@ -25,7 +25,7 @@ import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
 import { edgeTypes, flowEdges, isTrunk, Markers, type FlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
-import { functionCounts, HEADER, layout, packId, packLabel, REGION_HEAD, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
+import { functionCounts, layout, packId, packLabel, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { GROUP_NAMES, KIND_NAMES, STEP_NAMES } from "./names";
@@ -33,13 +33,13 @@ import { LAYER } from "./layers";
 import { flowNodes, parts, pointing, pressable, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
 import { isPack, type PackFlowNode } from "./nodes/PackNode";
-import { cycleLines, cycleMarks, markedBy, UNUSED_OPACITY, unusedCounts } from "./overlay";
+import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
 import { drawn, type EdgeKey } from "./scope";
 import { nodeTip, packTip, tipOf, trunkTip } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst, type Lines } from "./view";
-import { anchorOn, boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, headInto, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { anchorOn, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -55,9 +55,9 @@ interface Scene {
   lit: Lit | null;
   /** 초점을 둔 노드 */
   focus: string | null;
-  /** 토글, 접은 폴더, 전부 펼친 상자, 덮개가 표시하는 노드, 초점을 둔 노드, 흐름 단계를 적은 글. 같은 그래프와 경로에서 이 글이 같으면 배치가 같다. */
+  /** 토글, 접은 폴더, 전부 펼친 파일 상자, 미사용 덮개를 켰는지와 미사용 후보, 초점을 둔 노드, 흐름 단계를 적은 글. 같은 그래프와 경로에서 이 글이 같으면 배치가 같다. */
   key: string;
-  /** 접은 폴더와 전부 펼친 상자 */
+  /** 접은 폴더와 전부 펼친 파일 상자 */
   collapsed: Set<string>;
   unpacked: Set<string>;
   layout: Layout;
@@ -153,7 +153,7 @@ function packNodes(scene: Scene, nodes: Map<string, AtlasNode>, at: Map<string, 
       draggable: false,
       connectable: false,
       style: { opacity: fresh?.has(box) === true ? 0 : (opacity.get(box) ?? 1) },
-      data: { box, label: packLabel(pack, covered), open: pack.open, tip: packTip(nodes.get(box)!, pack.ids.map((kid) => titleOf(nodes.get(kid)!))) },
+      data: { box, label: packLabel(pack, covered), open: pack.open, tip: packTip(pack.ids.map((kid) => titleOf(nodes.get(kid)!))) },
     });
   }
   return result;
@@ -247,9 +247,9 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
     const toggles = { showTests, showExternal };
     const off = hidden(graph, toggles);
-    const marked = markedBy(overlay, graph, off, candidates);
-    const boxes = { collapsed, unpacked, marked, candidates };
-    const state = [toggles, [...collapsed].sort(), [...unpacked].sort(), [...marked].sort(), [...candidates].sort()];
+    const covered = overlay === "unused";
+    const boxes = { collapsed, unpacked, marked: covered ? candidates : undefined, candidates };
+    const state = [toggles, [...collapsed].sort(), [...unpacked].sort(), covered, [...candidates].sort()];
     if (lit !== null) {
       return { flow: null, lit, focus: null, key: JSON.stringify(state), collapsed, unpacked, shown: shown(graph, { ...toggles, ...boxes, flow: null, lit }) };
     }
@@ -342,15 +342,14 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         void setViewport(anchorOn(held.before, box, held.view));
       }
     };
-    /** 펼치거나 접은 상자의 머리 줄이 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역을 벗어났으면 머리 줄이 들어오게만 옮긴다. */
+    /** 펼치거나 접은 상자의 왼쪽 위 모서리가 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역을 벗어났으면 모서리가 들어오게만 옮긴다. */
     const reveal = () => {
       const box = toggled === null ? undefined : to.boxes.get(toggled);
       if (box === undefined || root.current === null) {
         return;
       }
       const view = held === null ? getViewport() : anchorOn(held.before, box, held.view);
-      const head = index.nodes.get(toggled!)?.kind === "package" ? REGION_HEAD : HEADER;
-      const next = headInto(box, head, stageOf(root.current).clear, view);
+      const next = cornerInto(box, stageOf(root.current).clear, view);
       if (next.x !== view.x || next.y !== view.y) {
         void setViewport(next, { duration: still ? 0 : PAN_MS });
       }

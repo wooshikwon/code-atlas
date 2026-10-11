@@ -13,8 +13,8 @@ describe("배지 말풍선", () => {
   });
 
   it("손잡이는 안에서만 쓰이는 자식의 수와 이름을 적고 여섯 개부터는 줄인다", () => {
-    expect(packTip(file, ["_parse()", "_merge()"])).toBe("이 파일 안에서만 쓰이는 정의 2개 · _parse(), _merge()");
-    expect(packTip(folder, ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py", "g.py"])).toBe("이 폴더 안에서만 쓰이는 파일 7개 · a.py, b.py, c.py, d.py, e.py 외 2개");
+    expect(packTip(["_parse()", "_merge()"])).toBe("이 파일 안에서만 쓰이는 정의 2개 · _parse(), _merge()");
+    expect(packTip(["a()", "b()", "c()", "d()", "e()", "f()", "g()"])).toBe("이 파일 안에서만 쓰이는 정의 7개 · a(), b(), c(), d(), e() 외 2개");
   });
 
   it("모듈 변수 변경은 바꾸는 모듈 변수 이름을 적고 self 속성은 뺀다", () => {

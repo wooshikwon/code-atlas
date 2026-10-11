@@ -5065,9 +5065,8 @@ async function arranging(t, page) {
     `worker ${workers}개 → ${await page.evaluate(() => window.__shotsWorkers)}개`,
   );
 
-  // 폴더를 펼치면 영역의 머리 줄이 보이게 화면을 옮기므로 파일 상자가 화면 밖에 있을 수 있다. 파일트리에서 고른다.
   await slow(DELAY);
-  await page.click(`.tree-row.tree-file[data-node="${FILE}"]`);
+  await clickNode(page, FILE);
   await page.waitForSelector(".arranging", { timeout: 5_000 });
   const picked = (await headOf(page)).split("\n")[0];
   await page.keyboard.press("Alt+ArrowLeft");
@@ -5683,16 +5682,14 @@ async function packFile(t, page) {
   const all = await drawnIn(page, graph, file.id);
   const fullBoxes = await flowBoxes(page);
   const corner = await rectOf(page, node(file.id));
-  const { clear } = await stageOf(page);
-  const fits = corner.x + corner.width <= clear.x + clear.width - INSET + 1 || near(corner.x, clear.x + INSET, 1.5);
   t.check(
     `손잡이를 누르면 정의 ${file.kids.length}개가 모두 보이고 손잡이가 "안쪽 ${file.inner.length}개 접기"로 바뀌며 선택과 확대 비율이 그대로다`,
     same(all, file.kids) && opened?.open === true && opened.text === `안쪽 ${file.inner.length}개 접기` && (await selectedOf(page)) === before.selected && near(await zoomOf(page), before.zoom, 0.001),
     `그린 정의 ${all.length}개, 손잡이 "${opened?.text}"`,
   );
   t.check(
-    "누른 상자의 왼쪽 위 모서리가 화면의 같은 좌표에 있고, 머리 줄이 가리지 않는 영역을 벗어나면 머리 줄이 들어오는 만큼만 옮긴다",
-    near(corner.y, before.corner.y, 1.5) && (near(corner.x, before.corner.x, 1.5) || (fits && corner.x < before.corner.x)),
+    "누른 상자의 왼쪽 위 모서리가 화면의 같은 좌표에 있다",
+    near(corner.y, before.corner.y, 1.5) && near(corner.x, before.corner.x, 1.5),
     `(${Math.round(before.corner.x)}, ${Math.round(before.corner.y)}) → (${Math.round(corner.x)}, ${Math.round(corner.y)})`,
   );
   t.check("전부 펼쳐도 이미 보이던 정의 사이의 순서가 같다", same(order(fullBoxes, first), order(drawnBoxes, first)), order(fullBoxes, first).join(", "));
@@ -5942,37 +5939,30 @@ async function packToggle(t, page) {
   t.check("토글을 끄면 손잡이가 켜기 전과 같다", same(await packOf(page, file.id), before));
 }
 
-/** 폴더를 펼치고 접을 때 누른 상자를 화면에 붙잡는지 본다. 손잡이를 다는 폴더가 있으면 그 손잡이도 본다. */
+/** 폴더는 접힘과 펼침 두 단계다. 펼치면 안의 파일을 모두 그리고, 펼치고 접을 때 누른 상자를 화면에 붙잡는다. */
 async function packFolder(t, page) {
   const graph = await api("/api/graph");
   await load(page, url, false);
-  const before = { zoom: await zoomOf(page), corner: await rectOf(page, node("parser")) };
+  const before = { zoom: await zoomOf(page), corner: await rectOf(page, node("parser")), view: await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform) };
   await clickNode(page, "parser");
   await page.waitForSelector(`${node("parser")} > .node-region`, { timeout: 30_000 });
   await page.mouse.move(5, 5);
   await rest(page);
   const region = await rectOf(page, node("parser"));
-  const { clear } = await stageOf(page);
-  const right = clear.x + clear.width - INSET;
-  const left = clear.x + INSET;
   t.check(
-    "폴더 상자를 눌러 펼치면 확대 비율이 그대로이고 영역의 위쪽 좌표가 누른 상자와 같다",
-    near(await zoomOf(page), before.zoom, 0.001) && near(region.y, before.corner.y, 1.5),
+    "폴더 상자를 눌러 펼치면 확대 비율이 그대로이고 영역의 왼쪽 위 모서리가 누른 상자의 왼쪽 위 모서리가 있던 좌표에 있다",
+    near(await zoomOf(page), before.zoom, 0.001) && near(region.x, before.corner.x, 1.5) && near(region.y, before.corner.y, 1.5),
     `(${Math.round(before.corner.x)}, ${Math.round(before.corner.y)}) → (${Math.round(region.x)}, ${Math.round(region.y)})`,
   );
-  t.check(
-    "펼친 영역의 머리 줄이 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역 안에 있고, 벗어나지 않았으면 왼쪽 위 모서리가 그대로다",
-    near(region.x, before.corner.x, 1.5) ? region.x + region.width <= right + 1.5 || region.width > right - left : near(region.x + region.width, right, 1.5) || near(region.x, left, 1.5),
-    `영역 ${Math.round(region.x)}~${Math.round(region.x + region.width)}, 가리지 않는 영역 ${Math.round(left)}~${Math.round(right)}`,
-  );
+  const stays = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`.react-flow__node[data-id="${id}"]`).getBoundingClientRect().left > 0).length, ["arbiter", "note_batch"]);
+  t.check("누른 상자의 모서리가 가리지 않는 영역 안에 있으므로 화면을 옮기지 않아 왼쪽 열의 파일 상자가 화면에 남는다", stays === 2, `왼쪽 열의 파일 상자 ${stays}개`);
   await t.shot();
-  const stages = stagesOf(graph, "parser");
+  const inside = graph.nodes.filter((n) => n.parent === "parser" && !n.test).map((n) => n.id);
   const files = await drawnIn(page, graph, "parser");
-  const pack = await packOf(page, "parser");
   t.check(
-    `parser/는 밖과 이어진 파일 ${stages.outer.length}개를 그리고 안쪽 파일 ${stages.inner.length}개는 둘 이상일 때만 손잡이에 담는다`,
-    stages.inner.length >= 2 ? same(files, stages.outer) && pack?.text.startsWith(`안쪽 ${stages.inner.length}개`) : same(files, stages.kids) && pack === null,
-    `그린 파일 ${files.length}개, 손잡이 "${pack?.text ?? "없음"}"`,
+    `parser/를 펼치면 안의 파일 ${inside.length}개를 모두 그리고 폴더에는 손잡이가 없다`,
+    same(files, inside) && (await packOf(page, "parser")) === null,
+    `그린 파일 ${files.length}개`,
   );
   const head = await rectOf(page, `${face("parser")} .node-region-head`);
   await page.mouse.click(head.x + 20, head.y + head.height / 2);
@@ -5981,8 +5971,9 @@ async function packFolder(t, page) {
   await rest(page);
   const folded = await rectOf(page, node("parser"));
   t.check(
-    "머리 줄을 눌러 접으면 폴더 상자가 영역의 왼쪽 위 모서리가 있던 좌표에 놓인다",
-    near(folded.x, region.x, 1.5) && near(folded.y, region.y, 1.5) && near(await zoomOf(page), before.zoom, 0.001),
+    "머리 줄을 눌러 접으면 폴더 상자가 영역의 왼쪽 위 모서리가 있던 좌표에 놓이고 화면이 펼치기 전과 같다",
+    near(folded.x, region.x, 1.5) && near(folded.y, region.y, 1.5) && near(await zoomOf(page), before.zoom, 0.001) &&
+      (await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform)) === before.view,
     `(${Math.round(region.x)}, ${Math.round(region.y)}) → (${Math.round(folded.x)}, ${Math.round(folded.y)})`,
   );
 }
