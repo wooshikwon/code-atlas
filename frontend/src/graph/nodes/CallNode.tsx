@@ -1,7 +1,7 @@
 import type { Node, NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { useChange } from "../../state/changes";
-import { counted, type Side } from "../callview";
+import { counted, type Side } from "../calls";
 import { ENTRY_MARK } from "../layout";
 import { Badges, Handles, Loc, nodeProps, sameNode, type AtlasNodeData } from "./common";
 

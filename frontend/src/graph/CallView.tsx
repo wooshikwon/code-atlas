@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import type { AtlasNode } from "../api/types";
 import type { History } from "../state/history";
 import { useAtlas } from "../state/store";
-import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./callview";
+import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
 import { edgeTypes, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
 import { Legend } from "./Legend";

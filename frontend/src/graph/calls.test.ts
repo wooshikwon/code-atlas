@@ -1,7 +1,7 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, Graph } from "../api/types";
-import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel } from "./callview";
+import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel } from "./calls";
 import { repoFixture } from "./fixture";
 import { fromElk, LEAF_HEIGHT } from "./layout";
 import { edgeKey } from "./scope";
