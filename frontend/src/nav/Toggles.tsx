@@ -1,6 +1,6 @@
 // 상단 줄의 토글 세 개. 줄 폭이 넉넉하면 줄에 나란히 그리고, 모자라면 "설정" 버튼 아래 목록으로 접는다.
-// 어느 쪽으로 그릴지는 styles.css의 container 조건이 정한다.
-import { useRef, useState } from "react";
+// 어느 쪽으로 그릴지는 nav/fit.ts가 상단 줄에 적는 단계(data-fit)가 정한다.
+import { useLayoutEffect, useRef, useState } from "react";
 import { useAtlas } from "../state/store";
 import { useDismiss } from "./menu";
 
@@ -12,8 +12,19 @@ export function Toggles() {
   const toggleExternal = useAtlas((s) => s.toggleExternal);
   const toggleAutoSummary = useAtlas((s) => s.toggleAutoSummary);
   const [open, setOpen] = useState(false);
+  /** 목록을 버튼의 어느 쪽 끝에 맞추는지. 오른쪽 끝에 맞춘 목록이 상단 줄의 왼쪽 끝을 넘으면 왼쪽 끝에 맞춘다. */
+  const [side, setSide] = useState<"right" | "left">("right");
   const root = useRef<HTMLDivElement | null>(null);
+  const list = useRef<HTMLDivElement | null>(null);
   useDismiss(open, root, setOpen);
+  useLayoutEffect(() => {
+    const bar = root.current?.closest(".toolbar");
+    if (!open || bar == null || list.current === null) {
+      setSide("right");
+    } else if (list.current.getBoundingClientRect().left < bar.getBoundingClientRect().left) {
+      setSide("left");
+    }
+  }, [open]);
 
   return (
     <div className="toolbar-toggles" ref={root}>
@@ -26,7 +37,7 @@ export function Toggles() {
       >
         설정
       </button>
-      <div className="toolbar-toggles-list" id="toolbar-toggles" data-open={open ? "" : undefined}>
+      <div className="toolbar-toggles-list" id="toolbar-toggles" ref={list} data-open={open ? "" : undefined} data-side={side}>
         <label className="toolbar-toggle">
           <input type="checkbox" checked={showTests} onChange={toggleTests} />
           테스트 코드

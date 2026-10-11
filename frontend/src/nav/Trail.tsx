@@ -1,10 +1,11 @@
 // 상단 줄의 탐색 경로 표시. 고른 노드(함수 시점 뷰에서는 가운데 함수)까지의 폴더·파일·클래스·함수를 단계로 그린다.
-// 줄 폭이 모자라면 앞 단계부터 `…`로 줄이고 마지막 단계는 늘 남긴다.
+// 줄 폭이 모자라면 앞 단계부터 `…`로 줄이고 마지막 단계는 늘 남긴다. 상단 줄을 줄이는 단계(`fit.ts`)는 이 폭을 보지 않는다.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AtlasNode } from "../api/types";
 import { labelOf, titleOf } from "../graph/layout";
 import { nodeIndex } from "../graph/visible";
 import { useAtlas } from "../state/store";
+import type { Fit } from "./fit";
 
 /** 한 단계의 이름. 폴더와 파일은 경로의 마지막 마디만 적는다. */
 function stepName(node: AtlasNode): string {
@@ -18,7 +19,7 @@ function stepName(node: AtlasNode): string {
   }
 }
 
-export function Trail() {
+export function Trail({ fit }: { fit: Fit }) {
   const repo = useAtlas((s) => s.repo);
   const graph = useAtlas((s) => s.graph);
   const view = useAtlas((s) => s.view);
@@ -39,8 +40,8 @@ export function Trail() {
   const names = [...(rooted ? [source] : []), ...steps.map(stepName)];
 
   const nav = useRef<HTMLElement | null>(null);
-  const path = `${names.join("/")}|${view.kind}`;
-  /** 앞에서부터 `…`로 줄인 이름 수. 경로나 상단 줄의 폭이 바뀌면 0에서 다시 센다. */
+  const path = `${names.join("/")}|${view.kind}|${fit}`;
+  /** 앞에서부터 `…`로 줄인 이름 수. 경로, 상단 줄의 단계, 탐색 경로가 든 줄의 폭이 바뀌면 0에서 다시 센다. */
   const [cut, setCut] = useState({ path, count: 0 });
   const hidden = cut.path === path ? cut.count : 0;
 
