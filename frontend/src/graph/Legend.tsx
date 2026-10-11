@@ -127,11 +127,11 @@ export function Legend() {
           <svg width={30} height={16}>
             <path d="M2,3 L10,3 L10,9 M2,14 L10,14 L10,9 L27,9" className="legend-edge tone-muted" markerEnd="url(#arrow-run-muted)" />
             <circle cx={10} cy={9} r={2.5} className="edge-joint tone-muted" />
-            <text x={19} y={5} textAnchor="middle" className="edge-trunk-count tone-muted">
-              2
+            <text x={17} y={9} dy="0.35em" textAnchor="middle" className="edge-trunk-count tone-muted">
+              7
             </text>
           </svg>
-          합류: 같은 노드로 가는 선의 수
+          합류와 들어오는 관계의 합계
         </li>
         <li>
           <svg width={30} height={16}>

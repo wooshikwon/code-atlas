@@ -28,6 +28,11 @@ export interface Layout {
   boxes: Map<string, Box>;
   /** 시작점, 꺾이는 점, 끝점 순서의 절대 좌표 */
   routes: Map<EdgeKey, Point[]>;
+  /**
+   * 상자의 변에서 옆 통로(배치 밖에서 정하는 경로가 꺾는 세로 줄)까지의 거리(`laneOf`). 도착 노드의 변과 통로 사이의 곧은 구간에
+   * 들어오는 합계를 적는다.
+   */
+  lane: number;
 }
 
 /** 글자 폭을 잰다. 브라우저는 canvas로 재고 시험은 글자 수로 어림한다. */
@@ -86,12 +91,52 @@ const SHELF_GAP = 64;
 const GRID_GAP = 24;
 const SHELF_COLUMNS = 4;
 
-/**
- * 배치가 경로를 내지 않는 선(`sideRoute`)이 상자 옆에서 세로로 꺾는 줄의 거리. 배치가 내는 선의 세로 줄기는 상자에서
- * `LANE_CLEAR` 넘게 떨어뜨려 이 줄과 겹치지 않게 한다.
- */
+/** 함수 안 import 선이 두 노드 아래로 돌아가는 줄과 노드 사이의 거리. 배치가 내는 선의 세로 줄과 옆 통로 사이도 이만큼 띄운다. */
 const ROUTE_GAP = 10;
-const LANE_CLEAR = 2 * ROUTE_GAP;
+
+/** 선의 수를 적는 글자(`.edge-weight`, 11px)의 숫자 하나 폭과 줄 높이 */
+export const DIGIT_WIDTH = 7;
+export const NUMBER_HEIGHT = 14;
+/** 숫자 둘레에 비우는 폭. 숫자를 선에서 끊는 바탕색 테두리(stroke 3px의 바깥쪽 절반)를 올림한 값이다. */
+export const NUMBER_PAD = 2;
+/** 화살촉의 길이. 세 분류 가운데 가장 긴 계승 화살촉(`edges/OrthogonalEdge.tsx`의 markerWidth)이다. */
+export const ARROW_LENGTH = 13;
+/** 합류점의 반지름. `edges/Trunk.tsx`가 그리는 점이다. */
+export const JOINT_RADIUS = 2.5;
+
+/** digits 자리 수가 선 위에서 차지하는 폭 */
+export function numberWidth(digits: number): number {
+  return digits * DIGIT_WIDTH + 2 * NUMBER_PAD;
+}
+
+/**
+ * 상자의 변에서 옆 통로까지의 거리. 도착 노드 앞의 곧은 구간에 화살촉, digits 자리 수, 합류점이 겹치지 않고 놓이는 길이다.
+ */
+export function laneOf(digits: number): number {
+  return ARROW_LENGTH + NUMBER_PAD + numberWidth(digits) + Math.ceil(JOINT_RADIUS);
+}
+
+/**
+ * 화면에 적을 수 있는 가장 큰 수의 자릿수. 노드마다 그 노드 밖에서 안으로 들어오는 선의 sites 수를 더한 값 가운데 가장 큰 값이
+ * 도착 노드 앞에 적는 합계의 상한이다. off에 든 노드와의 선은 세지 않는다.
+ */
+export function numberDigits(graph: Graph, off: Set<string>): number {
+  const nodes = nodeIndex(graph);
+  const arriving = new Map<string, number>();
+  for (const edge of graph.edges) {
+    if (off.has(edge.source) || off.has(edge.target)) {
+      continue;
+    }
+    const outside = new Set<string>();
+    for (let at = nodes.get(edge.source); at !== undefined; at = at.parent === null ? undefined : nodes.get(at.parent)) {
+      outside.add(at.id);
+    }
+    for (let at = nodes.get(edge.target); at !== undefined && !outside.has(at.id); at = at.parent === null ? undefined : nodes.get(at.parent)) {
+      arriving.set(at.id, (arriving.get(at.id) ?? 0) + edge.sites.length);
+    }
+  }
+  return String(Math.max(1, ...arriving.values())).length;
+}
 /** 같은 열의 두 상자를 잇는 선이 상자의 옆면에서 드나드는 높이. 마주 보는 쪽 모서리에서 이만큼 안쪽이다. */
 const CORNER_INSET = 6;
 
@@ -136,20 +181,30 @@ export function joined(node: ElkNode): ElkNode {
 /** 같은 열에 놓인 형제 노드 사이의 세로 간격 */
 export const NODE_GAP = 24;
 
-/** 열은 partition으로, 열 안 순서는 children 배열 순서로 고정한다. */
-const ELK_OPTIONS = {
-  "elk.algorithm": "layered",
-  "elk.direction": "RIGHT",
-  "elk.edgeRouting": "ORTHOGONAL",
-  "elk.partitioning.activate": "true",
-  ...arrangeOptions(),
-  "elk.separateConnectedComponents": "false",
-  "elk.spacing.nodeNode": String(NODE_GAP),
-  "elk.layered.spacing.nodeNodeBetweenLayers": "48",
-  "elk.layered.spacing.edgeNodeBetweenLayers": String(LANE_CLEAR),
-};
+/**
+ * 선과 노드 사이의 간격을 정하는 ELK 옵션. 배치가 내는 선의 세로 줄을 상자의 변에서 옆 통로(lane)보다 `ROUTE_GAP`만큼 더 떨어뜨려,
+ * 도착 노드 앞의 곧은 구간에 들어오는 합계가 들어가고 세로 줄이 옆 통로와 겹치지 않게 한다. 구조 뷰와 함수 시점 뷰의 ELK 입력이 함께 쓴다.
+ */
+export function spacingOptions(lane: number): Record<string, string> {
+  return { "elk.layered.spacing.edgeNodeBetweenLayers": String(lane + ROUTE_GAP) };
+}
 
-const ROOT_OPTIONS = { ...ELK_OPTIONS, "elk.padding": "[top=0,left=0,bottom=0,right=0]" };
+/** 열은 partition으로, 열 안 순서는 children 배열 순서로 고정한다. */
+function elkOptions(lane: number): Record<string, string> {
+  return {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.edgeRouting": "ORTHOGONAL",
+    "elk.partitioning.activate": "true",
+    ...arrangeOptions(),
+    "elk.separateConnectedComponents": "false",
+    "elk.spacing.nodeNode": String(NODE_GAP),
+    "elk.layered.spacing.nodeNodeBetweenLayers": "48",
+    ...spacingOptions(lane),
+  };
+}
+
+const ROOT_PADDING = { "elk.padding": "[top=0,left=0,bottom=0,right=0]" };
 
 function cut(text: string): string {
   return text.length > LABEL_MAX ? `${text.slice(0, LABEL_MAX - 1)}…` : text;
@@ -323,6 +378,8 @@ export interface Link {
 }
 
 export interface ElkInput {
+  /** 상자의 변에서 옆 통로까지의 거리. 배치 결과(`Layout.lane`)에 그대로 담는다. */
+  lane: number;
   /** 연결 묶음마다 ELK 뿌리 하나. 위에서 아래로 쌓는 순서다. */
   components: ElkNode[];
   /** 선반 단위마다 ELK 노드 하나. 펼친 단위만 children을 가진다. */
@@ -391,12 +448,14 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
       .filter((link) => members === undefined || members.has(link.source))
       .map((link) => ({ id: link.key, sources: [link.source], targets: [children.has(link.target) ? link.target : inPort(link.target)] }));
 
+  const lane = laneOf(numberDigits(graph, shown.hidden));
+  const options = elkOptions(lane);
   const functions = functionCounts(graph);
   const marked = cycleMarks(graph, cycles(graph, shown.hidden), shown);
   const marksOf = (id: string): Marks => ({ cycle: marked.has(id), end: ends.get(id) });
   const build = (node: AtlasNode): ElkNode => {
     const kids = children.get(node.id) ?? [];
-    const options: Record<string, string> = {
+    const placed: Record<string, string> = {
       "elk.partitioning.partition": String(columns.column.get(node.id)!),
       "elk.alignment": "LEFT",
     };
@@ -408,24 +467,25 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
         id: node.id,
         children: ordered([...kids.map(build), ...handle]),
         edges: edgesOf(node.id),
-        layoutOptions: { ...ELK_OPTIONS, ...options, ...boxOptions(node, functions.get(node.id) ?? 0, measure, marksOf(node.id)) },
+        layoutOptions: { ...options, ...placed, ...boxOptions(node, functions.get(node.id) ?? 0, measure, marksOf(node.id)) },
       };
     }
     if (node.kind !== "module" && node.kind !== "package") {
-      return joined({ id: node.id, ...leafSize(node, measure, marksOf(node.id)), layoutOptions: options });
+      return joined({ id: node.id, ...leafSize(node, measure, marksOf(node.id)), layoutOptions: placed });
     }
     return joined({
       id: node.id,
       ...leafSize(node, measure, marksOf(node.id)),
       labels: [{ text: BOX_CAPTION, width: measure(BOX_CAPTION), height: CAPTION_HEIGHT }],
-      layoutOptions: { ...options, "elk.nodeLabels.placement": "OUTSIDE V_BOTTOM H_LEFT" },
+      layoutOptions: { ...placed, "elk.nodeLabels.placement": "OUTSIDE V_BOTTOM H_LEFT" },
     });
   };
 
   return {
+    lane,
     components: columns.components.map((ids, i) => ({
       id: `component:${i}`,
-      layoutOptions: ROOT_OPTIONS,
+      layoutOptions: { ...options, ...ROOT_PADDING },
       children: ordered(ids.map((id) => build(nodes.get(id)!))),
       edges: edgesOf(null, new Set(ids)),
     })),
@@ -433,9 +493,9 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
   };
 }
 
-/** ELK 결과를 부모 기준 좌표, 절대 좌표, 절대 좌표 선 경로로 바꾼다. offset은 뿌리의 화면 기준 위치다. */
-export function fromElk(root: ElkNode, offset: Point = { x: 0, y: 0 }): Layout {
-  const result: Layout = { positions: new Map(), sizes: new Map(), boxes: new Map(), routes: new Map() };
+/** ELK 결과를 부모 기준 좌표, 절대 좌표, 절대 좌표 선 경로로 바꾼다. lane은 ELK 입력을 만들 때 쓴 옆 통로의 거리이고 offset은 뿌리의 화면 기준 위치다. */
+export function fromElk(root: ElkNode, lane: number, offset: Point = { x: 0, y: 0 }): Layout {
+  const result: Layout = { positions: new Map(), sizes: new Map(), boxes: new Map(), routes: new Map(), lane };
   const origins = new Map<string, Point>([[root.id, offset]]);
   const edges: [ElkExtendedEdge, string][] = [];
 
@@ -478,7 +538,7 @@ export function fromElk(root: ElkNode, offset: Point = { x: 0, y: 0 }): Layout {
  * 격자는 가장 넓은 묶음의 폭에서 줄을 바꾸고, 한 칸보다 넓은 단위는 여러 칸을 쓴다.
  */
 export async function arrange(input: ElkInput, run: RunElk): Promise<Layout> {
-  const result: Layout = { positions: new Map(), sizes: new Map(), boxes: new Map(), routes: new Map() };
+  const result: Layout = { positions: new Map(), sizes: new Map(), boxes: new Map(), routes: new Map(), lane: input.lane };
   const add = (part: Layout) => {
     part.positions.forEach((value, id) => result.positions.set(id, value));
     part.sizes.forEach((value, id) => result.sizes.set(id, value));
@@ -490,7 +550,7 @@ export async function arrange(input: ElkInput, run: RunElk): Promise<Layout> {
   let y = 0;
   for (const root of input.components) {
     const done = await run(root);
-    add(fromElk(done, { x: 0, y }));
+    add(fromElk(done, input.lane, { x: 0, y }));
     width = Math.max(width, done.width ?? 0);
     y += (done.height ?? 0) + STACK_GAP;
   }
@@ -501,7 +561,7 @@ export async function arrange(input: ElkInput, run: RunElk): Promise<Layout> {
   let row = 0;
   y = input.components.length > 0 ? y - STACK_GAP + SHELF_GAP : 0;
   for (const node of input.shelf) {
-    const root: ElkNode = { id: `shelf:${node.id}`, layoutOptions: ROOT_OPTIONS, children: [node] };
+    const root: ElkNode = { id: `shelf:${node.id}`, layoutOptions: { ...elkOptions(input.lane), ...ROOT_PADDING }, children: [node] };
     const done = node.children === undefined ? root : await run(root);
     const box = done.children![0];
     if (x > 0 && x + box.width! > limit) {
@@ -509,7 +569,7 @@ export async function arrange(input: ElkInput, run: RunElk): Promise<Layout> {
       y += row + GRID_GAP;
       row = 0;
     }
-    add(fromElk(done, { x, y }));
+    add(fromElk(done, input.lane, { x, y }));
     x += Math.ceil((box.width! + GRID_GAP) / cell) * cell;
     row = Math.max(row, (box.labels ?? []).reduce((sum, label) => sum + (label.height ?? 0), box.height!));
   }
@@ -544,12 +604,12 @@ export function insideRoute(source: Box, target: Box): Point[] {
 
 /**
  * 배치가 경로를 내지 않은 선의 경로. 진입점 단위 사이 선이 이 경로를 쓴다. 화면에 보이는 양 끝 상자의 위치로 정한다.
- * 도착 상자가 오른쪽에 있으면 출발 상자의 오른쪽 변 가운데에서 나와 도착 상자 `ROUTE_GAP` 앞에서 세로로 꺾어 왼쪽 변 가운데로
- * 들어간다. 도착 상자가 왼쪽에 있으면 좌우를 뒤집은 경로다. 두 상자가 가로로 겹치면 같은 열이므로 두 상자의 오른쪽
- * `ROUTE_GAP` 밖으로 돌아 도착 상자의 오른쪽 변으로 들어가고, 배치가 낸 선이 드나드는 옆면 가운데를 피해 서로 마주 보는 쪽
- * 모서리에서 `CORNER_INSET` 안쪽 높이로 드나든다.
+ * 도착 상자가 오른쪽에 있으면 출발 상자의 오른쪽 변 가운데에서 나와 도착 상자의 옆 통로(변에서 lane 앞)에서 세로로 꺾어 왼쪽 변
+ * 가운데로 들어간다. 도착 상자가 왼쪽에 있으면 좌우를 뒤집은 경로다. 두 상자가 가로로 겹치면 같은 열이므로 두 상자의 오른쪽 옆 통로로
+ * 돌아 도착 상자의 오른쪽 변으로 들어가고, 배치가 낸 선이 드나드는 옆면 가운데를 피해 서로 마주 보는 쪽 모서리에서 `CORNER_INSET`
+ * 안쪽 높이로 드나든다.
  */
-export function sideRoute(source: Box, target: Box): Point[] {
+export function sideRoute(source: Box, target: Box, lane: number): Point[] {
   const middle = (box: Box) => box.y + box.height / 2;
   const [sr, tr] = [source.x + source.width, target.x + target.width];
   const route = (sx: number, sy: number, x: number, tx: number, ty: number): Point[] => [
@@ -558,18 +618,18 @@ export function sideRoute(source: Box, target: Box): Point[] {
     { x, y: ty },
     { x: tx, y: ty },
   ];
-  if (sr + ROUTE_GAP <= target.x) {
-    return route(sr, middle(source), target.x - ROUTE_GAP, target.x, middle(target));
+  if (sr + lane <= target.x) {
+    return route(sr, middle(source), target.x - lane, target.x, middle(target));
   }
-  if (tr + ROUTE_GAP <= source.x) {
-    return route(source.x, middle(source), tr + ROUTE_GAP, tr, middle(target));
+  if (tr + lane <= source.x) {
+    return route(source.x, middle(source), tr + lane, tr, middle(target));
   }
   /** 상대 상자 쪽 모서리에서 안쪽으로 들어온 높이 */
   const facing = (box: Box, other: Box) => {
     const inset = Math.min(CORNER_INSET, box.height / 2);
     return middle(other) < middle(box) ? box.y + inset : box.y + box.height - inset;
   };
-  return route(sr, facing(source, target), Math.max(sr, tr) + ROUTE_GAP, tr, facing(target, source));
+  return route(sr, facing(source, target), Math.max(sr, tr) + lane, tr, facing(target, source));
 }
 
 let canvas: CanvasRenderingContext2D | null = null;

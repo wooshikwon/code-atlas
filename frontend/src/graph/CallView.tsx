@@ -15,7 +15,7 @@ import { useOverlay } from "../state/overlay";
 import { useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { Arranging, watchLayout } from "./arranging";
-import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
+import { callEdges, callElk, callLabel, callLane, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
 import { edgeTypes, flowEdges, isTrunk, Markers, type FlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
 import { Dock } from "./Dock";
@@ -119,7 +119,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     }
     return watchLayout(
       runElk(callElk(calls, (id) => callSize(calls, index, index.get(id)!, measureText))),
-      (done) => setScene({ calls, center, layout: fromElk(done) }),
+      (done) => setScene({ calls, center, layout: fromElk(done, callLane(calls)) }),
       setError,
     );
   }, [calls, index, center]);

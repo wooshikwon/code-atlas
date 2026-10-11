@@ -473,7 +473,7 @@ describe("belowRoute, sideRoute", () => {
   });
 
   it("도착 상자가 오른쪽에 있으면 출발 상자의 오른쪽 변에서 나와 도착 상자 10px 앞에서 꺾어 왼쪽 변으로 들어간다", () => {
-    expect(sideRoute(a, right)).toEqual([
+    expect(sideRoute(a, right, 10)).toEqual([
       { x: 40, y: 10 },
       { x: 90, y: 10 },
       { x: 90, y: 60 },
@@ -482,7 +482,7 @@ describe("belowRoute, sideRoute", () => {
   });
 
   it("도착 상자가 왼쪽에 있으면 출발 상자의 왼쪽 변에서 나와 도착 상자의 오른쪽 변으로 들어간다", () => {
-    expect(sideRoute(right, a)).toEqual([
+    expect(sideRoute(right, a, 10)).toEqual([
       { x: 100, y: 60 },
       { x: 50, y: 60 },
       { x: 50, y: 10 },
@@ -491,12 +491,12 @@ describe("belowRoute, sideRoute", () => {
   });
 
   it("가로로 겹치는 두 상자는 오른쪽 10px 밖으로 돌고, 마주 보는 쪽 모서리에서 6px 안쪽 높이로 드나든다", () => {
-    expect(sideRoute(a, under)).toEqual([
+    expect(sideRoute(a, under, 10)).toEqual([
       { x: 40, y: 14 },
       { x: 60, y: 14 },
       { x: 60, y: 86 },
       { x: 50, y: 86 },
     ]);
-    expect(sideRoute(under, a).map((p) => p.y)).toEqual([86, 86, 14, 14]);
+    expect(sideRoute(under, a, 10).map((p) => p.y)).toEqual([86, 86, 14, 14]);
   });
 });

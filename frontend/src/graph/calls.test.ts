@@ -1,7 +1,7 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, Graph } from "../api/types";
-import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel } from "./calls";
+import { callEdges, callElk, callLabel, callLane, callSize, callTitle, callview, fileLabel } from "./calls";
 import { repoFixture } from "./fixture";
 import { fromElk, LEAF_HEIGHT } from "./layout";
 import { edgeKey } from "./scope";
@@ -129,7 +129,7 @@ describe("배치", () => {
   it("호출하는 쪽을 가운데 함수 왼쪽에, 호출되는 쪽을 오른쪽에 놓고 선마다 경로를 낸다", async () => {
     const calls = callview(repoFixture, load, [save, "main:run"], off);
     const done = await elk.layout(callElk(calls, (id) => callSize(calls, nodes, nodes.get(id)!, measure)));
-    const layout = fromElk(done);
+    const layout = fromElk(done, callLane(calls));
     const x = (id: string) => layout.boxes.get(id)!.x;
     expect(x("cli:main")).toBeLessThan(x("main:run"));
     expect(x("main:run")).toBeLessThan(x(load));
@@ -147,6 +147,6 @@ describe("배치", () => {
     expect(tone(`main:run|${load}|call`)).toBe("strong");
     expect(tone(`${load}|${save}|call`)).toBe("strong");
     expect(tone(`${save}|pkg.mod:parse|call`)).toBe("muted");
-    expect(views.every((view) => view.weight === null && view.opacity === 1)).toBe(true);
+    expect(views.every((view) => view.opacity === 1)).toBe(true);
   });
 });

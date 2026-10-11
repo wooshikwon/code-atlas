@@ -4,7 +4,7 @@ import { flow } from "./flow";
 import { lit, route } from "./route";
 import { sideRoute, type Layout } from "./layout";
 import { drawn } from "./scope";
-import { edgeViews, emphasized, letteredBoxes, midpoint, parentFirst, roundedPath, trunkShade, trunkViews, weightPoint, type EdgeView } from "./view";
+import { edgeViews, emphasized, letteredBoxes, ownNumbers, parentFirst, roundedPath, trunkShade, trunkViews, type EdgeView } from "./view";
 import { hidden, nodeIndex, shown, type Shown } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
@@ -28,7 +28,7 @@ function lineLayout(visible: Shown): Layout {
       ],
     ],
   ]);
-  return { positions: new Map(), sizes: new Map(), boxes, routes };
+  return { positions: new Map(), sizes: new Map(), boxes, routes, lane: 12 };
 }
 
 function views(selection: string | null): Map<string, EdgeView> {
@@ -100,7 +100,7 @@ describe("edgeViews", () => {
     const { shown: visible } = scene(null);
     const layout = lineLayout(visible);
     const view = edgeViews(drawn(repoFixture, visible, null, null, null), layout, nodes).views.find((v) => v.key === "agg|cli|main")!;
-    expect(view.points).toEqual(sideRoute(layout.boxes.get("cli")!, layout.boxes.get("main")!));
+    expect(view.points).toEqual(sideRoute(layout.boxes.get("cli")!, layout.boxes.get("main")!, layout.lane));
   });
 
   it("함수 안 import만 합친 선은 두 상자 아래로 돌아가는 경로를 받는다", () => {
@@ -110,11 +110,12 @@ describe("edgeViews", () => {
     expect(points.at(-1)!.y).toBe(20);
   });
 
-  it("집계 선은 무게가 2 이상일 때만 숫자를 달고, sites 수는 늘 담는다", () => {
+  it("따로 들어가는 선은 sites 수가 2 이상일 때 도착 노드 앞에 그 수를 적고, sites 수는 늘 담는다", () => {
     const closed = views(null);
-    expect(closed.get("agg|main|pkg.mod")).toMatchObject({ weight: { count: 4 }, sites: 4 });
-    expect(closed.get("agg|pkg.mod|main")).toMatchObject({ weight: null, sites: 1 });
-    expect(views("main:run").get("main:run|main:helper|call")).toMatchObject({ weight: null, sites: 1 });
+    expect(closed.get("agg|main|pkg.mod")).toMatchObject({ trunk: null, sites: 4 });
+    expect(closed.get("agg|main|pkg.mod")!.into).not.toBeNull();
+    expect(closed.get("agg|pkg.mod|main")).toMatchObject({ into: null, sites: 1 });
+    expect(views("main:run").get("main:run|main:helper|call")).toMatchObject({ into: null, sites: 1 });
   });
 
   it("진하기와 불투명도는 그릴 선의 값을 그대로 쓴다", () => {
@@ -155,6 +156,7 @@ describe("edgeViews: 올린 상자 안으로 들어가는 경로", () => {
     sizes: new Map(),
     boxes: new Map(boxes),
     routes: new Map([["agg|main|pkg", trunk.map(([x, y]) => ({ x, y }))]]),
+    lane: 12,
   });
   const pointsOf = (layout: Layout) => edgeViews([edge], layout, nodes).views[0].points.map((p) => [p.x, p.y]);
 
@@ -189,41 +191,13 @@ describe("edgeViews: 올린 상자 안으로 들어가는 경로", () => {
   });
 });
 
-describe("roundedPath, midpoint", () => {
-  const points = [
-    { x: 0, y: 0 },
-    { x: 10, y: 0 },
-    { x: 10, y: 10 },
-  ];
-
+describe("roundedPath", () => {
   it("꺾이는 점에 원호를 넣는다", () => {
-    expect(roundedPath(points)).toBe("M0,0 L6,0 Q10,0 10,4 L10,10");
-  });
-
-  it("경로 길이의 절반이 되는 점을 찾는다", () => {
-    expect(midpoint(points)).toEqual({ x: 10, y: 0 });
+    expect(roundedPath([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }])).toBe("M0,0 L6,0 Q10,0 10,4 L10,10");
   });
 });
 
-describe("letteredBoxes, weightPoint", () => {
-  const line = [
-    { x: 0, y: 0 },
-    { x: 200, y: 0 },
-  ];
-
-  it("숫자 이름표는 글자를 그리는 칸에 닿지 않으면 경로 길이의 절반이 되는 점에 단다", () => {
-    expect(weightPoint(line, 2, [{ x: 0, y: 40, width: 200, height: 20 }])).toEqual({ x: 100, y: 0 });
-  });
-
-  it("절반이 되는 점이 칸에 닿으면 경로를 따라 칸에 닿지 않는 가장 가까운 점으로 옮긴다", () => {
-    const at = weightPoint(line, 2, [{ x: 80, y: -10, width: 60, height: 20 }]);
-    expect(at).toEqual({ x: 68, y: 0 });
-  });
-
-  it("칸에 닿지 않는 점이 없으면 절반이 되는 점에 단다", () => {
-    expect(weightPoint(line, 2, [{ x: -50, y: -10, width: 300, height: 20 }])).toEqual({ x: 100, y: 0 });
-  });
-
+describe("letteredBoxes", () => {
   it("접힌 파일 상자는 배지가 나가는 폭과 상자 아래 함수 수 글자까지, 펼친 파일 상자와 펼친 폴더 영역은 머리 줄만 글자를 그리는 칸이다", () => {
     const { shown: visible } = scene("main:run");
     const layout = lineLayout(visible);
@@ -260,7 +234,7 @@ describe("edgeViews: 강조하는 경로", () => {
       ["flow.build:Engine", box(100, 50, 200, 66)],
       ["flow.build:Engine.__init__", box(116, 82, 90, 18)],
     ]);
-    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes: new Map() }, routeNodes).views;
+    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes: new Map(), lane: 12 }, routeNodes).views;
     expect(view.key).toBe("step|flow.build:Engine|flow.build:Engine.__init__");
     expect(view.points).toEqual([
       { x: 100, y: 91 },
@@ -281,7 +255,7 @@ describe("edgeViews: 강조하는 경로", () => {
       { x: 300, y: 60 },
     ];
     const routes = new Map([["agg|flow.build:Child|flow.build:Base", trunk]]);
-    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes }, routeNodes).views;
+    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes, lane: 12 }, routeNodes).views;
     expect(view.route).toBe("overridden");
     expect(view.points).toEqual([
       { x: 316, y: 49 },
@@ -296,7 +270,7 @@ describe("edgeViews: 강조하는 경로", () => {
 describe("trunkViews", () => {
   const view = (key: string, target: string, points: [number, number][], more: Partial<EdgeView> = {}): EdgeView => {
     const path = points.map(([x, y]) => ({ x, y }));
-    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, weight: null, sites: 1, route: null, joins: true, below: false, branch: path, trunk: null, ...more };
+    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, sites: 1, route: null, joins: true, below: false, into: null, branch: path, trunk: null, ...more };
   };
   /** 세 선이 x=100의 세로선에 차례로 붙어 (120, 50)으로 들어간다. c는 아래에서 올라온다. */
   const a = view("a", "t", [[0, 0], [100, 0], [100, 50], [120, 50]]);
@@ -304,7 +278,7 @@ describe("trunkViews", () => {
   const c = view("c", "t", [[0, 90], [100, 90], [100, 50], [120, 50]], { sites: 3, group: "use" });
 
   it("도착이 같은 선이 끝에서부터 함께 지나는 구간을 줄기로 떼고 선마다 가지를 남긴다", () => {
-    const { views, trunks } = trunkViews([a, b, c]);
+    const { views, trunks } = trunkViews([a, b, c], []);
     expect(trunks).toHaveLength(1);
     const [trunk] = trunks;
     expect(trunk).toMatchObject({ key: "trunk|t|0", target: "t", keys: ["a", "b", "c"], sources: 3, sites: 5, group: "run", route: false });
@@ -321,12 +295,12 @@ describe("trunkViews", () => {
 
   it("도착 노드 앞에서 만나기 전에 먼저 모인 선은 줄기에 붙는 묶음 하나가 된다", () => {
     const d = view("d", "t", [[0, 80], [50, 80], [50, 90], [100, 90], [100, 50], [120, 50]]);
-    const { trunks } = trunkViews([a, c, d]);
+    const { trunks } = trunkViews([a, c, d], []);
     expect(trunks[0].pieces).toEqual([
       [{ x: 50, y: 90 }, { x: 100, y: 90 }, { x: 100, y: 50 }, { x: 120, y: 50 }],
     ]);
     const e = view("e", "t", [[0, 10], [100, 10], [100, 50], [120, 50]]);
-    expect(trunkViews([a, c, d, e]).trunks[0].pieces[1]).toEqual([{ x: 100, y: 10 }, { x: 100, y: 50 }]);
+    expect(trunkViews([a, c, d, e], []).trunks[0].pieces[1]).toEqual([{ x: 100, y: 10 }, { x: 100, y: 50 }]);
     expect(trunks[0].joints).toContainEqual({ x: 50, y: 90 });
     expect(trunks[0].joints).toContainEqual({ x: 100, y: 50 });
   });
@@ -335,20 +309,52 @@ describe("trunkViews", () => {
     const other = view("o", "u", [[0, 0], [100, 0], [100, 50], [120, 50]]);
     const apart = view("p", "t", [[300, 50], [200, 50]]);
     const below = view("q", "t", [[0, 20], [100, 20], [100, 50], [120, 50]], { joins: false });
-    const { views, trunks } = trunkViews([a, other, apart, below]);
+    const { views, trunks } = trunkViews([a, other, apart, below], []);
     expect(trunks).toEqual([]);
     expect(views.every((v) => v.trunk === null && v.branch === v.points)).toBe(true);
   });
 
   it("배치 밖에서 정한 경로가 마지막 가로 구간만 겹쳐도 같은 줄기에 든다", () => {
     const side = view("s", "t", [[0, 200], [110, 200], [110, 50], [120, 50]]);
-    const { views, trunks } = trunkViews([a, side]);
+    const { views, trunks } = trunkViews([a, side], []);
     expect(trunks[0].pieces).toEqual([[{ x: 110, y: 50 }, { x: 120, y: 50 }]]);
     expect(views.find((v) => v.key === "a")!.branch.at(-1)).toEqual({ x: 110, y: 50 });
   });
 
-  it("합친 선의 수는 도착 노드 앞 줄기 위에 적는다", () => {
-    expect(trunkViews([a, b]).trunks[0].at).toEqual({ x: 108, y: 42 });
+  it("줄기는 도착 노드로 들어오는 합계를 화살촉 앞의 마지막 구간 위에 적는다", () => {
+    // 끝점 (120, 50)에서 화살촉 13, 둘레 2, 한 자리 수의 폭 11의 절반을 띄운다.
+    expect(trunkViews([a, c], []).trunks[0]).toMatchObject({ sites: 4, at: { x: 120 - 13 - 2 - 5.5, y: 50 } });
+  });
+
+  it("줄기에 들지 않은 선은 sites 수가 2 이상이면 그 선이 도착 노드 앞에 수를 적는다", () => {
+    const { views } = trunkViews([c, view("o", "u", [[0, 0], [100, 0]])], []);
+    expect(views.map((v) => v.into)).toEqual([{ x: 120 - 13 - 2 - 5.5, y: 50 }, null]);
+  });
+
+  it("활성화된 선의 수는 그 선만 지나는 가장 긴 구간의 가운데에 적고, 줄기에 들지 않은 선과 sites 수가 1인 선은 적지 않는다", () => {
+    const lines = trunkViews([a, c], []);
+    const [first, third] = lines.views;
+    expect([...ownNumbers(lines, lines.views)]).toEqual([["c", { x: 50, y: 90 }]]);
+    expect(third.branch).toEqual([{ x: 0, y: 90 }, { x: 100, y: 90 }, { x: 100, y: 50 }]);
+    expect(first.sites).toBe(1);
+    expect(ownNumbers(trunkViews([c], []), [c]).size).toBe(0);
+  });
+
+  it("활성화된 선의 수는 글자를 그리는 칸, 다른 선, 먼저 놓은 수와 겹치지 않는 가장 가까운 점으로 옮기고 없으면 다음으로 긴 구간에서 찾는다", () => {
+    const wide = { ...c, sites: 3 };
+    const crossing = view("x", "v", [[50, 0], [50, 200]]);
+    const lines = trunkViews([a, wide, crossing], []);
+    // 가운데 (50, 90)을 다른 선이 지나므로 구간을 따라 그 선에서 벗어난 첫 점으로 옮긴다.
+    const at = ownNumbers(lines, [lines.views[1]]).get("c")!;
+    expect(at.y).toBe(90);
+    expect(Math.abs(at.x - 50)).toBeGreaterThanOrEqual(5.5 + 1);
+    expect(Math.abs(at.x - 50)).toBeLessThanOrEqual(12);
+    const boxed = trunkViews([a, wide], [{ x: -10, y: 80, width: 200, height: 20 }]);
+    expect(ownNumbers(boxed, [boxed.views[1]]).get("c")).toEqual({ x: 100, y: 70 });
+    const second = { ...view("d", "t", [[0, 60], [100, 60], [100, 50], [120, 50]]), sites: 5 };
+    const both = trunkViews([wide, second], []);
+    const spots = ownNumbers(both, both.views);
+    expect(spots.size).toBe(2);
   });
 
   it("줄기의 진하기는 따로 그리는 선을 뺀 가지 가운데 가장 진한 값이다", () => {

@@ -9,9 +9,12 @@ import {
   inPort,
   joined,
   labelOf,
+  laneOf,
   LEAF_HEIGHT,
   LOC_GAP,
+  NODE_GAP,
   ordered,
+  spacingOptions,
   titleOf,
   type Layout,
   type Measure,
@@ -40,15 +43,23 @@ const MORE = 16;
 /** + 버튼과 노드 사이의 폭. 호출하는 쪽은 + 버튼이 원 왼쪽에 있으므로 원 왼쪽 위로 나가는 배지와 닿지 않게 원과 이름표 사이만큼 띄운다. */
 const MORE_GAP = { caller: CIRCLE_GAP, callee: 4, center: 0 } as const;
 
-const CALL_OPTIONS = {
-  "elk.algorithm": "layered",
-  "elk.direction": "RIGHT",
-  "elk.edgeRouting": "ORTHOGONAL",
-  ...arrangeOptions(),
-  "elk.spacing.nodeNode": "24",
-  "elk.layered.spacing.nodeNodeBetweenLayers": "48",
-  "elk.padding": "[top=0,left=0,bottom=0,right=0]",
-};
+/** 함수 시점 뷰의 선은 실행 선 하나씩이어서 도착 노드 앞에 적는 합계가 한 화면의 선 수를 넘지 않는다. */
+export function callLane(calls: Calls): number {
+  return laneOf(String(Math.max(1, calls.edges.reduce((sum, edge) => sum + edge.sites.length, 0))).length);
+}
+
+function callOptions(lane: number): Record<string, string> {
+  return {
+    "elk.algorithm": "layered",
+    "elk.direction": "RIGHT",
+    "elk.edgeRouting": "ORTHOGONAL",
+    ...arrangeOptions(),
+    "elk.spacing.nodeNode": String(NODE_GAP),
+    "elk.layered.spacing.nodeNodeBetweenLayers": "48",
+    ...spacingOptions(lane),
+    "elk.padding": "[top=0,left=0,bottom=0,right=0]",
+  };
+}
 
 function firstLine(edge: AtlasEdge): number {
   return Math.min(...edge.sites.map((site) => site.line));
@@ -153,7 +164,7 @@ export function callSize(calls: Calls, nodes: Map<string, AtlasNode>, node: Atla
 export function callElk(calls: Calls, size: (id: string) => Size): ElkNode {
   return {
     id: "calls",
-    layoutOptions: CALL_OPTIONS,
+    layoutOptions: callOptions(callLane(calls)),
     children: ordered(calls.nodes.map((id) => joined({ id, ...size(id) }))),
     edges: calls.edges.map((edge) => ({ id: edgeKey(edge), sources: [edge.source], targets: [inPort(edge.target)] })),
   };
@@ -176,7 +187,7 @@ export function callEdges(calls: Calls, center: string, layout: Layout): Lines {
       points,
       tone: edge.source === center || edge.target === center ? "strong" : "muted",
       opacity: EDGE_OPACITY.full,
-      weight: null,
+      into: null,
       sites: edge.sites.length,
       route: null,
       joins: true,
@@ -185,5 +196,5 @@ export function callEdges(calls: Calls, center: string, layout: Layout): Lines {
       trunk: null,
     });
   }
-  return trunkViews(views);
+  return trunkViews(views, [...layout.boxes.values()]);
 }

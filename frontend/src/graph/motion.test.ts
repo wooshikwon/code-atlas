@@ -10,6 +10,7 @@ function flat(boxes: Record<string, Box>): Layout {
     sizes: new Map(entries.map(([id, b]) => [id, { width: b.width, height: b.height }])),
     boxes: new Map(entries),
     routes: new Map(),
+    lane: 12,
   };
 }
 

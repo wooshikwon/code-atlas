@@ -38,7 +38,7 @@ import type { Lit } from "./route";
 import { drawn, type EdgeKey } from "./scope";
 import { nodeTip, packTip, tipOf, trunkTip } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
-import { edgeViews, parentFirst, type Lines } from "./view";
+import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
 import { anchorOn, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, type Shown } from "./visible";
 
@@ -405,7 +405,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     return overlay === "cycles" ? cycleLines(scene.graph, scene.shown, scene.flow, scene.lit, edges, loops) : { edges, keys: new Set<EdgeKey>() };
   }, [scene, loops, overlay, hovered]);
   const views = useMemo(
-    (): Lines => (scene === null || index === null ? { views: [], trunks: [] } : edgeViews(lines.edges, scene.layout, index.nodes)),
+    (): Lines => (scene === null || index === null ? NO_LINES : edgeViews(lines.edges, scene.layout, index.nodes)),
     [scene, index, lines],
   );
   /**

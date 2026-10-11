@@ -2,13 +2,18 @@
 import type { AtlasNode, EdgeGroup, Graph } from "../api/types";
 import { siblings } from "./columns";
 import {
+  ARROW_LENGTH,
   BADGE_HEIGHT,
   BADGE_OVERHANG,
   belowRoute,
   CAPTION_HEIGHT,
   HEADER,
   insideRoute,
+  JOINT_RADIUS,
   NODE_GAP,
+  NUMBER_HEIGHT,
+  NUMBER_PAD,
+  numberWidth,
   PAD,
   REGION_HEAD,
   sideRoute,
@@ -27,8 +32,12 @@ export type EdgeView = {
   points: Point[];
   tone: Tone;
   opacity: number;
-  /** 무게 2 이상인 집계 선만 숫자 이름표를 단다. at은 숫자의 가운데 점이다. */
-  weight: { count: number; at: Point } | null;
+  /**
+   * 줄기에 들지 않고 따로 들어가는 선이 도착 노드 앞에 적는 들어오는 합계. 그 선 하나의 sites 수이고 가운데 점이 at이다.
+   * sites 수가 1 이하이거나 줄기에 든 선이면 null이다(줄기가 합계를 적는다).
+   */
+  into: Point | null;
+
   /** 합친 선의 sites 수 합 */
   sites: number;
   /** 강조하는 경로의 걸음을 그리는 선이면 그 걸음의 종류 */
@@ -58,9 +67,9 @@ export type TrunkView = {
   keys: EdgeKey[];
   /** 줄기에 든 선을 내보내는 노드 수 */
   sources: number;
-  /** 줄기에 든 선의 sites 수 합 */
+  /** 줄기에 든 선의 sites 수 합. 도착 노드로 들어오는 합계로 화살촉 앞에 적는다. */
   sites: number;
-  /** 합친 선의 수를 적는 점 */
+  /** 합계를 적는 가운데 점 */
   at: Point;
   /** 줄기에 든 선의 분류 가운데 집계 규칙의 순서(실행, 사용, 계승)로 가장 앞선 것 */
   group: EdgeGroup;
@@ -68,11 +77,23 @@ export type TrunkView = {
   route: boolean;
 };
 
+/** 숫자가 닿으면 안 되는 곳 */
+interface Blocked {
+  /** 노드의 글자를 그리는 칸, 합류점, 도착 노드 앞의 들어오는 합계 */
+  solid: Box[];
+  /** 선분의 사각형과 그 선분을 그리는 선이나 줄기의 키, 선이면 그 출발 노드. 높이 `ROW`의 줄마다 그 줄에 걸친 선분을 모은다. */
+  rows: Map<number, { box: Box; owner: EdgeKey; source: string | null }[]>;
+}
+
 /** 그릴 선과 그 선이 모여 만든 줄기 */
 export interface Lines {
   views: EdgeView[];
   trunks: TrunkView[];
+  blocked: Blocked;
 }
+
+/** 선이 하나도 없는 화면 */
+export const NO_LINES: Lines = { views: [], trunks: [], blocked: { solid: [], rows: new Map() } };
 
 /** 부모가 자식보다 앞에 오는 순서. 같은 층의 바탕 요소는 이 순서로 그리므로 부모 위에 자식이 놓인다. */
 export function parentFirst(graph: Graph, visible: Set<string>): AtlasNode[] {
@@ -90,8 +111,6 @@ export function parentFirst(graph: Graph, visible: Set<string>): AtlasNode[] {
   const depths = new Map(nodes.map((n) => [n.id, depth(n.id)]));
   return nodes.sort((a, b) => depths.get(a.id)! - depths.get(b.id)!);
 }
-
-const JOG = 12;
 
 /**
  * 배치에 든 상자의 포함 관계와, 선이 지나면 안 되는 사각형. 선은 자기 출발·도착과 그 조상이 아닌 상자의 안을 지나지 않는다.
@@ -141,10 +160,11 @@ function chainOf(rooms: Rooms, layout: Layout, top: string, id: string): string[
  * 1이면 오른쪽 변으로 들어간다. 상자를 한 겹 들어갈 때마다 그 상자 안에서 다음 상자의 열 앞 통로까지 가는 가로 줄을 고른다.
  * 가로 줄의 높이는 끝 상자의 가운데 높이, 형제 상자의 위아래 간격의 가운데, 상자의 아래 여백 가운데 형제 상자를 지나지 않는 것으로
  * 끝 상자의 가운데 높이에 가장 가까운 값이다. 열 앞 통로는 왼쪽이면 그 상자의 왼쪽 변에서, 오른쪽이면 그 열에서 가장 넓은 상자의
- * 오른쪽 변에서 `JOG`만큼 떨어진 세로 줄이고, 열 사이 간격 안에 있어 상자를 지나지 않는다. 지나지 않는 가로 줄이 없는 겹이 있으면
+ * 오른쪽 변에서 옆 통로의 거리(`Layout.lane`)만큼 떨어진 세로 줄이고, 열 사이 간격 안에 있어 상자를 지나지 않는다. 지나지 않는 가로 줄이 없는 겹이 있으면
  * null이다.
  */
 function legs(rooms: Rooms, layout: Layout, chain: string[], side: -1 | 1, outer: number): Point[] | null {
+  const jog = layout.lane;
   const end = layout.boxes.get(chain.at(-1)!)!;
   const aim = end.y + end.height / 2;
   const points: Point[] = [];
@@ -154,7 +174,7 @@ function legs(rooms: Rooms, layout: Layout, chain: string[], side: -1 | 1, outer
     const goal = layout.boxes.get(chain[i + 1])!;
     const blocks = (rooms.kids.get(chain[i]) ?? []).map(rooms.block);
     const column = blocks.filter((b) => Math.abs(b.x - goal.x) < SAME);
-    const lane = side < 0 ? goal.x - JOG : Math.max(...column.map((b) => b.x + b.width)) + JOG;
+    const lane = side < 0 ? goal.x - jog : Math.max(...column.map((b) => b.x + b.width)) + jog;
     const [left, right] = [Math.min(x, lane), Math.max(x, lane)];
     const top = Math.min(...blocks.map((b) => b.y));
     const free = (y: number) =>
@@ -204,7 +224,7 @@ function alongRoute(trunk: Point[], source: string[] | null, target: string[] | 
   /**
    * 올린 상자 chain[0]에서 원래 노드까지의 길. 배치 경로에서 올린 상자에 가장 가까운 세로 줄(x가 bend)을 원래 노드 쪽 가로 줄의
    * 높이까지 늘여 잇는다. 늘인 뒤의 가로 줄이 올린 상자의 형제 상자를 지나면, 배치 경로를 올린 상자의 변(edge)까지 그대로 따라간 뒤
-   * 변에서 `JOG`만큼 떨어진 옆 통로에서 꺾는다. 배치는 선의 세로 줄을 상자에서 이보다 멀리 두므로 이 통로는 비어 있다.
+   * 변에서 옆 통로의 거리만큼 떨어진 세로 줄에서 꺾는다. 배치는 선의 세로 줄을 상자에서 이보다 멀리 두므로 이 통로는 비어 있다.
    * 올린 상자에서 바깥쪽으로 나가는 순서의 점을 낸다.
    */
   const side = (chain: string[], dir: -1 | 1, edge: Point, bend: number): Point[] => {
@@ -219,11 +239,11 @@ function alongRoute(trunk: Point[], source: string[] | null, target: string[] | 
     if (!around.some((b) => y > b.y - 1 && y < b.y + b.height + 1 && right > b.x && left < b.x + b.width)) {
       return reach;
     }
-    const jog = edge.x + dir * JOG;
-    return [{ x: bend, y: edge.y }, { x: jog, y: edge.y }, ...inner(jog)];
+    const lane = edge.x + dir * layout.lane;
+    return [{ x: bend, y: edge.y }, { x: lane, y: edge.y }, ...inner(lane)];
   };
   /** 올린 상자 사이를 곧게 잇는 배치 경로에는 세로 줄이 없으므로 도착 쪽 상자 앞에 하나를 둔다. */
-  const straight = trunk[1].x + (forward ? -JOG : JOG);
+  const straight = trunk[1].x + (forward ? -layout.lane : layout.lane);
   const [leave, enter] = last === 1 ? [straight, straight] : [trunk[1].x, trunk[last - 1].x];
   const head = source === null ? [trunk[0], { x: leave, y: trunk[0].y }] : side(source, forward ? 1 : -1, trunk[0], leave).reverse();
   const tail = target === null ? [{ x: enter, y: trunk[last].y }, trunk[last]] : side(target, arriving ? -1 : 1, trunk[last], enter);
@@ -231,7 +251,7 @@ function alongRoute(trunk: Point[], source: string[] | null, target: string[] | 
 }
 
 /**
- * 그릴 선마다 경로를 정하고 도착이 같은 선을 줄기로 묶는다(`trunkViews`). 집계 선의 숫자는 가지 구간에 적는다. 배치가 낸 경로를 먼저 쓴다. 없으면 함수 안 import만 합친 선은 `belowRoute`로,
+ * 그릴 선마다 경로를 정하고 도착이 같은 선을 줄기로 묶는다(`trunkViews`). 배치가 낸 경로를 먼저 쓴다. 없으면 함수 안 import만 합친 선은 `belowRoute`로,
  * 한쪽이 다른 쪽을 품은 두 노드를 잇는 선은 `insideRoute`로, 형제가 아닌 두 노드를 잇는 선은 두 노드를 형제로 올린
  * 상자 사이의 배치 경로를 따라가는 경로로 만들고, 따라갈 경로가 없으면 `sideRoute`로 만든다. 오버라이드 이음은 오버라이드 선을
  * 거꾸로 가므로 올린 상자 사이에 반대 방향 배치 경로만 있으면 그 경로를 뒤집어 따라간다. 배치에 양 끝 상자가 없는 선은 뺀다.
@@ -263,11 +283,10 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
             rooms,
             layout,
           );
-    return { points: along ?? sideRoute(source, target), joins };
+    return { points: along ?? sideRoute(source, target, layout.lane), joins };
   };
 
   const rooms = roomsOf(layout, nodes);
-  const lettered = letteredBoxes(layout, nodes);
   const views: EdgeView[] = [];
   for (const edge of edges) {
     const source = layout.boxes.get(edge.source);
@@ -276,7 +295,6 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       continue;
     }
     const { points, joins, below = false } = route(edge, source, target);
-    const counted = edge.key.startsWith("agg|") && edge.weight >= 2;
     views.push({
       key: edge.key,
       source: edge.source,
@@ -285,7 +303,7 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       points,
       tone: edge.tone,
       opacity: edge.opacity,
-      weight: counted ? { count: edge.weight, at: points[0] } : null,
+      into: null,
       sites: edge.weight,
       route: edge.route,
       joins,
@@ -294,13 +312,7 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       trunk: null,
     });
   }
-  const lines = trunkViews(views);
-  for (const view of lines.views) {
-    if (view.weight !== null) {
-      view.weight.at = weightPoint(view.branch, String(view.weight.count).length, lettered);
-    }
-  }
-  return lines;
+  return trunkViews(views, letteredBoxes(layout, nodes));
 }
 
 /** 줄기 위에 출발부터 도착까지의 경로를 한 번 더 그리는 선: 마우스를 올린 선, 순환 선, 경로의 걸음, 고른 노드에 닿는 선 */
@@ -373,16 +385,121 @@ export function trunkShade(members: EdgeView[], apart: (view: EdgeView) => boole
 }
 
 const GROUP_ORDER: EdgeGroup[] = ["run", "use", "derive"];
-/** 합친 선의 수를 줄기 위로 띄우는 높이와 도착 노드에서 띄우는 폭. 화살촉의 길이 9px와 숫자 높이의 절반을 비운다. */
-const COUNT_LIFT = 8;
-const COUNT_BACK = 12;
+
+/** 가운데 점이 at인 count가 차지하는 사각형 */
+function numberBox(at: Point, count: number): Box {
+  const width = numberWidth(String(count).length);
+  return { x: at.x - width / 2, y: at.y - NUMBER_HEIGHT / 2, width, height: NUMBER_HEIGHT };
+}
+
+/**
+ * 도착 노드로 들어오는 합계 count를 적는 가운데 점. 늘 보이는 수는 이 합계 하나이고, 경로의 마지막 구간 위에서 끝점으로부터
+ * clear(화살촉의 길이)와 숫자 둘레의 폭만큼 띄운 화살촉 앞에 적는다.
+ */
+function beforeEnd(points: Point[], clear: number, count: number): Point {
+  const [before, end] = points.slice(-2);
+  const size = before.y === end.y ? numberWidth(String(count).length) : NUMBER_HEIGHT;
+  return toward(end, before, clear + NUMBER_PAD + size / 2);
+}
+
+/** 선분을 찾는 격자의 줄 높이 */
+const ROW = 64;
+/** 숫자를 놓을 곳을 찾아 구간을 따라 옮기는 걸음 */
+const NUMBER_STEP = 4;
+/** 꺾이는 모서리의 둥근 반지름. `roundedPath`의 기본값이다. */
+const CORNER = 4;
+
+function overlap(a: Box, b: Box): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+/** 선과 줄기가 그리는 선분, 노드의 글자를 그리는 칸 lettered, 합류점, 들어오는 합계를 숫자가 닿으면 안 되는 곳으로 모은다. */
+function blockedOf(views: EdgeView[], trunks: TrunkView[], lettered: Box[]): Blocked {
+  const solid = [...lettered];
+  const rows: Blocked["rows"] = new Map();
+  const draw = (points: Point[], owner: EdgeKey, source: string | null) => {
+    for (let i = 1; i < points.length; i++) {
+      const [a, b] = [points[i - 1], points[i]];
+      const box = { x: Math.min(a.x, b.x) - 1, y: Math.min(a.y, b.y) - 1, width: Math.abs(a.x - b.x) + 2, height: Math.abs(a.y - b.y) + 2 };
+      for (let row = Math.floor(box.y / ROW); row <= Math.floor((box.y + box.height) / ROW); row++) {
+        rows.set(row, [...(rows.get(row) ?? []), { box, owner, source }]);
+      }
+    }
+  };
+  for (const view of views) {
+    draw(view.branch, view.key, view.source);
+    if (view.into !== null) {
+      solid.push(numberBox(view.into, view.sites));
+    }
+  }
+  for (const trunk of trunks) {
+    trunk.pieces.forEach((piece) => draw(piece, trunk.key, null));
+    solid.push(numberBox(trunk.at, trunk.sites));
+    solid.push(...trunk.joints.map((joint) => ({ x: joint.x - JOINT_RADIUS, y: joint.y - JOINT_RADIUS, width: 2 * JOINT_RADIUS, height: 2 * JOINT_RADIUS })));
+  }
+  return { solid, rows };
+}
+
+/**
+ * 활성화된 선(마우스를 올린 선, 고른 노드에 닿는 선, 경로의 걸음) active마다 그 선의 sites 수를 적는 가운데 점.
+ * 줄기에 든 선만 적는다(따로 들어가는 선은 도착 노드 앞의 합계가 그 선의 수다). 수는 그 선만 지나는 곧은 구간 위에 둔다. 가장 긴
+ * 구간의 가운데에서 시작해 구간을 따라 양쪽으로 옮기며, 노드의 글자를 그리는 칸·합류점·다른 숫자·다른 선과 겹치지 않고 꺾이는
+ * 모서리에 닿지 않는 첫 점을 고른다. 그 구간에 없으면 다음으로 긴 구간에서 찾는다. 그 선만 지나는 구간에 놓을 곳이 없으면 같은
+ * 노드에서 나가는 선과 함께 지나는 구간까지 넣어 다시 찾는다. sites 수가 1 이하이거나 그래도 놓을 곳이 없으면 적지 않는다.
+ */
+export function ownNumbers(lines: Lines, active: EdgeView[]): Map<EdgeKey, Point> {
+  const placed: Box[] = [];
+  /** shared는 box가 놓일 선 view와 같은 노드에서 나가는 선을 지나도 되는지다. */
+  const free = (box: Box, view: EdgeView, shared: boolean) => {
+    if (lines.blocked.solid.some((other) => overlap(box, other)) || placed.some((other) => overlap(box, other))) {
+      return false;
+    }
+    for (let row = Math.floor(box.y / ROW); row <= Math.floor((box.y + box.height) / ROW); row++) {
+      if ((lines.blocked.rows.get(row) ?? []).some((line) => line.owner !== view.key && !(shared && line.source === view.source) && overlap(box, line.box))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  const result = new Map<EdgeKey, Point>();
+  for (const view of active) {
+    if (view.trunk === null || view.sites < 2) {
+      continue;
+    }
+    const size = numberBox(view.points[0], view.sites);
+    const segments = view.branch.slice(1).map((b, i) => ({ a: view.branch[i], b, length: distance(view.branch[i], b) }));
+    segments.sort((p, q) => q.length - p.length);
+    const spot = (shared: boolean): Point | null => {
+      for (const { a, b, length } of segments) {
+        const margin = (a.y === b.y ? size.width : size.height) / 2 + CORNER;
+        for (let shift = 0; shift <= length / 2 - margin; shift += NUMBER_STEP) {
+          for (const along of shift === 0 ? [length / 2] : [length / 2 - shift, length / 2 + shift]) {
+            const at = toward(a, b, along);
+            if (free(numberBox(at, view.sites), view, shared)) {
+              return at;
+            }
+          }
+        }
+      }
+      return null;
+    };
+    const at = spot(false) ?? spot(true);
+    if (at !== null) {
+      placed.push(numberBox(at, view.sites));
+      result.set(view.key, at);
+    }
+  }
+  return result;
+}
 
 /**
  * 도착 노드가 같은 선을 묶어, 경로의 끝에서부터 다른 선과 함께 지나는 구간을 줄기로 떼고 선마다 줄기 앞까지의 가지를 남긴다.
  * ELK가 같은 포트로 합친 경로와 ELK 밖에서 정한 경로(`alongRoute`, `sideRoute`)를 같은 방법으로 다룬다. `joins`가 거짓인 선은 묶지 않고,
  * 다른 선과 함께 지나는 구간이 없는 선은 줄기에 들지 않는다. 한 노드로 들어오는 선이 서로 다른 변에서 따로 모이면 줄기도 따로 낸다.
+ * 도착 노드 앞의 들어오는 합계는 줄기에 든 선이면 줄기가, 따로 들어가는 선이면 그 선이 적는다. 두 노드 아래로 돌아가는 함수 안
+ * import 선은 적지 않는다. lettered는 노드의 글자를 그리는 칸이다.
  */
-export function trunkViews(views: EdgeView[]): Lines {
+export function trunkViews(views: EdgeView[], lettered: Box[]): Lines {
   const groups = new Map<string, EdgeView[]>();
   for (const view of views) {
     if (view.joins && view.points.length >= 2) {
@@ -429,8 +546,6 @@ export function trunkViews(views: EdgeView[]): Lines {
         }
         joined.set(view.key, { branch: stretch(view.points, total, reach), trunk: key });
       });
-      const [before, end] = pieces[0].slice(-2);
-      const back = toward(end, before, Math.min(COUNT_BACK, distance(end, before)));
       trunks.push({
         key,
         target,
@@ -439,13 +554,18 @@ export function trunkViews(views: EdgeView[]): Lines {
         keys: tree.map((m) => m.view.key),
         sources: new Set(tree.map((m) => m.view.source)).size,
         sites: tree.reduce((sum, m) => sum + m.view.sites, 0),
-        at: before.y === end.y ? { x: back.x, y: back.y - COUNT_LIFT } : { x: back.x + COUNT_LIFT, y: back.y },
+        at: beforeEnd(pieces[0], ARROW_LENGTH, tree.reduce((sum, m) => sum + m.view.sites, 0)),
         group: tree.map((m) => m.view.group).reduce((a, b) => (GROUP_ORDER.indexOf(b) < GROUP_ORDER.indexOf(a) ? b : a)),
         route: tree.some((m) => m.view.route !== null),
       });
     });
   }
-  return { views: views.map((view) => ({ ...view, ...joined.get(view.key) })), trunks };
+  const parted = views.map((view) => {
+    const part = joined.get(view.key);
+    const counted = view.sites >= 2 && !view.below;
+    return part === undefined ? { ...view, into: counted ? beforeEnd(view.points, ARROW_LENGTH, view.sites) : null } : { ...view, ...part };
+  });
+  return { views: parted, trunks, blocked: blockedOf(parted, trunks, lettered) };
 }
 
 /** 꺾이는 점마다 반지름 radius 원호를 넣은 SVG 경로. 선분이 짧으면 반지름을 선분 절반으로 줄인다. */
@@ -484,11 +604,6 @@ function lengthOf(points: Point[]): number {
   return points.slice(1).reduce((sum, p, i) => sum + distance(points[i], p), 0);
 }
 
-/** 경로 길이의 절반이 되는 점 */
-export function midpoint(points: Point[]): Point {
-  return along(points, lengthOf(points) / 2);
-}
-
 /**
  * 글자를 그리는 칸. 자식을 그리지 않는 노드는 상자에 배지가 나가는 폭을 더한 칸이고 접힌 파일 상자는 상자 아래
  * 미사용 후보 수를 적는 줄까지 더한다. 자식을 그리는 파일 상자·클래스 노드와 펼친 폴더 영역은 머리 줄만이다.
@@ -510,30 +625,6 @@ export function letteredBoxes(layout: Layout, nodes: Map<string, AtlasNode>): Bo
     }
   }
   return result;
-}
-
-const DIGIT_WIDTH = 7;
-const WEIGHT_HEIGHT = 14;
-const WEIGHT_STEP = 4;
-
-/**
- * 집계 선 숫자 이름표의 가운데 점. 경로 길이의 절반이 되는 점에서 시작해 경로를 따라 양쪽으로 4px씩 옮기며
- * digits 자리 숫자가 lettered의 어느 칸에도 닿지 않는 첫 점을 고른다. 그런 점이 없으면 절반이 되는 점이다.
- */
-export function weightPoint(points: Point[], digits: number, lettered: Box[]): Point {
-  const total = lengthOf(points);
-  const half = { x: (digits * DIGIT_WIDTH) / 2 + 2, y: WEIGHT_HEIGHT / 2 };
-  const free = (at: Point) =>
-    !lettered.some((b) => at.x + half.x > b.x && at.x - half.x < b.x + b.width && at.y + half.y > b.y && at.y - half.y < b.y + b.height);
-  for (let shift = 0; shift <= total / 2; shift += WEIGHT_STEP) {
-    for (const length of shift === 0 ? [total / 2] : [total / 2 - shift, total / 2 + shift]) {
-      const at = along(points, length);
-      if (free(at)) {
-        return at;
-      }
-    }
-  }
-  return midpoint(points);
 }
 
 function distance(a: Point, b: Point): number {

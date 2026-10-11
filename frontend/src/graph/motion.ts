@@ -18,7 +18,7 @@ export function tween(from: Layout, to: Layout, t: number): Layout {
   }
   const k = easeInOut(Math.max(0, t));
   const mix = (a: number, b: number) => a + (b - a) * k;
-  const result: Layout = { positions: new Map(), sizes: new Map(), boxes: new Map(), routes: to.routes };
+  const result: Layout = { positions: new Map(), sizes: new Map(), boxes: new Map(), routes: to.routes, lane: to.lane };
   for (const [id, box] of to.boxes) {
     const position = to.positions.get(id)!;
     const before = from.boxes.get(id);
