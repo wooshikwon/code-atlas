@@ -1,6 +1,6 @@
 // 2단계 화면을 시나리오마다 조작해 확인 항목의 통과 여부를 한 줄씩 출력하고 스크린샷을 남긴다.
 // 사용: node scripts/shots.mjs [주소] [--only 이름,이름] [--with-summary]
-// 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름과 수는 sync-engine을 연 서버가 기준이다.
+// 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름은 sync-engine을 연 서버가 기준이고 노드 수·선 수·줄 범위는 서버 응답에서 읽는다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
 // summary 시나리오는 Claude Code 구독 사용량을 쓰므로 --only로 지정하거나 --with-summary를 줬을 때만 돈다.
 // 다른 시나리오가 보내는 POST /api/summary는 서버로 보내지 않고 붙잡아 두었다가 버린다.
@@ -44,6 +44,29 @@ const near = (a, b, tolerance = 1) => Math.abs(a - b) <= tolerance;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const node = (id) => `.react-flow__node[data-id="${id}"]`;
 const api = async (path) => (await fetch(new URL(path, url))).json();
+
+// ── 서버 응답에서 읽는 기대값 ─────────────────────────────────────
+
+/** 파일 상자 id의 파일에 정의된 클래스·함수·메서드 노드 */
+function definedIn(graph, file) {
+  const path = graph.nodes.find((n) => n.id === file)?.path;
+  return graph.nodes.filter((n) => n.path === path && n.id !== file);
+}
+
+/** 토글이 꺼진 화면에서 노드에 닿는 선 수. 테스트 코드와 외부 모듈로 가는 선은 세지 않는다. */
+function touchingOf(graph, id) {
+  const drawn = new Set(graph.nodes.filter((n) => !n.test && n.kind !== "external").map((n) => n.id));
+  return {
+    out: graph.edges.filter((e) => e.source === id && drawn.has(e.target)).length,
+    into: graph.edges.filter((e) => e.target === id && drawn.has(e.source)).length,
+  };
+}
+
+/** 정보 패널 머리 줄에 적히는 `경로:시작-끝` */
+function spanOf(graph, id) {
+  const found = graph.nodes.find((n) => n.id === id);
+  return { from: found.range[0], text: `${found.path}:${found.range[0]}-${found.range[1]}` };
+}
 
 // ── 화면에서 읽는 값 ──────────────────────────────────────────────
 
@@ -261,10 +284,12 @@ const center = (rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height 
 
 async function open(t, page) {
   await load(page);
+  const graph = await api("/api/graph");
+  const files = graph.nodes.filter((n) => n.kind === "module" && !n.test).length;
   const all = await boxes(page);
   t.check(
-    "파일 상자 12개가 모두 220×40이다",
-    all.length === 12 && all.every((b) => near(b.width, 220, 0.5) && near(b.height, 40, 0.5)),
+    `파일 상자 ${files}개가 모두 220×40이다`,
+    all.length === files && all.every((b) => near(b.width, 220, 0.5) && near(b.height, 40, 0.5)),
     `${all.length}개, 크기 ${[...new Set(all.map((b) => `${Math.round(b.width)}×${Math.round(b.height)}`))].join("·")}`,
   );
   const [arbiter, batch] = [all.find((b) => b.id === "arbiter"), all.find((b) => b.id === "note_batch")];
@@ -297,7 +322,6 @@ async function open(t, page) {
   );
   const [panel, head] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-head")];
   t.check("정보 패널 높이가 머리 줄 높이에 테두리 2px를 더한 값이다", near(panel.height, head.height + 2), `패널 ${panel.height}, 머리 줄 ${head.height}`);
-  const graph = await api("/api/graph");
   const unresolved = graph.nodes.filter((n) => !n.test).reduce((sum, n) => sum + n.unresolved, 0);
   const badges = await page.evaluate(() =>
     [...document.querySelectorAll(".react-flow__node .badge-unresolved")].map((badge) => Number(badge.textContent.slice(1))),
@@ -313,9 +337,10 @@ async function file(t, page) {
   await load(page);
   const before = { columns: columnsOf(await boxes(page)), zoom: await zoomOf(page) };
   await pick(page, FILE);
+  const graph = await api("/api/graph");
   const all = await boxes(page);
-  const functions = await count(page, ".react-flow__node .node-function");
-  t.check("함수 노드 35개가 나타난다", functions === 35, `${functions}개`);
+  const [functions, defined] = [await count(page, ".react-flow__node .node-function"), definedIn(graph, FILE).filter((n) => n.kind === "function" || n.kind === "method").length];
+  t.check(`함수 노드 ${defined}개가 나타난다`, defined > 0 && functions === defined, `${functions}개`);
   const opened = all.filter((b) => b.open).map((b) => b.id);
   t.check("다른 파일 상자는 접혀 있다", same(opened, [FILE]), `펼친 상자 ${opened.join(", ")}`);
   t.check("누르기 전과 후에 파일 상자의 열 순서와 열 안 순서가 같다", same(columnsOf(all), before.columns), JSON.stringify(columnsOf(all)));
@@ -345,7 +370,6 @@ async function file(t, page) {
     title.includes(`쓰는 파일 ${uses.size} · 이 파일을 쓰는 파일 ${users.size}`),
     title.replaceAll("\n", " / "),
   );
-  const graph = await api("/api/graph");
   const unresolved = graph.nodes.filter((n) => n.path === `src/${FILE}.py`).reduce((sum, n) => sum + n.unresolved, 0);
   const badges = await page.evaluate((sel) => {
     const numbers = (list) => [...list].map((badge) => Number(badge.textContent.slice(1)));
@@ -376,12 +400,14 @@ async function focused(t, page) {
   const before = await zoomOf(page);
   await pick(page, FUNCTION);
   await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+  const graph = await api("/api/graph");
+  const [want, span] = [touchingOf(graph, FUNCTION), spanOf(graph, FUNCTION)];
   const edges = await edgesOf(page);
   const strong = edges.filter((e) => e.tone === "strong");
   const [out, into] = [strong.filter((e) => e.source === FUNCTION).length, strong.filter((e) => e.target === FUNCTION).length];
   t.check(
-    "본문 잉크 선은 고른 함수에 닿는 15개(나가는 선 14개, 들어오는 선 1개)뿐이고 불투명도가 1이다",
-    out === 14 && into === 1 && strong.length === 15 && strong.every((e) => e.opacity === 1),
+    `본문 잉크 선은 고른 함수에 닿는 ${want.out + want.into}개(나가는 선 ${want.out}개, 들어오는 선 ${want.into}개)뿐이고 불투명도가 1이다`,
+    want.out > 0 && out === want.out && into === want.into && strong.length === out + into && strong.every((e) => e.opacity === 1),
     `나가는 선 ${out}개, 들어오는 선 ${into}개, 그린 선 ${edges.length}개: ${toneLevels(edges)}`,
   );
   const rest = edges.filter((e) => e.tone === "muted");
@@ -394,20 +420,20 @@ async function focused(t, page) {
   const strokes = [...new Set(edges.map((e) => e.stroke))].sort();
   t.check("선의 색이 --ink와 --muted 두 값뿐이다", same(strokes, [ink.rgb, muted.rgb].sort()), strokes.join(", "));
   const head = await headOf(page);
-  t.check("정보 패널 머리 줄이 src/arbiter.py:1058-1199를 담는다", head.includes("src/arbiter.py:1058-1199"), head.replaceAll("\n", " / "));
+  t.check(`정보 패널 머리 줄이 ${span.text}를 담는다`, head.includes(span.text), head.replaceAll("\n", " / "));
   const first = await page.evaluate(() => {
     const numbers = [...document.querySelectorAll(".info-panel .monaco-editor .line-numbers")];
     numbers.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
     return numbers[0]?.textContent ?? null;
   });
-  t.check("코드 뷰어 첫 줄 번호가 1058이다", first === "1058", `${first}`);
+  t.check(`코드 뷰어 첫 줄 번호가 ${span.from}이다`, first === String(span.from), `${first}`);
   const zoom = await zoomOf(page);
   const { free } = await stageOf(page);
-  const [at, want] = [center(await rectOf(page, node(FUNCTION))), center(free)];
+  const [at, middle] = [center(await rectOf(page, node(FUNCTION))), center(free)];
   t.check(
     "확대 비율이 누르기 전과 같고 고른 함수의 중심이 패널을 뺀 영역의 중심에서 1px 안에 있다",
-    near(zoom, before, 0.001) && near(at.x, want.x) && near(at.y, want.y),
-    `확대 비율 ${before.toFixed(3)} → ${zoom.toFixed(3)}, 중심 차이 (${(at.x - want.x).toFixed(1)}, ${(at.y - want.y).toFixed(1)})`,
+    near(zoom, before, 0.001) && near(at.x, middle.x) && near(at.y, middle.y),
+    `확대 비율 ${before.toFixed(3)} → ${zoom.toFixed(3)}, 중심 차이 (${(at.x - middle.x).toFixed(1)}, ${(at.y - middle.y).toFixed(1)})`,
   );
   const local = await page.evaluate(() =>
     [...document.querySelectorAll(".react-flow__node > [data-local]:not([data-flow])")].map((root) => ({
@@ -550,13 +576,14 @@ async function hover(t, page) {
 async function folder(t, page) {
   await load(page);
   const inside = (id) => id === "parser" || id.startsWith("parser.");
-  const before = columnsOf(await boxes(page), inside);
+  const opened = await boxes(page);
+  const [before, members] = [columnsOf(opened, inside), opened.filter((b) => inside(b.id)).length];
   await page.click('.tree-row.tree-dir[data-node="parser"]');
   await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 });
   await settle(page);
   const all = await boxes(page);
   const left = all.filter((b) => inside(b.id)).map((b) => b.id);
-  t.check("parser/ 안의 파일 상자 네 개가 parser/ 상자 하나로 바뀐다", left.length === 0 && all.length === 8, `남은 파일 상자 ${all.length}개`);
+  t.check(`parser/ 안의 파일 상자 ${members}개가 parser/ 상자 하나로 바뀐다`, members > 0 && left.length === 0 && all.length === opened.length - members, `남은 파일 상자 ${all.length}개`);
   t.check("다른 상자의 열 순서와 열 안 순서가 같다", same(columnsOf(all, inside), before), JSON.stringify(columnsOf(all, inside)));
 }
 
@@ -653,6 +680,43 @@ async function zoom(t, page) {
   t.check("확대 비율 구간 data-zoom이 0, 1, 2로 바뀐다", same(seen.map((s) => s.band), ["0", "1", "2"]), seen.map((s) => s.band).join(", "));
 }
 
+/** 테스트 코드를 켜고 클래스가 든 파일 가운데 노드가 가장 적은 파일을 펼쳐 육각형 위에 이름표가 그려지는지 본다. */
+async function classLabel(t, page) {
+  await load(page);
+  const graph = await api("/api/graph");
+  const holders = [...new Set(graph.nodes.filter((n) => n.kind === "class").map((n) => n.parent))]
+    .filter((id) => graph.nodes.some((n) => n.id === id && n.kind === "module"))
+    .sort((a, b) => definedIn(graph, a).length - definedIn(graph, b).length);
+  if (holders.length === 0) {
+    t.check("대상 레포에 클래스가 있다", false);
+    return;
+  }
+  await page.getByLabel("테스트 코드").check();
+  await page.click(`.tree-row.tree-file[data-node="${holders[0]}"]`);
+  await waitSelected(page, holders[0]);
+  const { free } = await stageOf(page);
+  const classes = await page.evaluate((area) => {
+    const result = [];
+    for (const root of document.querySelectorAll(".react-flow__node > .node-class")) {
+      const label = root.querySelector(".node-label");
+      const rect = label.getBoundingClientRect();
+      const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
+      if (x > area.x && x < area.x + area.width && y > area.y && y < area.y + area.height) {
+        // 그 점에 겹쳐 그린 요소를 위부터 늘어놓아 이름표가 같은 노드의 육각형보다 앞에 있는지 본다.
+        const stack = document.elementsFromPoint(x, y);
+        const [text, shape] = [stack.indexOf(label), stack.indexOf(root.querySelector(".node-hexagon polygon"))];
+        result.push({ name: label.textContent, expanded: root.classList.contains("node-class-expanded"), top: text >= 0 && shape > text });
+      }
+    }
+    return result;
+  }, free);
+  t.check(
+    "클래스 육각형의 이름표가 육각형 채움 위에 그려진다",
+    classes.length > 0 && classes.every((c) => c.top),
+    `${holders[0]}의 클래스 ${classes.length}개(메서드를 품은 클래스 ${classes.filter((c) => c.expanded).length}개), 가려진 이름표 ${classes.filter((c) => !c.top).map((c) => c.name).join("·") || "없음"}`,
+  );
+}
+
 async function external(t, page) {
   await load(page);
   await page.getByLabel("외부 노드").check();
@@ -714,9 +778,10 @@ async function tree(t, page) {
   );
   const at = rows.findIndex((row) => row.kind === "file" && row.node === FILE);
   const below = rows.slice(at + 1, at + 1 + kinds("symbol").length);
+  const defined = definedIn(await api("/api/graph"), FILE).length;
   t.check(
-    "함수 행 35개가 arbiter.py 행 바로 아래에서 한 단계 더 들여쓴 안내선 아래에 있다",
-    below.length === 35 && below.every((row) => row.kind === "symbol" && near(row.indent, rows[at].indent + 14, 0.5) && row.guide.includes("gradient")),
+    `함수 행 ${defined}개가 arbiter.py 행 바로 아래에서 한 단계 더 들여쓴 안내선 아래에 있다`,
+    defined > 0 && below.length === defined && below.every((row) => row.kind === "symbol" && near(row.indent, rows[at].indent + 14, 0.5) && row.guide.includes("gradient")),
     `함수 행 ${below.length}개, 들여쓰기 ${rows[at].indent}px → ${below[0]?.indent}px`,
   );
 }
@@ -1070,7 +1135,7 @@ async function initFile(t, page) {
   await page.waitForSelector(".info-panel .code", { timeout: 10_000 }).catch(() => {});
   await page.click(`.tree-row.tree-symbol[data-node="${FUNCTION}"]`);
   await waitSelected(page, FUNCTION);
-  t.check("그래프에서 다른 노드를 고르면 연 파일이 닫히고 그 노드의 코드를 보인다", (await headOf(page)).includes("src/arbiter.py:1058-1199"), (await headOf(page)).replaceAll("\n", " / "));
+  t.check("그래프에서 다른 노드를 고르면 연 파일이 닫히고 그 노드의 코드를 보인다", (await headOf(page)).includes(spanOf(await api("/api/graph"), FUNCTION).text), (await headOf(page)).replaceAll("\n", " / "));
 
   // 선택 없이 연 파일은 그래프 바탕을 누르거나 그 파일이 든 폴더를 접으면 닫힌다.
   await page.keyboard.press("Escape");
@@ -1221,6 +1286,7 @@ const SCENARIOS = [
   ["callview", callview],
   ["search", search],
   ["zoom", zoom],
+  ["class-label", classLabel],
   ["external", external],
   ["dark", dark],
   ["tree", tree],
