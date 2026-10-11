@@ -76,4 +76,5 @@ def analyzed(tmp_path_factory):
     """고정 레포에 실제 basedpyright를 띄워 한 번 분석한 결과."""
     from code_atlas.analyze import analyze
 
-    return analyze(_copy_fixture(tmp_path_factory.mktemp("analyzed")), sys.executable)
+    found = analyze(_copy_fixture(tmp_path_factory.mktemp("analyzed")), sys.executable)
+    return found.analysis, found.files

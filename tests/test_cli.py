@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import socket
@@ -68,6 +69,17 @@ def test_sigint_ends_the_server_and_the_language_server(sample_repo, tmp_path, m
     assert server.returncode in ((130,) if signals == 1 else (130, -signal.SIGINT))
     if signals == 1:
         assert "Traceback" not in errors
+
+
+def test_analyze_prints_the_unused_count_only_in_the_summary(sample_repo, capsys):
+    assert cli.main(["analyze", str(sample_repo), "--python", sys.executable]) == 0
+    summary = capsys.readouterr().out.splitlines()
+    assert summary[0].startswith("노드 ") and summary[1:] == ["미사용 후보 3개"]
+
+    assert cli.main(["analyze", str(sample_repo), "--python", sys.executable, "--json"]) == 0
+    printed = capsys.readouterr().out
+    assert set(json.loads(printed)) == {"nodes", "edges", "sites", "errors", "stats"}
+    assert "미사용 후보" not in printed
 
 
 def test_serve_parser_reads_style_guide_option():

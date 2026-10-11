@@ -38,12 +38,13 @@ def _print_summary(analysis) -> None:
 
 
 def _analyze_command(args: argparse.Namespace) -> int:
-    analysis, _ = analyze(args.repo, _python_or_exit(args.repo, args.python))
+    analyzed = analyze(args.repo, _python_or_exit(args.repo, args.python))
     if args.json:
-        json.dump(to_dict(analysis), sys.stdout, ensure_ascii=False)
+        json.dump(to_dict(analyzed.analysis), sys.stdout, ensure_ascii=False)
         sys.stdout.write("\n")
     else:
-        _print_summary(analysis)
+        _print_summary(analyzed.analysis)
+        print(f"미사용 후보 {len(analyzed.unused.candidates)}개")
     return 0
 
 
