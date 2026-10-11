@@ -1,7 +1,7 @@
 import pytest
 
-from code_atlas.collect import collect
-from code_atlas.extract import extract_repo
+from code_atlas.collect import SourceFile, collect
+from code_atlas.extract import extract, extract_repo
 
 
 @pytest.fixture
@@ -25,6 +25,47 @@ def test_node_kinds_and_parents(facts):
     assert core["app.core:Engine.start"].parent == "app.core:Engine"
     assert core["app.core:run_engine"].kind == "function"
     assert nodes(facts, "src/app/__init__.py")["app"].kind == "package"
+
+
+INIT_WITH_DEFINITIONS = """\
+from pkg.models import Config
+
+
+def version():
+    return Config("x")
+
+
+class Settings:
+    def load(self):
+        return version()
+"""
+
+
+def test_init_with_definitions_is_a_module_under_the_package():
+    file = SourceFile(path="src/pkg/__init__.py", module_id="pkg", test=False, is_init=True)
+    found = extract(file, INIT_WITH_DEFINITIONS, frozenset())
+    module = found.nodes[0]
+    assert (module.id, module.kind, module.name, module.parent) == ("pkg.__init__", "module", "__init__", "pkg")
+    parents = {n.id: n.parent for n in found.nodes[1:]}
+    assert parents == {"pkg:version": "pkg.__init__", "pkg:Settings": "pkg.__init__", "pkg:Settings.load": "pkg:Settings"}
+    assert {s.enclosing for s in found.sites if s.kind == "import"} == {"pkg.__init__"}
+
+
+@pytest.mark.parametrize(
+    ("path", "module_id", "text", "expected"),
+    [
+        ("src/pkg/__init__.py", "pkg", "from pkg.core import run\n\nrun()\n", ("pkg", "package", None)),
+        ("src/pkg/sub/__init__.py", "pkg.sub", "", ("pkg.sub", "package", "pkg")),
+        ("src/__init__.py", "__init__", "def main():\n    pass\n", ("__init__", "module", None)),
+        ("src/__init__.py", "__init__", "", ("__init__", "module", None)),
+    ],
+    ids=["정의 없는 패키지", "빈 하위 패키지", "소스 루트의 정의", "빈 소스 루트"],
+)
+def test_init_without_definitions_keeps_its_node(path, module_id, text, expected):
+    found = extract(SourceFile(path=path, module_id=module_id, test=False, is_init=True), text, frozenset())
+    module = found.nodes[0]
+    assert (module.id, module.kind, module.parent) == expected
+    assert {s.enclosing for s in found.sites} <= {module.id}
 
 
 def test_nested_function_merges_into_enclosing(facts):

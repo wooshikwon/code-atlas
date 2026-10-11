@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -8,7 +9,7 @@ from urllib.parse import urlencode
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import git, group_ended
+from conftest import FIXTURE, git, group_ended
 
 from code_atlas import api, summary
 from code_atlas.api import create_app
@@ -80,6 +81,62 @@ def test_tree(client):
     assert (core["kind"], core["node"], "children" in core) == ("file", "app.core", False)
     plugins = app["children"][0]
     assert plugins["node"] == "app.plugins"
+
+
+@pytest.fixture(scope="module")
+def init_client(tmp_path_factory):
+    """고정 레포 복사본에 소스 루트의 `__init__.py`, 정의가 있는 `plugins/__init__.py`, 그 정의를 쓰는 파일을 더해 분석한다."""
+    repo = tmp_path_factory.mktemp("init") / "sample_repo"
+    shutil.copytree(FIXTURE, repo)
+    (repo / "src" / "__init__.py").write_text("")
+    (repo / "src" / "app" / "plugins" / "__init__.py").write_text(
+        "from app.models import Config\n\n\ndef version():\n    return Config('x')\n\n\n"
+        "class Settings:\n    def load(self):\n        return version()\n"
+    )
+    (repo / "src" / "app" / "uses.py").write_text("from app.plugins import version\n\nversion()\n")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(summary, "CACHE_PATH", tmp_path_factory.mktemp("cache") / "summaries.db")
+        patch.setattr(summary, "find_cli", lambda: None)
+        with TestClient(create_app(repo, sys.executable)) as client:
+            yield client
+
+
+def test_init_file_rows_point_at_module_nodes_only(init_client):
+    src = init_client.get("/api/tree").json()["entries"][0]
+    rows = {c["name"]: c for c in src["children"]}
+    assert rows["__init__.py"]["node"] == "__init__"
+    app = {c["name"]: c for c in rows["app"]["children"]}
+    assert app["__init__.py"]["node"] is None
+    plugins = {c["name"]: c for c in app["plugins"]["children"]}
+    assert (app["plugins"]["node"], plugins["__init__.py"]["node"]) == ("app.plugins", "app.plugins.__init__")
+
+
+def test_init_definitions_hang_under_the_init_module(init_client):
+    body = init_client.get("/api/graph").json()
+    nodes = {n["id"]: n for n in body["nodes"]}
+    assert (nodes["__init__"]["kind"], nodes["app"]["kind"]) == ("module", "package")
+    assert (nodes["app.plugins"]["kind"], nodes["app.plugins"]["path"]) == ("package", "src/app/plugins")
+    init = nodes["app.plugins.__init__"]
+    assert (init["kind"], init["name"], init["parent"], init["path"]) == (
+        "module",
+        "__init__",
+        "app.plugins",
+        "src/app/plugins/__init__.py",
+    )
+    assert nodes["app.plugins:version"]["parent"] == "app.plugins.__init__"
+    assert nodes["app.plugins:Settings.load"]["parent"] == "app.plugins:Settings"
+    assert nodes["app.plugins"]["loc"] == init["loc"] + nodes["app.plugins.base"]["loc"]
+    edges = {(e["kind"], e["source"], e["target"]) for e in body["edges"]}
+    assert all(e["source"] in nodes and e["target"] in nodes for e in body["edges"])
+    assert {
+        ("import", "app.plugins.__init__", "app.models"),
+        ("construct", "app.plugins:version", "app.models:Config"),
+        ("call", "app.plugins:Settings.load", "app.plugins:version"),
+        ("import", "app.uses", "app.plugins.__init__"),
+        ("call", "app.uses", "app.plugins:version"),
+    } <= edges
+    target = init_client.get("/api/definition", params={"path": "src/app/uses.py", "line": 3, "col": 0}).json()
+    assert [(t["path"], t["node"]) for t in target["targets"]] == [("src/app/plugins/__init__.py", "app.plugins:version")]
 
 
 def test_graph(client):
@@ -335,8 +392,8 @@ def test_changes_mark_changed_definitions_and_stale_files(changed, git_repo):
     body = changed.get("/api/changes").json()
     assert (body["git"], body["branch"]) == (True, "main")
     assert body["files"] == [
-        {"path": "src/app/core.py", "status": "modified", "stale": False},
-        {"path": "src/app/extra.py", "status": "added", "stale": False},
+        {"path": "src/app/core.py", "status": "modified", "stale": False, "test": False},
+        {"path": "src/app/extra.py", "status": "added", "stale": False, "test": False},
     ]
     assert body["nodes"] == {
         "app.core": "modified",
@@ -353,13 +410,15 @@ def test_changes_mark_changed_definitions_and_stale_files(changed, git_repo):
     (git_repo / "notes.md").write_text("메모\n")
     (git_repo / ".tools").mkdir()
     (git_repo / ".tools" / "hidden.py").write_text("x = 1\n")
+    (git_repo / "tests" / "test_late.py").write_text("def test_late():\n    pass\n")
     body = changed.get("/api/changes").json()
     assert body["files"] == [
-        {"path": "src/app/cli.py", "status": "deleted", "stale": True},
-        {"path": "src/app/core.py", "status": "modified", "stale": False},
-        {"path": "src/app/extra.py", "status": "added", "stale": True},
-        {"path": "src/app/late.py", "status": "added", "stale": False},
-        {"path": "src/app/models.py", "status": "modified", "stale": True},
+        {"path": "src/app/cli.py", "status": "deleted", "stale": True, "test": False},
+        {"path": "src/app/core.py", "status": "modified", "stale": False, "test": False},
+        {"path": "src/app/extra.py", "status": "added", "stale": True, "test": False},
+        {"path": "src/app/late.py", "status": "added", "stale": False, "test": False},
+        {"path": "src/app/models.py", "status": "modified", "stale": True, "test": False},
+        {"path": "tests/test_late.py", "status": "added", "stale": False, "test": True},
     ]
     assert body["nodes"] == {
         "app.core": "modified",
@@ -381,8 +440,8 @@ def test_files_changed_after_analysis_stay_stale_after_commit(changed, git_repo)
     body = changed.get("/api/changes").json()
     assert (body["git"], body["branch"]) == (True, "main")
     assert body["files"] == [
-        {"path": "src/app/cli.py", "status": "unchanged", "stale": True},
-        {"path": "src/app/models.py", "status": "unchanged", "stale": True},
+        {"path": "src/app/cli.py", "status": "unchanged", "stale": True, "test": False},
+        {"path": "src/app/models.py", "status": "unchanged", "stale": True, "test": False},
     ]
     assert body["nodes"] == {}
 
@@ -396,7 +455,7 @@ def test_changes_outside_git_list_only_stale_files(client, module_repo):
         assert client.get("/api/changes").json() == {
             "git": False,
             "branch": None,
-            "files": [{"path": "src/app/models.py", "status": "unchanged", "stale": True}],
+            "files": [{"path": "src/app/models.py", "status": "unchanged", "stale": True, "test": False}],
             "nodes": {},
         }
     finally:

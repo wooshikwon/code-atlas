@@ -105,9 +105,12 @@ def _serve_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["analyze"]:
-        return _analyze_command(_analyze_parser().parse_args(argv[1:]))
-    return _serve_command(_serve_parser().parse_args(argv))
+    try:
+        if argv[:1] == ["analyze"]:
+            return _analyze_command(_analyze_parser().parse_args(argv[1:]))
+        return _serve_command(_serve_parser().parse_args(argv))
+    except KeyboardInterrupt:
+        return 130
 
 
 if __name__ == "__main__":

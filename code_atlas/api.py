@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from . import changes
 from .analyze import Analyzed, analyze_async, require_python
-from .collect import RepoFiles, collect, collected
+from .collect import RepoFiles, collect, collected, is_test_path
 from .lsp import Location, Session
 from .model import Analysis, to_dict
 from .resolve import EXTERNAL_PREFIX, Index, external_of
@@ -33,7 +33,7 @@ T = TypeVar("T")
 
 def _tree(files: RepoFiles, analysis: Analysis) -> list[dict]:
     """수집한 파일과 그 조상 폴더로 파일 트리를 만든다. 폴더가 앞, 그 안은 이름 순서다."""
-    node_ids = {n.id for n in analysis.nodes}
+    module_of = {n.path: n.id for n in analysis.nodes if n.kind == "module"}
     package_of = {n.path: n.id for n in analysis.nodes if n.kind == "package" and n.path}
     root: dict = {"children": {}}
     for f in files.files:
@@ -59,7 +59,7 @@ def _tree(files: RepoFiles, analysis: Analysis) -> list[dict]:
             "name": parts[-1],
             "kind": "file",
             "test": f.test,
-            "node": f.module_id if f.module_id in node_ids and not f.is_init else None,
+            "node": module_of.get(f.path),
         }
     return _entries(root["children"])
 
@@ -267,7 +267,8 @@ def create_app(
             "git": found is not None,
             "branch": changes.branch(root) if found is not None else None,
             "files": [
-                {"path": path, "status": state, "stale": path in stale} for path, state in sorted(states.items())
+                {"path": path, "status": state, "stale": path in stale, "test": is_test_path(path)}
+                for path, state in sorted(states.items())
             ],
             "nodes": nodes,
         }
