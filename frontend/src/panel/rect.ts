@@ -10,8 +10,9 @@ export interface Area {
 }
 
 export const MIN_WIDTH = 260;
-/** 기본 사각형의 폭을 관계 그래프 영역의 폭으로 나눈 값 */
-const DEFAULT_SHARE = 0.3;
+/** 기본 사각형의 폭과, 기본 사각형이 영역의 위·오른쪽·아래 끝에서 띄우는 여백을 관계 그래프 영역의 폭으로 나눈 값 */
+const DEFAULT_SHARE = 0.4;
+const DEFAULT_GAP = 0.01;
 export const MIN_HEIGHT = 58;
 /** 경계선을 끌어 줄일 때 LLM 요약 칸과 코드 뷰어에 남기는 높이 */
 export const MIN_SUMMARY = 56;
@@ -33,12 +34,14 @@ export function clamp(rect: Rect, area: Area): Rect {
 }
 
 /**
- * 사용자가 옮기거나 크기를 바꾸기 전의 사각형. 영역의 오른쪽 끝에 붙어 영역 폭의 30%를 차지하고 위에서 아래까지 빈틈없이 찬다.
- * 그 폭이 최소 폭보다 좁으면 최소 폭으로 그린다.
+ * 사용자가 옮기거나 크기를 바꾸기 전의 사각형. 영역 폭의 40%를 차지하고 영역의 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운다.
+ * 세 여백은 같은 값이다. 영역 폭의 40%가 최소 폭보다 좁으면 최소 폭으로 그린다.
  */
 export function initial(area: Area): Rect {
-  const { width } = clamp({ x: 0, y: 0, width: Math.round(area.width * DEFAULT_SHARE), height: area.height }, area);
-  return clamp({ x: area.width - width, y: 0, width, height: area.height }, area);
+  const gap = Math.round(area.width * DEFAULT_GAP);
+  const height = area.height - 2 * gap;
+  const { width } = clamp({ x: 0, y: 0, width: Math.round(area.width * DEFAULT_SHARE), height }, area);
+  return clamp({ x: area.width - gap - width, y: gap, width, height }, area);
 }
 
 export function move(rect: Rect, dx: number, dy: number, area: Area): Rect {

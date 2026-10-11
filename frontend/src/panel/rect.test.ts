@@ -5,14 +5,17 @@ const area = { width: 1000, height: 800 };
 const rect = { x: 400, y: 100, width: 480, height: 420 };
 
 describe("initial", () => {
-  it("영역의 오른쪽 끝에 붙어 영역 폭의 30%를 차지하고 위에서 아래까지 빈틈없이 찬다", () => {
-    expect(initial(area)).toEqual({ x: 700, y: 0, width: 300, height: 800 });
-    expect(initial({ width: 1440, height: 600 })).toEqual({ x: 1008, y: 0, width: 432, height: 600 });
+  it("영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운다", () => {
+    expect(initial(area)).toEqual({ x: 590, y: 10, width: 400, height: 780 });
+    expect(initial({ width: 1440, height: 600 })).toEqual({ x: 850, y: 14, width: 576, height: 572 });
   });
 
-  it("영역 폭의 30%가 최소 폭보다 좁으면 최소 폭으로 오른쪽 끝에 붙고, 영역이 최소 높이보다 낮으면 최소 높이다", () => {
-    expect(initial({ width: 460, height: 800 })).toEqual({ x: 460 - MIN_WIDTH, y: 0, width: MIN_WIDTH, height: 800 });
-    expect(initial({ width: 1000, height: 40 })).toMatchObject({ y: 0, height: MIN_HEIGHT });
+  it("영역 폭의 40%가 최소 폭보다 좁으면 최소 폭으로 그리고 오른쪽 여백은 그대로다", () => {
+    expect(initial({ width: 460, height: 800 })).toEqual({ x: 460 - 5 - MIN_WIDTH, y: 5, width: MIN_WIDTH, height: 790 });
+  });
+
+  it("영역이 최소 높이보다 낮으면 최소 높이다", () => {
+    expect(initial({ width: 1000, height: 40 })).toMatchObject({ height: MIN_HEIGHT });
   });
 });
 
