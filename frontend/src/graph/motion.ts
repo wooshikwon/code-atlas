@@ -2,7 +2,7 @@
 import type { Layout } from "./layout";
 
 /** 펼치기·접기 움직임의 길이(ms) */
-const MOVE_MS = 300;
+export const MOVE_MS = 300;
 
 function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - (2 - 2 * t) ** 2 / 2;

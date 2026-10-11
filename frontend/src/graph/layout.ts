@@ -547,6 +547,15 @@ export const runElk: RunElk = (input) => {
   return elk.layout(input);
 };
 
+/**
+ * 돌고 있는 ELK 계산을 worker와 함께 끝낸다. worker는 요청을 차례로 처리하므로 버린 계산을 끝내야 다음 계산이 바로 시작한다.
+ * 끝낸 계산의 응답은 오지 않고, 다음 `runElk`가 새 worker를 띄운다.
+ */
+export function stopElk(): void {
+  elk?.terminateWorker();
+  elk = null;
+}
+
 export async function layout(graph: Graph, shown: Shown, columns: Columns, ends: Map<string, RouteEnd>): Promise<Layout> {
   const started = performance.now();
   const result = await arrange(elkGraphs(graph, shown, columns, measureText, ends), runElk);

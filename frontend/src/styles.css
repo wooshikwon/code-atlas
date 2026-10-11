@@ -1320,6 +1320,25 @@ ul {
   font-size: 12px;
 }
 
+/* 느린 배치의 표시. 그래프 영역 위쪽 가운데에 뜨고 마우스를 받지 않는다. */
+.arranging {
+  position: absolute;
+  z-index: var(--z-overlay);
+  top: 12px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  font-size: 12px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
 /* 왼쪽 아래 칸. 아랫줄에 둥근 버튼을, 그 위에 펼친 미니맵과 범례, 경로 탐색 창을 나란히 둔다. 폭이 모자라면 오른쪽 칸부터 위로 올라간다.
    칸의 빈 곳은 마우스를 받지 않아 그래프를 가리지 않는다. */
 .dock {

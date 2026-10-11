@@ -70,6 +70,10 @@ export interface AtlasStore {
   reloadError: string | null;
   /** 레포를 다시 연 횟수. 파일트리와 그래프가 이 값이 바뀌면 처음 상태로 다시 그린다. */
   epoch: number;
+  /** 배치 계산이 펼치기·접기의 움직임 시간을 넘겨 도는 중이다(`graph/arranging.tsx`). 그동안 그래프는 앞의 배치를 그대로 그린다. */
+  arranging: boolean;
+  /** 화면에 그린 배치를 계산하기 시작한 때의 탐색 이력. 그린 배치가 없으면 null이다. */
+  arranged: History | null;
 
   /** 저장해 둔 화면 설정을 되살리고 레포·그래프·파일트리를 받는다. */
   load(): void;
@@ -105,9 +109,15 @@ export interface AtlasStore {
    * from에서 이어 한 단계만 넣는다. 함수 시점 뷰의 가운데 함수면 from으로 되돌리기만 한다.
    */
   open(id: string, from: History): void;
+  /** 이력의 앞 단계로 돌아간다. 되돌릴 느린 배치가 있으면(`undoable`) 그 배치를 취소한다. */
   back(): void;
   forward(): void;
   jump(index: number): void;
+  /**
+   * 느린 배치를 취소한다. 뷰·선택·접은 폴더·탐색 이력을 화면에 그린 배치의 것(`arranged`)으로 되돌리고 참을 돌려준다.
+   * 되돌릴 조작이 없으면(`undoable`) 아무것도 하지 않고 거짓을 돌려준다.
+   */
+  cancelArranging(): boolean;
   /** 두 칸이 차 있으면 바뀐 토글로 경로를 다시 찾는다. */
   toggleTests(): void;
   toggleExternal(): void;
@@ -202,6 +212,14 @@ export function litOf(finder: Finder): Lit | null {
   return finder.route === null ? null : lit(finder.route, finder.pick);
 }
 
+/**
+ * 느린 배치를 취소해 되돌릴 조작이 있는지. 배치 계산이 길어지는 중이고, 화면에 그린 배치 뒤에 탐색 이력이 바뀌었을 때다.
+ * 레포를 연 첫 배치, 토글·흐름 단계·경로 고정이 부른 배치는 이력을 바꾸지 않으므로 되돌릴 조작이 없다.
+ */
+export function undoable(state: Pick<AtlasStore, "arranging" | "arranged" | "history" | "finder">): boolean {
+  return state.arranging && state.arranged !== null && state.arranged !== state.history && !pinned(state.finder);
+}
+
 /** 정보 패널·탐색 경로 표시·파일트리가 보이는 노드. 경로 고정 중에는 finder.focus이고 그 밖에는 고른 노드다. */
 export function chosenOf(state: Pick<AtlasStore, "finder" | "selection">): string | null {
   if (pinned(state.finder)) {
@@ -234,7 +252,7 @@ const FINDER: Finder = { open: false, from: null, to: null, route: null, pick: 0
 function opened(repo: Repo, graph: Graph, tree: Tree, showTests: boolean) {
   const collapsed = startFolds(graph, showTests);
   const place = placeOf({ ...START, collapsed });
-  return { repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 } };
+  return { repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 }, arranging: false, arranged: null };
 }
 
 /** 레포를 열 때의 덮개. 지금 토글에서 순환 묶음이 하나라도 있으면 순환 덮개를 켜고 없으면 끈다. */
@@ -355,6 +373,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     reloading: false,
     reloadError: null,
     epoch: 0,
+    arranging: false,
+    arranged: null,
 
     load: () => {
       const ui = parseUi(localStorage.getItem(UI_KEY), preferredTheme());
@@ -423,9 +443,21 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         enter(id);
       }
     }),
-    back: guarded(() => restore(back(get().history))),
+    back: guarded(() => {
+      if (!get().cancelArranging()) {
+        restore(back(get().history));
+      }
+    }),
     forward: guarded(() => restore(forward(get().history))),
     jump: guarded((index) => restore(jump(get().history, index))),
+    cancelArranging: () => {
+      const { arranged } = get();
+      if (arranged === null || !undoable(get())) {
+        return false;
+      }
+      restore(arranged);
+      return true;
+    },
     toggleTests: guarded(() => {
       set((state) => ({ showTests: !state.showTests }));
       seek(get().finder.from, get().finder.to);

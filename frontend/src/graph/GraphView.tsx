@@ -19,6 +19,7 @@ import { focusOf, type History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { chosenOf, litOf, useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
+import { Arranging, keepLayout, watchLayout } from "./arranging";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
@@ -53,6 +54,8 @@ interface Scene {
   lit: Lit | null;
   /** 초점을 둔 노드 */
   focus: string | null;
+  /** 토글, 접은 폴더, 초점을 둔 노드, 흐름 단계를 적은 글. 같은 그래프와 경로에서 이 글이 같으면 배치가 같다. */
+  key: string;
   layout: Layout;
 }
 
@@ -181,6 +184,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
   const onScreen = useRef<Layout | null>(null);
+  /** 화면에 그린 배치의 입력 */
+  const arranged = useRef<Pick<Scene, "graph" | "columns" | "lit" | "key"> | null>(null);
   /** 화면을 옮겨 둔 노드나 경로와 그때의 finder.aimed */
   const panned = useRef<{ aim: string | Lit | null; aimed: number }>({ aim: null, aimed: 0 });
   /** 직전에 한 번 누른 노드와 누르기 전의 이력. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
@@ -204,28 +209,39 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return null;
     }
     const toggles = { showTests, showExternal };
+    const folds = [...collapsed].sort();
     if (lit !== null) {
-      return { flow: null, lit, focus: null, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
+      const key = JSON.stringify([toggles, folds]);
+      return { flow: null, lit, focus: null, key, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
     }
     const off = hidden(graph, toggles);
     const picked = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
-    return { flow: picked, lit, focus: picked === null ? null : focus, shown: shown(graph, { ...toggles, collapsed, flow: picked, lit }) };
+    const key = JSON.stringify([toggles, folds, picked === null ? null : [focus, depth]]);
+    return { flow: picked, lit, focus: picked === null ? null : focus, key, shown: shown(graph, { ...toggles, collapsed, flow: picked, lit }) };
   }, [graph, index, showTests, showExternal, collapsed, focus, depth, lit]);
 
+  // 느린 배치를 취소하면 입력이 화면에 그린 배치의 입력으로 돌아오므로 다시 계산하지 않는다.
   useEffect(() => {
     if (graph === null || cols === null || target === null) {
       return;
     }
-    let stale = false;
-    layout(graph, target.shown, cols, endsOf(target.lit))
-      .then((result) => !stale && setScene({ graph, columns: cols, ...target, layout: result }))
-      .catch((caught: unknown) => !stale && setError(caught instanceof Error ? caught.message : String(caught)));
-    return () => {
-      stale = true;
-    };
+    const input = { graph, columns: cols, lit: target.lit, key: target.key };
+    const last = arranged.current;
+    if (last !== null && last.graph === graph && last.columns === cols && last.lit === input.lit && last.key === input.key) {
+      keepLayout();
+      return;
+    }
+    return watchLayout(
+      layout(graph, target.shown, cols, endsOf(target.lit)),
+      (result) => {
+        arranged.current = input;
+        setScene({ graph, columns: cols, ...target, layout: result });
+      },
+      setError,
+    );
   }, [graph, cols, target]);
 
-  // 레포를 열면 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. 함수 시점 뷰에서 돌아오면 떠날 때의 화면에서 시작한다.
+  // 레포를 열면 정보 패널이 가리지 않는 영역에 그래프 전체를 맞추고 확대 비율을 100%보다 키우지 않는다. 함수 시점 뷰에서 돌아오면 떠날 때의 화면에서 시작한다.
   useEffect(() => {
     if (scene === null || home.current !== null || root.current === null) {
       return;
@@ -478,6 +494,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         )}
       </ReactFlow>
       <Dock />
+      <Arranging />
       <Tooltip ref={tip} />
     </div>
   );

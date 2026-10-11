@@ -69,7 +69,8 @@ export function App() {
 
   useEffect(() => (opened ? watch() : undefined), [opened]);
 
-  // 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 정보 패널에 연 파일이 있으면 그 파일만 닫는다.
+  // 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
+  // 정보 패널에 연 파일이 있으면 그 파일만 닫는다.
   useEffect(
     () =>
       bind({
@@ -77,7 +78,7 @@ export function App() {
         forward: () => useAtlas.getState().forward(),
         escape: () => {
           const state = useAtlas.getState();
-          if (state.paletteOpen) {
+          if (state.paletteOpen || state.cancelArranging()) {
             return;
           }
           if (useOpened.getState().path !== null) {

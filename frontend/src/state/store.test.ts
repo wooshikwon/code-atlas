@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { node as made, repoFixture, routeFixture } from "../graph/fixture";
 import { back, jump, push, type History, type Place } from "./history";
 import { useOverlay } from "./overlay";
-import { barred, chosenOf, litOf, parseUi, pinned, startFolds, useAtlas, type AtlasStore } from "./store";
+import { barred, chosenOf, litOf, parseUi, pinned, startFolds, undoable, useAtlas, type AtlasStore } from "./store";
 
 const [a, b, c] = repoFixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
 const folder = repoFixture.nodes.find((n) => n.kind === "package")!.id;
@@ -320,6 +320,67 @@ describe("이력", () => {
     expect(history.index).toBe(99);
     expect(history.entries[99].selection).toEqual(node("n119"));
     expect(jump(history, 100)).toBe(history);
+  });
+});
+
+describe("느린 배치의 취소", () => {
+  /** 화면에 그린 배치가 지금 이력의 것이라고 적는다. */
+  const drawn = () => useAtlas.setState({ arranged: store().history, arranging: false });
+  const slow = () => useAtlas.setState({ arranging: true });
+
+  it("배치가 길어지는 동안 취소하면 뷰·선택·접은 폴더·이력이 화면에 그린 배치의 것으로 돌아간다", () => {
+    store().select(a);
+    drawn();
+    const before = store();
+    store().toggleFolder(folder);
+    store().select(b);
+    slow();
+    expect(undoable(store())).toBe(true);
+    expect(store().cancelArranging()).toBe(true);
+    const now = store();
+    expect([now.history, now.selection, now.collapsed, now.view]).toEqual([before.history, before.selection, before.collapsed, before.view]);
+    expect(now.history).toBe(before.history);
+    expect(undoable(now)).toBe(false);
+  });
+
+  it("뒤로 가기는 되돌릴 느린 배치가 있으면 그 배치만 취소한다", () => {
+    store().select(a);
+    drawn();
+    const before = store().history;
+    store().back();
+    slow();
+    store().back();
+    expect(store().history).toBe(before);
+    expect(store().selection).toEqual(node(a));
+    useAtlas.setState({ arranging: false });
+    store().back();
+    expect(store().history.index).toBe(0);
+  });
+
+  it("배치가 길어지지 않았거나 그린 배치 뒤에 이력이 바뀌지 않았으면 취소하지 않는다", () => {
+    store().select(a);
+    expect(undoable({ ...store(), arranging: true })).toBe(false);
+    drawn();
+    store().select(b);
+    expect(store().cancelArranging()).toBe(false);
+    expect(store().selection).toEqual(node(b));
+    drawn();
+    store().toggleTests();
+    slow();
+    expect(store().cancelArranging()).toBe(false);
+    expect(store().selection).toEqual(node(b));
+  });
+
+  it("경로 고정 중에는 취소하지 않는다", () => {
+    useAtlas.setState({ graph: routeFixture });
+    drawn();
+    store().select("flow.walk:probe");
+    store().setEnd("from", "flow.walk:begin");
+    store().setEnd("to", "flow.walk:finish");
+    slow();
+    expect(pinned(store().finder)).toBe(true);
+    expect(store().cancelArranging()).toBe(false);
+    expect(store().selection).toEqual(node("flow.walk:probe"));
   });
 });
 
@@ -672,6 +733,7 @@ describe("reopen", () => {
     expect([now.view, now.selection]).toEqual([{ kind: "structure" }, null]);
     expect(now.collapsed).toEqual(new Set(["app", "pkg"]));
     expect(now.history).toEqual({ entries: [{ view: { kind: "structure" }, selection: null, collapsed: ["app", "pkg"] }], index: 0 });
+    expect([now.arranging, now.arranged]).toEqual([false, null]);
     expect([now.finder.open, now.finder.from, now.finder.route]).toEqual([false, null, null]);
     expect([now.repo, now.graph, now.tree, now.epoch]).toEqual([repo, repoFixture, tree, 1]);
     expect(useOverlay.getState().kind).toBe("cycles");

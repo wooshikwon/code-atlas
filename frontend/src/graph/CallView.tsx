@@ -14,6 +14,7 @@ import type { History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
+import { Arranging, watchLayout } from "./arranging";
 import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
 import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
@@ -115,13 +116,11 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     if (calls === null || index === null) {
       return;
     }
-    let stale = false;
-    runElk(callElk(calls, (id) => callSize(calls, index, index.get(id)!, measureText)))
-      .then((done) => !stale && setScene({ calls, center, layout: fromElk(done) }))
-      .catch((caught: unknown) => !stale && setError(caught instanceof Error ? caught.message : String(caught)));
-    return () => {
-      stale = true;
-    };
+    return watchLayout(
+      runElk(callElk(calls, (id) => callSize(calls, index, index.get(id)!, measureText))),
+      (done) => setScene({ calls, center, layout: fromElk(done) }),
+      setError,
+    );
   }, [calls, index, center]);
 
   useEffect(() => {
@@ -278,6 +277,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
         proOptions={{ hideAttribution: true }}
       />
       <Dock />
+      <Arranging />
       <Tooltip ref={tip} />
     </div>
   );

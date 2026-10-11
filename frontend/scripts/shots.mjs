@@ -4620,6 +4620,121 @@ async function start(t, page) {
   );
 }
 
+/**
+ * 느린 배치. ELK worker로 가는 배치 요청을 늦춰, 배치가 펼치기·접기의 움직임 시간(300ms)을 넘기면 앞의 그래프를 둔 채
+ * 표시가 뜨는지, Esc와 뒤로 가기가 그 조작만 되돌리는지 본다.
+ */
+async function arranging(t, page) {
+  /** 늦추는 시간(ms). 표시가 뜨는 300ms와 확인하는 시각을 넉넉히 넘긴다. */
+  const DELAY = 2500;
+  await page.addInitScript(() => {
+    window.__shotsElkDelay = 0;
+    window.__shotsWorkers = 0;
+    const Native = window.Worker;
+    window.Worker = class extends Native {
+      constructor(address, options) {
+        super(address, options);
+        window.__shotsWorkers += 1;
+        const post = this.postMessage.bind(this);
+        this.postMessage = (message, ...rest) => {
+          if (message?.cmd === "layout" && window.__shotsElkDelay > 0) {
+            setTimeout(() => post(message, ...rest), window.__shotsElkDelay);
+          } else {
+            post(message, ...rest);
+          }
+        };
+      }
+    };
+    window.__shotsArranging = 0;
+    const watcher = new MutationObserver(() => {
+      if (document.querySelector(".arranging") !== null) {
+        window.__shotsArranging += 1;
+      }
+    });
+    document.addEventListener("DOMContentLoaded", () => watcher.observe(document.body, { childList: true, subtree: true }));
+  });
+  const slow = (ms) => page.evaluate((value) => void (window.__shotsElkDelay = value), ms);
+  const sign = () => page.evaluate(() => document.querySelector(".arranging")?.textContent ?? null);
+  const seen = () => page.evaluate(() => window.__shotsArranging);
+  const nav = async () => [await page.getByRole("button", { name: "뒤로" }).isDisabled(), await page.getByRole("button", { name: "앞으로" }).isDisabled()];
+
+  await load(page, url, false);
+  const first = await boxIds(page);
+  await clickNode(page, "parser");
+  await page.waitForSelector(`${node("parser")} > .node-region`, { timeout: 30_000 });
+  await settle(page);
+  const opened = await boxIds(page);
+  t.check("움직임 시간 안에 끝나는 배치에는 표시가 뜨지 않는다", opened.length > first.length && (await seen()) === 0, `표시가 뜬 횟수 ${await seen()}`);
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 });
+  await settle(page);
+
+  const before = await nav();
+  await slow(DELAY);
+  await clickNode(page, "parser");
+  await page.waitForTimeout(150);
+  const early = await sign();
+  await page.waitForSelector(".arranging", { timeout: 5_000 });
+  t.check(
+    "배치가 300ms를 넘기면 앞의 그래프를 그대로 둔 채 그래프 위쪽에 표시가 뜬다",
+    early === null && (await sign()) === "배치 계산 중 · Esc로 취소" && same(await boxIds(page), first),
+    `150ms의 표시 ${early}, 뜬 표시 ${await sign()}`,
+  );
+  const [sized, area] = [await rectOf(page, ".arranging"), (await stageOf(page)).area];
+  t.check(
+    "표시는 관계 그래프 영역의 위쪽 가운데에 있다",
+    near(sized.x + sized.width / 2, area.x + area.width / 2, 1) && sized.y > area.y && sized.y < area.y + area.height / 4,
+    `표시 가운데 ${Math.round(sized.x + sized.width / 2)}, 영역 가운데 ${Math.round(area.x + area.width / 2)}, 위 ${Math.round(sized.y)}`,
+  );
+  await t.shot();
+  const workers = await page.evaluate(() => window.__shotsWorkers);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(100);
+  t.check(
+    "Esc를 누르면 표시가 사라지고 폴더를 펼치기 전의 화면과 이력으로 돌아간다",
+    (await sign()) === null && same(await boxIds(page), first) && same(await nav(), before) && (await count(page, '.tree-row.tree-dir[data-node="parser"][aria-expanded="true"]')) === 0,
+    `표시 ${await sign()}, 뒤로·앞으로 버튼의 누를 수 없음 ${before} → ${await nav()}`,
+  );
+  await page.waitForTimeout(DELAY + 500);
+  t.check("늦게 끝난 배치는 화면을 바꾸지 않는다", same(await boxIds(page), first) && (await sign()) === null);
+
+  await slow(0);
+  await clickNode(page, "parser");
+  await page.waitForSelector(`${node("parser")} > .node-region`, { timeout: 30_000 });
+  await settle(page);
+  t.check(
+    "취소한 뒤에 다시 펼치면 새 worker가 배치한다",
+    same(await boxIds(page), opened) && (await page.evaluate(() => window.__shotsWorkers)) === workers + 1,
+    `worker ${workers}개 → ${await page.evaluate(() => window.__shotsWorkers)}개`,
+  );
+
+  await slow(DELAY);
+  await clickNode(page, FILE);
+  await page.waitForSelector(".arranging", { timeout: 5_000 });
+  const picked = (await headOf(page)).split("\n")[0];
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForTimeout(100);
+  t.check(
+    "노드를 고른 배치가 길어질 때 뒤로 가기를 누르면 그 선택만 취소한다",
+    picked.includes(`${FILE}.py`) && (await sign()) === null && (await selectedOf(page)) === null && same(await boxIds(page), opened) && same(await nav(), [false, true]),
+    `고른 동안의 정보 패널 ${picked}, 표시 ${await sign()}, 뒤로·앞으로 버튼의 누를 수 없음 ${await nav()}`,
+  );
+
+  await inFilters(page, async () => {
+    await page.locator(".filter-panel").getByLabel("테스트 코드").click();
+    await page.waitForSelector(".arranging", { timeout: 5_000 });
+    const text = await sign();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(100);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(100);
+    t.check("탐색 이력을 바꾸지 않는 조작의 배치는 취소하는 키 없이 표시만 하고 Esc로 사라지지 않는다", text === "배치 계산 중" && (await sign()) === "배치 계산 중", `표시 ${text} → ${await sign()}`);
+  });
+  await page.waitForSelector(".arranging", { state: "detached", timeout: 30_000 });
+  await slow(0);
+  await settle(page);
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -4672,12 +4787,13 @@ const SCENARIOS = [
   ["cycles-change", cyclesChange],
   ["cycles-pin", cyclesPin],
   ["start", start],
+  ["arranging", arranging],
 ];
 
 /** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
 const STAGE3 = new Set(SCENARIOS.slice(SCENARIOS.findIndex(([name]) => name === "finder-open")).map(([name]) => name));
 /** 4단계 시나리오. 스크린샷 이름이 s4-로 시작한다. */
-const STAGE4 = new Set(["start"]);
+const STAGE4 = new Set(["start", "arranging"]);
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 
