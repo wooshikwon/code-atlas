@@ -12,6 +12,7 @@ import type {
   Repo,
   SummaryStatus,
   Tree,
+  Unused,
 } from "./types";
 
 export class ApiError extends Error {
@@ -105,4 +106,9 @@ export function deleteExplanation(path: string, start: number, end: number): Pro
 /** 마지막 커밋 뒤에 바뀐 파일과 노드 */
 export function getChanges(): Promise<Changes> {
   return request("/api/changes");
+}
+
+/** 분석을 끝낼 때 판정한 미사용 후보 */
+export function getUnused(): Promise<Unused> {
+  return request("/api/unused");
 }
