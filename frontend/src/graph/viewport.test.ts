@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsOf, centerOn, fitPadding, frameOn, freeRect } from "./viewport";
+import { boundsOf, centerOn, fitPadding, fitTarget, frameOn, freeRect } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -70,16 +70,16 @@ describe("centerOn", () => {
 describe("fitPadding", () => {
   it("패널이 오른쪽 위에 있으면 오른쪽을 패널 왼쪽 끝까지 비운다", () => {
     const free = freeRect(area, [{ x: 912, y: 8, width: 480, height: 420 }]);
-    expect(fitPadding({ area, free, clear: free })).toEqual({ top: "24px", right: "512px", bottom: "24px", left: "24px" });
+    expect(fitPadding(area, free)).toEqual({ top: "24px", right: "512px", bottom: "24px", left: "24px" });
   });
 
   it("패널이 왼쪽에 있으면 왼쪽을 패널 오른쪽 끝까지 비운다", () => {
     const free = freeRect(area, [{ x: 8, y: 8, width: 400, height: 800 }]);
-    expect(fitPadding({ area, free, clear: free })).toEqual({ top: "24px", right: "24px", bottom: "24px", left: "432px" });
+    expect(fitPadding(area, free)).toEqual({ top: "24px", right: "24px", bottom: "24px", left: "432px" });
   });
 
   it("패널이 없으면 네 변을 24px씩 비운다", () => {
-    expect(fitPadding({ area, free: area, clear: area })).toEqual({ top: "24px", right: "24px", bottom: "24px", left: "24px" });
+    expect(fitPadding(area, area)).toEqual({ top: "24px", right: "24px", bottom: "24px", left: "24px" });
   });
 });
 
@@ -97,35 +97,84 @@ describe("boundsOf", () => {
   });
 });
 
+describe("fitTarget", () => {
+  const free = { x: 0, y: 0, width: 912, height: 900 };
+  const clear = { x: 0, y: 0, width: 912, height: 500 };
+
+  it("강조하는 경로가 없으면 그래프 전체를 free에 맞춘다", () => {
+    expect(fitTarget({ area, free, clear }, null)).toEqual({ padding: fitPadding(area, free) });
+  });
+
+  it("경로 고정 중에는 경로 위 노드를 clear에 맞추고 확대 비율을 100%보다 키우지 않는다", () => {
+    expect(fitTarget({ area, free, clear }, ["a", "b"])).toEqual({
+      padding: { top: "24px", right: "512px", bottom: "424px", left: "24px" },
+      nodes: [{ id: "a" }, { id: "b" }],
+      maxZoom: 1,
+    });
+  });
+});
+
 describe("frameOn", () => {
   const clear = { x: 0, y: 0, width: 900, height: 600 };
   const from = { x: 100, y: 100, width: 120, height: 18 };
+  const origin = { x: 0, y: 0, zoom: 1 };
 
   it("경로 위 상자가 모두 영역에 들어가면 그 상자를 품는 사각형을 영역의 가운데에 둔다", () => {
     const via = { x: 300, y: 150, width: 80, height: 18 };
     const to = { x: 500, y: 300, width: 100, height: 18 };
-    expect(frameOn([from, via, to], to, clear, 1)).toEqual({ x: 450 - 350, y: 300 - 209, zoom: 1 });
+    expect(frameOn([from, via, to], boundsOf([from, via]), from, clear, origin, true)).toEqual({ x: 450 - 350, y: 300 - 209, zoom: 1 });
   });
 
   it("확대 비율이 0.8보다 작으면 0.8로 키우고 그보다 크면 그대로 둔다", () => {
     const to = { x: 300, y: 200, width: 100, height: 18 };
-    expect(frameOn([from, to], to, clear, 0.3).zoom).toBe(0.8);
-    expect(frameOn([from, to], to, clear, 1.5).zoom).toBe(1.5);
+    const step = boundsOf([from, to]);
+    expect(frameOn([from, to], step, from, clear, { ...origin, zoom: 0.3 }, true).zoom).toBe(0.8);
+    expect(frameOn([from, to], step, from, clear, { ...origin, zoom: 1.5 }, true).zoom).toBe(1.5);
   });
 
-  it("경로 위 상자가 영역에 들어가지 않으면 경로의 시작 끝을 맞춘 뒤 초점 상자가 20px 안쪽에 들어올 만큼만 옮긴다", () => {
+  it("경로가 영역보다 길면 경로의 시작 끝을 맞추고, 그 화면에 출발 상자와 다음 상자가 들어 있으면 더 옮기지 않는다", () => {
+    const via = { x: 400, y: 100, width: 80, height: 18 };
     const to = { x: 2000, y: 100, width: 100, height: 18 };
-    // 가로는 경로가 영역보다 길어 왼쪽 끝을 맞추고, 도착 상자의 오른쪽 끝이 영역의 오른쪽 20px 안쪽에 오게 옮긴다.
-    expect(frameOn([from, to], to, clear, 1)).toEqual({ x: 900 - 20 - 2100, y: 300 - 109, zoom: 1 });
-    // 출발 상자는 왼쪽 끝을 맞춘 화면에 이미 들어 있다.
-    expect(frameOn([from, to], from, clear, 0.5)).toEqual({ x: 20 - 80, y: 300 - 109 * 0.8, zoom: 0.8 });
+    expect(frameOn([from, via, to], boundsOf([from, via]), from, clear, origin, true)).toEqual({ x: 20 - 100, y: 300 - 109, zoom: 1 });
   });
 
-  it("출발과 도착은 들어가도 그 사이의 상자가 영역 밖이면 초점 상자가 들어올 만큼만 옮긴다", () => {
-    const via = { x: 300, y: 1500, width: 80, height: 18 };
-    const to = { x: 500, y: 300, width: 100, height: 18 };
-    // 세로는 경로가 영역보다 길어 위 끝을 맞추고, 그 화면에 도착 상자가 들어 있다.
-    expect(frameOn([from, via, to], to, clear, 1)).toEqual({ x: 450 - 350, y: 20 - 100, zoom: 1 });
-    expect(frameOn([from, via, to], via, clear, 1)).toEqual({ x: 450 - 350, y: 600 - 20 - 1518, zoom: 1 });
+  it("지금 화면에 초점 상자와 다음 상자가 들어 있으면 화면을 옮기지 않는다", () => {
+    const via = { x: 400, y: 300, width: 80, height: 18 };
+    const to = { x: 2000, y: 100, width: 100, height: 18 };
+    const view = { x: 37, y: -11, zoom: 1.2 };
+    expect(frameOn([from, via, to], boundsOf([from, via]), from, clear, view, false)).toEqual(view);
+  });
+
+  it("초점 상자와 다음 상자가 화면을 벗어난 축은 두 상자를 품는 사각형을 영역의 가운데에 둔다", () => {
+    const via = { x: 400, y: 100, width: 80, height: 18 };
+    const to = { x: 1000, y: 100, width: 100, height: 18 };
+    const far = { x: 1400, y: 500, width: 100, height: 18 };
+    // 가로는 벗어났으므로 두 상자의 가운데(750)를 영역의 가운데에 두고, 세로는 들어 있으므로 그대로 둔다.
+    expect(frameOn([from, via, to], boundsOf([via, to]), via, clear, { x: -80, y: 191, zoom: 1 }, false)).toEqual({
+      x: 450 - 750,
+      y: 191,
+      zoom: 1,
+    });
+    // 두 축을 모두 벗어나면 두 축 모두 가운데에 둔다.
+    expect(frameOn([from, to, far], boundsOf([to, far]), to, clear, { x: 0, y: -300, zoom: 1 }, false)).toEqual({
+      x: 450 - 1250,
+      y: 300 - 309,
+      zoom: 1,
+    });
+  });
+
+  it("초점 상자와 다음 상자가 영역에 함께 들어가지 않으면 초점 상자만 영역의 가운데에 둔다", () => {
+    const to = { x: 2000, y: 100, width: 100, height: 18 };
+    expect(frameOn([from, to], boundsOf([from, to]), to, clear, origin, false)).toEqual({ x: 450 - 2050, y: 0, zoom: 1 });
+  });
+
+  it("확대 비율을 키웠으면 경로의 시작 끝을 맞춘 화면에서 판정한다", () => {
+    const via = { x: 400, y: 100, width: 80, height: 18 };
+    const to = { x: 2000, y: 100, width: 100, height: 18 };
+    expect(frameOn([from, via, to], boundsOf([from, via]), from, clear, { x: -5000, y: -5000, zoom: 0.2 }, false)).toEqual({
+      x: 20 - 80,
+      y: 300 - 109 * 0.8,
+      zoom: 0.8,
+    });
   });
 });

@@ -33,6 +33,8 @@ export interface Finder {
   focus: string | null;
   /** 고정 중에 막힌 액션이 불린 횟수 */
   blocked: number;
+  /** focus를 정한 횟수. 같은 노드를 다시 받아도 는다. 그래프가 이 값이 늘 때마다 focus의 노드로 화면을 옮긴다. */
+  aimed: number;
 }
 
 export interface AtlasStore {
@@ -99,12 +101,12 @@ export interface AtlasStore {
   toggleFinder(): void;
   /**
    * 출발 칸이나 도착 칸을 채우거나 비운다. 그래프에 없는 id와 폴더는 받지 않는다. 두 칸이 차면 경로를 찾아 첫 경로를
-   * 강조하고 focus를 그 경로의 도착 노드에 둔다. 경로가 나왔는데 함수 시점 뷰면 구조 뷰로 돌아가는 단계를 이력에 넣는다.
+   * 강조하고 focus를 그 경로의 출발 노드에 둔다. 경로가 나왔는데 함수 시점 뷰면 구조 뷰로 돌아가는 단계를 이력에 넣는다.
    */
   setEnd(end: "from" | "to", id: string | null): void;
   /** 출발과 도착을 맞바꾸고 경로를 다시 찾는다. */
   swapEnds(): void;
-  /** 강조할 경로를 고르고 focus를 그 경로의 도착 노드로 돌린다. 찾은 경로에 없는 번호는 넘긴다. */
+  /** 강조할 경로를 고르고 focus를 그 경로의 출발 노드로 돌린다. 찾은 경로에 없는 번호는 넘긴다. */
   pickPath(index: number): void;
   /** 출발·도착·찾은 경로를 비워 경로 고정을 끈다. */
   clearFinder(): void;
@@ -235,7 +237,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       return false;
     }
     if (id !== null) {
-      set({ finder: { ...finder, focus: id } });
+      set({ finder: { ...finder, focus: id, aimed: finder.aimed + 1 } });
     }
     return true;
   };
@@ -250,7 +252,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       visit({ view: { kind: "structure" } });
     }
     set((state) => ({
-      finder: { ...state.finder, from, to, route: found, pick: 0, focus: first?.[first.length - 1] ?? null },
+      finder: { ...state.finder, from, to, route: found, pick: 0, focus: first?.[0] ?? null, aimed: state.finder.aimed + 1 },
     }));
   };
 
@@ -302,7 +304,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     autoSummary: false,
     theme: "light",
     history: { entries: [placeOf(START)], index: 0 },
-    finder: { open: false, from: null, to: null, route: null, pick: 0, focus: null, blocked: 0 },
+    finder: { open: false, from: null, to: null, route: null, pick: 0, focus: null, blocked: 0, aimed: 0 },
     panel: null,
     split: null,
     legendOpen: false,
@@ -397,7 +399,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       const finder = get().finder;
       const path = finder.route?.paths[index];
       if (path !== undefined) {
-        set({ finder: { ...finder, pick: index, focus: path[path.length - 1] } });
+        set({ finder: { ...finder, pick: index, focus: path[0], aimed: finder.aimed + 1 } });
       }
     },
     clearFinder: () => seek(null, null),

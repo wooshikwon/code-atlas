@@ -1500,6 +1500,36 @@ ul {
   stroke: var(--ink);
 }
 
+/* 미니맵 위의 강조하는 경로. 선과 점의 굵기는 미니맵의 축소 비율과 관계없이 화면 px다. 출발 노드는 채운 원 위에 바탕색 점을 얹어 빈 원으로 그린다. */
+.minimap-route {
+  pointer-events: none;
+}
+
+.minimap-route > * {
+  vector-effect: non-scaling-stroke;
+  fill: none;
+  stroke: var(--ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.minimap-route-line {
+  stroke-width: 1.5;
+}
+
+.minimap-route-via {
+  stroke-width: 4;
+}
+
+.minimap-route-end {
+  stroke-width: 9;
+}
+
+.minimap-route > .minimap-route-from {
+  stroke: var(--panel-bg);
+  stroke-width: 5;
+}
+
 .legend-list li {
   display: flex;
   align-items: center;
@@ -2339,10 +2369,30 @@ ul {
   font-size: 11px;
 }
 
+.finder-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+}
+
 .finder-more {
-  margin: 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+.finder-fit {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 11px;
+}
+
+.finder-fit:hover {
+  background: var(--hover-bg);
 }
 
 /* 고정 안내 줄. 막힌 조작이 있으면 Finder가 data-flash를 0.7초 동안 달아 본문 잉크 바탕으로 뒤집는다. */

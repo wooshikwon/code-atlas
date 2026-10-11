@@ -142,7 +142,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       const stage = stageOf(root.current);
       const { width, height } = stage.area;
       void setViewport(
-        getViewportForBounds(boundsOf(to.boxes.values()), width, height, ZOOM_MIN, FRAME_ZOOM, fitPadding(stage)),
+        getViewportForBounds(boundsOf(to.boxes.values()), width, height, ZOOM_MIN, FRAME_ZOOM, fitPadding(stage.area, stage.free)),
         { duration: from === null || still ? 0 : PAN_MS },
       );
     }

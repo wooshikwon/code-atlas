@@ -1,6 +1,6 @@
 // 관계 그래프. 저장소의 뷰 종류에 따라 구조 뷰나 함수 시점 뷰를 그린다. 구조 뷰는 저장소 상태에서 보이는 노드와
 // 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드로 화면을 옮긴다. 경로 고정 중에는 고른 노드의 흐름 대신
-// 강조하는 경로를 그리고, 경로가 바뀌면 출발 노드와 도착 노드가 함께 보이게 화면을 옮긴다.
+// 강조하는 경로를 그리고, finder.focus를 정할 때마다 그 노드와 다음 걸음이 보이게 화면을 옮긴다.
 import {
   getViewportForBounds,
   ReactFlow,
@@ -181,14 +181,15 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
   const onScreen = useRef<Layout | null>(null);
-  /** 화면을 옮겨 둔 노드나 경로 */
-  const panned = useRef<string | Lit | null>(null);
+  /** 화면을 옮겨 둔 노드나 경로와 그때의 finder.aimed */
+  const panned = useRef<{ aim: string | Lit | null; aimed: number }>({ aim: null, aimed: 0 });
   /** 직전에 한 번 누른 노드와 누르기 전의 이력. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
   const clicked = useRef<{ id: string; from: History } | null>(null);
   /** 초점을 둔 노드. 선을 골라도 직전에 고른 노드의 초점을 유지한다. */
   const focus = focusOf(selection);
   const lit = useMemo(() => litOf(finder), [finder.route, finder.pick]);
   const pinFocus = finder.focus;
+  const aimed = finder.aimed;
 
   const index = useMemo(
     () => (graph === null ? null : { nodes: nodeIndex(graph), functions: functionCounts(graph) }),
@@ -232,7 +233,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const stage = stageOf(root.current);
     const { width, height } = stage.area;
     const bounds = boundsOf(scene.layout.boxes.values());
-    home.current = getViewportForBounds(bounds, width, height, ZOOM_MIN, ZOOM_MAX, fitPadding(stage));
+    home.current = getViewportForBounds(bounds, width, height, ZOOM_MIN, ZOOM_MAX, fitPadding(stage.area, stage.free));
     void setViewport(home.current);
   }, [scene, home, setViewport]);
   useEffect(
@@ -268,21 +269,25 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       setShelf(shelfCorner(scene, at));
     };
 
+    // 고른 노드나 강조하는 경로가 바뀌면 화면을 옮긴다. 경로 고정 중에는 finder.focus를 정할 때마다 옮긴다.
+    // 강조하는 경로의 배치가 아직 오지 않았으면 그 배치가 올 때까지 기다린다.
     const aim = scene.lit ?? scene.focus;
-    if (aim !== panned.current && root.current !== null) {
-      panned.current = aim;
+    const fresh = aim !== panned.current.aim;
+    if (scene.lit === lit && (fresh || (lit !== null && aimed !== panned.current.aimed)) && root.current !== null) {
+      panned.current = { aim, aimed };
       const { clear } = stageOf(root.current);
-      const zoom = getViewport().zoom;
-      const path = typeof aim === "string" ? null : (aim?.path ?? null);
-      const id = typeof aim === "string" ? aim : path === null ? null : (pinFocus ?? path[path.length - 1]);
-      const box = id === null ? undefined : to.boxes.get(id);
+      const view = getViewport();
+      const path = scene.lit?.path.filter((id) => to.boxes.has(id)) ?? [];
+      const at = Math.max(path.indexOf(pinFocus ?? ""), 0);
+      const box = to.boxes.get(scene.lit === null ? (scene.focus ?? "") : path[at]);
       if (box !== undefined) {
-        const scale = Math.max(zoom, NAMED_ZOOM);
-        const view =
-          path === null
-            ? { ...centerOn(box, clear, scale), zoom: scale }
-            : frameOn(path.map((each) => to.boxes.get(each)).filter((each) => each !== undefined), box, clear, zoom);
-        void setViewport(view, { duration: still ? 0 : PAN_MS });
+        const scale = Math.max(view.zoom, NAMED_ZOOM);
+        const boxes = path.map((id) => to.boxes.get(id)!);
+        const step = boundsOf([box, boxes[at + 1] ?? boxes[at - 1] ?? box]);
+        void setViewport(
+          scene.lit === null ? { ...centerOn(box, clear, scale), zoom: scale } : frameOn(boxes, step, box, clear, view, fresh),
+          { duration: still ? 0 : PAN_MS },
+        );
       }
     }
 
@@ -291,8 +296,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       setMoving(false);
       return;
     }
-    const fresh = new Set(items.filter((item) => !from.boxes.has(item.id)).map((item) => item.id));
-    draw(tween(from, to, 0), fresh);
+    const added = new Set(items.filter((item) => !from.boxes.has(item.id)).map((item) => item.id));
+    draw(tween(from, to, 0), added);
     setMoving(true);
     return play(
       from,
@@ -300,7 +305,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, index, making, pinFocus, cover, getViewport, setViewport]);
+  }, [scene, index, making, lit, pinFocus, aimed, cover, getViewport, setViewport]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
   /** 그릴 선과 그 가운데 순환 선의 키. 순환 덮개를 켠 동안에만 순환 선을 넣고 칠한다. */

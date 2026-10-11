@@ -1,10 +1,10 @@
 // 그래프 왼쪽 아래 칸(`graph/Dock.tsx`)의 경로 찾기 버튼과 그 위에 펼치는 경로 탐색 창. 저장소의 finder를 읽고 쓴다.
-// 출발 칸과 도착 칸이 차면 찾은 경로를 숫자 버튼으로 나열하고, 고른 경로의 단계 목록과 고정 안내, 끄기 버튼을 그린다.
+// 출발 칸과 도착 칸이 차면 찾은 경로를 숫자 버튼으로 나열하고, 고른 경로의 단계 목록과 경로 전체 보기 버튼, 고정 안내,
+// 끄기 버튼을 그린다.
 import { useReactFlow } from "@xyflow/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { reducedMotion } from "../graph/motion";
 import { PATH_LIMIT } from "../graph/route";
-import { frameOn, PAN_MS, stageOf } from "../graph/viewport";
+import { fitTarget, stageOf } from "../graph/viewport";
 import { nodeIndex } from "../graph/visible";
 import { build } from "../search/index";
 import { pinned, useAtlas } from "../state/store";
@@ -26,7 +26,7 @@ export function Finder() {
   const swapEnds = useAtlas((s) => s.swapEnds);
   const pickPath = useAtlas((s) => s.pickPath);
   const clearFinder = useAtlas((s) => s.clearFinder);
-  const { getInternalNode, getViewport, setViewport } = useReactFlow();
+  const { fitView } = useReactFlow();
   const nodes = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
   const entries = useMemo(() => (graph === null ? [] : build(graph, showTests)), [graph, showTests]);
 
@@ -73,20 +73,12 @@ export function Finder() {
   const { route, pick, focus } = finder;
   const path = route?.paths[pick];
 
-  /** 단계의 노드를 정보 패널에 보이고 확대 비율을 그대로 둔 채 그 노드가 가리지 않는 영역에 들어오게 화면을 옮긴다. */
-  const reveal = (event: ReactMouseEvent, id: string) => {
-    show(id);
+  /** 강조하는 경로 위 노드를 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역에 맞춘다. 상단 줄의 "화면 맞춤"과 같은 조작이다. */
+  const fitPath = (event: ReactMouseEvent) => {
     const root = event.currentTarget.closest(".graph");
-    const boxOf = (each: string) => {
-      const at = getInternalNode(each);
-      return at === undefined ? undefined : { ...at.internals.positionAbsolute, width: at.measured.width ?? 0, height: at.measured.height ?? 0 };
-    };
-    const focused = boxOf(id);
-    if (root === null || focused === undefined || path === undefined) {
-      return;
+    if (root !== null && path !== undefined) {
+      void fitView(fitTarget(stageOf(root), path));
     }
-    const boxes = path.map(boxOf).filter((each) => each !== undefined);
-    void setViewport(frameOn(boxes, focused, stageOf(root).clear, getViewport().zoom), { duration: reducedMotion() ? 0 : PAN_MS });
   };
 
   return (
@@ -137,7 +129,7 @@ export function Finder() {
                   data-node={row.id}
                   aria-current={row.id === focus ? "true" : undefined}
                   title={`${row.name} · ${row.file}`}
-                  onClick={(event) => reveal(event, row.id)}
+                  onClick={() => show(row.id)}
                 >
                   <span className="finder-step-number">{index + 1}</span>
                   {row.mark !== null && <span className="finder-step-mark">{row.mark}</span>}
@@ -147,11 +139,16 @@ export function Finder() {
               </li>
             ))}
           </ol>
-          {route.more && (
-            <p className="finder-more">
-              짧은 것부터 {PATH_LIMIT}개 · 경로가 더 있다
-            </p>
-          )}
+          <div className="finder-foot">
+            {route.more && (
+              <span className="finder-more">
+                짧은 것부터 {PATH_LIMIT}개 · 경로가 더 있다
+              </span>
+            )}
+            <button type="button" className="finder-fit" title="경로 위 노드가 모두 보이게 화면을 맞춘다" onClick={fitPath}>
+              경로 전체 보기
+            </button>
+          </div>
           <div className="finder-pinned" data-flash={flash ? "" : undefined}>
             <span>경로 고정 중 · 경로 밖은 눌리지 않는다</span>
             <button type="button" className="finder-clear" onClick={clearFinder}>

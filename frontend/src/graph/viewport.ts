@@ -63,24 +63,29 @@ export function centerOn(box: Box, free: Rect, zoom: number): Point {
   return { x: along(box.x, box.width, free.x, free.width), y: along(box.y, box.height, free.y, free.height) };
 }
 
+/** 화면 위치와 확대 비율 */
+export type View = Point & { zoom: number };
+
 /**
- * 강조하는 경로를 보이는 화면 위치와 확대 비율. path는 경로 위 노드의 상자이고 focus는 정보 패널이 보이는 경로 위 노드의 상자다.
- * 확대 비율은 zoom을 줄이지 않고 `NAMED_ZOOM`보다 작으면 그 값으로 키운다. 경로 위 노드를 모두 품는 사각형을 `centerOn`으로
- * clear에 맞춘 뒤, focus가 clear의 20px 안쪽을 벗어난 축은 focus가 그 안에 들어올 만큼만 옮긴다.
+ * 경로 고정 중에 화면을 옮길 위치와 확대 비율. path는 강조하는 경로 위 노드의 상자, focus는 정보 패널이 보이는 경로 위 노드의 상자,
+ * step은 focus의 노드와 경로에서 그 다음 노드를 품는 상자다. 확대 비율은 view의 값을 줄이지 않고 `NAMED_ZOOM`보다 작으면 그 값으로 키운다.
+ * whole이 참이거나 확대 비율을 키웠으면 path를 모두 품는 사각형을 `centerOn`으로 clear에 맞춘 화면에서 시작하고, 그 밖에는 view에서 시작한다.
+ * 시작한 화면에서 step이 clear의 20px 안쪽에 들어 있는 축은 그대로 두고, 벗어난 축은 step을 `centerOn`으로 clear에 맞춘다.
+ * step이 clear의 20px 안쪽보다 크면 step 대신 focus로 판정한다.
  */
-export function frameOn(path: Box[], focus: Box, clear: Rect, zoom: number): Point & { zoom: number } {
-  const scale = Math.max(zoom, NAMED_ZOOM);
-  const at = centerOn(boundsOf(path), clear, scale);
-  /** 화면 좌표 from에서 시작하는 길이 length의 구간이 room의 안쪽에 들어오도록 옮길 거리. 구간이 더 길면 시작 끝을 맞춘다. */
-  const shift = (from: number, length: number, start: number, room: number) => {
-    const low = start + INSET;
-    const high = start + room - INSET - length;
-    return from < low || high < low ? low - from : from > high ? high - from : 0;
-  };
+export function frameOn(path: Box[], step: Box, focus: Box, clear: Rect, view: View, whole: boolean): View {
+  const zoom = Math.max(view.zoom, NAMED_ZOOM);
+  const from = whole || zoom !== view.zoom ? centerOn(boundsOf(path), clear, zoom) : view;
+  const fits = step.width * zoom <= clear.width - 2 * INSET && step.height * zoom <= clear.height - 2 * INSET;
+  const target = fits ? step : focus;
+  const to = centerOn(target, clear, zoom);
+  /** 화면 좌표 start에서 시작하는 길이 length의 구간이 room의 20px 안쪽에 들어 있는지 */
+  const inside = (start: number, length: number, low: number, room: number) =>
+    start >= low + INSET && start + length <= low + room - INSET;
   return {
-    x: at.x + shift(focus.x * scale + at.x, focus.width * scale, clear.x, clear.width),
-    y: at.y + shift(focus.y * scale + at.y, focus.height * scale, clear.y, clear.height),
-    zoom: scale,
+    x: inside(target.x * zoom + from.x, target.width * zoom, clear.x, clear.width) ? from.x : to.x,
+    y: inside(target.y * zoom + from.y, target.height * zoom, clear.y, clear.height) ? from.y : to.y,
+    zoom,
   };
 }
 
@@ -110,15 +115,26 @@ export interface Stage {
   clear: Rect;
 }
 
-/** "화면 맞춤"의 여백. 그래프를 free 안에 24px를 두고 맞추도록 area의 네 변에서 비울 폭을 낸다. */
-export function fitPadding({ area, free }: Stage) {
+/** 그래프를 관계 그래프 영역 area 안의 사각형 room에 24px를 두고 맞추도록 area의 네 변에서 비울 폭 */
+export function fitPadding(area: Rect, room: Rect) {
   const px = (n: number) => `${Math.round(n) + FIT_MARGIN}px` as const;
   return {
-    top: px(free.y - area.y),
-    right: px(area.x + area.width - free.x - free.width),
-    bottom: px(area.y + area.height - free.y - free.height),
-    left: px(free.x - area.x),
+    top: px(room.y - area.y),
+    right: px(area.x + area.width - room.x - room.width),
+    bottom: px(area.y + area.height - room.y - room.height),
+    left: px(room.x - area.x),
   };
+}
+
+/**
+ * "화면 맞춤"이 맞추는 대상. 강조하는 경로 path가 없으면 그래프 전체를 free에 맞춘다. 경로 고정 중에는 경로 위 노드를 clear에 맞추고
+ * 확대 비율을 100%보다 키우지 않는다.
+ */
+export function fitTarget({ area, free, clear }: Stage, path: string[] | null) {
+  if (path === null) {
+    return { padding: fitPadding(area, free) };
+  }
+  return { padding: fitPadding(area, clear), nodes: path.map((id) => ({ id })), maxZoom: FRAME_ZOOM };
 }
 
 /** 화면에서 관계 그래프 영역 root와 정보 패널, 왼쪽 아래 칸의 사각형을 읽는다. */

@@ -2,7 +2,7 @@ import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { useEffect, useRef } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { GraphView } from "./graph/GraphView";
-import { fitPadding, FRAME_ZOOM, stageOf } from "./graph/viewport";
+import { fitTarget, FRAME_ZOOM, stageOf } from "./graph/viewport";
 import { Entries } from "./nav/Entries";
 import { useFit } from "./nav/fit";
 import { bind } from "./nav/keys";
@@ -14,7 +14,7 @@ import { useOpened } from "./panel/opened";
 import { Palette } from "./search/Palette";
 import { useBranch, useStaleCount, watch } from "./state/changes";
 import { useOverlay } from "./state/overlay";
-import { pinned, useAtlas, type Depth } from "./state/store";
+import { litOf, pinned, useAtlas, type Depth } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
 function Toolbar() {
@@ -41,11 +41,15 @@ function Toolbar() {
     stats === undefined ? null : `호출 확인 ${rate}` + ((stats.timed_out ?? 0) > 0 ? ` · 응답 없음 ${stats.timed_out}` : "");
   const summary = stats === undefined ? null : `파일 ${stats.files} · 노드 ${stats.nodes} · 선 ${stats.edges} · ${brief}`;
 
-  /** 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. 함수 시점 뷰에서는 확대 비율을 100%보다 키우지 않는다. */
+  /**
+   * 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. 함수 시점 뷰에서는 확대 비율을 100%보다 키우지 않는다.
+   * 경로 고정 중에는 강조하는 경로를 맞춘다.
+   */
   const fitGraph = () => {
     const graph = document.querySelector(".graph");
     if (graph !== null) {
-      void fitView({ padding: fitPadding(stageOf(graph)), maxZoom: functionView ? FRAME_ZOOM : undefined });
+      const path = litOf(useAtlas.getState().finder)?.path ?? null;
+      void fitView({ maxZoom: functionView ? FRAME_ZOOM : undefined, ...fitTarget(stageOf(graph), path) });
     }
   };
 

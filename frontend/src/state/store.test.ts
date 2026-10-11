@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { repoFixture, routeFixture } from "../graph/fixture";
 import { back, jump, push, type History, type Place } from "./history";
-import { barred, litOf, nestedFolders, parseUi, pinned, useAtlas, type AtlasStore } from "./store";
+import { barred, chosenOf, litOf, nestedFolders, parseUi, pinned, useAtlas, type AtlasStore } from "./store";
 
 const [a, b, c] = repoFixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
 const folder = repoFixture.nodes.find((n) => n.kind === "package")!.id;
@@ -334,13 +334,13 @@ describe("경로 고정", () => {
     useAtlas.setState({ graph: routeFixture });
   });
 
-  it("칸 하나만 차면 고정이 아니고, 두 칸이 차면 경로를 찾아 첫 경로를 강조하며 도착 노드를 focus에 둔다", () => {
+  it("칸 하나만 차면 고정이 아니고, 두 칸이 차면 경로를 찾아 첫 경로를 강조하며 출발 노드를 focus에 둔다", () => {
     store().setEnd("from", begin);
     expect(store().finder).toMatchObject({ from: begin, to: null, route: null, focus: null });
     expect(pinned(store().finder)).toBe(false);
     expect(litOf(store().finder)).toBeNull();
     store().setEnd("to", finish);
-    expect(store().finder).toMatchObject({ from: begin, to: finish, pick: 0, focus: finish, blocked: 0 });
+    expect(store().finder).toMatchObject({ from: begin, to: finish, pick: 0, focus: begin, blocked: 0 });
     expect(store().finder.route?.paths).toEqual(paths);
     expect(pinned(store().finder)).toBe(true);
     expect(litOf(store().finder)?.path).toEqual(paths[0]);
@@ -407,15 +407,16 @@ describe("경로 고정", () => {
     expect(store().finder.blocked).toBe(0);
   });
 
-  it("경로 위 노드의 select와 show는 focus만 바꾸고 다시 골라도 focus가 풀리지 않는다", () => {
+  it("경로 위 노드의 select와 show는 focus를 바꾸고 aimed를 늘리며, 다시 골라도 focus가 풀리지 않고 aimed가 는다", () => {
     pin();
     const before = store();
+    const aimed = before.finder.aimed;
     store().select(left);
-    expect(store().finder).toEqual({ ...before.finder, focus: left });
+    expect(store().finder).toEqual({ ...before.finder, focus: left, aimed: aimed + 1 });
     store().select(left);
-    expect(store().finder.focus).toBe(left);
+    expect(store().finder).toEqual({ ...before.finder, focus: left, aimed: aimed + 2 });
     store().show(begin);
-    expect(store().finder).toEqual({ ...before.finder, focus: begin });
+    expect(store().finder).toEqual({ ...before.finder, focus: begin, aimed: aimed + 3 });
     expect(kept(store())).toEqual(kept(before));
     expect(store().history).toBe(before.history);
   });
@@ -423,12 +424,24 @@ describe("경로 고정", () => {
   it("강조하지 않은 경로에만 있는 노드는 경로 밖 노드로 막는다", () => {
     pin();
     store().select(right);
-    expect(store().finder).toMatchObject({ focus: finish, blocked: 1 });
+    expect(store().finder).toMatchObject({ focus: begin, blocked: 1 });
     store().pickPath(1);
     store().select(right);
     expect(store().finder).toMatchObject({ focus: right, blocked: 1 });
     store().select(left);
     expect(store().finder).toMatchObject({ focus: right, blocked: 2 });
+  });
+
+  it("chosenOf는 고정 밖에서 고른 노드를, 고정 중에는 focus를 낸다", () => {
+    store().select(probe);
+    expect(chosenOf(store())).toBe(probe);
+    store().setEnd("from", begin);
+    store().setEnd("to", finish);
+    expect(chosenOf(store())).toBe(begin);
+    store().select(left);
+    expect(chosenOf(store())).toBe(left);
+    store().clearFinder();
+    expect(chosenOf(store())).toBe(probe);
   });
 
   it("barred는 고정 밖에서 거짓이고, 고정 중에는 blocked를 늘리고 창을 편 뒤 참을 낸다", () => {
@@ -448,12 +461,12 @@ describe("경로 고정", () => {
     expect(pinned(store().finder)).toBe(true);
   });
 
-  it("pickPath는 고정을 유지한 채 강조할 경로를 바꾸고 focus를 도착 노드로 돌린다", () => {
+  it("pickPath는 고정을 유지한 채 강조할 경로를 바꾸고 focus를 출발 노드로 돌린다", () => {
     pin();
     store().select(left);
     const before = store();
     store().pickPath(2);
-    expect(store().finder).toEqual({ ...before.finder, pick: 2, focus: finish });
+    expect(store().finder).toEqual({ ...before.finder, pick: 2, focus: begin, aimed: before.finder.aimed + 1 });
     expect(litOf(store().finder)?.path).toEqual(paths[2]);
     expect(kept(store())).toEqual(kept(before));
     store().pickPath(3);
@@ -466,7 +479,7 @@ describe("경로 고정", () => {
     store().pickPath(2);
     const before = store();
     store().setEnd("from", mid);
-    expect(store().finder).toMatchObject({ from: mid, to: finish, pick: 0, focus: finish });
+    expect(store().finder).toMatchObject({ from: mid, to: finish, pick: 0, focus: mid });
     expect(store().finder.route?.paths).toEqual([[mid, left, finish]]);
     expect(pinned(store().finder)).toBe(true);
     expect(kept(store())).toEqual(kept(before));
@@ -487,7 +500,7 @@ describe("경로 고정", () => {
     expect(store().finder.blocked).toBe(0);
     store().swapEnds();
     expect(pinned(store().finder)).toBe(true);
-    expect(store().finder.focus).toBe(finish);
+    expect(store().finder.focus).toBe(begin);
     store().select(probe);
     expect(store().selection).toEqual(node(left));
     expect(store().finder.blocked).toBe(1);
@@ -516,7 +529,7 @@ describe("경로 고정", () => {
     store().select(null);
     store().pickPath(1);
     store().clearFinder();
-    expect(store().finder).toEqual({ open: true, from: null, to: null, route: null, pick: 0, focus: null, blocked: 5 });
+    expect(store().finder).toEqual({ open: true, from: null, to: null, route: null, pick: 0, focus: null, blocked: 5, aimed: 5 });
     expect(kept(store())).toEqual(kept(before));
     expect(store().history).toBe(before.history);
     expect(store().collapsed).toBe(before.collapsed);
@@ -560,7 +573,7 @@ describe("경로 고정", () => {
     store().toggleTests();
     expect(store().showTests).toBe(true);
     expect(store().finder.route?.paths).toEqual([[probe, "tests.fakes:relay", lone]]);
-    expect(store().finder).toMatchObject({ pick: 0, focus: lone });
+    expect(store().finder).toMatchObject({ pick: 0, focus: probe });
     store().toggleTests();
     expect(store().showTests).toBe(true);
     expect(store().finder.blocked).toBe(1);
