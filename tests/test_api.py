@@ -499,6 +499,8 @@ async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects
             asyncio.create_task(call(app, "POST", "/api/summary", {"node": node}, left))
             for node, left in zip(nodes, gone)
         ]
+        while len(made) < 2:
+            await asyncio.sleep(0.01)
         await asyncio.sleep(0.1)
         assert made == ["app/core.py::helper", "app/core.py::run_engine"]
 
