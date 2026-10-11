@@ -73,7 +73,7 @@ def test_repo(client):
     assert body["name"] == "sample_repo"
     assert body["source_root"] == "src"
     assert body["python"] == sys.executable
-    assert body["stats"]["files"] == 9
+    assert body["stats"]["files"] == 10
     assert body["stats"]["timed_out"] == 0
     assert body["stats"]["resolved"] + body["stats"]["unresolved"] == body["stats"]["call_sites"]
 
@@ -162,7 +162,7 @@ def test_graph(client):
 
 def test_unused(client):
     body = client.get("/api/unused").json()
-    assert body == {"definitions": 19, "candidates": ["app.core:spare", "app.models:Point", "app.models:Color"]}
+    assert body == {"definitions": 21, "candidates": ["app.core:spare", "app.models:Point", "app.models:Color", "app.shadow:announce"]}
     ids = {n["id"] for n in client.get("/api/graph").json()["nodes"]}
     assert set(body["candidates"]) <= ids and "app.core:on_stop" in ids
 

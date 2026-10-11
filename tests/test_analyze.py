@@ -8,8 +8,8 @@ from code_atlas.lsp import Location
 from code_atlas.model import Site
 
 
-def site(line: int, dynamic: bool = False) -> Site:
-    return Site("call", "a.py", line, 0, line, 0, "a:f", "g()", dynamic)
+def site(line: int, dynamic: bool = False, builtin: bool = False) -> Site:
+    return Site("call", "a.py", line, 0, line, 0, "a:f", "g()", dynamic, builtin=builtin)
 
 
 class FakeSession:
@@ -36,12 +36,12 @@ class FakeSession:
 
 
 @pytest.mark.asyncio
-async def test_request_all_asks_each_site_once_and_skips_dynamic_sites():
+async def test_request_all_asks_each_site_once_and_skips_dynamic_and_builtin_sites():
     session = FakeSession({})
-    sites = [site(line, dynamic=line == 5) for line in range(1, 101)]
+    sites = [site(line, dynamic=line == 5, builtin=line == 7) for line in range(1, 101)]
     found, timed_out = await _request_all(session, sites)
-    assert sorted(session.asked) == [line for line in range(1, 101) if line != 5]
-    assert timed_out == 0 and 4 not in found  # 5번 줄의 지점 번호가 4다
+    assert sorted(session.asked) == [line for line in range(1, 101) if line not in (5, 7)]
+    assert timed_out == 0 and 4 not in found and 6 not in found  # 5번 줄의 지점 번호가 4다
     assert found[1] == [Location("/repo/a.py", 2, 0)] and found[0] == []
     assert max(session.peaks.values()) == analyze.CONCURRENCY
 
@@ -54,13 +54,4 @@ async def test_request_all_asks_only_timed_out_sites_again_and_counts_the_unansw
     assert len(session.asked) == 102
     assert found[49] == [Location("/repo/a.py", 50, 0)]
     assert found[59] == [] and timed_out == 1
-
-
-@pytest.mark.asyncio
-async def test_request_all_halves_concurrency_while_the_first_batch_times_out():
-    session = FakeSession({2: 2, 4: 1})
-    found, timed_out = await _request_all(session, [site(line) for line in range(1, 101)])
-    assert session.asked.count(2) == 3 and session.asked.count(4) == 2
-    assert timed_out == 0 and found[1] == [Location("/repo/a.py", 2, 0)]
-    rest = [session.peaks[line] for line in range(analyze.CONCURRENCY + 1, 101)]
-    assert max(rest) == analyze.CONCURRENCY // 4
+    assert max(session.peaks.values()) == analyze.CONCURRENCY

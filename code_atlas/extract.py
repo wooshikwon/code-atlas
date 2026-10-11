@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import re
 from dataclasses import dataclass, field
 
@@ -20,6 +21,7 @@ METHOD_KINDS = {
     "staticmethod": "static",
     "classmethod": "class",
 }
+BUILTIN_NAMES = frozenset(dir(builtins))
 _DEF_HEAD = re.compile(rb"(?:async\s+)?(?:def|class)\s+")
 _TEXT_LIMIT = 80
 
@@ -113,6 +115,30 @@ def module_variables(tree: ast.Module) -> set[str]:
     return names
 
 
+def bound_names(tree: ast.Module) -> set[str]:
+    """파일 어디에서든 묶이는 이름. `from m import *`가 있으면 `*`가 들어간다.
+
+    대입·`for`·`with`·컴프리헨션의 대상, `def`·`class`, import, 매개변수, `except`의 대상,
+    `match`의 캡처, 타입 매개변수, `global`·`nonlocal`에 적힌 이름이다.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.alias):
+            names.add(node.asname or node.name.split(".")[0])
+        elif isinstance(node, ast.Name):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                names.add(node.id)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            names.update(node.names)
+        else:
+            name = getattr(node, "rest" if isinstance(node, ast.MatchMapping) else "name", None)
+            if isinstance(name, str):
+                names.add(name)
+    return names
+
+
 def _root_name(e: ast.expr) -> ast.Name | None:
     while isinstance(e, (ast.Attribute, ast.Subscript)):
         e = e.value
@@ -184,6 +210,7 @@ class _Extractor:
         self.tree = tree
         self.repo_names = repo_names
         self.bound: set[str] = set()
+        self.file_names = bound_names(tree)
         self.module_vars = module_variables(tree)
         self.nodes: list[Node] = []
         self.defs: dict[str, DefInfo] = {}
@@ -259,8 +286,15 @@ class _Extractor:
                 text=_text(e),
                 dynamic=dynamic,
                 deferred=False,
+                builtin=not dynamic and self._builtin(target),
             )
         )
+
+    def _builtin(self, e: ast.expr) -> bool:
+        """식이 내장 이름 하나이고 이 파일이 그 이름을 묶지 않는다. `import *`가 있는 파일은 묶는 이름을 알 수 없다."""
+        if not isinstance(e, ast.Name) or e.id not in BUILTIN_NAMES:
+            return False
+        return e.id not in self.file_names and "*" not in self.file_names
 
     def _known(self, e: ast.expr) -> bool:
         if isinstance(e, ast.Name):
@@ -573,14 +607,16 @@ def read_source(repo: RepoFiles, file: SourceFile) -> str:
 
 
 def extract(file: SourceFile, text: str, repo_names: frozenset[str]) -> FileFacts:
+    """문법 오류가 있거나 식이 깊어 재귀 한도를 넘는 파일은 `error`를 적은 정의 없는 파일로 낸다."""
     try:
-        tree = ast.parse(text, filename=file.path)
+        return _Extractor(file, text, ast.parse(text, filename=file.path), repo_names).run()
     except SyntaxError as exc:
-        empty = ast.Module(body=[], type_ignores=[])
-        facts = _Extractor(file, text, empty, repo_names).run()
-        facts.error = f"{exc.msg} (줄 {exc.lineno})"
-        return facts
-    return _Extractor(file, text, tree, repo_names).run()
+        error = f"{exc.msg} (줄 {exc.lineno})"
+    except RecursionError:
+        error = "식이 너무 깊다"
+    facts = _Extractor(file, text, ast.Module(body=[], type_ignores=[]), repo_names).run()
+    facts.error = error
+    return facts
 
 
 def extract_repo(repo: RepoFiles) -> list[FileFacts]:
@@ -590,7 +626,7 @@ def extract_repo(repo: RepoFiles) -> list[FileFacts]:
     for f in repo.files:
         try:
             names |= _top_level_names(ast.parse(texts[f.path]))
-        except SyntaxError:
+        except (SyntaxError, RecursionError):
             pass
     repo_names = frozenset(names)
     return [extract(f, texts[f.path], repo_names) for f in repo.files]

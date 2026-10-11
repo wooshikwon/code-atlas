@@ -53,6 +53,7 @@ class Index:
         self.names: dict[tuple[str, int, int], str] = {}  # (경로, 줄, 열) → 노드 id
         self.kinds: dict[str, str] = {}
         self.ranges: dict[str, list[tuple[int, int, str]]] = {}  # 레포 루트 기준 경로 → (시작 줄, 끝 줄, 노드 id)
+        self._relative: dict[str, str | None] = {}  # 언어 서버가 돌려준 경로 → 레포 루트 기준 경로
         for f in facts:
             self.modules[f.file.path] = f.nodes[0].id
             for node in f.nodes:
@@ -63,10 +64,12 @@ class Index:
 
     def relative(self, path: str) -> str | None:
         """레포 루트 기준 경로. 레포 밖이면 None이다."""
-        try:
-            return disk_path(path).relative_to(self.root).as_posix()
-        except ValueError:
-            return None
+        if path not in self._relative:
+            try:
+                self._relative[path] = disk_path(path).relative_to(self.root).as_posix()
+            except ValueError:
+                self._relative[path] = None
+        return self._relative[path]
 
     def enclosing(self, path: str, line: int, col: int) -> str | None:
         """레포 루트 기준 경로의 위치를 품은 가장 안쪽 노드 id. 파일 첫 위치는 모듈이고, 분석 대상 파일이 아니면 None이다."""
@@ -130,6 +133,8 @@ def resolve_site(site: Site, locations: list[Location], index: Index, externals:
     base = {k: getattr(site, k) for k in Site.__dataclass_fields__}
     if site.dynamic:
         return ResolvedSite(**base, status="dynamic")
+    if site.builtin:
+        return ResolvedSite(**base, status="builtin")
     external: tuple[str, str] | None = None
     for loc in locations:
         rel = index.relative(loc.path)

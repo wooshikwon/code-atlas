@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 10.0
 SHUTDOWN_TIMEOUT = 5.0
 STOP_TIMEOUT = 5.0
-READY_TIMEOUT = 60.0
-READY_INTERVAL = 0.5
 
 
 def to_utf16(line: str, col_utf8: int) -> int:
@@ -83,6 +81,7 @@ class Session:
         self.extra_paths = [str((self.root / p).resolve()) for p in extra_paths]
         self.client = LanguageClient("code-atlas", "0.1.0")
         self._lines: dict[str, list[str]] = {}
+        self._answered = 0.0  # 서버가 마지막으로 요청에 응답한 때(이벤트 루프 시각)
         self._register_handlers()
 
     def _analysis_settings(self) -> dict:
@@ -226,16 +225,30 @@ class Session:
         return lines[line - 1] if 0 < line <= len(lines) else ""
 
     async def _request(self, method: str, params, timeout: float):
-        """요청을 보내 응답을 기다린다. 시간 안에 응답이 없으면 `$/cancelRequest`를 보내고 `asyncio.TimeoutError`를 낸다."""
+        """요청을 보내 응답을 기다린다.
+
+        서버는 요청을 하나씩 처리하므로 앞 요청이 오래 걸리면 뒤 요청은 차례를 기다린다. 서버가 어느 요청에도
+        `timeout`초 동안 응답하지 않으면 `$/cancelRequest`를 보내고 `asyncio.TimeoutError`를 낸다.
+        """
+        loop = asyncio.get_running_loop()
         msg_id = str(uuid.uuid4())
+        sent = loop.time()
         response = asyncio.wrap_future(self.client.protocol.send_request(method, params, msg_id=msg_id))
-        # 취소한 요청에 늦게 오는 응답과 오류를 받아 둔다.
-        response.add_done_callback(lambda done: done.cancelled() or done.exception())
-        try:
-            return await asyncio.wait_for(asyncio.shield(response), timeout)
-        except asyncio.TimeoutError:
-            self.client.cancel_request(types.CancelParams(id=msg_id))
-            raise
+        # 취소한 요청에 늦게 오는 응답과 오류도 서버의 응답으로 받아 둔다.
+        response.add_done_callback(self._note_answer)
+        while True:
+            remaining = max(sent, self._answered) + timeout - loop.time()
+            if remaining <= 0:
+                self.client.cancel_request(types.CancelParams(id=msg_id))
+                raise asyncio.TimeoutError
+            done, _ = await asyncio.wait([response], timeout=remaining)
+            if done:
+                return response.result()
+
+    def _note_answer(self, response: asyncio.Future) -> None:
+        if not response.cancelled():
+            response.exception()
+            self._answered = asyncio.get_running_loop().time()
 
     async def definition(
         self, path: str, line: int, col_utf8: int, timeout: float = REQUEST_TIMEOUT
@@ -287,16 +300,10 @@ class Session:
         )
 
     async def wait_ready(self, probe: tuple[str, int, int] | None) -> None:
-        """레포 안 정의를 가리키는 지점에 응답이 올 때까지 기다린다."""
+        """레포 안 정의를 가리키는 지점에 정의 위치를 한 번 물어 응답을 기다린다."""
         if probe is None:
             return
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + READY_TIMEOUT
-        while loop.time() < deadline:
-            try:
-                if await self.definition(*probe):
-                    return
-            except asyncio.TimeoutError:
-                pass
-            await asyncio.sleep(READY_INTERVAL)
-        logger.warning("basedpyright readiness probe timed out")
+        try:
+            await self.definition(*probe)
+        except asyncio.TimeoutError:
+            logger.warning("basedpyright readiness probe timed out")

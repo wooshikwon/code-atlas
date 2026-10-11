@@ -1,6 +1,7 @@
 import pytest
 
-from code_atlas.collect import collect
+from code_atlas import resolve
+from code_atlas.collect import collect, disk_path
 from code_atlas.extract import extract_repo
 from code_atlas.lsp import Location
 from code_atlas.model import Site
@@ -31,14 +32,14 @@ def index(sample_repo):
     return Index(sample_repo, extract_repo(collect(sample_repo))), sample_repo
 
 
-def site(kind, path="src/app/cli.py", dynamic=False):
-    return Site(kind, path, 1, 0, 1, 0, "app.cli:main", "x", dynamic=dynamic)
+def site(kind, path="src/app/cli.py", dynamic=False, builtin=False):
+    return Site(kind, path, 1, 0, 1, 0, "app.cli:main", "x", dynamic=dynamic, builtin=builtin)
 
 
-def run(index, kind, *locations, dynamic=False):
+def run(index, kind, *locations, dynamic=False, builtin=False):
     idx, _ = index
     externals = {}
-    return resolve_site(site(kind, dynamic=dynamic), list(locations), idx, externals), externals
+    return resolve_site(site(kind, dynamic=dynamic, builtin=builtin), list(locations), idx, externals), externals
 
 
 def test_call_to_function_and_class(index):
@@ -74,6 +75,8 @@ def test_unresolved_builtin_dynamic_external(index):
     assert (r.status, r.edge) == ("builtin", None)
     r, _ = run(index, "call", dynamic=True)
     assert r.status == "dynamic"
+    r, _ = run(index, "call", builtin=True)
+    assert (r.status, r.target, r.edge) == ("builtin", None, None)
     r, externals = run(index, "call", Location(f"{TYPESHED}/stdlib/os/__init__.pyi", 10, 4))
     assert (r.status, r.target, r.edge) == ("external", "ext:os", None)
     assert externals["ext:os"].origin == "stdlib"
@@ -90,6 +93,15 @@ def test_locations_under_a_symlinked_root_resolve(sample_repo, tmp_path):
         r = resolve_site(site("call"), [Location(str(root / "src/app/core.py"), *pos)], idx, {})
         assert (r.status, r.target) == ("resolved", "app.core:run_engine")
     assert idx.relative(str(tmp_path / "elsewhere.py")) is None
+
+
+def test_relative_converts_each_path_once(index, monkeypatch):
+    idx, root = index
+    converted = []
+    monkeypatch.setattr(resolve, "disk_path", lambda path: converted.append(path) or disk_path(path))
+    inside, outside = str(root / "src/app/core.py"), f"{TYPESHED}/stdlib/builtins.pyi"
+    assert [idx.relative(p) for p in (inside, outside, inside, outside)] == ["src/app/core.py", None] * 2
+    assert converted == [inside, outside]
 
 
 def test_locations_spelled_in_another_case_resolve_only_where_they_name_the_same_file(sample_repo, tmp_path):

@@ -50,7 +50,8 @@ class Site:
 
     kind는 call·import·pass·decorate·type·inherit 가운데 하나다. call은 대상이
     클래스인지 확인한 뒤 construct가 된다. request_line·request_col은 언어 서버에
-    정의 위치를 물을 위치이고, dynamic이면 묻지 않는다.
+    정의 위치를 물을 위치이고, dynamic이거나 builtin이면 묻지 않는다. builtin은 식이
+    그 파일에서 묶이지 않은 내장 이름 하나인 지점이다.
     """
 
     kind: str
@@ -63,6 +64,7 @@ class Site:
     text: str
     dynamic: bool = False
     deferred: bool = False
+    builtin: bool = False
 
 
 @dataclass
