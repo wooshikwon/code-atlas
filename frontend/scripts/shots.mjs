@@ -5404,10 +5404,11 @@ async function mergeHover(t, page) {
     `줄기 ${pointed.tone} ${pointed.opacity}, 본문 잉크 가지 ${members.filter((line) => line.pointed).length}개`,
   );
   const sources = new Set(trunk.branches.map((key) => endsOfKey(key)[0])).size;
+  const tipRows = trunkTipText.split("\n");
   t.check(
-    "줄기의 말풍선은 선을 내보내는 노드 수와 도착 노드, 지점 수 합이다",
-    new RegExp(`^노드 ${sources}개 → .+ · \\d+곳$`).test(trunkTipText),
-    trunkTipText,
+    "도착 노드 앞 줄기의 말풍선은 첫 줄에 선을 내보내는 노드 수와 도착 노드, 지점 수 합을, 그 아래에 그 구간을 지나는 선을 한 줄씩 적는다",
+    new RegExp(`^노드 ${sources}개 → .+ · \\d+곳$`).test(tipRows[0]) && tipRows.length === 1 + trunk.count && tipRows.slice(1).every((row) => / → .+ · \d+곳$/.test(row)),
+    trunkTipText.replaceAll("\n", " / "),
   );
   await t.shot();
   await page.mouse.move(5, 5);
@@ -6262,6 +6263,158 @@ async function numbers(t, page) {
   await page.screenshot({ path: join(OUT, "s4-u7-fix-labels-wide-light.png") });
 }
 
+// ── 4단계: 여러 선이 함께 지나는 구간 ────────────────────────────
+
+/** 화면의 선 가운데 pointed인 선의 키 */
+const pointedLines = (page) => page.evaluate(() => [...document.querySelectorAll(".react-flow__edge .edge[data-pointed]:not(.edge-trunk)")].map((edge) => edge.dataset.key).sort());
+
+/** 고정한 선 목록의 항목마다 선의 키와 글. 목록이 없으면 null이다. */
+const menuOf = (page) =>
+  page.evaluate(() => (document.querySelector(".line-menu") === null ? null : [...document.querySelectorAll(".line-menu-item")].map((item) => ({ key: item.dataset.key, text: item.textContent }))));
+
+/**
+ * 도착 노드가 다른 선 둘 이상이 함께 지나는 구간 위의 화면 좌표와 그 구간을 지나는 선의 키. 선의 경로를 4px마다 짚어 2px 격자에 모으고,
+ * 그 점의 맨 위 요소가 선인 곳을 고른다. 없으면 null이다.
+ */
+const sharedSpot = (page) =>
+  page.evaluate(() => {
+    const endsOf = (key) => {
+      const parts = key.split("|");
+      return parts[0] === "agg" || parts[0] === "step" ? [parts[1], parts[2]] : [parts[0], parts[1]];
+    };
+    const cells = new Map();
+    for (const edge of document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")) {
+      const line = edge.querySelector(".edge-hit");
+      const matrix = line.getScreenCTM();
+      for (let at = 8; at < line.getTotalLength() - 8; at += 4) {
+        const point = new DOMPoint(line.getPointAtLength(at).x, line.getPointAtLength(at).y).matrixTransform(matrix);
+        const cell = `${Math.round(point.x / 2)}:${Math.round(point.y / 2)}`;
+        const found = cells.get(cell) ?? { x: point.x, y: point.y, keys: new Set() };
+        found.keys.add(edge.dataset.key);
+        cells.set(cell, found);
+      }
+    }
+    const area = document.querySelector(".graph").getBoundingClientRect();
+    const panel = document.querySelector(".info-panel").getBoundingClientRect();
+    for (const { x, y, keys } of cells.values()) {
+      const targets = new Set([...keys].map((key) => endsOf(key)[1]));
+      const visible = x > area.left + 10 && x < panel.left - 10 && y > area.top + 10 && y < area.bottom - 200;
+      if (keys.size >= 2 && targets.size >= 2 && visible && document.elementFromPoint(x, y)?.closest(".react-flow__edge") != null) {
+        return { x, y, keys: [...keys].sort(), targets: [...targets] };
+      }
+    }
+    return null;
+  });
+
+/** 여러 선이 함께 지나는 구간의 hover와 클릭을 본다. */
+async function overlap(t, page) {
+  await load(page);
+  const hoverAt = async (spot) => {
+    await page.mouse.move(spot.x + 1, spot.y + 1);
+    await page.mouse.move(spot.x, spot.y);
+    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+    await page.waitForTimeout(250);
+  };
+  // 줄기 가운데 일부 선만 지나는 구간: 줄기의 먼 쪽 끝.
+  const trunk = (await trunksOf(page)).filter((each) => each.count >= 3).sort((a, b) => b.count - a.count)[0];
+  const far = await page.evaluate((key) => {
+    const line = document.querySelector(`.edge-trunk[data-key="${CSS.escape(key)}"] .edge-line`);
+    const point = new DOMPoint(line.getPointAtLength(6).x, line.getPointAtLength(6).y).matrixTransform(line.getScreenCTM());
+    return { x: point.x, y: point.y };
+  }, trunk.key);
+  await hoverAt(far);
+  const part = { pointed: await pointedLines(page), rows: (await tipText(page)).split("\n"), trunk: (await trunksOf(page)).find((each) => each.key === trunk.key).pointed };
+  t.check(
+    `가지 ${trunk.count}개인 줄기의 먼 쪽 구간에 올리면 그 구간을 지나는 선만 강조하고 줄기 전체는 강조하지 않는다`,
+    part.pointed.length >= 1 && part.pointed.length < trunk.count && !part.trunk && part.pointed.every((key) => trunk.branches.includes(key)),
+    `강조한 선 ${part.pointed.length}개, 말풍선 ${part.rows.length}줄`,
+  );
+  t.check(
+    "말풍선의 줄 수가 그 구간을 지나는 선의 수와 같고(도착이 같은 여럿이면 합계 한 줄을 더한다) 선마다 출발 → 도착 · 분류 · M곳을 적는다",
+    part.rows.length === (part.pointed.length === 1 ? 1 : part.pointed.length + 1) && part.rows.slice(-part.pointed.length).every((row) => / → .+ · \d+곳$/.test(row)),
+    part.rows.join(" / "),
+  );
+  await page.screenshot({ path: join(OUT, "s4-u7-fix-overlap-part.png") });
+
+  // 도착이 같은 줄기는 누르면 바로 도착 노드를 고른다.
+  const near1 = await trunkPoint(page, trunk.key);
+  await hoverAt(near1);
+  await page.mouse.click(near1.x, near1.y);
+  await waitSelected(page, trunk.target).catch(() => {});
+  t.check("도착 노드가 같은 선이 겹친 줄기를 누르면 목록 없이 바로 도착 노드를 고른다", (await selectedOf(page)) === trunk.target && (await menuOf(page)) === null, `선택 ${await selectedOf(page)}`);
+  await page.keyboard.press("Escape");
+  await rest(page);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.mouse.move(5, 5);
+  await rest(page);
+
+  // 도착이 다른 선이 겹친 구간.
+  const spot = await sharedSpot(page);
+  if (spot === null) {
+    t.skip("도착이 다른 선이 겹친 구간을 누르면 목록이 고정된다", `화면에 도착이 다른 선이 함께 지나는 구간이 없다 (선택 ${await selectedOf(page)}, 선 ${(await linesOf(page)).length}개)`);
+    return;
+  }
+  await hoverAt(spot);
+  const shared = { pointed: await pointedLines(page), rows: (await tipText(page)).split("\n") };
+  t.check(
+    `도착이 다른 선 ${spot.keys.length}개가 함께 지나는 구간에 올리면 그 선들만 강조하고 말풍선에 한 줄씩 적는다`,
+    same(shared.pointed, spot.keys) && shared.rows.length === spot.keys.length && shared.rows.every((row) => / → .+ · \d+곳$/.test(row)),
+    `강조 ${shared.pointed.length}개, 말풍선 ${shared.rows.join(" / ")}`,
+  );
+  await page.screenshot({ path: join(OUT, "s4-u7-fix-overlap-hover.png") });
+  await page.mouse.click(spot.x, spot.y);
+  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
+  const menu = await menuOf(page);
+  t.check(
+    "그 구간을 누르면 노드를 고르지 않고 누른 자리에 선 목록을 고정한다. 항목은 말풍선의 줄과 같다",
+    menu !== null && same(menu.map((item) => item.key).sort(), spot.keys) && same(menu.map((item) => item.text), shared.rows) && (await selectedOf(page)) === null && (await count(page, ".tooltip")) === 0,
+    `항목 ${menu?.length ?? 0}개`,
+  );
+  const item = await rectOf(page, `.line-menu-item[data-key="${menu[1].key}"]`);
+  await page.mouse.move(item.x + item.width / 2, item.y + item.height / 2);
+  await page.waitForTimeout(250);
+  t.check("항목에 올리면 그 선 하나만 강조한다", same(await pointedLines(page), [menu[1].key]), (await pointedLines(page)).join(", "));
+  await t.shot();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  t.check("Esc는 목록을 먼저 닫고 선택을 바꾸지 않는다", (await menuOf(page)) === null && (await selectedOf(page)) === null && (await count(page, ".edge[data-pointed]")) === 0);
+
+  await page.mouse.click(spot.x, spot.y);
+  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
+  await page.mouse.click(40, 500);
+  await page.waitForTimeout(200);
+  t.check("목록 밖을 누르면 목록이 닫힌다", (await menuOf(page)) === null);
+
+  await page.waitForTimeout(600);
+  await page.mouse.click(spot.x, spot.y);
+  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
+  const picked = (await menuOf(page))[0];
+  const wanted = endsOfKey(picked.key)[1];
+  await page.click(`.line-menu-item[data-key="${picked.key}"]`);
+  await waitSelected(page, wanted).catch(() => {});
+  t.check("항목을 누르면 그 선의 도착 노드를 고르고 목록이 닫힌다", (await selectedOf(page)) === wanted && (await menuOf(page)) === null, `선택 ${await selectedOf(page)}`);
+  await page.keyboard.press("Escape");
+  await rest(page);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.mouse.move(5, 5);
+  await rest(page);
+
+  const again = await sharedSpot(page);
+  await page.waitForTimeout(600);
+  await page.keyboard.down("Shift");
+  await page.mouse.click(again.x, again.y);
+  await page.keyboard.up("Shift");
+  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
+  const listed = (await menuOf(page))[0];
+  await page.click(`.line-menu-item[data-key="${listed.key}"]`);
+  await page.waitForSelector(".info-panel-sites", { timeout: 10_000 }).catch(() => {});
+  t.check(
+    "Shift를 누른 채 누른 목록에서 항목을 고르면 그 선의 코드 줄 목록이 열리고 노드는 선택되지 않는다",
+    (await count(page, ".info-panel-site")) > 0 && (await headOf(page)).includes("→") && (await selectedOf(page)) === null,
+    (await headOf(page)).replaceAll("\n", " / ").slice(0, 80),
+  );
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -6332,6 +6485,7 @@ const SCENARIOS = [
   ["pack-toggle", packToggle],
   ["lanes", lanes],
   ["numbers", numbers],
+  ["overlap", overlap],
   ["progress", progress],
   ["progress-failed", progressFailed],
   ["stale", staleScenario],
@@ -6360,6 +6514,7 @@ const STAGE4 = new Set([
   "pack-toggle",
   "lanes",
   "numbers",
+  "overlap",
   "progress",
   "progress-failed",
   "stale",

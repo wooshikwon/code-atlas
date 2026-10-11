@@ -1,6 +1,7 @@
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
+import { usePick } from "./graph/aim";
 import { GraphView } from "./graph/GraphView";
 import { Progress } from "./graph/Progress";
 import { fitTarget, stageOf } from "./graph/viewport";
@@ -79,7 +80,7 @@ export function App() {
         forward: () => useAtlas.getState().forward(),
         escape: () => {
           const state = useAtlas.getState();
-          if (state.paletteOpen || state.cancelArranging()) {
+          if (state.paletteOpen || usePick.getState().close() || state.cancelArranging()) {
             return;
           }
           if (useOpened.getState().path !== null) {

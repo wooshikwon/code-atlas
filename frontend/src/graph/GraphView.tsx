@@ -7,7 +7,6 @@ import {
   useReactFlow,
   useStore,
   ViewportPortal,
-  type EdgeMouseHandler,
   type NodeMouseHandler,
   type Viewport,
 } from "@xyflow/react";
@@ -19,11 +18,12 @@ import { focusOf, type History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { chosenOf, litOf, useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
+import { useAim } from "./aim";
 import { Arranging, keepLayout, watchLayout } from "./arranging";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
-import { edgeTypes, flowEdges, isTrunk, Markers, type FlowEdge } from "./edges/OrthogonalEdge";
+import { edgeTypes, flowEdges, Markers } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, layout, packId, packLabel, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
@@ -36,13 +36,14 @@ import { isPack, type PackFlowNode } from "./nodes/PackNode";
 import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
 import { drawn, type EdgeKey } from "./scope";
-import { nodeTip, packTip, tipOf, trunkTip } from "./tips";
+import { nodeTip, packTip, tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
 import { anchorOn, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
+const NO_BOXES = new Map<string, Box>();
 const SHELF_NAME_HEIGHT = 22;
 
 /** 배치 한 번과 그 배치를 만든 입력. 노드와 선은 늘 같은 Scene에서 만든다. */
@@ -208,8 +209,6 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const [error, setError] = useState<string | null>(null);
   /** 마우스를 올린 노드 id */
   const [hover, setHover] = useState<string | null>(null);
-  /** 마우스를 올린 선 */
-  const [pointed, setPointed] = useState<EdgeKey | null>(null);
   /** 마우스를 올린 노드 가운데 그 위치에서 눌리는 노드 id. 경로 고정 중에는 경로 위 노드만이다. */
   const [aimedNode, setAimedNode] = useState<string | null>(null);
 
@@ -408,18 +407,37 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     (): Lines => (scene === null || index === null ? NO_LINES : edgeViews(lines.edges, scene.layout, index.nodes)),
     [scene, index, lines],
   );
+  const chosen = chosenOf({ finder, selection });
+  const nameOf = (id: string) => {
+    const node = index?.nodes.get(id);
+    return node === undefined ? id : titleOf(node);
+  };
   /**
-   * 마우스를 올린 선으로 그리는 선. 줄기에 올리면 그 줄기와 가지 전체이고, 경로 고정 중에는 가지 가운데 경로의 걸음만이다.
+   * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 도착 노드를 고르고 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 그 선을 골라
+   * 정보 패널에 지점 목록을 연다. 경로 고정 중에는 경로의 걸음만 강조하고, 그 밖의 선은 말풍선만 띄운다.
    */
-  const aimedLines = useMemo(() => {
-    const trunk = views.trunks.find((t) => t.key === pointed);
-    if (trunk === undefined) {
-      return new Set(pointed === null ? [] : [pointed]);
-    }
-    const members = views.views.filter((v) => v.trunk === trunk.key && (scene?.lit == null || v.route !== null));
-    return new Set([trunk.key, ...members.map((v) => v.key)]);
-  }, [views, pointed, scene]);
-  const edges = useMemo(() => flowEdges(views, aimedLines, lines.keys), [views, aimedLines, lines]);
+  const aim = useAim({
+    lines: views,
+    boxes: scene?.layout.boxes ?? NO_BOXES,
+    tip,
+    name: nameOf,
+    describe: ({ source, target, group, sites, route }) =>
+      `${nameOf(source)} → ${nameOf(target)} · ${sites === 0 && route !== null ? STEP_NAMES[route] : `${GROUP_NAMES[group]} · ${sites}곳`}`,
+    only: lit === null ? null : (view) => view.route !== null,
+    skip: (event) => {
+      const again = repeated(event);
+      clicked.current = null;
+      return again;
+    },
+    pick: (target) => {
+      if (target !== chosen) {
+        press(target);
+        clicked.current = null;
+      }
+    },
+    open: selectEdge,
+  });
+  const edges = useMemo(() => flowEdges(views, aim.pointed, lines.keys), [views, aim.pointed, lines]);
   const drawnNodes = useMemo(() => [...pointing(nodes, aimedNode), ...packs], [nodes, aimedNode, packs]);
 
   /**
@@ -479,26 +497,6 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       select(null);
     }
   };
-  const chosen = chosenOf({ finder, selection });
-  /**
-   * 선이나 줄기를 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 그 선을 골라 정보 패널에 지점 목록을 열고,
-   * 줄기면 줄기에 든 선 전체의 지점 목록을 연다.
-   */
-  const onEdgeClick: EdgeMouseHandler<FlowEdge> = (event, edge) => {
-    tip.current?.hide();
-    setPointed(null);
-    if (repeated(event)) {
-      return;
-    }
-    clicked.current = null;
-    if (event.shiftKey) {
-      selectEdge(edge.id);
-    } else if (edge.data !== undefined && edge.data.target !== chosen) {
-      press(edge.data.target);
-      clicked.current = null;
-    }
-  };
-
   /**
    * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 그 위치에서 눌리는 노드면 선의 hover처럼
    * 가장 진한 단계로 그린다. 경로 고정 중에는 경로 위 노드만 그렇게 그린다.
@@ -518,39 +516,11 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
     onNodeOver(event, node);
   };
-  /** 경로 고정 중에는 경로의 걸음과 걸음이 지나는 줄기만 마우스를 올린 선으로 강조하고, 그 밖의 선은 말풍선만 띄운다. */
-  const onEdgeEnter: EdgeMouseHandler<FlowEdge> = (event, edge) => {
-    const step = isTrunk(edge) ? edge.data?.route === true : edge.data?.route != null;
-    if (lit === null || step) {
-      setPointed(edge.id);
-    }
-    const name = (id: string) => {
-      const node = index?.nodes.get(id);
-      return node === undefined ? id : titleOf(node);
-    };
-    if (isTrunk(edge)) {
-      if (edge.data !== undefined) {
-        tip.current?.show(trunkTip(edge.data.sources, name(edge.data.target), edge.data.sites), event.clientX, event.clientY);
-      }
-      return;
-    }
-    if (edge.data !== undefined) {
-      const { source, target, group, sites, route } = edge.data;
-      const kind = sites === 0 && route !== null ? STEP_NAMES[route] : `${GROUP_NAMES[group]} · ${sites}곳`;
-      tip.current?.show(`${name(source)} → ${name(target)} · ${kind}`, event.clientX, event.clientY);
-    }
-  };
-  const onMove = (event: ReactMouseEvent) => tip.current?.move(event.clientX, event.clientY);
   const onNodeLeave = () => {
     setHover(null);
     setAimedNode(null);
     tip.current?.hide();
   };
-  const onEdgeLeave = () => {
-    setPointed(null);
-    tip.current?.hide();
-  };
-
   if (scene === null) {
     return (
       <div className="graph">
@@ -578,10 +548,10 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         onNodeMouseEnter={onNodeEnter}
         onNodeMouseMove={onNodeOver}
         onNodeMouseLeave={onNodeLeave}
-        onEdgeClick={onEdgeClick}
-        onEdgeMouseEnter={onEdgeEnter}
-        onEdgeMouseMove={onMove}
-        onEdgeMouseLeave={onEdgeLeave}
+        onEdgeClick={aim.onEdgeClick}
+        onEdgeMouseEnter={aim.onEdgeEnter}
+        onEdgeMouseMove={aim.onEdgeMove}
+        onEdgeMouseLeave={aim.onEdgeLeave}
         onPaneClick={onPaneClick}
         nodesDraggable={false}
         nodesConnectable={false}
@@ -607,6 +577,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       <Dock />
       <Arranging />
       <Tooltip ref={tip} />
+      {aim.menu}
     </div>
   );
 }

@@ -30,7 +30,7 @@ export function isTrunk(edge: FlowEdge): edge is TrunkFlowEdge {
 
 /**
  * 그릴 선마다 React Flow 선 하나와 줄기마다 하나. 마우스를 올린 선 pointed는 다른 선 위의 층에 본문 잉크, 불투명도 1로 그린다.
- * pointed에 줄기의 키가 들면 그 줄기를 같은 방식으로 그린다. cycles에 든 선은 순환 선이다. 줄기에 든 선은 가지만 그리고,
+ * 줄기에 든 선이 모두 pointed에 들면 그 줄기도 같은 방식으로 그린다. cycles에 든 선은 순환 선이다. 줄기에 든 선은 가지만 그리고,
  * 강조하는 선(`emphasized`)은 줄기 위에 전체 경로를 한 번 더 그리고 그 선의 수를 선 위에 적는다(`ownNumbers`).
  * 같은 층에서는 가지, 줄기, 강조하는 선 순서로 그린다.
  */
@@ -61,8 +61,8 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
   });
   const byKey = new Map(views.map((view) => [view.key, view]));
   const stems = trunks.map((trunk): TrunkFlowEdge => {
-    const on = pointed.has(trunk.key);
     const members = trunk.keys.map((key) => byKey.get(key)!);
+    const on = trunk.keys.every((key) => pointed.has(key));
     const shade = on ? { tone: "strong" as const, opacity: EDGE_OPACITY.full } : trunkShade(members, (view) => emphasized(view, marks(view)));
     return {
       id: trunk.key,

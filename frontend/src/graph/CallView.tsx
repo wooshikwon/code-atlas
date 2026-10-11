@@ -3,7 +3,6 @@ import {
   getViewportForBounds,
   ReactFlow,
   useReactFlow,
-  type EdgeMouseHandler,
   type NodeMouseHandler,
   type NodeTypes,
 } from "@xyflow/react";
@@ -14,16 +13,18 @@ import type { History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
+import { useAim } from "./aim";
 import { Arranging, watchLayout } from "./arranging";
 import { callEdges, callElk, callLabel, callLane, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
-import { edgeTypes, flowEdges, isTrunk, Markers, type FlowEdge } from "./edges/OrthogonalEdge";
-import { fromElk, measureText, runElk, type Layout } from "./layout";
+import { edgeTypes, flowEdges, Markers } from "./edges/OrthogonalEdge";
+import { fromElk, measureText, runElk, type Box, type Layout } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { flowNodes, parts, pointing, type Drawn } from "./nodes/common";
 import { UNUSED_OPACITY } from "./overlay";
-import { nodeTip, tipOf, trunkTip } from "./tips";
+import { nodeTip, tipOf } from "./tips";
+import { NO_LINES } from "./view";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { GROUP_NAMES, KIND_NAMES } from "./names";
 import type { EdgeKey } from "./scope";
@@ -33,6 +34,7 @@ import { hidden, nodeIndex } from "./visible";
 const nodeTypes: NodeTypes = { call: CallNode };
 /** 함수 시점 뷰는 파일 사이의 import 선을 그리지 않으므로 순환 선이 없다. */
 const NO_CYCLES = new Set<EdgeKey>();
+const NO_BOXES = new Map<string, Box>();
 
 /** 배치 한 번과 그 배치를 만든 입력. 노드와 선은 늘 같은 Scene에서 만든다. */
 interface Scene {
@@ -92,8 +94,6 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const [nodes, setNodes] = useState<CallFlowNode[]>([]);
   const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** 마우스를 올린 선 */
-  const [pointed, setPointed] = useState<EdgeKey | null>(null);
   /** 마우스를 올린 노드 id */
   const [aimedNode, setAimedNode] = useState<string | null>(null);
 
@@ -163,15 +163,32 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     );
   }, [scene, index, selected, making, unused, setViewport]);
 
-  const lines = useMemo(() => (scene === null ? null : callEdges(scene.calls, scene.center, scene.layout)), [scene]);
-  const edges = useMemo((): FlowEdge[] => {
-    if (lines === null) {
-      return [];
-    }
-    /** 줄기에 올리면 그 줄기와 가지 전체를 마우스를 올린 선으로 그린다. */
-    const members = lines.views.filter((view) => view.trunk === pointed).map((view) => view.key);
-    return flowEdges(lines, new Set(pointed === null ? [] : [pointed, ...members]), NO_CYCLES);
-  }, [lines, pointed]);
+  const lines = useMemo(() => (scene === null ? NO_LINES : callEdges(scene.calls, scene.center, scene.layout)), [scene]);
+  const nameOf = (id: string) => {
+    const node = index?.get(id);
+    return node === undefined || index === null ? id : callTitle(index, node);
+  };
+  /** 선의 hover와 클릭(`aim.tsx`). 선을 누르면 도착 노드를 고르고 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 그 선의 지점 목록을 연다. */
+  const aim = useAim({
+    lines,
+    boxes: scene?.layout.boxes ?? NO_BOXES,
+    tip,
+    name: nameOf,
+    describe: ({ source, target, group, sites }) => `${nameOf(source)} → ${nameOf(target)} · ${GROUP_NAMES[group]} · ${sites}곳`,
+    only: null,
+    skip: (event) => {
+      const again = repeated(event);
+      clicked.current = null;
+      return again;
+    },
+    pick: (target) => {
+      if (target !== selected) {
+        select(target);
+      }
+    },
+    open: selectEdge,
+  });
+  const edges = useMemo(() => flowEdges(lines, aim.pointed, NO_CYCLES), [lines, aim.pointed]);
 
   const drawnNodes = useMemo(() => pointing(nodes, aimedNode), [nodes, aimedNode]);
 
@@ -210,57 +227,16 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     clicked.current = null;
     select(null);
   };
-  /**
-   * 선이나 줄기를 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 그 선을 골라 정보 패널에 지점 목록을 열고,
-   * 줄기면 줄기에 든 선 전체의 지점 목록을 연다.
-   */
-  const onEdgeClick: EdgeMouseHandler<FlowEdge> = (event, edge) => {
-    tip.current?.hide();
-    setPointed(null);
-    if (repeated(event)) {
-      return;
-    }
-    clicked.current = null;
-    if (event.shiftKey) {
-      selectEdge(edge.id);
-    } else if (edge.data !== undefined && edge.data.target !== selected) {
-      select(edge.data.target);
-    }
-  };
-
   /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 올린 노드는 선의 hover처럼 가장 진한 단계로 그린다. */
   const onNodeOver: NodeMouseHandler<CallFlowNode> = (event, node) => {
     setAimedNode(node.data.node.id);
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
     tip.current?.show(tipOf(event.target) ?? nodeTip(title, KIND_NAMES[node.data.node.kind], node.data.unused), event.clientX, event.clientY);
   };
-  const onEdgeEnter: EdgeMouseHandler<FlowEdge> = (event, edge) => {
-    setPointed(edge.id);
-    const name = (id: string) => {
-      const node = index?.get(id);
-      return node === undefined || index === null ? id : callTitle(index, node);
-    };
-    if (isTrunk(edge)) {
-      if (edge.data !== undefined) {
-        tip.current?.show(trunkTip(edge.data.sources, name(edge.data.target), edge.data.sites), event.clientX, event.clientY);
-      }
-      return;
-    }
-    if (edge.data !== undefined) {
-      const { source, target, group, sites } = edge.data;
-      tip.current?.show(`${name(source)} → ${name(target)} · ${GROUP_NAMES[group]} · ${sites}곳`, event.clientX, event.clientY);
-    }
-  };
-  const onMove = (event: ReactMouseEvent) => tip.current?.move(event.clientX, event.clientY);
   const onLeave = () => {
     setAimedNode(null);
     tip.current?.hide();
   };
-  const onEdgeLeave = () => {
-    setPointed(null);
-    tip.current?.hide();
-  };
-
   if (scene === null) {
     return (
       <div className="graph">
@@ -281,10 +257,10 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
         onNodeMouseEnter={onNodeOver}
         onNodeMouseMove={onNodeOver}
         onNodeMouseLeave={onLeave}
-        onEdgeClick={onEdgeClick}
-        onEdgeMouseEnter={onEdgeEnter}
-        onEdgeMouseMove={onMove}
-        onEdgeMouseLeave={onEdgeLeave}
+        onEdgeClick={aim.onEdgeClick}
+        onEdgeMouseEnter={aim.onEdgeEnter}
+        onEdgeMouseMove={aim.onEdgeMove}
+        onEdgeMouseLeave={aim.onEdgeLeave}
         onPaneClick={onPaneClick}
         nodesDraggable={false}
         nodesConnectable={false}
@@ -298,6 +274,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       <Dock />
       <Arranging />
       <Tooltip ref={tip} />
+      {aim.menu}
     </div>
   );
 }
