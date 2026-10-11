@@ -113,6 +113,58 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
     return () => listener.dispose();
   }, [editor, path, start, select]);
 
+  // Mod를 누른 채 이름 위에 마우스를 올리면 정의가 레포 안의 노드인 이름에 밑줄을 긋는다.
+  useEffect(() => {
+    if (editor === null) {
+      return;
+    }
+    const links = editor.createDecorationsCollection();
+    /** 정의를 물어 둔 이름의 줄과 시작 열 */
+    let asked = "";
+    const clear = () => {
+      asked = "";
+      links.clear();
+    };
+    const listeners = [
+      editor.onMouseMove((event) => {
+        const position = event.target.position;
+        const mod = event.event.metaKey || event.event.ctrlKey;
+        const word = mod && position !== null ? editor.getModel()?.getWordAtPosition(position) : null;
+        if (word == null || position === null) {
+          clear();
+          return;
+        }
+        const line = position.lineNumber;
+        const key = `${line}:${word.startColumn}`;
+        if (key === asked) {
+          return;
+        }
+        clear();
+        asked = key;
+        getDefinition(path, line + start - 1, word.startColumn - 1)
+          .then(({ targets }) => {
+            if (asked === key && targets.at(0)?.node != null) {
+              links.set([
+                {
+                  range: { startLineNumber: line, startColumn: word.startColumn, endLineNumber: line, endColumn: word.endColumn },
+                  options: { inlineClassName: "code-link" },
+                },
+              ]);
+            }
+          })
+          .catch(() => {
+            // LSP 세션이 없는 서버에서는 밑줄을 긋지 않는다.
+          });
+      }),
+      editor.onMouseLeave(clear),
+      editor.onKeyUp((event) => !(event.metaKey || event.ctrlKey) && clear()),
+    ];
+    return () => {
+      listeners.forEach((listener) => listener.dispose());
+      links.clear();
+    };
+  }, [editor, path, start]);
+
   useEffect(() => {
     if (note === null) {
       return;

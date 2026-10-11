@@ -643,6 +643,12 @@ ul {
   background: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
+/* Mod를 누른 채 올린 이름 가운데 정의로 이동할 수 있는 이름 */
+.code-link {
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* 구조 뷰 */
 
 .graph {

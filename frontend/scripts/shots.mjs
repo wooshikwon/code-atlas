@@ -710,12 +710,37 @@ async function hover(t, page) {
   const noted = (await note.isVisible()) ? await note.innerText() : "";
   t.check("표준 라이브러리 이름 Path를 Mod+클릭하면 외부 모듈 이름 말풍선이 뜬다", noted === "외부 모듈 pathlib" && (await selectedOf(page)) === FUNCTION, noted);
 
+  // Mod를 누른 채 올리면 레포 안에 정의가 있는 이름에만 밑줄이 그어진다.
+  const linked = async (word) => {
+    await page.mouse.move(word.x + word.width / 2 - 6, word.y + word.height / 2);
+    await page.mouse.move(word.x + word.width / 2, word.y + word.height / 2, { steps: 3 });
+    await page.waitForSelector(".info-panel .code-link", { timeout: 3_000 }).catch(() => {});
+    return page.evaluate(() => [...document.querySelectorAll(".info-panel .code-link")].map((element) => element.textContent).join(""));
+  };
   const inside = await wordRect(page, "extract_today_items");
   await page.keyboard.down(MOD);
+  const outer = await linked(await wordRect(page, "Path"));
+  const inner = await linked(inside);
+  t.check(
+    "Mod를 누른 채 올리면 레포 안의 extract_today_items에는 밑줄이 그어지고 표준 라이브러리 Path에는 그어지지 않는다",
+    inner === "extract_today_items" && outer === "",
+    `extract_today_items "${inner}", Path "${outer}"`,
+  );
   await page.mouse.click(inside.x + inside.width / 2, inside.y + inside.height / 2);
   await page.keyboard.up(MOD);
   await waitSelected(page, "note_common:extract_today_items").catch(() => {});
   t.check("Mod+클릭 뒤 선택이 note_common:extract_today_items로 바뀐다", (await selectedOf(page)) === "note_common:extract_today_items", `${await selectedOf(page)}`);
+  await page.waitForFunction(() => document.querySelector(".info-panel .monaco-editor .view-lines")?.textContent.includes("def extract_today_items"), null, { timeout: 10_000 }).catch(() => {});
+  const shownCode = await page.evaluate(() => document.querySelector(".info-panel .monaco-editor .view-lines")?.textContent.replaceAll("\u00a0", " ") ?? "");
+  const opened = (await boxes(page)).find((b) => b.id === "note_common")?.open === true;
+  t.check(
+    "그래프가 note_common.py를 펼쳐 그 함수를 보이고 정보 패널의 코드가 그 함수로 바뀐다",
+    opened && shownCode.includes("def extract_today_items") && (await headOf(page)).includes("extract_today_items"),
+    `note_common.py 펼침 ${opened}`,
+  );
+  await page.keyboard.press("Alt+ArrowLeft");
+  await waitSelected(page, FUNCTION).catch(() => {});
+  t.check("Alt+←로 Mod+클릭하기 전의 함수로 돌아온다", (await selectedOf(page)) === FUNCTION, `${await selectedOf(page)}`);
 }
 
 async function edge(t, page) {
