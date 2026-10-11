@@ -1,10 +1,12 @@
 """레포를 분석하며 단계별 시간, 정의 요청 수, 응답 없음 수를 잰다.
 
-    measure_analysis.py <레포> [--python P] [--runs 3] [--dump 결과.json] [--compare 결과.json]
+    measure_analysis.py <레포> [--python P] [--runs 3] [--no-cache] [--cache-dir 폴더] [--dump 결과.json] [--compare 결과.json]
 
-실행마다 새 언어 서버 세션으로 분석하고 한 줄에 실행 하나씩 JSONL로 표준 출력에 쓴다. `stages_s`는 단계별 초다:
-`collect`(파일 수집), `extract`(구조 추출), `start`(언어 서버 기동), `ready`(준비 확인), `requests`(정의 요청),
-`resolve`(응답 위치를 노드 id로 바꾸기), `build`(그래프 조립), `unused`(미사용 판정).
+실행마다 `code_atlas.analyze.refresh`를 한 번 부르고 한 줄에 실행 하나씩 JSONL로 표준 출력에 쓴다. 분석 캐시는
+`--cache-dir`(주지 않으면 `~/.cache/code-atlas`)의 파일을 쓰고, `--no-cache`는 캐시를 읽지 않고 전체를 분석해 덮어쓴다.
+다시 물을 지점이 없는 실행은 언어 서버를 띄우지 않는다. `stages_s`는 단계별 초다: `collect`(파일 수집과 본문 읽기),
+`extract`(캐시 읽기와 구조 추출), `environment`(환경 지문), `start`(언어 서버 기동), `ready`(준비 확인),
+`requests`(정의 요청과 응답 위치를 노드 id로 바꾸기), `build`(그래프 조립), `unused`(미사용 판정), `save`(캐시 쓰기).
 
 `--dump`는 마지막 실행의 분석 결과를 `code-atlas analyze --json`과 같은 JSON으로 쓴다. `--compare`는 그 JSON과
 실행마다의 노드, 선, 지점별 판정을 견줘 `compare`에 다른 수를 적고 다른 지점을 표준 오류에 한 줄씩 쓴다.
@@ -22,12 +24,18 @@ from collections import Counter
 from pathlib import Path
 
 from code_atlas import analyze as pipeline
-from code_atlas.collect import collect
+from code_atlas.cache import Cache
 from code_atlas.lsp import Session
 from code_atlas.model import to_dict
 
-STAGES = ("extract_repo", "_request_all", "resolve", "build", "candidates")
-STAGE_NAMES = {"extract_repo": "extract", "_request_all": "requests", "candidates": "unused"}
+STAGES = {
+    "_read": "collect",
+    "_extracted": "extract",
+    "environment": "environment",
+    "_request_all": "requests",
+    "build": "build",
+    "candidates": "unused",
+}
 JUDGED = ("kind", "path", "line", "col", "enclosing", "text", "status", "target", "edge")
 
 
@@ -105,29 +113,39 @@ def _compare(result: dict, expected: dict) -> dict:
     return {"nodes": unequal("nodes"), "edges": unequal("edges"), "sites": differ}
 
 
-async def _run(repo: str, python: str, clock: Clock) -> tuple[int, dict]:
-    started = time.monotonic()
-    files = collect(repo)
-    clock.add("collect", started)
-    started = time.monotonic()
-    session = Session(files.root, python, files.extra_paths)
-    async with session:
-        clock.add("start", started)
+async def _run(repo: str, python: str, clock: Clock, store: Cache, rebuild: bool) -> tuple[int, dict]:
+    sessions: list[Session] = []
+
+    async def started(files) -> Session:
+        began = time.monotonic()
+        session = Session(files.root, python, files.extra_paths)
+        await session.__aenter__()
+        sessions.append(session)
+        clock.add("start", began)
         clock.watch(session)
-        analyzed = await pipeline.analyze_async(files, session)
-    return len(files.files), to_dict(analyzed.analysis)
+        return session
+
+    try:
+        analyzed = await pipeline.refresh(repo, python, started, cache=store, rebuild=rebuild)
+    finally:
+        for session in sessions:
+            await session.__aexit__(None, None, None)
+    return len(analyzed.files.files), to_dict(analyzed.analysis)
 
 
-def measure(repo: str, python: str) -> tuple[dict, dict]:
+def measure(repo: str, python: str, cache_dir: Path | None, rebuild: bool) -> tuple[dict, dict]:
     """한 번 분석해 (잰 값, 분석 결과)를 돌려준다."""
     clock = Clock()
+    store = Cache(Path(repo), cache_dir)
+    store.save = clock.timed("save", store.save)
     originals = {name: getattr(pipeline, name) for name in STAGES}
     for name, fn in originals.items():
-        setattr(pipeline, name, clock.timed(STAGE_NAMES.get(name, name), fn))
+        setattr(pipeline, name, clock.timed(STAGES[name], fn))
     started = time.monotonic()
     try:
-        files, result = asyncio.run(_run(repo, python, clock))
+        files, result = asyncio.run(_run(repo, python, clock, store, rebuild))
     finally:
+        store.close()
         for name, fn in originals.items():
             setattr(pipeline, name, fn)
     row = {
@@ -150,6 +168,8 @@ def main() -> int:
     parser.add_argument("repo")
     parser.add_argument("--python", help="대상 레포의 파이썬 인터프리터 경로")
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--no-cache", action="store_true", help="캐시를 읽지 않고 전체를 분석해 덮어쓴다")
+    parser.add_argument("--cache-dir", type=Path, help="분석 캐시 파일을 둘 폴더")
     parser.add_argument("--dump", type=Path, help="마지막 실행의 분석 결과를 쓸 JSON 경로")
     parser.add_argument("--compare", type=Path, help="견줄 분석 결과 JSON 경로")
     args = parser.parse_args()
@@ -161,7 +181,7 @@ def main() -> int:
     expected = json.loads(args.compare.read_text(encoding="utf-8")) if args.compare else None
     result: dict = {}
     for run in range(1, args.runs + 1):
-        row, result = measure(args.repo, python)
+        row, result = measure(args.repo, python, args.cache_dir, args.no_cache)
         if expected is not None:
             row["compare"] = _compare(result, expected)
         print(json.dumps({"repo": str(Path(args.repo).resolve()), "run": run, **row}, ensure_ascii=False), flush=True)

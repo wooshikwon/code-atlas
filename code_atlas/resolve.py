@@ -154,6 +154,17 @@ def resolve_site(site: Site, locations: list[Location], index: Index, externals:
     return ResolvedSite(**base, status="external", target=node.id, edge=EDGE_KINDS[site.kind].get("external"))
 
 
+def restore(
+    site: Site, verdict: tuple[str, str | None, str | None], origins: dict[str, str], externals: dict[str, Node]
+) -> ResolvedSite:
+    """저장해 둔 판정 (상태, 대상 노드 id, 선 종류)로 지점을 되살린다. 대상이 외부 노드면 `origins`의 origin으로 그 노드를 `externals`에 넣는다."""
+    status, target, edge = verdict
+    if status == "external":
+        externals.setdefault(target, _external_node(target[len(EXTERNAL_PREFIX) :], origins[target]))
+    base = {k: getattr(site, k) for k in Site.__dataclass_fields__}
+    return ResolvedSite(**base, status=status, target=target, edge=edge)
+
+
 def resolve(facts: list[FileFacts], locations: dict[int, list[Location]], index: Index) -> Resolution:
     """지점 순번(`facts`의 지점을 차례로 센 번호)마다 받은 위치로 대상을 정한다."""
     externals: dict[str, Node] = {}

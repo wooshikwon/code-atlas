@@ -170,6 +170,25 @@ export interface Unused {
   candidates: string[];
 }
 
+export type Phase = "collect" | "extract" | "resolve" | "build" | "ready" | "failed";
+
+/** 분석의 단계와 진행 수, 결과의 판 번호, 언어 서버의 상태 */
+export interface Status {
+  phase: Phase;
+  /** extract에서 추출한 파일 수와 전체 파일 수, resolve에서 보낸 정의 요청 수와 보낼 전체 수. 나머지 단계에서는 0이다. total은 resolve 도중에 커진다. */
+  done: number;
+  total: number;
+  /** 서버가 분석 결과를 바꾼 횟수. 결과가 아직 없으면 0이다. */
+  revision: number;
+  /** 다시 물을 지점이 남은 결과다. 다 물으면 다음 판이 온다. */
+  draft: boolean;
+  lsp: "starting" | "ready";
+  /** phase가 failed일 때의 까닭 */
+  error: string | null;
+  /** 지금 판을 분석한 뒤 내용이 달라졌거나 생기거나 없어진 파일. paths는 레포 루트 기준 경로의 앞 5개다. */
+  stale: { count: number; paths: string[] };
+}
+
 export interface ApiErrorBody {
   error: string;
 }

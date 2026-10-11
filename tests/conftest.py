@@ -13,6 +13,16 @@ CYCLE_FIXTURE = Path(__file__).parent / "fixtures" / "cycle_repo"
 collect_ignore_glob = ["fixtures/*"]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def cache_dir(tmp_path_factory):
+    """분석 캐시의 기본 폴더를 임시 폴더로 바꾼다. 시험은 `~/.cache/code-atlas`에 쓰지 않는다."""
+    from code_atlas import cache
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cache, "CACHE_DIR", tmp_path_factory.mktemp("analysis-cache"))
+        yield
+
+
 def _copy_fixture(tmp_path: Path) -> Path:
     """고정 레포를 복사하고 git에 담을 수 없는 무시 대상 파일과 가상환경 폴더를 더한다."""
     repo = tmp_path / "sample_repo"
