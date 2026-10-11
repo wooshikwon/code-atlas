@@ -23,7 +23,7 @@ basedpyright는 Python 의존성으로 함께 설치한다. 화면은 `frontend/
 .venv/bin/code-atlas analyze <레포 경로> [--python PATH] [--json]
 ```
 
-`code-atlas <레포 경로>`는 레포를 분석한 뒤 `http://127.0.0.1:8766`에 서버를 띄우고 브라우저를 연다. 분석이 끝나면 터미널에 `노드 695 · 선 1417 · 지점 4680 · 호출 해석률 87.2% (2043/2342) · 6033ms` 같은 줄을 한 번 출력한다. 언어 서버가 시간 안에 답하지 못한 지점이 있으면 `정의 요청 N개가 시간 안에 응답받지 못했다`를 표준 오류에 적고, 화면 상단 줄 통계에 `응답 없음 N`을 붙인다. `code-atlas analyze`는 서버를 띄우지 않고 같은 줄만 출력하며, `--json`을 주면 분석 결과 전체를 JSON으로 출력한다.
+`code-atlas <레포 경로>`는 레포를 분석한 뒤 `http://127.0.0.1:8766`에 서버를 띄우고 브라우저를 연다. 분석이 끝나면 터미널에 `노드 695 · 선 1417 · 지점 4680 · 호출 해석률 87.2% (2043/2342) · 6033ms` 같은 줄을 한 번 출력한다. 언어 서버가 시간 안에 답하지 못한 지점이 있으면 `정의 요청 N개가 시간 안에 응답받지 못했다`를 표준 오류에 적고, 화면 상단 줄 통계에 `응답 없음 N`을 붙인다. `code-atlas analyze`는 서버를 띄우지 않고 같은 줄과 `미사용 후보 4개` 줄을 출력하며, `--json`을 주면 두 줄 대신 분석 결과 전체를 JSON으로 출력한다. JSON에는 미사용 후보가 들지 않는다.
 
 | 옵션 | 뜻 |
 |---|---|
@@ -63,10 +63,35 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | 코드 뷰어에서 줄 범위 끌어 고르기 | 고른 끝에 "요약 생성" 버튼을 띄운다. 누르면 그 범위의 LLM 설명을 만든다 |
 | 미니맵 클릭·끌기 | 확대 비율을 그대로 둔 채 그 위치로 화면을 옮긴다 |
 | 그래프 바탕 클릭, `Esc` | 선택을 푼다 |
+| 왼쪽 아래 경로 찾기 버튼 | 경로 탐색 창을 펴거나 접는다. 출발 칸과 도착 칸에서 파일·클래스·함수를 검색해 고르면 두 곳을 잇는 실행 경로를 찾는다 |
+| 경로 탐색 창의 숫자 버튼 | 그 번호의 경로만 굵은 선으로 강조하고 단계 목록을 그 경로로 바꾼다 |
+| 경로 탐색 창의 단계 클릭 | 그 단계의 노드를 정보 패널에 보이고 화면을 그 노드로 옮긴다 |
+| 경로 탐색 창의 `끄기` | 경로 고정을 풀고 고정 전의 선택과 펼침으로 돌아간다 |
+| 상단 줄의 `덮개` 버튼 | 분석 덮개를 "없음", "순환 의존", "미사용 후보" 가운데 하나로 바꾼다 |
 | `Mod+P`, `Mod+K` | 파일·클래스·함수 이름으로 검색한다 |
 | `Alt+←`, `Alt+→` | 탐색 이력을 뒤로, 앞으로 옮긴다. macOS에서는 `Cmd+[`·`Cmd+]`도 쓴다 |
 
-`Mod`는 macOS에서 `Cmd`, 그 밖에서 `Ctrl`이다. 상단 줄의 토글로 테스트 코드와 외부 모듈 노드를 켜고, 왼쪽 아래 둥근 버튼 두 개로 미니맵과 범례를 접고 편다. 미니맵은 전체 그래프의 축소 그림 위에 지금 화면에 보이는 영역을 사각형으로 그리고, 처음에 펼친 채로 연다. 정보 패널은 머리 줄을 끌어 옮기고 가장자리를 끌어 크기를 바꾸며, LLM 요약 칸과 코드 뷰어 사이의 경계선을 위아래로 끌어 두 영역의 높이를 바꾼다. 머리 줄을 더블클릭하면 패널이 기본 위치와 크기로, 요약 칸이 기본 높이로 돌아간다.
+`Mod`는 macOS에서 `Cmd`, 그 밖에서 `Ctrl`이다. 상단 줄의 토글로 테스트 코드와 외부 모듈 노드를 켜고, 왼쪽 아래 둥근 버튼 세 개로 미니맵과 범례, 경로 탐색 창을 접고 편다. 미니맵은 전체 그래프의 축소 그림 위에 지금 화면에 보이는 영역을 사각형으로 그리고, 처음에 펼친 채로 연다. 펼친 세 칸은 아래 끝을 맞춰 나란히 놓이고 폭이 모자라면 오른쪽 칸부터 위로 올라가며, 정보 패널과 겹치면 정보 패널 위에 그린다. 노드를 고르거나 경로의 단계를 누르면 화면은 확대 비율을 줄이지 않은 채 그 노드를 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역으로 옮긴다. 정보 패널은 머리 줄을 끌어 옮기고 가장자리를 끌어 크기를 바꾸며, LLM 요약 칸과 코드 뷰어 사이의 경계선을 위아래로 끌어 두 영역의 높이를 바꾼다. 머리 줄을 더블클릭하면 패널이 기본 위치와 크기로, 요약 칸이 기본 높이로 돌아간다.
+
+## 경로 찾기와 경로 고정
+
+경로 탐색 창의 출발 칸과 도착 칸이 차면 출발에서 도착까지 호출을 따라가는 경로를 짧은 것부터 다섯 개까지 찾아 숫자 버튼으로 나열한다. 숫자 아래에는 단계 수를, 버튼의 말풍선에는 단계 수와 거치는 파일 수를 적고, 여섯째 경로가 있으면 "경로가 더 있다"고 적는다. 정보 패널 머리 줄의 `출발로`·`도착으로` 버튼은 창을 편 동안 지금 보이는 파일·클래스·함수를 그 칸에 넣는다.
+
+- **따라가는 선**: 실행 선(호출, 생성)과 이음 두 가지다. 생성자 이음은 클래스에서 그 클래스의 `__init__`·`__post_init__`·`__new__`로 가고, 오버라이드 이음은 부모 메서드에서 그 메서드를 오버라이드한 자식 메서드로 간다. 사용 선(import, 전달, 타입)과 상속 선은 따라가지 않고, 토글로 숨긴 테스트 코드와 외부 노드는 거치지 않는다.
+- **끝점**: 함수·메서드는 그 노드 하나, 클래스·파일은 그 안에 든 함수 전체다. 폴더는 끝점으로 고르지 않는다.
+- **강조**: 고른 번호의 경로만 본문 잉크 3px 선으로 그리고 이음 구간은 점선으로 그린다. 경로 위 노드는 접힌 파일 상자와 접힌 폴더 안에 있어도 펼쳐 보이고, 경로 밖의 노드와 선은 흐리게 그린다. 출발 노드와 도착 노드에는 `출발`·`도착` 표지가 붙는다.
+- **경로 고정**: 경로가 하나라도 나오면 `끄기`를 누를 때까지 그 경로가 고정된다. 고정 중에는 경로 밖의 노드·선·폴더 상자, 파일트리, `Mod+P` 검색, 코드 뷰어의 `Mod`+클릭, 요약의 정의 표기, 뒤로·앞으로, "테스트 코드"·"외부 노드" 토글, 흐름 단계가 선택과 펼침을 바꾸지 않고, 막힌 조작마다 창의 `경로 고정 중 · 경로 밖은 눌리지 않는다` 줄이 잠깐 뒤집힌다. 경로 위의 노드나 선, 단계 목록의 단계를 누르면 강조는 그대로 두고 정보 패널이 보이는 노드만 바꾼다. `Esc`와 그래프 바탕 클릭은 고정을 풀지 않는다.
+- **고정 중에 되는 조작**: 화면 이동과 확대, 미니맵, 화면 맞춤, 숫자 버튼, 출발·도착 다시 고르기와 맞바꾸기, 분석 덮개 전환, 범례, 화면 색, 정보 패널의 요약 생성과 코드 범위 설명이다. 창은 접을 수 있고 접어도 고정은 유지되며, 고정 중에는 경로 찾기 버튼을 채워 그린다.
+- **경로 없음**: 경로가 없으면 "실행 선으로 이어지는 경로가 없다" 아래에 출발에서 닿는 함수 수와 그 안의 미확인 호출(`?`) 수를 적고, 반대 방향에 경로가 있으면 맞바꾸기 버튼을 보인다. 이때는 고정이 아니다.
+
+## 분석 덮개
+
+상단 줄의 `덮개` 버튼에서 덮개 하나를 켠다. 창이 좁아 토글이 "설정" 목록으로 접히면 덮개도 그 목록 안에서 고른다. 순환 묶음이 있는 레포는 순환 덮개를 켠 채로, 없는 레포는 덮개 없이 연다. 덮개를 켜고 꺼도 상자의 위치는 바뀌지 않고, 켠 덮개는 다음에 열 때 유지하지 않는다. 덮개를 켜고 아무것도 고르지 않았으면 정보 패널이 그 덮개의 결과 목록을 보이고, 목록의 행을 누르면 그 노드를 고른다.
+
+- **순환 의존**: 서로를 import해 돌아오는 파일의 묶음을 찾는다. 함수 안에서 하는 import와 폴더 단위로만 돌아오는 관계는 세지 않는다. 묶음에 든 파일 상자와 그 파일을 품은 접힌 폴더 상자는 덮개와 관계없이 이름표 앞에 순환 아이콘을 달고, 덮개를 켜면 묶음 안의 import 선을 빨간색으로 그린다. 덮개를 켠 동안 변경 표시는 색을 빼고 글자만 남긴다.
+- **미사용 후보**: 들어오는 실행·사용 선이 없는 함수·메서드·클래스를 점선 테두리로 흐리게 그린다. 접힌 파일 상자와 접힌 폴더 상자 아래에는 안에 든 후보 수를 `미사용 후보 3`으로 적는다. 테스트 코드가 부르는 정의는 후보가 아니다. 진입점, 데코레이터가 붙은 정의, 이중 밑줄 이름, 상속되는 클래스, 오버라이드로 이어진 메서드 가운데 하나라도 쓰이는 묶음, 외부 클래스를 상속한 클래스의 메서드, 미확인 호출이 같은 이름을 부르는 정의, 이름이 문자열 상수로 적힌 정의, 점 경로가 설정 파일(`.yaml`·`.yml`·`.toml`·`.json`·`.cfg`·`.ini`)에 적힌 정의는 후보에서 뺀다.
+
+경로 고정과 덮개는 함께 켤 수 있다. 고정 중에는 경로가 먼저 읽히도록 순환 선을 색만 남긴 채 흐리게 그리고, 경로 위의 미사용 후보는 점선 테두리만 받는다.
 
 ## LLM 요약
 
@@ -104,6 +129,9 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 - **파일이 많은 레포의 처음 화면**: 소스 루트 바로 아래 폴더만 펼치고 그 아래 폴더는 접힌 폴더 상자로 그린다. 한 폴더에 파일이 많으면 그 폴더의 파일 상자를 모두 한 화면에 그린다.
 - **열어 둔 채 고친 코드**: 그래프의 노드와 줄 범위, 코드 뷰어와 요약의 본문은 레포를 열 때 분석한 값이다. 그 뒤 내용이 바뀐 파일은 상단 줄에 "분석 뒤 바뀐 파일 N개"로만 알리고 다시 분석하지 않는다. 바뀐 코드를 보려면 `Ctrl+C`로 끝내고 다시 실행한다.
 - **동적 호출**: `getattr(obj, name)()`이나 타입 힌트 없는 인자의 메서드 호출처럼 정적 분석으로 대상을 확인하지 못한 호출은 선으로 그리지 않고 노드의 `?` 배지에 수로 적는다.
+- **경로 없음이 도달하지 않음을 보장하지 않는다**: 경로 찾기는 그린 선만 따라가므로 미확인 호출을 거쳐야 닿는 함수로는 경로를 찾지 못한다. 경로 없음 문구가 출발에서 닿는 함수 안의 미확인 호출 수를 함께 적는다.
+- **미사용 후보는 후보다**: 판정은 정적 분석이 그린 선과 이름 대조에 기대므로, 동적으로만 불리는 정의가 후보로 남거나 이름이 우연히 문자열과 같은 미사용 정의가 후보에서 빠진다. 지우기 전에 코드를 읽어 확인한다.
+- **순환 묶음의 두 파일 사이에 호출이 있을 때**: 두 파일 상자 사이의 선은 import와 호출을 합친 집계 선 하나이므로 순환 덮개가 그 선 전체를 빨간색으로 그린다.
 - **macOS의 이력 단축키**: `Option+←`·`Option+→`와 `Cmd+[`·`Cmd+]`는 브라우저의 이전·다음 페이지 단축키와 같은 키다. code-atlas가 이 키를 먼저 받아 탐색 이력을 옮기는 동작은 headless Chrome에서만 확인했다. 포커스가 코드 뷰어나 검색 칸에 있으면 `Option+←`·`Option+→`는 낱말 사이를 옮긴다.
 
 ## 구성
@@ -111,29 +139,32 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | 경로 | 역할 |
 |---|---|
 | `code_atlas/model.py` | 노드·선·지점·분석 결과 자료형. 필드는 HTTP API 계약과 같다 |
-| `code_atlas/collect.py` | 분석할 `.py` 파일 수집(`.gitignore`·가상환경 폴더 제외), 소스 루트·테스트 코드 판정, `pyproject.toml`의 진입점 설정, 경로를 디스크에 적힌 이름으로 맞추기 |
+| `code_atlas/collect.py` | 분석할 `.py` 파일 수집(`.gitignore`·가상환경 폴더 제외), 소스 루트·테스트 코드 판정, `pyproject.toml`의 진입점 설정, 미사용 판정이 읽는 설정 파일 본문, 경로를 디스크에 적힌 이름으로 맞추기 |
 | `code_atlas/extract.py` | 파일마다 `ast`로 정의 노드와 관계 후보 지점(호출·import·이름 사용·데코레이터·타입·상속)을 뽑는다 |
 | `code_atlas/lsp.py` | basedpyright 언어 서버 세션 수명과 UTF-8 바이트·UTF-16 열 변환 |
 | `code_atlas/resolve.py` | 언어 서버가 돌려준 정의 위치를 노드 id와 선 종류로 바꾼다 |
 | `code_atlas/graph.py` | 노드·선 조립, 패키지 노드, 데이터 클래스·오버라이드·진입점 판정, 해석률 집계 |
-| `code_atlas/analyze.py` | 수집부터 그래프 조립까지 차례로 부르는 분석 진입점. 인터프리터 확인과 분석 뒤 바뀐 파일 판정도 맡는다 |
+| `code_atlas/analyze.py` | 수집부터 그래프 조립, 미사용 후보 판정까지 차례로 부르는 분석 진입점. 인터프리터 확인과 분석 뒤 바뀐 파일 판정도 맡는다 |
+| `code_atlas/unused.py` | 분석 결과에서 들어오는 실행·사용 선이 없는 정의를 찾고 제외 규칙 일곱 개를 적용해 미사용 후보를 낸다 |
 | `code_atlas/venv.py` | 대상 레포의 가상환경 인터프리터 탐색 |
 | `code_atlas/changes.py` | 대상 레포에서 `git status`·`git diff HEAD`를 읽어 마지막 커밋 뒤에 바뀐 파일과 줄 범위를 낸다. 인덱스를 다시 쓰지 않는 읽기 전용 명령만 부른다 |
 | `code_atlas/summary.py` | 분석 결과에서 앞뒤 흐름 자료를 모아 프롬프트를 만들고, Claude Code CLI(`claude -p`)를 불러 노드의 설명과 코드 범위의 설명을 받아 `~/.cache/code-atlas/summaries.db`에 저장한다 |
-| `code_atlas/api.py` | 서버가 떠 있는 동안 언어 서버 세션 하나를 유지한다. `/api/repo`·`/api/tree`·`/api/graph`·`/api/file`(분석 결과. `/api/file`은 분석할 때 읽은 본문을 돌려준다), `/api/hover`·`/api/definition`(언어 서버에 묻는 타입 정보와 정의 위치), `/api/changes`(변경 표시), `/api/summary`(LLM 요약), `/api/explanations`·`/api/explanation`(코드 범위 설명) 경로와 `frontend/dist/` 서빙. `127.0.0.1`에만 연다 |
+| `code_atlas/api.py` | 서버가 떠 있는 동안 언어 서버 세션 하나를 유지한다. `/api/repo`·`/api/tree`·`/api/graph`·`/api/file`(분석 결과. `/api/file`은 분석할 때 읽은 본문을 돌려준다), `/api/hover`·`/api/definition`(언어 서버에 묻는 타입 정보와 정의 위치), `/api/changes`(변경 표시), `/api/unused`(판정 대상 정의 수 `definitions`와 미사용 후보의 노드 id `candidates`), `/api/summary`(LLM 요약), `/api/explanations`·`/api/explanation`(코드 범위 설명) 경로와 `frontend/dist/` 서빙. `127.0.0.1`에만 연다 |
 | `code_atlas/cli.py` | `code-atlas <레포>`(분석 뒤 서버 실행)와 `code-atlas analyze <레포>`(결과 출력) 명령 |
 | `frontend/src/api/` | API 계약 자료형과 백엔드 호출. 화면 컴포넌트는 `client.ts`만 거친다 |
-| `frontend/src/state/` | `store.ts`의 zustand 저장소 `useAtlas(selector)`가 분석 결과, 선택, 뷰 종류, 접은 폴더, 흐름 단계, 토글, 정보 패널 사각형을 담고 `history.ts`가 탐색 이력을 맡는다. `changes.ts`는 `/api/changes`를 15초마다와 창이 포커스를 받을 때 다시 받는다. `summaries.ts`와 `explanations.ts`는 노드 요약과 코드 범위 설명의 상태와 요청을 맡는다 |
+| `frontend/src/state/` | `store.ts`의 zustand 저장소 `useAtlas(selector)`가 분석 결과, 선택, 뷰 종류, 접은 폴더, 흐름 단계, 토글, 정보 패널 사각형을 담고 `history.ts`가 탐색 이력을 맡는다. `store.ts`는 경로 고정 상태 `finder`(창의 열림, 출발, 도착, 찾은 경로, 고른 번호, 정보 패널이 보이는 경로 위 노드)와 고정 중에 막는 액션도 맡는다. `overlay.ts`는 켠 덮개와 `/api/unused` 응답을, `cycles.ts`는 지금 토글의 순환 묶음을 낸다. `changes.ts`는 `/api/changes`를 15초마다와 창이 포커스를 받을 때 다시 받는다. `summaries.ts`와 `explanations.ts`는 노드 요약과 코드 범위 설명의 상태와 요청을 맡는다 |
 | `frontend/src/theme.ts` | 밝은 화면·어두운 화면 색 값과 CSS 변수 내보내기 |
 | `frontend/src/tree/` | 파일트리. `rows.ts`가 폴더·파일·고른 파일의 클래스·함수 목록을 행 배열로 펴고, `TreeSearch.tsx`가 맨 위 검색 칸과 결과 목록을, `Icon.tsx`가 종류 기호를 그린다. 행 오른쪽 끝에 변경 표시를 붙인다 |
-| `frontend/src/search/` | `Mod+P` 검색 팔레트. `index.ts`가 파일·클래스·함수 이름 색인과 `fzf` 매처를 맡는다 |
-| `frontend/src/nav/` | 상단 줄. `Trail.tsx`는 탐색 경로 표시, `Entries.tsx`는 진입점 목록, `Toggles.tsx`는 토글 세 개와 "설정" 목록, `fit.ts`는 줄 폭에 맞춰 상단 줄을 줄이는 단계, `keys.ts`는 이력 이동·`Esc`·팔레트 열기 단축키다 |
-| `frontend/src/panel/` | 그래프 위에 떠 있는 정보 패널. 머리 줄(`Header.tsx`), LLM 요약 칸(`Summary.tsx`, 요약 상태와 요청은 `state/summaries.ts`, 문단 안의 식별자와 정의 표기를 그리는 `inline.tsx`, 설명을 세 부분과 정의 표기로 나누는 `parts.ts`), 선의 지점 목록(`Sites.tsx`), 끌기와 크기 조절(`usePanelRect.ts`·`rect.ts`·`drag.ts`), 그래프 노드가 없는 `__init__.py`를 여는 `opened.ts` |
+| `frontend/src/search/` | `Mod+P` 검색 팔레트. `index.ts`가 파일·클래스·함수 이름 색인과 `fzf` 매처를 맡고, `HitRow.tsx`는 팔레트와 경로 탐색 창이 함께 쓰는 결과 행이다 |
+| `frontend/src/route/` | 경로 탐색 창. `Finder.tsx`가 경로 찾기 버튼과 창을, `EndField.tsx`가 출발·도착 검색 칸을, `Ends.tsx`가 정보 패널 머리 줄의 `출발로`·`도착으로` 버튼을 그리고, `words.ts`가 단계 목록과 경로 없음 문구를 만든다 |
+| `frontend/src/nav/` | 상단 줄. `Trail.tsx`는 탐색 경로 표시, `Entries.tsx`는 진입점 목록, `Toggles.tsx`는 토글 세 개와 "설정" 목록, `Overlays.tsx`는 분석 덮개 메뉴, `fit.ts`는 줄 폭에 맞춰 상단 줄을 줄이는 단계, `keys.ts`는 이력 이동·`Esc`·팔레트 열기 단축키다 |
+| `frontend/src/panel/` | 그래프 위에 떠 있는 정보 패널. 머리 줄(`Header.tsx`), LLM 요약 칸(`Summary.tsx`, 요약 상태와 요청은 `state/summaries.ts`, 문단 안의 식별자와 정의 표기를 그리는 `inline.tsx`, 설명을 세 부분과 정의 표기로 나누는 `parts.ts`), 선의 지점 목록(`Sites.tsx`), 덮개의 결과 목록(`Overview.tsx`), 끌기와 크기 조절(`usePanelRect.ts`·`rect.ts`·`drag.ts`), 그래프 노드가 없는 `__init__.py`를 여는 `opened.ts` |
 | `frontend/src/code/` | 고른 노드가 든 파일의 전체 코드를 열고 노드의 줄 범위 밖을 흐리게 그리는 읽기 전용 Monaco 코드 뷰어. `hover.ts`가 이름 위 hover를, `CodeView.tsx`가 `Mod`+클릭 정의 이동을 백엔드에 연결한다. `RangeNotes.tsx`는 고른 줄 범위의 설명 버튼·창·말풍선 표지를 그린다. Monaco는 CDN 없이 번들에 넣는다 |
-| `frontend/src/graph/` | 구조 뷰와 함수 시점 뷰. `visible.ts`가 보이는 노드를, `flow.ts`가 고른 노드에서 나가는 흐름과 불투명도를, `scope.ts`가 그릴 선을, `columns.ts`가 열 번호와 연결 묶음·선반을 정한다. `layout.ts`가 ELK를 Web Worker로 돌려 좌표를 정하고, `view.ts`가 선마다 경로를, `motion.ts`가 배치 움직임을, `viewport.ts`가 화면 이동 좌표를, `layers.ts`가 노드·선·글자의 겹침 순서를 낸다. `calls.ts`·`CallView.tsx`는 함수 시점 뷰, `nodes/`·`edges/`는 React Flow 노드·선 컴포넌트, `Dock.tsx`는 왼쪽 아래 칸, `Minimap.tsx`·`Legend.tsx`·`Tooltip.tsx`는 미니맵·범례·말풍선이고 `tips.ts`는 배지 말풍선의 글이다 |
+| `frontend/src/graph/` | 구조 뷰와 함수 시점 뷰. `visible.ts`가 보이는 노드를, `flow.ts`가 고른 노드에서 나가는 흐름과 불투명도를, `scope.ts`가 그릴 선을, `columns.ts`가 열 번호와 연결 묶음·선반을 정한다. `route.ts`가 두 끝점 사이의 경로를, `cycles.ts`가 순환 묶음을, `overlay.ts`가 덮개가 그래프에 더하는 표시를 낸다. `layout.ts`가 ELK를 Web Worker로 돌려 좌표를 정하고, `view.ts`가 선마다 경로를, `motion.ts`가 배치 움직임을, `viewport.ts`가 화면 이동 좌표를, `layers.ts`가 노드·선·글자의 겹침 순서를 낸다. `calls.ts`·`CallView.tsx`는 함수 시점 뷰, `nodes/`·`edges/`는 React Flow 노드·선 컴포넌트, `Dock.tsx`는 왼쪽 아래 칸, `Minimap.tsx`·`Legend.tsx`·`Tooltip.tsx`는 미니맵·범례·말풍선이고 `tips.ts`는 배지 말풍선의 글이다 |
 | `frontend/scripts/shots.mjs` | 화면 시나리오 스크립트. 떠 있는 서버에서 정해진 조작을 하고 확인 항목의 통과 여부와 스크린샷을 남긴다 |
 | `scripts/measure_resolution.py` | 호출 지점 해석 상태별 비율 출력, 고정 시드 표본 JSONL 작성(`~/data/code-atlas/resolution-sample.jsonl`), `--report`로 직접 채운 판정 집계 |
-| `tests/fixtures/sample_repo/` | 시험용 고정 레포. `src/` 소스 루트, 하위 패키지, 함수 안 import, 상속, dataclass, `__main__` 블록, 한글 문자열 뒤 호출, 동적 호출을 담는다 |
+| `tests/fixtures/sample_repo/` | 시험용 고정 레포. `src/` 소스 루트, 하위 패키지, 함수 안 import, 상속, dataclass, `__main__` 블록, 한글 문자열 뒤 호출, 동적 호출, 어디서도 부르지 않는 함수와 문자열로만 불리는 함수를 담는다 |
+| `tests/fixtures/cycle_repo/` | 순환이 있는 고정 레포. 같은 폴더의 파일 세 개가 도는 묶음, 폴더 두 개에 걸친 파일 두 개의 묶음, 함수 안 import로만 돌아오는 파일 두 개, 미사용 후보 하나를 담는다 |
 
 ## 개발
 
@@ -142,21 +173,23 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 .venv/bin/pytest
 ```
 
-`tests/test_lsp.py`·`tests/test_graph.py`·`tests/test_analyze.py`·`tests/test_api.py`·`tests/test_cli.py`는 code-atlas 가상환경의 basedpyright를 실제로 띄운다. LLM 요약 테스트는 가짜 `claude`를 쓰고 실제 CLI를 부르지 않는다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다.
+`tests/test_lsp.py`·`tests/test_graph.py`·`tests/test_analyze.py`·`tests/test_api.py`·`tests/test_cli.py`·`tests/test_unused.py`·`tests/test_cycles.py`는 code-atlas 가상환경의 basedpyright를 실제로 띄운다. LLM 요약 테스트는 가짜 `claude`를 쓰고 실제 CLI를 부르지 않는다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다.
 
-화면을 고칠 때는 백엔드를 띄운 채 `frontend/`에서 `npm run dev`를 실행한다. Vite 개발 서버가 `/api`를 `localhost:8766`으로 넘긴다. `npm run typecheck`로 타입을 검사하고, `npm test`로 화면 없이 계산하는 모듈을 고정 그래프에서 확인한다. 대상은 저장소와 변경 내용(`state/`), 보이는 노드·흐름·그릴 선·열 배정·배치·선 경로·배치 움직임·화면 이동·함수 시점 뷰(`graph/`), 상단 줄 단계(`nav/fit`), 정보 패널 사각형·연 파일·설명 나누기(`panel/`), 검색 색인(`search/`), 파일트리 행(`tree/`)이다.
+화면을 고칠 때는 백엔드를 띄운 채 `frontend/`에서 `npm run dev`를 실행한다. Vite 개발 서버가 `/api`를 `localhost:8766`으로 넘긴다. `npm run typecheck`로 타입을 검사하고, `npm test`로 화면 없이 계산하는 모듈을 고정 그래프에서 확인한다. 대상은 저장소와 경로 고정, 덮개, 변경 내용(`state/`), 보이는 노드·흐름·그릴 선·열 배정·배치·선 경로·배치 움직임·화면 이동·함수 시점 뷰·경로·순환 묶음·덮개 표시(`graph/`), 경로 탐색 창의 글(`route/words`), 상단 줄 단계(`nav/fit`), 정보 패널 사각형·연 파일·설명 나누기(`panel/`), 검색 색인(`search/`), 파일트리 행(`tree/`)이다.
 
 화면은 `frontend/`에서 화면 시나리오 스크립트로 확인한다.
 
 ```bash
-node scripts/shots.mjs [주소] [--only 이름,이름] [--with-summary]
+node scripts/shots.mjs [주소] [--cycle-url 주소] [--only 이름,이름] [--with-summary]
 ```
 
 떠 있는 서버의 주소를 받고(기본 `http://127.0.0.1:8766`) 서버를 띄우지 않는다. 시나리오마다 새 브라우저 컨텍스트에서 조작하고 확인 항목을 `통과`·`실패`·`건너뜀`과 함께 한 줄씩 출력한다. 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 `건너뜀`이고 실패로 세지 않는다. 실패한 확인 항목이나 페이지 오류·콘솔 오류가 있으면 종료 코드 1로 끝난다.
 
-- **시나리오**: `open`, `file`, `function`, `body`, `panel`, `code-scope`, `hover`, `edge`, `badge-tip`, `minimap`, `region`, `folder`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `split`, `summary-busy`, `summary-stale`, `explain`, `summary-ask`, `summary-ref`, `summary` 33개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
-- **기대값**: 노드 이름은 sync-engine을 연 서버가 기준이고, 노드 수·선 수·줄 범위는 서버 응답에서 읽는다.
-- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 32개 시나리오는 요약을 만드는 요청을 서버로 보내지 않는다.
+- **시나리오**: `open`, `file`, `function`, `body`, `panel`, `code-scope`, `hover`, `edge`, `badge-tip`, `minimap`, `region`, `folder`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `split`, `summary-busy`, `summary-stale`, `explain`, `summary-ask`, `summary-ref`, `summary`와 경로·덮개 시나리오 `finder-open`, `finder-search`, `finder-path`, `finder-folder`, `finder-step`, `finder-none`, `finder-pin`, `finder-ends`, `overlay-menu`, `unused`, `finder-overlay`, `overlay-dark`, `cycles`, `cycles-change`, `cycles-pin` 48개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
+- **기대값**: 노드 이름은 sync-engine을 연 서버가 기준이고, 노드 수·선 수·줄 범위는 서버 응답에서 읽는다. 경로 수와 단계 수, 순환 묶음, 미사용 후보 수는 `/api/graph`와 `/api/unused` 응답에서 화면과 같은 규칙으로 계산한다.
+- **순환 시나리오**: `cycles`, `cycles-change`, `cycles-pin`은 `tests/fixtures/cycle_repo`를 연 서버의 주소를 `--cycle-url`로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다.
+- **`finder-pin`**: 경로 고정 중에 경로 밖 파일 상자, 접힌 폴더 상자, 그래프 바탕, `Esc`, 더블클릭, 파일트리, `Mod+P`, 코드 뷰어의 `Mod`+클릭, 요약의 정의 표기, `Alt+←`, 토글과 흐름 단계를 실제로 눌러 강조가 그대로인지 본다.
+- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 47개 시나리오는 요약을 만드는 요청을 서버로 보내지 않는다.
 - **`changes`**: 대상 레포에서 `git status`·`git diff`를 직접 읽어 화면과 비교하므로 서버와 같은 컴퓨터에서 돌린다. 수정한 `.py` 파일이 없는 레포에서는 확인 항목을 건너뛴다.
-- **스크린샷**: `~/data/code-atlas/screenshots/s2-{이름}.png`(1700×1000, 배율 2)에 남긴다. `toolbar`는 창 폭 1700·1440·1280·1160·980·900·720px마다 `s2-toolbar-{폭}.png`를 더 남긴다.
+- **스크린샷**: `~/data/code-atlas/screenshots/s2-{이름}.png`(1700×1000, 배율 2)에 남기고, 경로·덮개 시나리오는 `s3-{이름}.png`에 남긴다. `toolbar`는 창 폭 1700·1440·1280·1160·980·900·720px마다 `s2-toolbar-{폭}.png`를, `finder-open`과 `overlay-menu`는 창 폭 1700·1280·980·720px마다 `s3-{이름}-{폭}.png`를 더 남긴다.
 - **브라우저**: Playwright가 받은 chromium과 다른 실행 파일을 쓰려면 환경 변수 `CHROMIUM_PATH`에 경로를 넣는다.
