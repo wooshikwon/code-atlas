@@ -1379,28 +1379,32 @@ async function zoom(t, page) {
   await page.click('.tree-row.tree-file[data-node="parser.plan"]');
   await waitSelected(page, "parser.plan");
   const seen = [];
-  for (const target of [0.3, 0.6, 1.0]) {
+  for (const target of [0.2, 0.3, 0.6, 1.0]) {
     const got = await zoomTo(page, target);
     seen.push({
       target,
       got,
       ...(await page.evaluate(() => {
         const rows = [...document.querySelectorAll(".node-table-row")];
+        const fields = [...document.querySelectorAll(".node-face .node-field")];
+        const shown = (element) => getComputedStyle(element).visibility === "visible" && element.getBoundingClientRect().height > 0;
         return {
           band: document.querySelector(".graph").dataset.zoom,
           rows: rows.length,
-          visible: rows.filter((row) => getComputedStyle(row).visibility === "visible").length,
+          visible: rows.filter(shown).length,
+          fields: fields.length,
+          written: fields.filter((field) => shown(field) && field.textContent !== "").length,
         };
       })),
     });
   }
-  const text = seen.map((s) => `${s.got.toFixed(2)}에서 ${s.visible}/${s.rows}칸`).join(", ");
+  const text = seen.map((s) => `${s.got.toFixed(2)}에서 ${s.visible}/${s.rows}칸, 글자 ${s.written}/${s.fields}개`).join(", ");
   t.check(
-    "데이터 클래스 필드 칸이 0.3과 0.6에서 숨고 1.0에서 보인다",
-    seen.every((s) => near(s.got, s.target, 0.01) && s.rows > 0) && seen[0].visible === 0 && seen[1].visible === 0 && seen[2].visible === seen[2].rows,
+    "축소해도 데이터 클래스 필드 칸의 경계선과 글자가 그려진다. 0.2, 0.3, 0.6, 1.0에서 모두 보인다",
+    seen.every((s) => near(s.got, s.target, 0.01) && s.rows > 0 && s.visible === s.rows && s.fields > 0 && s.written === s.fields),
     text,
   );
-  t.check("확대 비율 구간 data-zoom이 0, 1, 2로 바뀐다", same(seen.map((s) => s.band), ["0", "1", "2"]), seen.map((s) => s.band).join(", "));
+  t.check("확대 비율 구간 data-zoom이 0, 0, 1, 2로 바뀐다", same(seen.map((s) => s.band), ["0", "0", "1", "2"]), seen.map((s) => s.band).join(", "));
 }
 
 /** 테스트 코드를 켜고 파일을 하나씩 펼쳐, 화면에 보이는 모든 글자와 배지의 가운데 점에서 그 노드가 눌리는지 센다. */
