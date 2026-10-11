@@ -1407,9 +1407,10 @@ ul {
   gap: 8px;
 }
 
+/* 줄을 아래에서 위로 쌓으므로 교차축의 시작이 아래다. 칸의 아래 끝을 맞춘다. */
 .dock-panels {
   flex-wrap: wrap-reverse;
-  align-items: flex-end;
+  align-items: flex-start;
 }
 
 .dock-panels > *,
