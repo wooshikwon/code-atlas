@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import builtins
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 
 from .collect import RepoFiles, SourceFile
@@ -22,6 +23,19 @@ METHOD_KINDS = {
     "classmethod": "class",
 }
 BUILTIN_NAMES = frozenset(dir(builtins))
+# 내장 컨테이너를 바꾸는 메서드. 모듈 변수에 이 메서드를 부르면 그 변수를 바꾸는 지점이다.
+MUTATORS = frozenset(
+    "append extend insert add update setdefault pop popitem remove discard clear sort reverse appendleft extendleft".split()
+)
+_CONTAINERS: dict[type, str] = {
+    ast.Dict: "dict",
+    ast.DictComp: "dict",
+    ast.List: "list",
+    ast.ListComp: "list",
+    ast.Set: "set",
+    ast.SetComp: "set",
+    ast.Tuple: "tuple",
+}
 _DEF_HEAD = re.compile(rb"(?:async\s+)?(?:def|class)\s+")
 _TEXT_LIMIT = 80
 
@@ -39,12 +53,32 @@ class DefInfo:
 
 
 @dataclass
+class VarInfo:
+    """모듈 수준에서 대입한 이름 하나. 위치의 열은 UTF-8 바이트 단위다.
+
+    value_kind는 값 식의 종류다. 상수는 자료형 이름, 컨테이너 표기와 컴프리헨션은 dict·list·set·tuple,
+    호출은 받는 식의 글에 `(…)`를 붙인 글, 그 밖은 `식`이다.
+    """
+
+    node_id: str  # "{모듈 id}:{이름}"
+    name: str
+    range: tuple[int, int]  # 첫 대입문의 시작 줄과 끝 줄
+    targets: list[tuple[int, int]]  # 그 이름을 대입한 모든 위치 (줄, 열)
+    value: tuple[int, int, int, int] | None  # 첫 대입문의 값 식 범위 (시작 줄, 열, 끝 줄, 열). 대입 대상이 이름 하나가 아니면 None
+    value_kind: str
+    size: int | None  # 컨테이너 표기의 원소 수, 컨테이너 표기 하나를 인자로 받은 호출의 그 원소 수
+    text: str  # 값 식의 글. `_TEXT_LIMIT`에서 자른다
+    maker: tuple[int, int] | None  # 값을 만든 호출 지점이 언어 서버에 묻는 위치 (줄, 열)
+
+
+@dataclass
 class FileFacts:
     file: SourceFile
     nodes: list[Node]
     defs: dict[str, DefInfo]
     sites: list[Site]
     error: str | None = None
+    variables: list[VarInfo] = field(default_factory=list)
 
 
 def _loc(lines: list[str], start: int, end: int) -> int:
@@ -83,36 +117,103 @@ def _is_main_guard(test: ast.expr) -> bool:
     return has_name and has_main
 
 
-def _assigned_names(target: ast.expr) -> list[str]:
+def _assigned_targets(target: ast.expr) -> list[ast.Name]:
     if isinstance(target, ast.Name):
-        return [target.id]
+        return [target]
     if isinstance(target, (ast.Tuple, ast.List)):
-        return [n for el in target.elts for n in _assigned_names(el)]
+        return [n for el in target.elts for n in _assigned_targets(el)]
     if isinstance(target, ast.Starred):
-        return _assigned_names(target.value)
+        return _assigned_targets(target.value)
     return []
 
 
-def module_variables(tree: ast.Module) -> set[str]:
-    """모듈 최상위에서 대입한 이름. 함수·클래스 본문은 들어가지 않는다."""
-    names: set[str] = set()
-    stack: list[ast.stmt] = list(tree.body)
-    while stack:
-        stmt = stack.pop()
-        if isinstance(stmt, ast.Assign):
-            names.update(n for t in stmt.targets for n in _assigned_names(t))
-        elif isinstance(stmt, (ast.AnnAssign, ast.AugAssign)):
-            names.update(_assigned_names(stmt.target))
-        elif isinstance(stmt, (ast.For, ast.AsyncFor)):
-            names.update(_assigned_names(stmt.target))
+def _module_statements(body: list[ast.stmt]) -> Iterator[ast.stmt]:
+    """모듈 최상위 문장과 그 안에 든 `if`·`try`·`for`·`with`의 문장을 소스 순서로 낸다. 함수·클래스 본문은 들어가지 않는다."""
+    for stmt in body:
+        yield stmt
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
         for child in ast.iter_child_nodes(stmt):
             if isinstance(child, ast.stmt):
-                stack.append(child)
+                yield from _module_statements([child])
             elif isinstance(child, ast.ExceptHandler):
-                stack.extend(child.body)
-    return names
+                yield from _module_statements(child.body)
+
+
+def _size(e: ast.expr) -> int | None:
+    if isinstance(e, ast.Dict):
+        return len(e.keys)
+    if isinstance(e, (ast.List, ast.Set, ast.Tuple)):
+        return len(e.elts)
+    return None
+
+
+def _value_kind(e: ast.expr) -> tuple[str, int | None]:
+    """값 식의 (종류, 원소 수)."""
+    if isinstance(e, ast.Constant):
+        return "None" if e.value is None else type(e.value).__name__, None
+    if isinstance(e, ast.JoinedStr):
+        return "str", None
+    if type(e) in _CONTAINERS:
+        return _CONTAINERS[type(e)], _size(e)
+    if isinstance(e, ast.Call):
+        only = e.args[0] if len(e.args) == 1 and not e.keywords else None
+        return f"{_text(e.func)}(…)", _size(only) if only is not None else None
+    return "식", None
+
+
+def _maker(e: ast.expr) -> tuple[int, int] | None:
+    """값을 만든 호출 지점이 묻는 위치. 이항 연산의 왼쪽, 속성과 첨자의 대상, 호출의 받는 쪽을 따라 내려가 만나는 가장 안쪽 호출이다."""
+    call: ast.Call | None = None
+    while True:
+        if isinstance(e, ast.Call):
+            call, e = e, e.func
+        elif isinstance(e, ast.BinOp):
+            e = e.left
+        elif isinstance(e, (ast.Attribute, ast.Subscript)):
+            e = e.value
+        else:
+            break
+    if call is None:
+        return None
+    func = call.func
+    return _request_pos(func) if isinstance(func, (ast.Name, ast.Attribute)) else (func.lineno, func.col_offset)
+
+
+def module_variables(tree: ast.Module, module_id: str) -> list[VarInfo]:
+    """모듈 최상위에서 대입한 이름마다 후보 하나를 첫 대입문의 순서로 낸다. 함수·클래스 본문은 들어가지 않는다."""
+    found: dict[str, VarInfo] = {}
+    for stmt in _module_statements(tree.body):
+        value: ast.expr | None = None
+        if isinstance(stmt, ast.Assign):
+            targets = [n for t in stmt.targets for n in _assigned_targets(t)]
+            if len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+                value = stmt.value
+        elif isinstance(stmt, ast.AnnAssign):
+            targets, value = _assigned_targets(stmt.target), stmt.value
+        elif isinstance(stmt, (ast.AugAssign, ast.For, ast.AsyncFor)):
+            targets = _assigned_targets(stmt.target)
+        else:
+            continue
+        for name in targets:
+            info = found.get(name.id)
+            if info is None:
+                kind, size = _value_kind(value) if value is not None else ("식", None)
+                info = found[name.id] = VarInfo(
+                    node_id=f"{module_id}:{name.id}",
+                    name=name.id,
+                    range=(stmt.lineno, stmt.end_lineno),
+                    targets=[],
+                    value=None
+                    if value is None
+                    else (value.lineno, value.col_offset, value.end_lineno, value.end_col_offset),
+                    value_kind=kind,
+                    size=size,
+                    text="" if value is None else _text(value),
+                    maker=None if value is None else _maker(value),
+                )
+            info.targets.append((name.lineno, name.col_offset))
+    return list(found.values())
 
 
 def bound_names(tree: ast.Module) -> set[str]:
@@ -156,10 +257,8 @@ def _receiver_attr(e: ast.expr, receiver: str | None) -> str | None:
     return None
 
 
-def variable_access(
-    fn: ast.FunctionDef | ast.AsyncFunctionDef, module_vars: set[str], receiver: str | None
-) -> tuple[list[str], list[str], bool]:
-    """함수 본문이 읽고 바꾸는 모듈 변수와 receiver 속성, `global` 선언 여부를 구한다."""
+def _function_names(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set[str], set[str]]:
+    """함수가 묶는 (지역 이름, `global`로 선언한 이름). 안에 중첩한 함수와 클래스가 묶는 이름도 함께 센다."""
     declared_global: set[str] = set()
     local: set[str] = set()
     for node in ast.walk(fn):
@@ -173,6 +272,29 @@ def variable_access(
                 local.add(node.id)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node is not fn:
             local.add(node.name)
+    return local, declared_global
+
+
+def _class_names(d: ast.ClassDef) -> set[str]:
+    """클래스 본문이 묶는 이름. 메서드 본문이 묶는 이름은 들어가지 않는다."""
+    names: set[str] = set()
+    stack: list[ast.AST] = list(d.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        stack.extend(ast.iter_child_nodes(node))
+    return names
+
+
+def variable_access(
+    fn: ast.FunctionDef | ast.AsyncFunctionDef, module_vars: set[str], receiver: str | None
+) -> tuple[list[str], list[str], bool]:
+    """함수 본문이 읽고 바꾸는 모듈 변수와 receiver 속성, `global` 선언 여부를 구한다."""
+    local, declared_global = _function_names(fn)
     called = {id(n.func) for n in ast.walk(fn) if isinstance(n, ast.Call)}
     mutated = {
         id(root)
@@ -203,15 +325,24 @@ def variable_access(
 
 
 class _Extractor:
-    def __init__(self, file: SourceFile, text: str, tree: ast.Module, repo_names: frozenset[str]):
+    def __init__(
+        self,
+        file: SourceFile,
+        text: str,
+        tree: ast.Module,
+        repo_names: frozenset[str],
+        repo_variables: frozenset[str],
+    ):
         self.file = file
         self.lines = text.splitlines()
         self.line_bytes = [line.encode() for line in self.lines]
         self.tree = tree
         self.repo_names = repo_names
+        self.repo_variables = repo_variables
         self.bound: set[str] = set()
         self.file_names = bound_names(tree)
-        self.module_vars = module_variables(tree)
+        self.variables = module_variables(tree, file.module_id)
+        self.module_vars = {v.name for v in self.variables}
         self.nodes: list[Node] = []
         self.defs: dict[str, DefInfo] = {}
         self.sites: list[Site] = []
@@ -583,15 +714,104 @@ class _Extractor:
                 fields.append({"name": s.target.id, "type": ast.unparse(s.annotation)})
             elif isinstance(s, ast.Assign):
                 for t in s.targets:
-                    for name in _assigned_names(t):
-                        if not name.startswith("_"):
-                            fields.append({"name": name, "type": None})
+                    for name in _assigned_targets(t):
+                        if not name.id.startswith("_"):
+                            fields.append({"name": name.id, "type": None})
         return fields
+
+    # 변수 접근
+
+    def access(self) -> None:
+        """레포의 모듈 변수와 이름이 같은 식별자가 쓰인 위치마다 읽음·바꿈 지점을 만든다.
+
+        함수 안에서는 그 함수가 묶는 지역 이름과 지역 이름에서 시작하는 속성 접근을 건너뛴다. 다른 지점이 이미
+        언어 서버에 묻는 위치에는 만들지 않는다.
+        """
+        found: dict[tuple[int, int], tuple[str, str, ast.Name | ast.Attribute]] = {}
+        self._scan(self.tree.body, self.module.id, set(), set(), [], False, found)
+        asked = {(s.request_line, s.request_col) for s in self.sites if not s.dynamic}
+        for pos in sorted(found.keys() - asked):
+            kind, self.enclosing, e = found[pos]
+            self._site(kind, e)
+        self.enclosing = self.module.id
+
+    def _scan(
+        self,
+        roots: Iterable[ast.AST],
+        enclosing: str,
+        local: set[str],
+        declared_global: set[str],
+        qual: list[str],
+        in_function: bool,
+        found: dict[tuple[int, int], tuple[str, str, ast.Name | ast.Attribute]],
+    ) -> None:
+        """`roots` 아래를 훑는다. 함수 밖에서 만난 함수와 클래스는 그 정의의 노드를 `enclosing`으로 삼아 따로 훑는다."""
+        stack = list(roots)
+        while stack:
+            node = stack.pop()
+            if not in_function and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                node_id = f"{self.file.module_id}:{'.'.join([*qual, node.name])}"
+                self._scan(ast.iter_child_nodes(node), node_id, *_function_names(node), qual, True, found)
+            elif not in_function and isinstance(node, ast.ClassDef):
+                inner = [*qual, node.name]
+                node_id = f"{self.file.module_id}:{'.'.join(inner)}"
+                self._scan(ast.iter_child_nodes(node), node_id, _class_names(node), set(), inner, False, found)
+            else:
+                self._access(node, enclosing, local, declared_global, found)
+                stack.extend(ast.iter_child_nodes(node))
+
+    def _access(
+        self,
+        node: ast.AST,
+        enclosing: str,
+        local: set[str],
+        declared_global: set[str],
+        found: dict[tuple[int, int], tuple[str, str, ast.Name | ast.Attribute]],
+    ) -> None:
+        """식 하나가 변수를 읽거나 바꾸는 위치를 `found`에 담는다. 같은 위치의 읽음과 바꿈은 바꿈으로 둔다."""
+        names = self.repo_variables
+
+        def put(kind: str, e: ast.Name | ast.Attribute) -> None:
+            pos = _request_pos(e)
+            if kind == "write" or pos not in found:
+                found[pos] = (kind, enclosing, e)
+
+        def free(e: ast.expr) -> bool:
+            """모듈 변수와 이름이 같은 이름이거나 속성 접근의 끝 이름이고, 지역 이름에서 시작하지 않는다."""
+            if isinstance(e, ast.Name):
+                return e.id in names and e.id not in local
+            root = _root_name(e)
+            return isinstance(e, ast.Attribute) and e.attr in names and root is not None and root.id not in local
+
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Load):
+                if free(node):
+                    put("read", node)
+            elif node.id in declared_global and node.id in names:
+                put("write", node)
+        elif isinstance(node, (ast.Attribute, ast.Subscript)):
+            written = isinstance(node.ctx, (ast.Store, ast.Del))
+            if free(node):
+                put("write" if written else "read", node)
+            inner = node.value
+            while written and isinstance(inner, (ast.Name, ast.Attribute, ast.Subscript)):
+                if free(inner):
+                    put("write", inner)
+                if isinstance(inner, ast.Name):
+                    break
+                inner = inner.value
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr in MUTATORS and free(func.value):
+                put("write", func.value)
 
     def run(self) -> FileFacts:
         for s in self.tree.body:
             self.stmt(s)
-        return FileFacts(self.file, self.nodes, self.defs, self.sites)
+        if self.repo_variables:
+            self.access()
+        variables = [v for v in self.variables if v.node_id not in self.defs]
+        return FileFacts(self.file, self.nodes, self.defs, self.sites, variables=variables)
 
 
 def defined_names(text: str) -> list[str]:
@@ -604,25 +824,42 @@ def defined_names(text: str) -> list[str]:
     return sorted({node.name for node in ast.walk(tree) if isinstance(node, defs)})
 
 
+def assigned_names(text: str) -> list[str]:
+    """본문이 모듈 수준에서 대입한 이름. 모듈 수준의 함수나 클래스와 이름이 같으면 넣지 않고, 문법 오류가 있거나 식이 깊은 파일은 빈 목록이다."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, RecursionError):
+        return []
+    defs = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    defined = {stmt.name for stmt in _module_statements(tree.body) if isinstance(stmt, defs)}
+    return sorted({v.name for v in module_variables(tree, "")} - defined)
+
+
 def read_source(repo: RepoFiles, file: SourceFile) -> str:
     return repo.abs_path(file.path).read_bytes().decode("utf-8-sig", errors="replace")
 
 
-def extract(file: SourceFile, text: str, repo_names: frozenset[str]) -> FileFacts:
-    """문법 오류가 있거나 식이 깊어 재귀 한도를 넘는 파일은 `error`를 적은 정의 없는 파일로 낸다."""
+def extract(
+    file: SourceFile, text: str, repo_names: frozenset[str], repo_variables: frozenset[str] = frozenset()
+) -> FileFacts:
+    """`repo_names`는 레포 전체의 정의 이름이고 `repo_variables`는 레포 전체의 모듈 변수 이름이다.
+
+    문법 오류가 있거나 식이 깊어 재귀 한도를 넘는 파일은 `error`를 적은 정의 없는 파일로 낸다.
+    """
     try:
-        return _Extractor(file, text, ast.parse(text, filename=file.path), repo_names).run()
+        return _Extractor(file, text, ast.parse(text, filename=file.path), repo_names, repo_variables).run()
     except SyntaxError as exc:
         error = f"{exc.msg} (줄 {exc.lineno})"
     except RecursionError:
         error = "식이 너무 깊다"
-    facts = _Extractor(file, text, ast.Module(body=[], type_ignores=[]), repo_names).run()
+    facts = _Extractor(file, text, ast.Module(body=[], type_ignores=[]), repo_names, repo_variables).run()
     facts.error = error
     return facts
 
 
 def extract_repo(repo: RepoFiles) -> list[FileFacts]:
-    """레포 전체 정의 이름을 먼저 모은 뒤 파일마다 extract를 실행한다."""
+    """레포 전체의 정의 이름과 모듈 변수 이름을 먼저 모은 뒤 파일마다 extract를 실행한다."""
     texts = {f.path: read_source(repo, f) for f in repo.files}
     repo_names = frozenset(name for text in texts.values() for name in defined_names(text))
-    return [extract(f, texts[f.path], repo_names) for f in repo.files]
+    repo_variables = frozenset(name for text in texts.values() for name in assigned_names(text))
+    return [extract(f, texts[f.path], repo_names, repo_variables) for f in repo.files]
