@@ -5,6 +5,7 @@ import { GraphView } from "./graph/GraphView";
 import { fitPadding, FRAME_ZOOM, stageOf } from "./graph/viewport";
 import { Entries } from "./nav/Entries";
 import { bind } from "./nav/keys";
+import { Toggles } from "./nav/Toggles";
 import { Trail } from "./nav/Trail";
 import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
@@ -21,25 +22,18 @@ function Toolbar() {
   const canBack = useAtlas((s) => s.history.index > 0);
   const canForward = useAtlas((s) => s.history.index < s.history.entries.length - 1);
   const depth = useAtlas((s) => s.depth);
-  const showTests = useAtlas((s) => s.showTests);
-  const showExternal = useAtlas((s) => s.showExternal);
-  const autoSummary = useAtlas((s) => s.autoSummary);
   const theme = useAtlas((s) => s.theme);
   const back = useAtlas((s) => s.back);
   const forward = useAtlas((s) => s.forward);
   const setDepth = useAtlas((s) => s.setDepth);
-  const toggleTests = useAtlas((s) => s.toggleTests);
-  const toggleExternal = useAtlas((s) => s.toggleExternal);
-  const toggleAutoSummary = useAtlas((s) => s.toggleAutoSummary);
   const setTheme = useAtlas((s) => s.setTheme);
   const { fitView } = useReactFlow();
 
   const rate = stats === undefined || stats.call_sites === 0 ? "-" : `${Math.round((stats.resolved / stats.call_sites) * 1000) / 10}%`;
-  const summary =
-    stats === undefined
-      ? null
-      : `파일 ${stats.files} · 노드 ${stats.nodes} · 선 ${stats.edges} · 호출 확인 ${rate}` +
-        ((stats.timed_out ?? 0) > 0 ? ` · 응답 없음 ${stats.timed_out}` : "");
+  /** 통계 문구의 뒤쪽. 줄 폭이 모자라면 이 문구만 적는다. */
+  const brief =
+    stats === undefined ? null : `호출 확인 ${rate}` + ((stats.timed_out ?? 0) > 0 ? ` · 응답 없음 ${stats.timed_out}` : "");
+  const summary = stats === undefined ? null : `파일 ${stats.files} · 노드 ${stats.nodes} · 선 ${stats.edges} · ${brief}`;
 
   /** 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. 함수 시점 뷰에서는 확대 비율을 100%보다 키우지 않는다. */
   const fit = () => {
@@ -60,7 +54,8 @@ function Toolbar() {
       <Trail />
       {summary !== null && (
         <span className="toolbar-stats" title={summary}>
-          {summary}
+          <span className="toolbar-stats-full">{summary}</span>
+          <span className="toolbar-stats-brief">{brief}</span>
         </span>
       )}
       <Entries />
@@ -85,18 +80,7 @@ function Toolbar() {
         />
         {depth}
       </label>
-      <label className="toolbar-toggle">
-        <input type="checkbox" checked={showTests} onChange={toggleTests} />
-        테스트 코드
-      </label>
-      <label className="toolbar-toggle">
-        <input type="checkbox" checked={showExternal} onChange={toggleExternal} />
-        외부 노드
-      </label>
-      <label className="toolbar-toggle" title="노드를 고르면 캐시에 없는 LLM 요약을 만든다">
-        <input type="checkbox" checked={autoSummary} onChange={toggleAutoSummary} />
-        자동 요약
-      </label>
+      <Toggles />
       <button className="toolbar-button" onClick={fit}>
         화면 맞춤
       </button>

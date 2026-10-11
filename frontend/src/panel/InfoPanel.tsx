@@ -3,8 +3,8 @@ import { useMemo, useState } from "react";
 import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { flow } from "../graph/flow";
-import { degrees, picked, type DrawnEdge } from "../graph/scope";
-import { hidden, nodeIndex, shown, within } from "../graph/visible";
+import { degrees, drawn, neighbors, picked, type DrawnEdge } from "../graph/scope";
+import { hidden, nodeIndex, shown, unresolvedWithin, within } from "../graph/visible";
 import { focusOf } from "../state/history";
 import { useAtlas, type Selection } from "../state/store";
 import { Header, type HeaderItem, type PickedEdge } from "./Header";
@@ -16,7 +16,7 @@ import { usePanelRect } from "./usePanelRect";
 
 const DIRS: Dir[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 const SUMMARIZED = new Set<AtlasNode["kind"]>(["module", "class", "dataclass", "function", "method"]);
-/** 코드 뷰어를 열지 않는 종류 */
+/** 코드 뷰어를 열지 않고 머리 줄 수치를 상자 단위로 세는 종류 */
 const UNITS = new Set<AtlasNode["kind"]>(["module", "package"]);
 /** 그래프가 그린 선 edge를 머리 줄과 지점 목록에 쓰는 값으로 바꾼다. 집계 선이면 kind가 null이다. */
 function pickedEdge(edge: DrawnEdge): PickedEdge {
@@ -68,20 +68,38 @@ export function InfoPanel() {
     [graph],
   );
 
-  const edge = useMemo(() => {
-    if (graph === null || index === null || selection?.type !== "edge") {
+  /** 그래프가 지금 화면을 그릴 때와 같은 흐름과 보이는 노드 */
+  const scene = useMemo(() => {
+    if (graph === null || index === null) {
       return null;
     }
-    // 그래프가 그 선을 그릴 때와 같은 흐름과 보이는 노드에서 선에 합친 원래 선을 찾는다.
     const toggles = { showTests, showExternal };
     const off = hidden(graph, toggles);
     const focus = focusOf(selection);
     const focused = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
-    const found = picked(graph, shown(graph, { ...toggles, collapsed, flow: focused }), focused, selection.key);
-    return found === null ? null : pickedEdge(found);
+    return { flow: focused, shown: shown(graph, { ...toggles, collapsed, flow: focused }) };
   }, [graph, index, selection, showTests, showExternal, collapsed, depth]);
 
+  const edge = useMemo(() => {
+    if (graph === null || scene === null || selection?.type !== "edge") {
+      return null;
+    }
+    const found = picked(graph, scene.shown, scene.flow, selection.key);
+    return found === null ? null : pickedEdge(found);
+  }, [graph, scene, selection]);
+
   const node = file === null && selection?.type === "node" ? index?.nodes.get(selection.id) : undefined;
+
+  /** 고른 파일 상자나 폴더 상자의 머리 줄 수치. 화면에 그린 선과 배지가 세는 범위에서 센다. */
+  const box = useMemo(() => {
+    if (graph === null || scene === null || node === undefined || !UNITS.has(node.kind)) {
+      return null;
+    }
+    return {
+      ...neighbors(drawn(graph, scene.shown, scene.flow, null), node.id),
+      unresolved: unresolvedWithin(graph, scene.shown.hidden).get(node.id) ?? 0,
+    };
+  }, [graph, scene, node]);
 
   let item: HeaderItem | null = null;
   if (file !== null) {
@@ -94,7 +112,7 @@ export function InfoPanel() {
             (n) => (n.kind === "function" || n.kind === "method") && n.id !== node.id && within(index.nodes, n.id, node.id),
           ).length
         : 0;
-    item = { type: "node", node, ...degree, functions };
+    item = { type: "node", node, ...degree, unresolved: node.unresolved, ...box, functions };
   } else if (edge !== null) {
     item = { type: "edge", edge };
   } else if (repo !== null) {

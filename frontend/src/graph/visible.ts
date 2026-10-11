@@ -37,9 +37,24 @@ export function within(nodes: Map<string, AtlasNode>, id: string, ancestor: stri
   return false;
 }
 
-/** 노드가 고른 노드와 같은 파일 상자에 든 노드인지 본다. 폴더 아래 다른 파일의 노드는 폴더의 `__init__.py` 정의와 같은 상자가 아니다. */
+/** 노드가 고른 노드와 같은 파일 상자에 든 노드인지 본다. 폴더를 골랐으면 그 폴더 아래 파일의 노드는 같은 상자가 아니다. */
 export function local(nodes: Map<string, AtlasNode>, flow: Flow, id: string): boolean {
   return unitOf(nodes, id) === flow.file;
+}
+
+/** 노드마다 그 노드와 안에 든 노드의 미확인 호출 수를 합친다. off에 든 노드의 수는 세지 않는다. */
+export function unresolvedWithin(graph: Graph, off: Set<string>): Map<string, number> {
+  const nodes = nodeIndex(graph);
+  const result = new Map<string, number>();
+  for (const node of graph.nodes) {
+    if (node.unresolved === 0 || off.has(node.id)) {
+      continue;
+    }
+    for (let at: AtlasNode | undefined = node; at !== undefined; at = at.parent === null ? undefined : nodes.get(at.parent)) {
+      result.set(at.id, (result.get(at.id) ?? 0) + node.unresolved);
+    }
+  }
+  return result;
 }
 
 /** 토글로 숨긴 노드. 테스트 코드와 외부 노드는 토글이 켜졌을 때만 보인다. */

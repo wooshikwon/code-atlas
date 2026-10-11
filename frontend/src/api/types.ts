@@ -25,7 +25,7 @@ export interface TreeEntry {
   name: string;
   kind: "dir" | "file";
   test: boolean;
-  /** 폴더면 패키지 노드 id, 파일이면 모듈 노드 id. `__init__.py`는 그래프 노드와 잇지 않으므로 null이다. */
+  /** 폴더면 패키지 노드 id, 파일이면 모듈 노드 id. 함수·클래스 정의가 없는 패키지의 `__init__.py`는 모듈 노드가 없으므로 null이다. */
   node: string | null;
   children?: TreeEntry[];
 }
@@ -134,6 +134,8 @@ export interface ChangedFile {
   status: Change | "deleted" | "unchanged";
   /** 레포를 열어 분석한 뒤 내용이 바뀌었다 */
   stale: boolean;
+  /** 테스트 코드다 */
+  test: boolean;
 }
 
 /** 마지막 커밋 뒤에 바뀐 `.py` 파일과 노드. git 저장소가 아니면 git이 거짓이고 files는 분석한 뒤 바뀐 파일만 담는다. */

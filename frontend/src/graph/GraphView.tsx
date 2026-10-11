@@ -13,6 +13,7 @@ import {
 import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { AtlasNode, Graph } from "../api/types";
+import { useOpened } from "../panel/opened";
 import { focusOf, type History } from "../state/history";
 import { useAtlas } from "../state/store";
 import { CallView } from "./CallView";
@@ -29,7 +30,7 @@ import { concealed, drawn } from "./scope";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst } from "./view";
 import { boundsOf, centerOn, fitPadding, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
-import { hidden, local, nodeIndex, shown, type Shown } from "./visible";
+import { hidden, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
 
 /** 선은 자식을 그리는 상자(깊이만큼 0부터)보다 위에, 그 밖의 노드보다 아래에 놓는다. */
 const EDGE_Z = 50;
@@ -66,6 +67,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<str
   const parents = new Set(order.map((n) => n.parent));
   const dim = opacities(scene.graph, scene.flow);
   const marks = concealed(scene.graph, scene.shown, scene.flow);
+  const unresolved = unresolvedWithin(scene.graph, scene.shown.hidden);
   const depths = new Map<string, number>();
   return order.map((node) => {
     const opacity = dim.get(node.id) ?? 1;
@@ -88,6 +90,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<str
         flow: scene.flow !== null && opacity > 0.2,
         local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
         inflow: marks.get(node.id) ?? null,
+        unresolved: node.kind !== "module" && node.kind !== "package" ? node.unresolved : expanded ? 0 : (unresolved.get(node.id) ?? 0),
       },
     };
   });
@@ -310,7 +313,11 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return;
     }
     clicked.current = null;
-    select(null);
+    if (useOpened.getState().path !== null) {
+      useOpened.getState().close();
+    } else {
+      select(null);
+    }
   };
   const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (_, edge) => selectEdge(edge.id);
 

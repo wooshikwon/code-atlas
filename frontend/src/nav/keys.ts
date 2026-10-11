@@ -31,11 +31,14 @@ function typing(): boolean {
 }
 
 /**
- * 포커스가 Esc를 직접 쓰는 요소 안에 있는지. 파일트리 검색 칸은 질의를 비우고, 코드 뷰어는 hover 상자를 닫고,
- * 진입점 목록은 목록을 접는다.
+ * Esc를 직접 쓰는 요소가 있는지. 포커스가 든 파일트리 검색 칸은 질의를 비우고, 포커스가 든 코드 뷰어는 hover 상자를 닫고,
+ * 상단 줄의 펼친 목록은 목록을 접는다.
  */
 function escaping(): boolean {
-  return document.activeElement?.closest(".tree-search-input, .monaco-editor, .toolbar-entries") != null;
+  return (
+    document.activeElement?.closest(".tree-search-input, .monaco-editor") != null ||
+    document.querySelector('.toolbar [aria-expanded="true"]') !== null
+  );
 }
 
 /** 단축키를 등록하고 등록을 푸는 함수를 돌려준다. 이력 이동과 팔레트 열기는 브라우저의 기본 동작(이전 페이지, 인쇄)을 막는다. */

@@ -10,7 +10,7 @@ const received = vi.mocked(getChanges);
 const changes = (extra: Partial<Changes> = {}): Changes => ({
   git: true,
   branch: "main",
-  files: [{ path: "pkg/mod.py", status: "modified", stale: false }],
+  files: [{ path: "pkg/mod.py", status: "modified", stale: false, test: false }],
   nodes: { "pkg.mod": "modified", "pkg.mod:Store.put": "modified" },
   ...extra,
 });
@@ -113,9 +113,9 @@ describe("inside", () => {
 describe("staleCount", () => {
   it("분석한 뒤 바뀐 파일을 변경 상태와 관계없이 센다", () => {
     const files: Changes["files"] = [
-      { path: "pkg/mod.py", status: "modified", stale: true },
-      { path: "pkg/util.py", status: "unchanged", stale: true },
-      { path: "pkg/new.py", status: "added", stale: false },
+      { path: "pkg/mod.py", status: "modified", stale: true, test: false },
+      { path: "pkg/util.py", status: "unchanged", stale: true, test: false },
+      { path: "pkg/new.py", status: "added", stale: false, test: false },
     ];
     expect(staleCount(changes({ files }))).toBe(2);
     expect(staleCount(changes({ git: false, branch: null, files: [files[1]], nodes: {} }))).toBe(1);

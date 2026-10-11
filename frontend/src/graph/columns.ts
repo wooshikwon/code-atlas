@@ -9,7 +9,7 @@ export interface Columns {
   order: Map<string, number>;
   /** 선으로 이어진 최상위 단위의 묶음. 노드 수가 많은 묶음이 앞에 온다. */
   components: string[][];
-  /** 선이 하나도 없는 최상위 단위. 이름순이다. */
+  /** 선이 하나도 없는 최상위 단위. 폴더는 안의 노드에 닿는 선도 없어야 한다. 이름순이다. */
   shelf: string[];
 }
 
@@ -116,6 +116,7 @@ function assign(ids: string[], pairs: [string, string][], entries: Set<string>):
 /**
  * 부모 노드마다 그 자식의 열과 순서를 정한다. 선은 양 끝을 형제가 될 때까지 올려 쓰고, 함수 안 import는 열 배정에서 뺀다.
  * 최상위 단위는 함수 안 import까지 포함한 선으로 연결 묶음을 나누고, 선이 없는 단위를 선반에 모은다.
+ * 안의 노드 사이에만 선이 있는 폴더는 단위 하나짜리 연결 묶음이다.
  */
 export function columns(graph: Graph, opts: { showTests: boolean; showExternal: boolean }): Columns {
   const nodes = nodeIndex(graph);
@@ -131,7 +132,15 @@ export function columns(graph: Graph, opts: { showTests: boolean; showExternal: 
     list.sort(siblingOrder).forEach((node, i) => order.set(node.id, i));
   }
 
+  const topOf = (id: string): string => {
+    let node = nodes.get(id)!;
+    while (node.parent !== null) {
+      node = nodes.get(node.parent)!;
+    }
+    return node.id;
+  };
   const pairs = new Map<string | null, [string, string][]>();
+  /** 최상위 단위 → 선으로 이어진 다른 최상위 단위. 안에만 선이 있는 폴더는 빈 집합이다. */
   const linked = new Map<string, Set<string>>();
   for (const edge of graph.edges) {
     const pair = off.has(edge.source) || off.has(edge.target) ? null : siblings(nodes, edge.source, edge.target);
@@ -142,6 +151,11 @@ export function columns(graph: Graph, opts: { showTests: boolean; showExternal: 
     if (parent === null) {
       linked.set(pair[0], (linked.get(pair[0]) ?? new Set()).add(pair[1]));
       linked.set(pair[1], (linked.get(pair[1]) ?? new Set()).add(pair[0]));
+    } else {
+      const top = topOf(pair[0]);
+      if (nodes.get(top)!.kind === "package" && !linked.has(top)) {
+        linked.set(top, new Set());
+      }
     }
     if (!edge.deferred) {
       pairs.set(parent, [...(pairs.get(parent) ?? []), pair]);

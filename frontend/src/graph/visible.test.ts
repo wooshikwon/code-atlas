@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture } from "./fixture";
 import { flow } from "./flow";
-import { hidden, lift, nodeIndex, shown } from "./visible";
+import { hidden, lift, nodeIndex, shown, unresolvedWithin } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
 const toggles = { showTests: false, showExternal: false };
@@ -11,7 +11,7 @@ const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null
 describe("shown", () => {
   it("흐름이 없으면 폴더와 파일 상자만 남기고 파일 상자를 펼치지 않는다", () => {
     expect([...closed.nodes].sort()).toEqual(
-      ["app", "app.text", "app.web", "cli", "common", "main", "pkg", "pkg.mod", "pkg.util", "scratch"].sort(),
+      ["app", "app.__init__", "app.text", "app.web", "cli", "common", "main", "pkg", "pkg.mod", "pkg.util", "scratch"].sort(),
     );
     expect(closed.open.size).toBe(0);
   });
@@ -56,10 +56,10 @@ describe("shown", () => {
     ]);
   });
 
-  it("폴더의 __init__.py에 든 정의를 고르면 그 정의만 남기고 폴더 아래 다른 파일 상자는 펼치지 않는다", () => {
+  it("폴더의 __init__.py에 든 정의를 고르면 __init__.py 파일 상자만 펼친다", () => {
     const result = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: flow(repoFixture, "app:version", 2, off) });
     expect([...result.nodes].filter((id) => id.includes(":"))).toEqual(["app:version"]);
-    expect([...result.open]).toEqual(["app"]);
+    expect([...result.open]).toEqual(["app.__init__"]);
   });
 
   it("접힌 폴더를 고르면 파일 상자를 펼치지 않는다", () => {
@@ -76,6 +76,34 @@ describe("shown", () => {
     });
     expect(result.nodes.has("pkg.mod:Store.load")).toBe(false);
     expect([...result.open].sort()).toEqual(["cli", "main"]);
+  });
+});
+
+describe("unresolvedWithin", () => {
+  const graph = {
+    ...repoFixture,
+    nodes: repoFixture.nodes.map((n) => ({
+      ...n,
+      unresolved: { "pkg.mod": 1, "pkg.mod:Store.load": 2, "pkg.mod:parse": 3, "pkg.conftest:setup": 4, "main:run": 5 }[n.id] ?? 0,
+    })),
+  };
+
+  it("노드와 안에 든 노드의 미확인 호출 수를 파일 상자와 폴더까지 합친다", () => {
+    const result = unresolvedWithin(graph, hidden(graph, toggles));
+    expect(Object.fromEntries(result)).toEqual({
+      pkg: 6,
+      "pkg.mod": 6,
+      "pkg.mod:Store": 2,
+      "pkg.mod:Store.load": 2,
+      "pkg.mod:parse": 3,
+      main: 5,
+      "main:run": 5,
+    });
+  });
+
+  it("토글로 숨긴 테스트 코드는 켰을 때만 센다", () => {
+    const result = unresolvedWithin(graph, hidden(graph, { showTests: true, showExternal: false }));
+    expect([result.get("pkg"), result.get("pkg.conftest")]).toEqual([10, 4]);
   });
 });
 

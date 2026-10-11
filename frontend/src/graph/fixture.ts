@@ -1,8 +1,8 @@
 // 시험용 고정 그래프. 폴더 pkg → 파일 pkg.mod → 클래스 Store → 메서드 두 개를 3단으로 중첩하고,
 // 메서드가 클래스 밖 데이터 클래스·함수로 계층을 넘어 잇고, 파일 main의 진입점 run과 메서드가 파일 경계를 넘어 서로 부른다.
-// 여기에 서로 import하는 진입점 파일 cli, 선이 없는 파일 scratch, 파일 네 개가 import하는 common,
+// 여기에 서로 import하는 진입점 파일 cli, 선이 없는 파일 scratch, 파일 다섯 개가 import하는 common,
 // 함수 진입점 index에서 시작해 파일 경계를 넘는 세 단계 호출 사슬 index → render → wrap → pad,
-// 폴더 pkg 안의 테스트 코드 pkg.conftest, 폴더 app의 `__init__.py`에 정의한 함수 app:version을 더한다.
+// 폴더 pkg 안의 테스트 코드 pkg.conftest, 폴더 app의 `__init__.py` 파일 app.__init__과 거기에 정의한 함수 app:version을 더한다.
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 
 function node(id: string, kind: AtlasNode["kind"], parent: string | null, extra: Partial<AtlasNode> = {}): AtlasNode {
@@ -61,14 +61,15 @@ export const repoFixture: Graph = {
     node("common:log", "function", "common", { path: "common.py", range: [1, 8] }),
     node("scratch", "module", null, { path: "scratch.py", loc: 4 }),
     node("scratch:todo", "function", "scratch", { path: "scratch.py", range: [1, 4] }),
-    node("app", "package", null, { path: "app/__init__.py" }),
+    node("app", "package", null, { path: "app" }),
+    node("app.__init__", "module", "app", { path: "app/__init__.py", loc: 3 }),
     node("app.web", "module", "app", { path: "app/web.py", loc: 30 }),
     node("app.web:index", "function", "app.web", { path: "app/web.py", range: [5, 12], entry: true }),
     node("app.web:render", "function", "app.web", { path: "app/web.py", range: [14, 25] }),
     node("app.text", "module", "app", { path: "app/text.py", loc: 20 }),
     node("app.text:wrap", "function", "app.text", { path: "app/text.py", range: [1, 8] }),
     node("app.text:pad", "function", "app.text", { path: "app/text.py", range: [10, 16] }),
-    node("app:version", "function", "app", { path: "app/__init__.py", range: [1, 3] }),
+    node("app:version", "function", "app.__init__", { path: "app/__init__.py", range: [1, 3] }),
   ],
   edges: [
     edge("main", "pkg.mod", "import"),
@@ -88,6 +89,7 @@ export const repoFixture: Graph = {
     edge("cli", "common", "import"),
     edge("pkg.mod", "common", "import"),
     edge("app.web", "common", "import"),
+    edge("app.__init__", "common", "import"),
     edge("cli:main", "common:log", "call"),
     edge("app.web", "app.text", "import"),
     edge("app.web:index", "app.web:render", "call"),
