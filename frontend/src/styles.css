@@ -1380,6 +1380,19 @@ ul {
   font-weight: 700;
 }
 
+/* 선을 눌러 온 상태에서 지나온 선. 고른 노드에 닿는 다른 선과 같은 본문 잉크에 마우스를 올린 선의 굵기로 그리고 빛은 두르지 않는다. */
+.edge[data-via] .edge-line {
+  stroke-width: 2.5;
+}
+
+.edge-derive[data-via] .edge-line {
+  stroke-width: 4;
+}
+
+.edge[data-via] .edge-weight {
+  font-weight: 700;
+}
+
 /* 줄기. 합류점의 점과 합친 선의 수는 줄기와 같은 색으로 그리고 줄기의 불투명도를 함께 받는다. 수는 도착 노드 앞 줄기 위에 적는다. */
 .edge-joint {
   fill: var(--tone);
@@ -1709,13 +1722,33 @@ ul {
 .info-panel-title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
 }
 
-.info-panel-title b {
-  overflow: hidden;
+/* 이름 줄. 앞쪽 경로는 옅게 적고 넘치면 앞에서부터 줄이며, 이름은 줄이지 않는다. */
+.info-panel-name {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  margin-right: 2px;
   font-size: 14px;
   white-space: nowrap;
+}
+
+.info-panel-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  color: var(--muted);
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
+.info-panel-own {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 
@@ -1728,26 +1761,9 @@ ul {
   font-size: 11px;
 }
 
-.info-panel-facts {
-  display: flex;
-  align-items: baseline;
-  margin-top: 3px;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.info-panel-facts-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .info-panel-change {
   flex: none;
-  margin-left: 1ch;
-  color: var(--ink);
+  font-size: 11px;
 }
 
 .info-panel-change::before {
@@ -1761,8 +1777,97 @@ ul {
   vertical-align: 1px;
 }
 
+.info-panel-head > .info-panel-hint {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+/* 구역 머리. 누르면 구역을 접거나 편다. 접힌 구역은 이름 옆에 한 줄 요약을 적고 넘치는 글은 줄인다. */
+.info-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  text-align: left;
+}
+
+.info-section-head .info-panel-label {
+  flex: none;
+}
+
+.info-section-head:hover .info-panel-label {
+  color: var(--ink);
+}
+
+.info-section-caret {
+  flex: none;
+  align-self: center;
+  width: 0;
+  height: 0;
+  border: 3.5px solid transparent;
+  border-top-color: var(--muted);
+  border-bottom-width: 0;
+}
+
+.info-section-head[aria-expanded="false"] .info-section-caret {
+  border: 3.5px solid transparent;
+  border-left-color: var(--muted);
+  border-right-width: 0;
+}
+
+.info-section-brief {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* "정보" 구역. 주제 칸은 가장 긴 주제의 폭에 맞추고 내용 칸이 남은 폭을 쓴다. */
+.info-panel-facts {
+  flex: none;
+  padding: 7px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.info-rows {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 14px;
+  margin: 5px 0 0;
+  line-height: 1.5;
+}
+
+.info-row {
+  display: contents;
+}
+
+.info-row dt {
+  color: var(--muted);
+}
+
+.info-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 누르면 코드 줄 목록이 열리는 내용 */
+.info-link {
+  padding: 0;
+  color: var(--link);
+  font: inherit;
+  text-align: left;
+}
+
+.info-link:hover,
+.info-link[aria-expanded="true"] {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* 코드 뷰어가 없으면 요약 칸이 패널의 남은 높이를 쓰고, 있으면 패널 높이의 4분의 1까지만 쓴다. 넘치는 설명은 칸 안에서 스크롤한다.
-   사용자가 경계선을 끌어 높이를 정했으면 요약 칸은 내용의 길이와 무관하게 그 높이를 쓴다. */
+   사용자가 경계선을 끌어 높이를 정했으면 요약 칸은 내용의 길이와 무관하게 그 높이를 쓴다. 접은 요약 칸은 구역 머리 한 줄만 쓴다. */
 .info-panel-summary {
   flex: 1 1 0;
   min-height: 0;
@@ -1789,6 +1894,13 @@ ul {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.info-panel-summary[data-folded] {
+  flex: none;
+  max-height: none;
+  line-height: inherit;
+  overflow: hidden;
 }
 
 .summary-make {
@@ -1946,7 +2058,7 @@ ol.summary-list {
   font-weight: 600;
 }
 
-.info-panel-sites:has(+ .code) {
+.info-panel-sites:has(~ .code) {
   max-height: 40%;
 }
 

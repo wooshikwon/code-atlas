@@ -88,29 +88,55 @@ describe("selectEdge", () => {
   });
 });
 
-describe("openFolder", () => {
-  it("접힌 폴더를 펼치고 다른 노드의 선택을 풀어 이력에 한 단계만 넣는다", () => {
+describe("follow", () => {
+  const line = `${b}|${a}|call`;
+
+  it("도착 노드를 고르고 누른 선을 이력의 단계에 담는다. 이미 고른 노드여도 선택을 풀지 않는다", () => {
+    store().follow([line], a);
+    expect(store().selection).toEqual(node(a));
+    expect(store().via).toEqual([line]);
+    store().follow([line], a);
+    expect(store().selection).toEqual(node(a));
+    expect(store().history.entries).toHaveLength(2);
+    expect(store().history.entries[1].via).toEqual([line]);
+  });
+
+  it("도착 노드가 접힌 폴더면 펼치고 다른 노드의 선택을 풀어 이력에 한 단계만 넣는다", () => {
     store().toggleFolder(folder);
     store().select(a);
-    store().openFolder(folder);
+    store().follow([`agg|main|${folder}`], folder);
     expect(store().selection).toBeNull();
+    expect(store().via).toEqual([`agg|main|${folder}`]);
     expect(store().collapsed).toEqual(new Set());
     expect(store().history.entries).toHaveLength(4);
     store().back();
     expect(store().selection).toEqual(node(a));
+    expect(store().via).toBeNull();
     expect(store().collapsed).toEqual(new Set([folder]));
+    store().forward();
+    expect(store().via).toEqual([`agg|main|${folder}`]);
   });
 
-  it("펼친 폴더면 선택만 풀고, 달라지는 것이 없거나 폴더가 아니면 이력에 넣지 않는다", () => {
-    store().select(a);
-    store().openFolder(folder);
-    expect(store().selection).toBeNull();
-    expect(store().collapsed).toEqual(new Set());
-    expect(store().history.entries).toHaveLength(3);
-    store().openFolder(folder);
-    store().openFolder(a);
-    expect(store().selection).toBeNull();
-    expect(store().history.entries).toHaveLength(3);
+  it("선택을 바꾸는 액션은 지나온 선을 지우고, 선택을 그대로 두는 액션은 지나온 선을 그대로 둔다", () => {
+    store().follow([line], a);
+    store().togglePack("pkg.mod");
+    expect(store().via).toEqual([line]);
+    store().select(c);
+    expect(store().via).toBeNull();
+    store().follow([line], a);
+    store().selectEdge("agg|x|y");
+    expect(store().via).toBeNull();
+    store().toggleFolder(folder);
+    store().follow([`agg|main|${folder}`], folder);
+    store().select(null);
+    expect(store().via).toBeNull();
+    expect(store().history.entries.at(-1)).toMatchObject({ selection: null, via: null });
+  });
+
+  it("그래프에 없는 노드로는 가지 않는다", () => {
+    store().follow([line], "없는:노드");
+    expect(store().via).toBeNull();
+    expect(store().history.entries).toHaveLength(1);
   });
 });
 
@@ -300,6 +326,7 @@ describe("이력", () => {
       view: { kind: "function", center: b, expanded: [c] },
       selection: node(b),
       unpacked: [],
+      via: null,
       collapsed: [folder],
     });
   });
@@ -361,7 +388,7 @@ describe("이력", () => {
   });
 
   it("push는 index 뒤를 버리고 100단계까지 둔다", () => {
-    const place = (id: string): Place => ({ view: { kind: "structure" }, selection: { type: "node", id }, collapsed: [], unpacked: [] });
+    const place = (id: string): Place => ({ view: { kind: "structure" }, selection: { type: "node", id }, via: null, collapsed: [], unpacked: [] });
     let history: History = { entries: [place("0")], index: 0 };
     for (let i = 1; i <= 3; i++) {
       history = push(history, place(String(i)));
@@ -509,7 +536,7 @@ describe("경로 고정", () => {
     ["show", (state) => state.show(probe)],
     ["selectEdge", (state) => state.selectEdge("agg|x|y")],
     ["toggleFolder", (state) => state.toggleFolder("flow")],
-    ["openFolder", (state) => state.openFolder("flow")],
+    ["follow", (state) => state.follow(["agg|x|flow"], "flow")],
     ["togglePack", (state) => state.togglePack("flow")],
     ["enterFunction", (state) => state.enterFunction(begin)],
     ["expandFunction", (state) => state.expandFunction(left)],
@@ -733,7 +760,7 @@ describe("경로 고정", () => {
 });
 
 describe("화면 설정", () => {
-  it("흐름 단계·화면 색·패널·범례·미니맵·자동 요약을 code-atlas:ui:v2에 쓴다", () => {
+  it("흐름 단계·화면 색·패널·패널 구역의 접힘·범례·미니맵·자동 요약을 code-atlas:ui:v2에 쓴다", () => {
     const saved = new Map<string, string>();
     vi.stubGlobal("localStorage", { setItem: (key: string, value: string) => saved.set(key, value) });
     vi.stubGlobal("document", { documentElement: { style: { setProperty: () => undefined }, dataset: {} } });
@@ -741,6 +768,7 @@ describe("화면 설정", () => {
     store().setTheme("dark");
     store().setPanel({ x: 10, y: 20, width: 300, height: 200 });
     store().setSplit(0.4);
+    store().toggleFacts();
     store().toggleLegend();
     store().toggleMinimap();
     store().toggleAutoSummary();
@@ -749,6 +777,8 @@ describe("화면 설정", () => {
     expect(parseUi(saved.get("code-atlas:ui:v2")!, "light")).toEqual({
       panel: { x: 10, y: 20, width: 300, height: 200 },
       split: 0.4,
+      factsOpen: false,
+      summaryOpen: true,
       legendOpen: true,
       minimapOpen: false,
       theme: "dark",
@@ -758,7 +788,7 @@ describe("화면 설정", () => {
   });
 
   it("형태가 맞지 않는 값은 기본값으로 둔다", () => {
-    const defaults = { panel: null, split: null, legendOpen: false, minimapOpen: true, theme: "dark", depth: 2, autoSummary: false };
+    const defaults = { panel: null, split: null, factsOpen: true, summaryOpen: true, legendOpen: false, minimapOpen: true, theme: "dark", depth: 2, autoSummary: false };
     expect(parseUi(null, "dark")).toEqual(defaults);
     expect(parseUi("{", "dark")).toEqual(defaults);
     expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, split: 1.5, legendOpen: "yes", minimapOpen: 0, theme: "blue", depth: 4, autoSummary: 1 }), "dark")).toEqual(
@@ -791,7 +821,7 @@ describe("reopen", () => {
     expect([now.view, now.selection]).toEqual([{ kind: "structure" }, null]);
     expect(now.collapsed).toEqual(new Set(["app", "pkg"]));
     expect(now.unpacked).toEqual(new Set());
-    expect(now.history).toEqual({ entries: [{ unpacked: [], view: { kind: "structure" }, selection: null, collapsed: ["app", "pkg"] }], index: 0 });
+    expect(now.history).toEqual({ entries: [{ unpacked: [], view: { kind: "structure" }, selection: null, via: null, collapsed: ["app", "pkg"] }], index: 0 });
     expect([now.arranging, now.arranged]).toEqual([false, null]);
     expect([now.finder.open, now.finder.from, now.finder.route]).toEqual([false, null, null]);
     expect([now.repo, now.graph, now.tree, now.epoch]).toEqual([repo, repoFixture, tree, 1]);

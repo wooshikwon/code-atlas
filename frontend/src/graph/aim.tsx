@@ -73,8 +73,8 @@ interface AimOptions {
   only: ((view: EdgeView) => boolean) | null;
   /** 누른 것을 받지 않을 때 참을 돌려준다(더블클릭의 둘째 클릭). */
   skip: (event: ReactMouseEvent) => boolean;
-  /** 도착 노드를 고른다. */
-  pick: (target: string) => void;
+  /** 선 keys를 눌러 도착 노드 target으로 간다. */
+  pick: (target: string, keys: EdgeKey[]) => void;
   /** 선이나 줄기의 코드 줄 목록을 연다. */
   open: (key: EdgeKey) => void;
 }
@@ -152,7 +152,10 @@ export function useAim({ lines, boxes, tip, name, describe, only, skip, pick, op
       if (event.shiftKey) {
         open(views.length === 1 ? views[0].key : (views[0].trunk ?? trunkKey(views[0].target, 0)));
       } else {
-        pick(views[0].target);
+        pick(
+          views[0].target,
+          views.map((view) => view.key),
+        );
       }
       return;
     }
@@ -176,7 +179,7 @@ export function useAim({ lines, boxes, tip, name, describe, only, skip, pick, op
           if (menu.open) {
             open(item.key);
           } else {
-            pick(item.target);
+            pick(item.target, [item.key]);
           }
         }}
       />

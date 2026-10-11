@@ -81,12 +81,12 @@ describe("find", () => {
   it("질의가 비면 최근에 고른 노드를 최근 것부터 낸다", () => {
     const history: History = {
       entries: [
-        { view: { kind: "structure" }, selection: null, collapsed: [], unpacked: [] },
-        { view: { kind: "structure" }, selection: { type: "node", id: "arbiter" }, collapsed: [], unpacked: [] },
-        { view: { kind: "structure" }, selection: { type: "node", id: "parser.reminders:Item" }, collapsed: [], unpacked: [] },
-        { view: { kind: "structure" }, selection: { type: "edge", key: "agg|a|b", focus: null }, collapsed: [], unpacked: [] },
-        { view: { kind: "structure" }, selection: { type: "node", id: "arbiter" }, collapsed: [], unpacked: [] },
-        { view: { kind: "structure" }, selection: { type: "node", id: "tests.test_reminders" }, collapsed: [], unpacked: [] },
+        { view: { kind: "structure" }, selection: null, via: null, collapsed: [], unpacked: [] },
+        { view: { kind: "structure" }, selection: { type: "node", id: "arbiter" }, via: null, collapsed: [], unpacked: [] },
+        { view: { kind: "structure" }, selection: { type: "node", id: "parser.reminders:Item" }, via: null, collapsed: [], unpacked: [] },
+        { view: { kind: "structure" }, selection: { type: "edge", key: "agg|a|b", focus: null }, via: null, collapsed: [], unpacked: [] },
+        { view: { kind: "structure" }, selection: { type: "node", id: "arbiter" }, via: null, collapsed: [], unpacked: [] },
+        { view: { kind: "structure" }, selection: { type: "node", id: "tests.test_reminders" }, via: null, collapsed: [], unpacked: [] },
       ],
       index: 5,
     };

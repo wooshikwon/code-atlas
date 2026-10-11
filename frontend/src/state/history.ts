@@ -1,4 +1,4 @@
-// 탐색 이력. 한 단계는 뷰 종류, 선택, 접은 폴더 집합, 전부 펼친 상자 집합이다.
+// 탐색 이력. 한 단계는 뷰 종류, 선택, 지나온 선, 접은 폴더 집합, 전부 펼친 상자 집합이다.
 import type { EdgeKey } from "../graph/scope";
 
 export type View = { kind: "structure" } | { kind: "function"; center: string; expanded: string[] };
@@ -17,6 +17,8 @@ export function focusOf(selection: Selection): string | null {
 export interface Place {
   view: View;
   selection: Selection;
+  /** 그래프에서 선을 눌러 이 단계에 왔으면 누른 선의 키. 정렬해 둔다. 다른 방법으로 왔으면 null이다. */
+  via: EdgeKey[] | null;
   /** 접은 폴더의 패키지 노드 id. 같은 집합이 같은 배열이 되도록 정렬해 둔다. */
   collapsed: string[];
   /** 전부 펼침 단계인 파일 상자의 노드 id. 정렬해 둔다. */

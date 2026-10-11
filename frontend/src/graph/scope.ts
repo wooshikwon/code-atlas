@@ -28,6 +28,8 @@ export interface DrawnEdge {
   edges: AtlasEdge[];
   /** 강조하는 경로의 걸음을 그리는 선이면 그 걸음의 종류 */
   route: StepKind | null;
+  /** 선을 눌러 온 상태에서 지나온 선이다(`followed`) */
+  via: boolean;
 }
 
 /**
@@ -56,24 +58,6 @@ function related(nodes: Map<string, AtlasNode>, a: string, b: string): boolean {
   return within(nodes, a, b) || within(nodes, b, a);
 }
 
-/** 노드에 닿는 선 수. 외부 노드로 가는 선도 센다. */
-export function degrees(graph: Graph): Map<string, { incoming: number; outgoing: number }> {
-  const result = new Map<string, { incoming: number; outgoing: number }>();
-  const entry = (id: string) => {
-    let value = result.get(id);
-    if (value === undefined) {
-      value = { incoming: 0, outgoing: 0 };
-      result.set(id, value);
-    }
-    return value;
-  };
-  for (const edge of graph.edges) {
-    entry(edge.source).outgoing++;
-    entry(edge.target).incoming++;
-  }
-  return result;
-}
-
 type Shade = Pick<DrawnEdge, "tone" | "opacity" | "route">;
 
 /** 흐름에서 정한 선의 진하기. edges는 선 하나에 합친 원래 선이다. */
@@ -99,7 +83,7 @@ function merge(key: EdgeKey, source: string, target: string, edges: AtlasEdge[],
       group = edge.group;
     }
   }
-  return { key, source, target, group, weight, kinds, ...shade, deferred: edges.length > 0 && edges.every((e) => e.deferred), edges };
+  return { key, source, target, group, weight, kinds, ...shade, via: false, deferred: edges.length > 0 && edges.every((e) => e.deferred), edges };
 }
 
 /**
@@ -203,21 +187,6 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
 }
 
 /**
- * 그린 선 edges에서 상자 id가 쓰는 상자 수(outgoing), 그 상자가 쓰는 외부 모듈 수(external), 그 상자를 쓰는 상자 수(incoming).
- * 외부 모듈은 outgoing에 세지 않는다.
- */
-export function neighbors(
-  edges: DrawnEdge[],
-  nodes: Map<string, AtlasNode>,
-  id: string,
-): { incoming: number; outgoing: number; external: number } {
-  const users = new Set(edges.filter((e) => e.target === id).map((e) => e.source));
-  const used = [...new Set(edges.filter((e) => e.source === id).map((e) => e.target))];
-  const external = used.filter((target) => nodes.get(target)?.kind === "external").length;
-  return { incoming: users.size, outgoing: used.length - external, external };
-}
-
-/**
  * 선 키가 가리키는 선과 그 선에 합친 원래 선. 집계 선은 `drawn`이 그 키로 합친 선이고, 마우스를 올려야 그려지는
  * 집계 선은 양 끝에 마우스를 올린 것으로 보고 찾는다. 집계 선이 아닌 키는 원래 선 하나다. 없으면 null이다.
  */
@@ -234,6 +203,39 @@ export function picked(graph: Graph, shown: Shown, flow: Flow | null, key: EdgeK
     }
   }
   return null;
+}
+
+/** 선 키의 출발 노드와 도착 노드. 집계 선 키는 `agg|출발|도착`이고 그 밖의 키는 `출발|도착|종류`다. */
+export function endsOf(key: EdgeKey): { source: string; target: string } {
+  const parts = key.split("|");
+  return parts[0] === "agg" ? { source: parts[1], target: parts[2] } : { source: parts[0], target: parts[1] };
+}
+
+/**
+ * 원래 선 edge가 선 키 keys 가운데 하나가 가리키는 선에 드는지. 집계 선 키는 출발이 그 키의 출발 노드 안에, 도착이 도착 노드 안에 든
+ * 선을 모두 가리키고, 그 밖의 키는 edge_key가 같은 선 하나를 가리킨다.
+ */
+export function along(nodes: Map<string, AtlasNode>, keys: EdgeKey[], edge: AtlasEdge): boolean {
+  return keys.some((key) => {
+    if (!key.startsWith("agg|")) {
+      return edgeKey(edge) === key;
+    }
+    const { source, target } = endsOf(key);
+    return within(nodes, edge.source, source) && within(nodes, edge.target, target);
+  });
+}
+
+/**
+ * 그린 선 edges 가운데 지나온 선 via에 드는 원래 선을 하나라도 합친 선을 가장 진한 단계(strong에 불투명도 1)로 올리고 via 표시를 단다.
+ * 지나온 선의 도착 폴더를 펼쳐 선이 갈라졌으면 갈라진 선이 모두 표시를 받는다.
+ */
+export function followed(edges: DrawnEdge[], nodes: Map<string, AtlasNode>, via: EdgeKey[] | null): DrawnEdge[] {
+  if (via === null) {
+    return edges;
+  }
+  return edges.map((edge) =>
+    edge.edges.some((e) => along(nodes, via, e)) ? { ...edge, tone: "strong", opacity: EDGE_OPACITY.full, via: true } : edge,
+  );
 }
 
 /** 줄기 키 `trunk|도착 노드|번호`의 도착 노드. 줄기 키가 아니면 null이다. */

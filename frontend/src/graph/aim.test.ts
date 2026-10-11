@@ -4,7 +4,7 @@ import type { EdgeView } from "./view";
 
 const view = (key: string, target: string, points: [number, number][]): EdgeView => {
   const path = points.map(([x, y]) => ({ x, y }));
-  return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, into: null, sites: 1, route: null, joins: true, below: false, branch: path, trunk: null };
+  return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, into: null, sites: 1, route: null, via: false, joins: true, below: false, branch: path, trunk: null };
 };
 /** a, b, c는 t로 들어가며 x=100의 세로 줄에 차례로 붙는다. d는 a와 출발 직후의 구간만 함께 지나 u로 간다. */
 const a = view("a", "t", [[0, 0], [100, 0], [100, 50], [120, 50]]);
