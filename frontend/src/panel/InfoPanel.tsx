@@ -1,5 +1,6 @@
 // 관계 그래프 위에 떠 있는 정보 패널. 저장소의 선택을 머리 줄, LLM 요약 칸, 지점 목록, 코드 뷰어로 바꾼다.
 // 아무것도 고르지 않았으면 레포 머리 줄 아래에 켠 분석 덮개의 요약을 보인다.
+// 경로 고정 중에는 선택 대신 finder.focus의 노드를 보인다.
 import { useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
@@ -7,7 +8,7 @@ import { flow } from "../graph/flow";
 import { degrees, drawn, neighbors, picked, type DrawnEdge } from "../graph/scope";
 import { hidden, nodeIndex, shown, unresolvedWithin, within } from "../graph/visible";
 import { focusOf } from "../state/history";
-import { useAtlas, type Selection } from "../state/store";
+import { litOf, useAtlas, type Selection } from "../state/store";
 import { drag } from "./drag";
 import { Header, type HeaderItem, type PickedEdge } from "./Header";
 import { useOpened } from "./opened";
@@ -57,6 +58,7 @@ export function InfoPanel() {
   const showExternal = useAtlas((s) => s.showExternal);
   const collapsed = useAtlas((s) => s.collapsed);
   const depth = useAtlas((s) => s.depth);
+  const finder = useAtlas((s) => s.finder);
   const split = useAtlas((s) => s.split);
   const setSplit = useAtlas((s) => s.setSplit);
   /** 그래프 선택과 무관하게 연 파일. 고른 노드나 선 대신 이 파일의 코드를 보인다. */
@@ -73,34 +75,42 @@ export function InfoPanel() {
     [graph],
   );
 
-  /** 그래프가 지금 화면을 그릴 때와 같은 흐름과 보이는 노드 */
+  /** 고정 중에 강조하는 경로 */
+  const lit = useMemo(() => litOf(finder), [finder.route, finder.pick]);
+
+  /** 그래프가 지금 화면을 그릴 때와 같은 흐름·강조하는 경로와 보이는 노드 */
   const scene = useMemo(() => {
     if (graph === null || index === null) {
       return null;
     }
     const toggles = { showTests, showExternal };
+    if (lit !== null) {
+      return { flow: null, lit, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
+    }
     const off = hidden(graph, toggles);
     const focus = focusOf(selection);
     const focused = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
-    return { flow: focused, shown: shown(graph, { ...toggles, collapsed, flow: focused, lit: null }) };
-  }, [graph, index, selection, showTests, showExternal, collapsed, depth]);
+    return { flow: focused, lit, shown: shown(graph, { ...toggles, collapsed, flow: focused, lit }) };
+  }, [graph, index, selection, showTests, showExternal, collapsed, depth, lit]);
 
   const edge = useMemo(() => {
-    if (graph === null || scene === null || selection?.type !== "edge") {
+    if (graph === null || scene === null || scene.lit !== null || selection?.type !== "edge") {
       return null;
     }
     const found = picked(graph, scene.shown, scene.flow, selection.key);
     return found === null ? null : pickedEdge(found);
   }, [graph, scene, selection]);
 
-  const node = file === null && selection?.type === "node" ? index?.nodes.get(selection.id) : undefined;
+  /** 정보 패널이 보이는 노드. 경로 고정 중에는 경로 위에서 누른 노드다. */
+  const chosen = lit !== null ? finder.focus : selection?.type === "node" ? selection.id : null;
+  const node = file === null && chosen !== null ? index?.nodes.get(chosen) : undefined;
 
   /** 고른 파일 상자나 폴더 상자의 머리 줄 수치. 화면에 그린 선과 배지가 세는 범위에서 센다. */
   const box = useMemo(() => {
     if (graph === null || index === null || scene === null || node === undefined || !UNITS.has(node.kind)) {
       return null;
     }
-    const { external, ...counts } = neighbors(drawn(graph, scene.shown, scene.flow, null, null), index.nodes, node.id);
+    const { external, ...counts } = neighbors(drawn(graph, scene.shown, scene.flow, null, scene.lit), index.nodes, node.id);
     return {
       ...counts,
       external: showExternal ? external : null,

@@ -1384,7 +1384,7 @@ ul {
   font-size: 12px;
 }
 
-/* 왼쪽 아래 칸. 아랫줄에 둥근 버튼을, 그 위에 펼친 미니맵과 범례를 나란히 둔다. 폭이 모자라면 범례가 미니맵 위로 올라간다.
+/* 왼쪽 아래 칸. 아랫줄에 둥근 버튼을, 그 위에 펼친 미니맵과 범례, 경로 탐색 창을 나란히 둔다. 폭이 모자라면 오른쪽 칸부터 위로 올라간다.
    칸의 빈 곳은 마우스를 받지 않아 그래프를 가리지 않는다. */
 .dock {
   position: absolute;
@@ -2093,4 +2093,332 @@ ul {
   margin-left: auto;
   color: var(--muted);
   font-size: 11px;
+}
+
+/* 경로 탐색 창 */
+
+/* 왼쪽 아래 칸의 셋째 칸. 폭은 330px이고 높이는 내용을 따른다. Finder가 넣는 최대 높이를 넘으면 단계 목록 안에서 스크롤한다. */
+.finder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 330px;
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  font-size: 12px;
+}
+
+.finder > * {
+  flex: none;
+}
+
+.finder-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.finder-ends {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.finder-fields {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 출발 칸은 빈 원, 도착 칸은 채운 원을 앞에 그린다. */
+.finder-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 4px 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.finder-field:focus-within {
+  border-color: var(--ink);
+}
+
+.finder-field::before {
+  content: "";
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+}
+
+.finder-field[data-end="to"]::before {
+  background: var(--ink);
+}
+
+.finder-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  outline: none;
+  font: inherit;
+  color: var(--ink);
+  background: none;
+}
+
+.finder-value {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  line-height: 28px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.finder-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+}
+
+.finder-aside {
+  flex: none;
+  max-width: 50%;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.finder-unset {
+  flex: none;
+  width: 20px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.finder-unset:hover {
+  color: var(--ink);
+}
+
+.finder-hits {
+  max-height: 194px;
+  margin-top: 2px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.finder-hits:empty {
+  display: none;
+}
+
+.finder-hit {
+  padding: 0 8px;
+}
+
+.finder-swap {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-top: 19px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.finder-swap:hover:enabled,
+.finder-reverse:hover,
+.finder-pick:hover:not([aria-pressed="true"]) {
+  background: var(--hover-bg);
+}
+
+.finder-swap:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* 숫자 버튼은 경로가 다섯 개일 때 줄을 채우는 폭으로 그린다. */
+.finder-picks {
+  display: flex;
+  gap: 6px;
+}
+
+.finder-pick {
+  display: flex;
+  flex: 0 0 calc((100% - 24px) / 5);
+  flex-direction: column;
+  align-items: center;
+  padding: 3px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  line-height: 1.25;
+}
+
+.finder-pick b {
+  font-size: 14px;
+}
+
+.finder-pick span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.finder-pick[aria-pressed="true"] {
+  border-color: var(--ink);
+  color: var(--surface);
+  background: var(--ink);
+}
+
+.finder-pick[aria-pressed="true"] span {
+  color: inherit;
+}
+
+.finder > .finder-steps {
+  flex: 0 1 auto;
+  min-height: 48px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.finder-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  height: 24px;
+  padding: 0 6px 0 2px;
+  border-radius: 3px;
+  line-height: 24px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.finder-step:hover {
+  background: var(--hover-bg);
+}
+
+.finder-step[aria-current] {
+  background: var(--active-bg);
+}
+
+.finder-step-number {
+  flex: none;
+  width: 16px;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+}
+
+.finder-step-mark {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.finder-more {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* 고정 안내 줄. 막힌 조작이 있으면 Finder가 data-flash를 0.7초 동안 달아 본문 잉크 바탕으로 뒤집는다. */
+.finder-pinned {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 4px;
+  background: var(--active-bg);
+  white-space: nowrap;
+}
+
+.finder-pinned[data-flash] {
+  color: var(--surface);
+  background: var(--ink);
+}
+
+.finder-clear {
+  flex: none;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+}
+
+.finder-empty {
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+}
+
+.finder-empty p {
+  margin: 0;
+}
+
+.finder-empty-title {
+  font-weight: 600;
+}
+
+.finder-reverse {
+  margin-top: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+/* 경로 찾기 버튼. 경로 고정 중에는 본문 잉크로 채운다. */
+.finder-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.finder-icon-to {
+  fill: currentColor;
+}
+
+.finder-button[data-pinned] {
+  border-color: var(--ink);
+  color: var(--surface);
+  background: var(--ink);
+}
+
+/* 정보 패널 머리 줄의 출발로·도착으로 버튼 */
+.info-panel-ends {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.info-panel-end {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.info-panel-end:hover {
+  background: var(--hover-bg);
 }

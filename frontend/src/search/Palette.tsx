@@ -1,21 +1,9 @@
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useAtlas } from "../state/store";
-import { build, find, recent, type EntryKind, type Hit } from "./index";
-
-const KIND_NAMES: Record<EntryKind, string> = {
-  file: "파일",
-  class: "클래스",
-  dataclass: "데이터 클래스",
-  function: "함수",
-  method: "메서드",
-};
+import { HitRow } from "./HitRow";
+import { build, find, recent, type Hit } from "./index";
 
 const optionId = (index: number) => `palette-option-${index}`;
-
-/** 일치한 글자를 굵게 그린다. */
-function marked(text: string, positions: Set<number>): ReactNode {
-  return [...text].map((char, index) => (positions.has(index) ? <b key={index}>{char}</b> : char));
-}
 
 function PaletteBox() {
   const graph = useAtlas((s) => s.graph);
@@ -98,24 +86,15 @@ function PaletteBox() {
         />
         <ul id="palette-list" className="palette-list" role="listbox">
           {hits.map((hit, index) => (
-            <li
+            <HitRow
               key={hit.entry.id}
+              hit={hit}
               id={optionId(index)}
-              className={`palette-option${index === active ? " active" : ""}`}
-              role="option"
-              aria-selected={index === active}
-              data-node={hit.entry.id}
-              onMouseMove={() => setActive(index)}
-              onClick={() => choose(hit)}
-            >
-              <span className="palette-name">
-                {hit.field === "name" ? marked(hit.entry.name, hit.positions) : hit.entry.name}
-              </span>
-              <span className="palette-aside">
-                {KIND_NAMES[hit.entry.kind]} ·{" "}
-                {hit.field === "path" ? marked(hit.entry.path, hit.positions) : hit.entry.path}
-              </span>
-            </li>
+              className="palette-option"
+              active={index === active}
+              onActive={() => setActive(index)}
+              onPick={() => choose(hit)}
+            />
           ))}
         </ul>
       </div>

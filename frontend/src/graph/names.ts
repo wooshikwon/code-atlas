@@ -32,3 +32,21 @@ export const EDGE_KIND_NAMES: Record<EdgeKind, string> = {
   inherit: "상속",
   override: "오버라이드",
 };
+
+/** 노드를 그 노드 하나로 가리킬 때 적는 이름. 파일은 파일 이름, 폴더는 `이름/`, 메서드는 `클래스.메서드()`다. */
+export function nameOf(nodes: Map<string, AtlasNode>, node: AtlasNode): string {
+  switch (node.kind) {
+    case "module":
+      return node.path?.split("/").pop() ?? node.name;
+    case "package":
+      return `${node.name}/`;
+    case "method": {
+      const owner = node.parent === null ? undefined : nodes.get(node.parent);
+      return owner === undefined ? `${node.name}()` : `${owner.name}.${node.name}()`;
+    }
+    case "function":
+      return `${node.name}()`;
+    default:
+      return node.name;
+  }
+}

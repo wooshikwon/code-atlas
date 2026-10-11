@@ -391,8 +391,11 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     setHover(node.data.node.id);
     onNodeOver(event, node);
   };
+  /** 경로 고정 중에는 경로의 걸음만 마우스를 올린 선으로 강조하고, 그 밖의 선은 말풍선만 띄운다. */
   const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
-    setPointed(edge.id);
+    if (lit === null || edge.data?.route != null) {
+      setPointed(edge.id);
+    }
     const name = (id: string) => {
       const node = index?.nodes.get(id);
       return node === undefined ? id : titleOf(node);

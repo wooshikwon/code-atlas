@@ -2,7 +2,7 @@
 // 접은 목록은 토글 아래 "분석 덮개" 구역에 덮개를 고르는 행을 함께 담는다.
 // 어느 쪽으로 그릴지는 nav/fit.ts가 상단 줄에 적는 단계(data-fit)가 정한다.
 import { useLayoutEffect, useRef, useState } from "react";
-import { useAtlas } from "../state/store";
+import { pinned, useAtlas } from "../state/store";
 import { useDismiss } from "./menu";
 import { OverlayOptions } from "./Overlays";
 
@@ -10,6 +10,8 @@ export function Toggles() {
   const showTests = useAtlas((s) => s.showTests);
   const showExternal = useAtlas((s) => s.showExternal);
   const autoSummary = useAtlas((s) => s.autoSummary);
+  /** 경로 고정 중에는 보이는 노드를 바꾸는 토글 두 개를 누를 수 없다. */
+  const pin = useAtlas((s) => pinned(s.finder));
   const toggleTests = useAtlas((s) => s.toggleTests);
   const toggleExternal = useAtlas((s) => s.toggleExternal);
   const toggleAutoSummary = useAtlas((s) => s.toggleAutoSummary);
@@ -41,11 +43,11 @@ export function Toggles() {
       </button>
       <div className="toolbar-toggles-list" id="toolbar-toggles" ref={list} data-open={open ? "" : undefined} data-side={side}>
         <label className="toolbar-toggle">
-          <input type="checkbox" checked={showTests} onChange={toggleTests} />
+          <input type="checkbox" checked={showTests} onChange={toggleTests} disabled={pin} />
           테스트 코드
         </label>
         <label className="toolbar-toggle">
-          <input type="checkbox" checked={showExternal} onChange={toggleExternal} />
+          <input type="checkbox" checked={showExternal} onChange={toggleExternal} disabled={pin} />
           외부 노드
         </label>
         <label className="toolbar-toggle" title="노드를 고르면 캐시에 없는 LLM 요약을 만든다">

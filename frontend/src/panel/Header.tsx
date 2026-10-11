@@ -1,7 +1,9 @@
-// 정보 패널 머리 줄. 첫 줄에 이름과 종류 칩을, 둘째 줄에 위치와 수치, 변경 상태를 적는다.
+// 정보 패널 머리 줄. 첫 줄에 이름과 종류 칩을, 둘째 줄에 위치와 수치, 변경 상태를 적는다. 경로 탐색 창을 편 동안에는
+// 그 아래에 보이는 노드를 출발 칸이나 도착 칸에 넣는 버튼을 그린다.
 import type { AtlasNode, EdgeGroup, EdgeKind, SiteRef } from "../api/types";
-import { EDGE_KIND_NAMES, GROUP_NAMES, KIND_NAMES } from "../graph/names";
+import { EDGE_KIND_NAMES, GROUP_NAMES, KIND_NAMES, nameOf } from "../graph/names";
 import { EntryMark } from "../graph/nodes/common";
+import { Ends } from "../route/Ends";
 import { CHANGE_NAMES, useChange } from "../state/changes";
 
 /** 고른 선. 집계 선이면 kind가 null이고 kinds에 종류마다 지점 수를 담는다. */
@@ -29,23 +31,6 @@ export type HeaderItem =
 interface HeaderProps {
   item: HeaderItem;
   nodes: Map<string, AtlasNode>;
-}
-
-function nameOf(nodes: Map<string, AtlasNode>, node: AtlasNode): string {
-  switch (node.kind) {
-    case "module":
-      return node.path?.split("/").pop() ?? node.name;
-    case "package":
-      return `${node.name}/`;
-    case "method": {
-      const owner = node.parent === null ? undefined : nodes.get(node.parent);
-      return owner === undefined ? `${node.name}()` : `${owner.name}.${node.name}()`;
-    }
-    case "function":
-      return `${node.name}()`;
-    default:
-      return node.name;
-  }
 }
 
 function whereOf(node: AtlasNode): string | null {
@@ -123,6 +108,7 @@ export function Header({ item, nodes }: HeaderProps) {
           </span>
         )}
       </div>
+      {item.type === "node" && <Ends node={item.node} />}
     </>
   );
 }

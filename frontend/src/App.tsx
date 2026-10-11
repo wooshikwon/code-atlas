@@ -14,7 +14,7 @@ import { useOpened } from "./panel/opened";
 import { Palette } from "./search/Palette";
 import { useBranch, useStaleCount, watch } from "./state/changes";
 import { useOverlay } from "./state/overlay";
-import { useAtlas, type Depth } from "./state/store";
+import { pinned, useAtlas, type Depth } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
 function Toolbar() {
@@ -25,6 +25,8 @@ function Toolbar() {
   const canBack = useAtlas((s) => s.history.index > 0);
   const canForward = useAtlas((s) => s.history.index < s.history.entries.length - 1);
   const depth = useAtlas((s) => s.depth);
+  /** 경로 고정 중에는 뒤로·앞으로 버튼과 흐름 단계 슬라이더를 누를 수 없다. */
+  const pin = useAtlas((s) => pinned(s.finder));
   const theme = useAtlas((s) => s.theme);
   const overlay = useOverlay((s) => s.kind);
   const back = useAtlas((s) => s.back);
@@ -54,10 +56,10 @@ function Toolbar() {
   return (
     <div className="toolbar" data-fit={fit} ref={bar}>
       <div className="toolbar-nav">
-        <button className="toolbar-button" onClick={back} disabled={!canBack} title="뒤로" aria-label="뒤로">
+        <button className="toolbar-button" onClick={back} disabled={!canBack || pin} title="뒤로" aria-label="뒤로">
           ←
         </button>
-        <button className="toolbar-button" onClick={forward} disabled={!canForward} title="앞으로" aria-label="앞으로">
+        <button className="toolbar-button" onClick={forward} disabled={!canForward || pin} title="앞으로" aria-label="앞으로">
           →
         </button>
         <Trail fit={fit} />
@@ -87,6 +89,7 @@ function Toolbar() {
             min={1}
             max={3}
             value={depth}
+            disabled={pin}
             onChange={(event) => setDepth(Number(event.target.value) as Depth)}
           />
           {depth}
