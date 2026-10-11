@@ -14,7 +14,7 @@ import { emptyText, pickTip, stepCount, stepRows } from "./words";
 /** 막힌 조작을 알리려고 고정 안내 줄을 뒤집어 두는 시간(ms) */
 const FLASH_MS = 700;
 /** 창의 높이가 넘지 않는 관계 그래프 영역 높이의 비율 */
-const HEIGHT_SHARE = 0.6;
+const HEIGHT_SHARE = 0.5;
 /** 창의 위 끝과 관계 그래프 영역의 위 끝 사이에 남기는 폭(px) */
 const TOP_MARGIN = 12;
 
@@ -66,6 +66,12 @@ export function Finder() {
     observer.observe(element.parentElement);
     return () => observer.disconnect();
   }, [drawn]);
+
+  // 지금 단계의 행이 단계 목록 안에 보이게 목록을 스크롤한다.
+  const steps = useRef<HTMLOListElement | null>(null);
+  useEffect(() => {
+    steps.current?.querySelector("[aria-current]")?.scrollIntoView({ block: "nearest" });
+  }, [drawn, finder.route, finder.pick, finder.focus, room]);
 
   if (!drawn) {
     return null;
@@ -120,7 +126,7 @@ export function Finder() {
               </button>
             ))}
           </div>
-          <ol className="finder-steps">
+          <ol className="finder-steps" ref={steps}>
             {stepRows(route, path, nodes).map((row, index) => (
               <li key={row.id}>
                 <button

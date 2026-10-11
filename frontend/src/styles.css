@@ -2326,9 +2326,11 @@ ul {
   color: inherit;
 }
 
+/* 단계 목록은 여섯 행 반까지 그리고 넘는 행은 목록 안에서 스크롤한다. 반 행이 아래에 행이 더 있음을 보인다. */
 .finder > .finder-steps {
   flex: 0 1 auto;
   min-height: 48px;
+  max-height: 156px;
   margin: 0;
   padding: 0;
   overflow-y: auto;
