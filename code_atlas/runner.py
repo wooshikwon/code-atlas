@@ -39,6 +39,7 @@ class Runner:
         self._cache: Cache | None = None
         self._cache_tried = False
         self._session: Session | None = None
+        self._env: str | None = None  # 세션을 띄운 때의 환경 지문
         self._sessions = AsyncExitStack()
         self._opening = asyncio.Lock()
         self._warming: asyncio.Task | None = None
@@ -46,7 +47,7 @@ class Runner:
     async def run(
         self, previous: Analyzed | None = None, drafted: Callable[[Analyzed], None] | None = None
     ) -> Analyzed:
-        """레포를 분석한다. `previous`가 있으면 그 결과에서 증분으로 분석하고 세션을 새로 띄우지 않는다.
+        """레포를 분석한다. `previous`가 있으면 그 결과에서 증분으로 분석하고, 환경 지문이 그대로면 세션을 새로 띄우지 않는다.
 
         첫 분석이 실패하면 `progress.phase`가 failed가 되고 `error`에 까닭이 남는다. 다시 분석이 실패하면 앞의 결과가
         그대로이므로 ready로 돌아가고 세션의 본문을 앞의 결과로 되돌린다.
@@ -89,14 +90,22 @@ class Runner:
     def _report(self, progress: Progress) -> None:
         self.progress = progress
 
-    async def _live(self, files: RepoFiles) -> Session:
-        """`refresh`에 넘기는 세션. 없거나 멈췄으면 띄운다. 본문을 맞추고 준비를 기다리는 일은 `refresh`가 한다."""
+    async def _live(self, files: RepoFiles, env: str) -> Session:
+        """`refresh`에 넘기는 세션. 없거나 멈췄으면 띄우고, 환경 지문이 `env`와 다른 때에 띄운 세션은 닫고 새로 띄운다.
+
+        언어 서버는 찾지 못한 import의 결과를 기억하므로 가상환경이 바뀌면 새 프로세스로 묻는다. 본문을 맞추고 준비를
+        기다리는 일은 `refresh`가 한다.
+        """
         async with self._opening:
             self.lsp = "starting"
+            if self._session is not None and self._env != env:
+                await self._sessions.aclose()
+                self._session = None
             if self._session is None or self._session.stopped:
                 self._session = await self._sessions.enter_async_context(
                     Session(files.root, self.python, files.extra_paths)
                 )
+                self._env = env
             return self._session
 
     def _warm(self) -> None:
@@ -114,6 +123,7 @@ class Runner:
                 self._session = await self._sessions.enter_async_context(
                     Session(analyzed.files.root, self.python, analyzed.files.extra_paths)
                 )
+                self._env = analyzed.env
             if self.lsp != "ready":
                 self._session.sync_files(analyzed.texts)
                 await self._session.wait_ready(analyzed.probe)

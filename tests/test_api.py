@@ -911,7 +911,7 @@ async def test_failed_reload_keeps_the_previous_analysis(sample_repo, tmp_path, 
         add_function(sample_repo)
 
         async def fail(repo, python, session, **options):
-            (await session(options["previous"].files)).sync_files({})
+            (await session(options["previous"].files, options["previous"].env)).sync_files({})
             raise RuntimeError("분석이 멈췄다")
 
         with monkeypatch.context() as patch:

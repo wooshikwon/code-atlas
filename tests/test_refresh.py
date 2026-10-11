@@ -32,7 +32,7 @@ async def started():
     async with AsyncExitStack() as stack:
         sessions: list[Session] = []
 
-        async def start(files) -> Session:
+        async def start(files, env) -> Session:
             if not sessions:
                 session = await stack.enter_async_context(Session(files.root, sys.executable, files.extra_paths))
                 definition = session.definition
@@ -269,7 +269,7 @@ async def test_reopening_from_the_cache_asks_nothing_and_starts_no_session(sampl
     async with started() as first:
         fresh = await refresh(sample_repo, sys.executable, first, cache=store)
 
-    async def never(files):
+    async def never(files, env):
         pytest.fail("세션을 띄웠다")
 
     phases: list[Progress] = []
@@ -327,7 +327,7 @@ async def test_unanswered_sites_stay_counted_until_their_file_is_asked_again(sam
                 raise asyncio.TimeoutError
             return []
 
-    async def never(files):
+    async def never(files, env):
         pytest.fail("세션을 띄웠다")
 
     store = Cache(sample_repo, tmp_path / "cache")

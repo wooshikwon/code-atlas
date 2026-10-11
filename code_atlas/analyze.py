@@ -436,7 +436,7 @@ def open_cache(repo: str | Path) -> Cache | None:
 async def refresh(
     repo: str | Path,
     python: str,
-    session: Session | Callable[[RepoFiles], Awaitable[Session]],
+    session: Session | Callable[[RepoFiles, str], Awaitable[Session]],
     *,
     previous: Analyzed | None = None,
     cache: Cache | None = None,
@@ -447,8 +447,8 @@ async def refresh(
 ) -> Analyzed:
     """레포를 분석한다. `previous`가 있으면 그 판정에서, 없으면 `cache`의 `snapshot` 시점에서 시작해 달라진 만큼만 다시 묻는다.
 
-    `session`은 띄워 둔 세션이거나 세션을 띄워 돌려주는 함수다. 다시 물을 지점이 없으면 세션을 쓰지 않고, 있으면 세션의
-    파일을 지금 본문에 맞춘 뒤 묻는다. 세션은 닫지 않는다. `rebuild`가 참이면 캐시를 읽지 않고 모든 지점을 물어 캐시를
+    `session`은 띄워 둔 세션이거나, 파일 목록과 지금의 환경 지문을 받아 그 환경에서 띄운 세션을 돌려주는 함수다.
+    다시 물을 지점이 없으면 세션을 쓰지 않고, 있으면 세션의 파일을 지금 본문에 맞춘 뒤 묻는다. 세션은 닫지 않는다. `rebuild`가 참이면 캐시를 읽지 않고 모든 지점을 물어 캐시를
     덮어쓴다. 캐시의 판정으로 조립한 결과가 있고 다시 물을 지점이 남았으면 그 결과를 `drafted`로 먼저 낸다.
     `report`는 단계가 바뀌거나 진행 수가 늘 때마다 불리고, 추출 단계에서는 다른 스레드에서 불린다.
     """
@@ -483,7 +483,7 @@ async def refresh(
                 report(Progress("build"))
                 drafted(await asyncio.to_thread(analyzed, {}))
             report(Progress("resolve", 0, len(todo)))
-            live = await session(files) if callable(session) else session
+            live = await session(files, env) if callable(session) else session
             live.sync_files(texts)
             await live.wait_ready(probe)
 
@@ -520,7 +520,7 @@ def analyze(repo: str | Path, python: str | None = None, *, cache: bool = True) 
         try:
             async with AsyncExitStack() as opened:
 
-                async def started(files: RepoFiles) -> Session:
+                async def started(files: RepoFiles, env: str) -> Session:
                     return await opened.enter_async_context(Session(files.root, python, files.extra_paths))
 
                 return await refresh(repo, python, started, cache=store, rebuild=not cache)

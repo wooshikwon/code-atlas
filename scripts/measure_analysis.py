@@ -116,7 +116,7 @@ def _compare(result: dict, expected: dict) -> dict:
 async def _run(repo: str, python: str, clock: Clock, store: Cache, rebuild: bool) -> tuple[int, dict]:
     sessions: list[Session] = []
 
-    async def started(files) -> Session:
+    async def started(files, env) -> Session:
         began = time.monotonic()
         session = Session(files.root, python, files.extra_paths)
         await session.__aenter__()

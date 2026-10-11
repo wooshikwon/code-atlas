@@ -6,7 +6,7 @@ import pytest
 
 from conftest import group_ended
 
-from code_atlas import runner
+from code_atlas import analyze, runner
 from code_atlas.analyze import Progress, PythonNotFound
 from code_atlas.runner import Runner
 
@@ -71,6 +71,24 @@ async def test_reload_keeps_the_session_and_reads_the_cache_only_on_the_first_ru
 
 
 @pytest.mark.asyncio
+async def test_reload_in_a_changed_environment_asks_a_new_session(sample_repo, monkeypatch):
+    running = Runner(sample_repo, sys.executable, cache=False)
+    try:
+        first = await running.run()
+        session = await running.session()
+        monkeypatch.setattr(analyze, "environment", lambda python, files: "다른 환경")
+        second = await running.run(first)
+        fresh = await running.session()
+        assert fresh is not session and not fresh.stopped and running.lsp == "ready"
+        assert session.stopped and group_ended(session.client._server.pid)
+        assert second.env == "다른 환경" and second.answers == first.answers
+        hover = await fresh.hover("src/app/cli.py", 10, 21)
+        assert "run_engine" in hover.markdown
+    finally:
+        await running.close()
+
+
+@pytest.mark.asyncio
 async def test_failed_first_run_is_failed_and_failed_reload_goes_back_to_ready(sample_repo, monkeypatch):
     missing = Runner(sample_repo, str(sample_repo / "no" / "python"))
     with pytest.raises(PythonNotFound):
@@ -84,7 +102,7 @@ async def test_failed_first_run_is_failed_and_failed_reload_goes_back_to_ready(s
         session = await running.session()
 
         async def fail(repo, python, live, **given):
-            (await live(first.files)).sync_files({})
+            (await live(first.files, first.env)).sync_files({})
             raise RuntimeError("분석이 멈췄다")
 
         monkeypatch.setattr(runner, "refresh", fail)
