@@ -16,7 +16,7 @@ import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { useAim } from "./aim";
 import { Arranging, watchLayout } from "./arranging";
 import { callEdges, callElk, callLabel, callLane, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
-import { edgeTypes, flowEdges, Markers } from "./edges/OrthogonalEdge";
+import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Box, type Layout } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
@@ -188,7 +188,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     },
     open: selectEdge,
   });
-  const edges = useMemo(() => flowEdges(lines, aim.pointed, NO_CYCLES), [lines, aim.pointed]);
+  const edges = useFlowEdges(lines, aim.pointed, NO_CYCLES);
 
   const drawnNodes = useMemo(() => pointing(nodes, aimedNode), [nodes, aimedNode]);
 
@@ -227,8 +227,14 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     clicked.current = null;
     select(null);
   };
-  /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 올린 노드는 선의 hover처럼 가장 진한 단계로 그린다. */
+  /**
+   * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 올린 노드는 선의 hover처럼 가장 진한 단계로 그린다.
+   * 마우스 버튼을 누른 동안(화면을 끄는 동안)에는 아무것도 하지 않는다.
+   */
   const onNodeOver: NodeMouseHandler<CallFlowNode> = (event, node) => {
+    if (event.buttons !== 0) {
+      return;
+    }
     setAimedNode(node.data.node.id);
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
     tip.current?.show(tipOf(event.target) ?? nodeTip(title, KIND_NAMES[node.data.node.kind], node.data.unused), event.clientX, event.clientY);

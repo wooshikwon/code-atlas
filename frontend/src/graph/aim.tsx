@@ -1,4 +1,4 @@
-// 커서 밑을 지나는 선의 집합으로 선의 hover와 클릭을 판정한다. 구조 뷰와 함수 시점 뷰가 함께 쓴다.
+// 커서 밑을 지나는 선의 집합으로 선의 hover와 클릭을 판정한다. 구조 뷰와 함수 시점 뷰가 함께 쓴다. 화면을 끄는 동안에는 hover를 받지 않는다.
 // 선이 하나면 그 선을 강조하고 누르면 도착 노드를 고른다. 여럿이면 그 구간을 지나는 선만 강조하고 말풍선에 한 줄씩 적는다.
 // 도착 노드가 모두 같으면 누를 때 그 노드를 고르고, 둘 이상이면 누른 자리에 선을 고르는 목록을 고정한다.
 import { useReactFlow, type EdgeMouseHandler } from "@xyflow/react";
@@ -112,8 +112,17 @@ export function useAim({ lines, boxes, tip, name, describe, only, skip, pick, op
     const sites = views.reduce((sum, view) => sum + view.sites, 0);
     return [trunkTip(new Set(views.map((view) => view.source)).size, name(target), sites), ...rows].join("\n");
   };
+  const onEdgeLeave = () => {
+    setAimed((before) => (before.length === 0 ? before : []));
+    tip.current?.hide();
+  };
+  /** 마우스 버튼을 누른 동안(화면을 끄는 동안)에는 선을 강조하지 않고 말풍선을 띄우지 않는다. */
   const over: EdgeMouseHandler<FlowEdge> = (event) => {
     if (usePick.getState().menu !== null) {
+      return;
+    }
+    if (event.buttons !== 0) {
+      onEdgeLeave();
       return;
     }
     const views = under(event);
@@ -124,10 +133,6 @@ export function useAim({ lines, boxes, tip, name, describe, only, skip, pick, op
     } else {
       tip.current?.show(text(views), event.clientX, event.clientY);
     }
-  };
-  const onEdgeLeave = () => {
-    setAimed([]);
-    tip.current?.hide();
   };
   const onEdgeClick: EdgeMouseHandler<FlowEdge> = (event) => {
     tip.current?.hide();

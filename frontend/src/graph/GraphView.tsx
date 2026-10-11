@@ -25,7 +25,7 @@ import { Arranging, keepLayout, watchLayout } from "./arranging";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
-import { edgeTypes, flowEdges, Markers } from "./edges/OrthogonalEdge";
+import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, layout, packId, packLabel, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
@@ -449,7 +449,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     },
     open: selectEdge,
   });
-  const edges = useMemo(() => flowEdges(views, aim.pointed, lines.keys), [views, aim.pointed, lines]);
+  const edges = useFlowEdges(views, aim.pointed, lines.keys);
   const drawnNodes = useMemo(() => [...pointing(nodes, aimedNode), ...packs], [nodes, aimedNode, packs]);
 
   /**
@@ -511,22 +511,21 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   };
   /**
    * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 그 위치에서 눌리는 노드면 선의 hover처럼
-   * 가장 진한 단계로 그린다. 경로 고정 중에는 경로 위 노드만 그렇게 그린다.
+   * 가장 진한 단계로 그린다. 경로 고정 중에는 경로 위 노드만 그렇게 그린다. 마우스 버튼을 누른 동안(화면을 끄는 동안)에는
+   * 아무것도 하지 않는다.
    */
   const onNodeOver: NodeMouseHandler<AtlasFlowNode | PackFlowNode> = (event, node) => {
+    if (event.buttons !== 0) {
+      return;
+    }
     if (isPack(node)) {
       tip.current?.show(node.data.tip, event.clientX, event.clientY);
       return;
     }
+    setHover(node.data.node.id);
     setAimedNode((lit === null || node.data.route !== null) && pressable(node.data, event.target) ? node.data.node.id : null);
     const text = tipOf(event.target) ?? nodeTip(titleOf(node.data.node), KIND_NAMES[node.data.node.kind], node.data.unused);
     tip.current?.show(text, event.clientX, event.clientY);
-  };
-  const onNodeEnter: NodeMouseHandler<AtlasFlowNode | PackFlowNode> = (event, node) => {
-    if (!isPack(node)) {
-      setHover(node.data.node.id);
-    }
-    onNodeOver(event, node);
   };
   /** 사용자가 화면을 끌거나 확대·축소하면 전체 맞춤 상태를 끈다. 코드가 옮긴 화면은 event가 null이다. */
   const released: OnMove = (event) => {
@@ -563,7 +562,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
-        onNodeMouseEnter={onNodeEnter}
+        onNodeMouseEnter={onNodeOver}
         onNodeMouseMove={onNodeOver}
         onNodeMouseLeave={onNodeLeave}
         onEdgeClick={aim.onEdgeClick}

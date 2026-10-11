@@ -2,6 +2,7 @@
 // 강조하는 경로의 걸음은 `data-route`에 걸음 종류를 받아 굵게 그린다.
 // 순환 덮개가 켜진 동안의 순환 선만 critical 색으로 그린다.
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
+import { useMemo, useRef } from "react";
 import type { EdgeGroup } from "../../api/types";
 import { LAYER } from "../layers";
 import { EDGE_OPACITY, type EdgeKey, type Tone } from "../scope";
@@ -28,14 +29,33 @@ export function isTrunk(edge: FlowEdge): edge is TrunkFlowEdge {
   return edge.type === "trunk";
 }
 
+const texts = new WeakMap<FlowEdge, string>();
+
+/** 선의 데이터를 적은 글. 두 선의 글이 같으면 그리는 내용이 같다. */
+function written(edge: FlowEdge): string {
+  let text = texts.get(edge);
+  if (text === undefined) {
+    text = JSON.stringify(edge.data);
+    texts.set(edge, text);
+  }
+  return text;
+}
+
 /**
  * 그릴 선마다 React Flow 선 하나와 줄기마다 하나. 마우스를 올린 선 pointed는 다른 선 위의 층에 본문 잉크, 불투명도 1로 그린다.
  * 줄기에 든 선이 모두 pointed에 들면 그 줄기도 같은 방식으로 그린다. cycles에 든 선은 순환 선이다. 줄기에 든 선은 가지만 그리고,
  * 강조하는 선(`emphasized`)은 줄기 위에 전체 경로를 한 번 더 그리고 그 선의 수를 선 위에 적는다(`ownNumbers`).
- * 같은 층에서는 가지, 줄기, 강조하는 선 순서로 그린다.
+ * 같은 층에서는 가지, 줄기, 강조하는 선 순서로 그린다. 마우스를 올려서만 강조하는 선은 다른 선 위의 층에 그리므로 순서를 옮기지 않아,
+ * 마우스를 올리고 뗄 때 선의 순서가 바뀌지 않는다. 앞에 만든 선 before 가운데 층과 데이터의 내용이 그대로인 선은 그 객체를
+ * 그대로 돌려줘, React Flow가 달라진 선만 다시 그리게 한다.
  */
-export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey>): FlowEdge[] {
+export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey>, before: FlowEdge[] = []): FlowEdge[] {
   const { views, trunks } = all;
+  const drawn = new Map(before.map((edge) => [edge.id, edge]));
+  const kept = <E extends FlowEdge>(edge: E): E => {
+    const last = drawn.get(edge.id);
+    return last !== undefined && last.type === edge.type && last.zIndex === edge.zIndex && written(last) === written(edge) ? (last as E) : edge;
+  };
   const marks = (view: EdgeView) => ({ pointed: pointed.has(view.key), cycle: cycles.has(view.key) });
   const numbers = ownNumbers(
     all,
@@ -48,7 +68,7 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
     const own = numbers.get(view.key) ?? null;
     const stem = whole ? stemOf.get(view.trunk!)! : null;
     const sum = stem === null ? null : { at: stem.at, sites: stem.sites };
-    return {
+    return kept({
       id: view.key,
       source: view.source,
       target: view.target,
@@ -57,23 +77,30 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
         ? { ...view, tone: "strong", opacity: EDGE_OPACITY.full, pointed: true, cycle, whole, own, sum }
         : { ...view, pointed: false, cycle, whole, own, sum },
       zIndex: on ? LAYER.pointed : LAYER.edge,
-    };
+    });
   });
   const byKey = new Map(views.map((view) => [view.key, view]));
   const stems = trunks.map((trunk): TrunkFlowEdge => {
     const members = trunk.keys.map((key) => byKey.get(key)!);
     const on = trunk.keys.every((key) => pointed.has(key));
     const shade = on ? { tone: "strong" as const, opacity: EDGE_OPACITY.full } : trunkShade(members, (view) => emphasized(view, marks(view)));
-    return {
+    return kept({
       id: trunk.key,
       source: members[0].source,
       target: trunk.target,
       type: "trunk",
       data: { ...trunk, ...shade, pointed: on },
       zIndex: on ? LAYER.pointed : LAYER.edge,
-    };
+    });
   });
-  return [...lines.filter((line) => line.data?.whole !== true), ...stems, ...lines.filter((line) => line.data?.whole === true)];
+  const above = new Set(views.filter((view) => view.trunk !== null && emphasized(view, { pointed: false, cycle: cycles.has(view.key) })).map((view) => view.key));
+  return [...lines.filter((line) => !above.has(line.id)), ...stems, ...lines.filter((line) => above.has(line.id))];
+}
+
+/** `flowEdges`의 결과. 다시 만들 때 앞의 결과를 넘겨 달라지지 않은 선의 객체를 유지한다. */
+export function useFlowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey>): FlowEdge[] {
+  const last = useRef<FlowEdge[]>([]);
+  return useMemo(() => (last.current = flowEdges(all, pointed, cycles, last.current)), [all, pointed, cycles]);
 }
 
 /** 선과 화살촉의 색. 순환 선은 진하기와 관계없이 critical이다. */
