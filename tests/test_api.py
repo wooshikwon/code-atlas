@@ -160,6 +160,13 @@ def test_graph(client):
     assert edge["sites"] == [{"path": "src/app/cli.py", "line": 10, "col": 21}]
 
 
+def test_unused(client):
+    body = client.get("/api/unused").json()
+    assert body == {"definitions": 19, "candidates": ["app.core:spare", "app.models:Point", "app.models:Color"]}
+    ids = {n["id"] for n in client.get("/api/graph").json()["nodes"]}
+    assert set(body["candidates"]) <= ids and "app.core:on_stop" in ids
+
+
 def test_file(client):
     body = client.get("/api/file", params={"path": "src/app/cli.py"}).json()
     assert body["path"] == "src/app/cli.py"

@@ -1,4 +1,4 @@
-"""HTTP 경로를 메모리의 분석 결과, 언어 서버 세션, 요약 캐시, git 변경 내용에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
+"""HTTP 경로를 메모리의 분석 결과와 미사용 후보, 언어 서버 세션, 요약 캐시, git 변경 내용에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
 
 세션은 lifespan이 띄워 분석에 쓴 뒤 서버가 내려갈 때 닫는다. 분석은 `app.state.starting` 태스크가 돌리고,
 이 태스크를 취소하면 lifespan이 세션을 닫고 분석 결과 없이 서버가 내려가기를 기다린다.
@@ -143,6 +143,7 @@ def create_app(
                 "nodes": [to_dict(n) for n in analysis.nodes],
                 "edges": [to_dict(e) for e in analysis.edges],
             }
+            app.state.unused = to_dict(analyzed.unused)
             if on_ready is not None:
                 on_ready(analysis)
             yield
@@ -316,6 +317,10 @@ def create_app(
             ],
             "nodes": nodes,
         }
+
+    @app.get("/api/unused")
+    def get_unused() -> dict:
+        return app.state.unused
 
     @app.get("/{path:path}", include_in_schema=False)
     def get_static(path: str) -> FileResponse:

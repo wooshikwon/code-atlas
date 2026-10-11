@@ -33,3 +33,14 @@ def run_engine(config: Config) -> Engine:
     engine.start(config)
     handlers = [helper, engine.stop]
     return engine
+
+
+def spare():
+    return 0
+
+
+def on_stop():
+    return None
+
+
+HOOKS = ["on_stop"]
