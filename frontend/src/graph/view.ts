@@ -1,7 +1,7 @@
 // 그릴 선과 배치를 합쳐 노드와 선 컴포넌트가 그대로 그리는 값을 만든다.
 import type { AtlasNode, EdgeGroup, Graph } from "../api/types";
 import { siblings } from "./columns";
-import { BADGE_HEIGHT, BADGE_OVERHANG, belowRoute, CAPTION_HEIGHT, HEADER, sideRoute, type Box, type Layout, type Point } from "./layout";
+import { BADGE_HEIGHT, BADGE_OVERHANG, belowRoute, CAPTION_HEIGHT, HEADER, REGION_HEAD, sideRoute, type Box, type Layout, type Point } from "./layout";
 import { aggKey, type DrawnEdge, type EdgeKey, type Tone } from "./scope";
 
 export type EdgeView = {
@@ -159,7 +159,7 @@ export function midpoint(points: Point[]): Point {
 
 /**
  * 글자를 그리는 칸. 자식을 그리지 않는 노드는 상자에 배지가 나가는 폭을 더한 칸이고 접힌 파일 상자는 상자 아래
- * 함수 수 글자까지 더한다. 자식을 그리는 파일 상자·클래스 노드는 머리 줄만이다.
+ * 함수 수 글자까지 더한다. 자식을 그리는 파일 상자·클래스 노드와 펼친 폴더 영역은 머리 줄만이다.
  */
 export function letteredBoxes(layout: Layout, nodes: Map<string, AtlasNode>): Box[] {
   const parents = new Set([...layout.boxes.keys()].map((id) => nodes.get(id)?.parent));
@@ -173,8 +173,8 @@ export function letteredBoxes(layout: Layout, nodes: Map<string, AtlasNode>): Bo
         width: box.width + BADGE_OVERHANG,
         height: box.height + (kind === "module" ? Math.max(CAPTION_HEIGHT, BADGE_HEIGHT / 2) : BADGE_HEIGHT / 2) + BADGE_HEIGHT / 2,
       });
-    } else if (kind !== "package") {
-      result.push({ ...box, height: HEADER });
+    } else {
+      result.push({ ...box, height: kind === "package" ? REGION_HEAD : HEADER });
     }
   }
   return result;

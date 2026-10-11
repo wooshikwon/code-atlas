@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { repoFixture } from "../graph/fixture";
 import { back, jump, push, type History, type Place } from "./history";
-import { parseUi, useAtlas } from "./store";
+import { nestedFolders, parseUi, useAtlas } from "./store";
 
 const [a, b, c] = repoFixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
 const folder = repoFixture.nodes.find((n) => n.kind === "package")!.id;
@@ -143,6 +143,14 @@ describe("접은 폴더와 선택", () => {
   });
 });
 
+describe("nestedFolders", () => {
+  it("소스 루트 바로 아래 폴더는 빼고 그 아래의 폴더만 고른다", () => {
+    const inner = { ...repoFixture.nodes.find((n) => n.id === "pkg")!, id: "pkg.inner", parent: "pkg" };
+    expect(nestedFolders(repoFixture)).toEqual(new Set());
+    expect(nestedFolders({ ...repoFixture, nodes: [...repoFixture.nodes, inner] })).toEqual(new Set(["pkg.inner"]));
+  });
+});
+
 describe("open", () => {
   it("함수를 더블클릭하면 첫 클릭이 넣은 단계 대신 함수 시점 뷰 한 단계를 넣는다", () => {
     const from = store().history;
@@ -167,22 +175,12 @@ describe("open", () => {
     expect(store().selection).toEqual(node(a));
   });
 
-  it("접힌 폴더를 더블클릭하면 한 단계로 펼치고, 고른 폴더였으면 선택을 푼다", () => {
+  it("폴더는 열지 않는다", () => {
     store().toggleFolder(folder);
     const from = store().history;
-    store().select(folder);
     store().open(folder, from);
-    expect(store().collapsed).toEqual(new Set());
-    expect(store().selection).toBeNull();
-    expect(store().history).toMatchObject({ index: 2, entries: { length: 3 } });
-
-    store().select(folder);
-    const chosen = store().history;
-    store().select(folder);
-    store().open(folder, chosen);
-    expect(store().collapsed).toEqual(new Set());
-    expect(store().selection).toBeNull();
-    expect(store().history.entries).toHaveLength(chosen.entries.length + 1);
+    expect(store().collapsed).toEqual(new Set([folder]));
+    expect(store().history).toBe(from);
   });
 
   it("함수 시점 뷰의 가운데 함수를 더블클릭하면 첫 클릭 전으로 되돌려 펼친 단계를 남긴다", () => {

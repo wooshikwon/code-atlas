@@ -10,12 +10,12 @@ import { PAN_MS, stageOf } from "./viewport";
 const SIZE = { width: 220, height: 140 };
 
 /**
- * 미니맵에 그리는 노드의 클래스. 노드의 바탕 요소만 그리고, 상자를 그리지 않는 펼친 폴더는 뺀다.
+ * 미니맵에 그리는 노드의 클래스. 노드의 바탕 요소만 그린다. 펼친 폴더 영역과 펼친 파일 상자는 테두리와 옅은 바탕으로 그린다.
  * 진하기는 구조 뷰의 불투명도를 세 단계(1, 1 미만, 0.2 이하)로 따르고 고른 노드는 본문 잉크로 그린다.
  */
 export function minimapClass(node: Node<AtlasNodeData>): string {
   const { part, node: atlas, expanded, selected } = node.data;
-  if (part === "face" || (expanded && atlas.kind === "package")) {
+  if (part === "face") {
     return "minimap-none";
   }
   const opacity = Number(node.style?.opacity ?? 1);

@@ -52,7 +52,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string |
       side: scene.calls.side.get(id)!,
       more: scene.calls.more.has(id),
     });
-    return { id, type: "call", opacity: 1, inert: false, ...data };
+    return { id, type: "call", opacity: 1, ...data };
   });
 }
 

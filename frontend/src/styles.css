@@ -796,9 +796,29 @@ ul {
   padding: 1px;
 }
 
-.node-package-open {
+/* 펼친 폴더 영역. 바탕 요소가 옅은 바탕과 테두리를 그리고 빈 곳에서 클릭을 받아 폴더를 접는다. 글자 요소는 왼쪽 위에 폴더 경로를 적는다. */
+.node-region {
   width: 100%;
   height: 100%;
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.node-body.node-region {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ink) 2%, transparent);
+}
+
+.node-body.node-region:hover {
+  border-color: var(--muted);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.node-face.node-region {
+  padding: 1px 12px;
+  line-height: 26px;
+  white-space: nowrap;
 }
 
 .node-module {
@@ -1308,6 +1328,11 @@ ul {
 .react-flow__minimap-node.minimap-open {
   fill: color-mix(in srgb, var(--ink) 6%, var(--surface));
   stroke: var(--muted);
+}
+
+.react-flow__minimap-node.minimap-package.minimap-open {
+  fill: color-mix(in srgb, var(--ink) 3%, var(--surface));
+  stroke: var(--line);
 }
 
 .react-flow__minimap-node.minimap-open.minimap-selected {

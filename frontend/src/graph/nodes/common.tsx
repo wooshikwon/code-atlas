@@ -33,11 +33,8 @@ export interface Drawn<D extends AtlasNodeData> {
   id: string;
   type: string;
   opacity: number;
-  /** 아무것도 그리지 않아 마우스를 받지 않는 노드다 */
-  inert: boolean;
   body: D;
-  /** 글자 요소를 그리지 않는 노드는 null이다 */
-  face: D | null;
+  face: D;
 }
 
 /** 노드 종류와 같은 값으로 요소마다의 data를 만든다. */
@@ -60,18 +57,18 @@ export function flowNodes<D extends AtlasNodeData>(items: Drawn<D>[], at: Map<st
       position: { x: box.x, y: box.y },
       width: box.width,
       height: box.height,
-      zIndex: layerOf(data.node.kind, data.part),
+      zIndex: layerOf(data.node.kind, data.part, data.expanded),
       draggable: false,
       connectable: false,
       focusable: !face,
       style: {
         opacity: fresh?.has(item.id) === true ? 0 : item.opacity,
-        pointerEvents: face || item.inert ? "none" : undefined,
+        pointerEvents: face ? "none" : undefined,
       },
       data,
     };
   };
-  return [...items.map((item) => node(item, item.body)), ...items.flatMap((item) => (item.face === null ? [] : [node(item, item.face)]))];
+  return [...items.map((item) => node(item, item.body)), ...items.map((item) => node(item, item.face))];
 }
 
 /** 움직이는 동안에는 위치만 바뀌므로 데이터와 크기가 같으면 노드 본문을 다시 그리지 않는다. */

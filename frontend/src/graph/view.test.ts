@@ -168,7 +168,7 @@ describe("letteredBoxes, weightPoint", () => {
     expect(weightPoint(line, 2, [{ x: -50, y: -10, width: 300, height: 20 }])).toEqual({ x: 100, y: 0 });
   });
 
-  it("접힌 파일 상자는 배지가 나가는 폭과 상자 아래 함수 수 글자까지, 펼친 파일 상자는 머리 줄만 글자를 그리는 칸이다", () => {
+  it("접힌 파일 상자는 배지가 나가는 폭과 상자 아래 함수 수 글자까지, 펼친 파일 상자와 펼친 폴더 영역은 머리 줄만 글자를 그리는 칸이다", () => {
     const { shown: visible } = scene("main:run");
     const layout = lineLayout(visible);
     const lettered = letteredBoxes(layout, nodes);
@@ -176,6 +176,7 @@ describe("letteredBoxes, weightPoint", () => {
     expect(lettered).toContainEqual({ x: common.x, y: -7, width: 40 + 6, height: 7 + 20 + 16 });
     expect(lettered).toContainEqual({ ...layout.boxes.get("main")!, height: 32 });
     expect(lettered).toContainEqual({ x: run.x, y: -7, width: 40 + 6, height: 7 + 20 + 7 });
-    expect(lettered).toHaveLength(visible.nodes.size - [...visible.nodes].filter((id) => nodes.get(id)!.kind === "package").length);
+    expect(lettered).toContainEqual({ ...layout.boxes.get("pkg")!, height: 28 });
+    expect(lettered).toHaveLength(visible.nodes.size);
   });
 });

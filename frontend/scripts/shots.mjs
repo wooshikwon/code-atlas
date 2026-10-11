@@ -763,15 +763,15 @@ async function edge(t, page) {
   const rest = (await linesOf(page)).filter((line) => line.key !== first.key);
   t.check(
     "선에 마우스를 올리면 그 선만 굵어지고 빛을 두르며 본문 잉크로 다른 선 위의 층에 그려진다",
-    over.pointed && over.width > first.width && over.glow && over.tone === "strong" && over.opacity === 1 && over.layer === "4" &&
-      rest.every((line) => !line.pointed && line.layer === "3" && !line.glow),
+    over.pointed && over.width > first.width && over.glow && over.tone === "strong" && over.opacity === 1 && over.layer === "5" &&
+      rest.every((line) => !line.pointed && line.layer === "4" && !line.glow),
     `굵기 ${first.width} → ${over.width}, 층 ${first.layer} → ${over.layer}, 진하기 ${first.tone} → ${over.tone}`,
   );
   await t.shot();
   await page.mouse.move(spot.x, spot.y - 40);
   await page.waitForFunction(() => document.querySelector(".edge[data-pointed]") === null, null, { timeout: 5_000 }).catch(() => {});
   const back = (await linesOf(page)).find((line) => line.key === first.key);
-  t.check("마우스를 떼면 굵기와 층이 돌아온다", !back.pointed && back.width === first.width && back.layer === "3", `굵기 ${back.width}, 층 ${back.layer}`);
+  t.check("마우스를 떼면 굵기와 층이 돌아온다", !back.pointed && back.width === first.width && back.layer === "4", `굵기 ${back.width}, 층 ${back.layer}`);
 
   // 선 클릭
   const target = ends(first)[1];
@@ -812,7 +812,7 @@ async function edge(t, page) {
   const pointedCall = (await linesOf(page)).find((line) => line.key === call.key);
   t.check(
     "함수 시점 뷰에서도 마우스를 올린 선이 굵어지고 다른 선 위의 층에 그려진다",
-    pointedCall.pointed && pointedCall.width > call.width && pointedCall.layer === "4",
+    pointedCall.pointed && pointedCall.width > call.width && pointedCall.layer === "5",
     `굵기 ${call.width} → ${pointedCall.width}, 층 ${pointedCall.layer}`,
   );
   await page.mouse.click(point.x, point.y);
@@ -828,12 +828,12 @@ async function edge(t, page) {
 async function minimap(t, page) {
   await load(page);
   const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
-  const files = (await boxes(page)).length;
+  const files = (await boxes(page)).length + (await count(page, ".react-flow__node > .node-body.node-region"));
   const drawn = () => page.evaluate(() => [...document.querySelectorAll(".react-flow__minimap-node")].filter((n) => getComputedStyle(n).display !== "none").length);
   t.check(
-    "레포를 열면 왼쪽 아래에 미니맵이 펼쳐져 있고 파일 상자마다 사각형 하나와 화면 영역 사각형을 그린다",
+    "레포를 열면 왼쪽 아래에 미니맵이 펼쳐져 있고 파일 상자와 폴더 영역마다 사각형 하나와 화면 영역 사각형을 그린다",
     (await count(page, ".graph-minimap")) === 1 && (await drawn()) === files && (await count(page, ".react-flow__minimap-mask")) === 1,
-    `미니맵 노드 ${await drawn()}개, 파일 상자 ${files}개`,
+    `미니맵 노드 ${await drawn()}개, 파일 상자와 폴더 영역 ${files}개`,
   );
   await page.click(".legend-button");
   const [map, legend, buttons] = [await rectOf(page, ".graph-minimap"), await rectOf(page, ".legend"), await rectOf(page, ".dock-buttons")];
@@ -899,6 +899,100 @@ async function minimap(t, page) {
     (await count(page, ".graph-minimap")) === 1 && (await drawn()) === (await count(page, ".react-flow__node > .node-body.node-call")),
     `미니맵 노드 ${await drawn()}개, 함수 노드 ${await count(page, ".react-flow__node > .node-body.node-call")}개`,
   );
+}
+
+async function region(t, page) {
+  await load(page);
+  const folderId = "parser";
+  const inside = (id) => id.startsWith(`${folderId}.`);
+  const area = `${node(folderId)} > .node-region`;
+  const members = (await boxes(page)).filter((b) => inside(b.id));
+  const [outer, at] = [await rectOf(page, area), await flowBoxes(page)];
+  const wraps = members.every((b) => {
+    const [box, around] = [at[b.id], at[folderId]];
+    return box.x >= around.x && box.y >= around.y && box.x + box.width <= around.x + around.width && box.y + box.height <= around.y + around.height;
+  });
+  const title = await page.evaluate((sel) => {
+    const label = document.querySelector(`${sel} .node-label`);
+    const [rect, around] = [label.getBoundingClientRect(), document.querySelector(sel).getBoundingClientRect()];
+    return { text: label.textContent, dx: rect.left - around.left, dy: rect.top - around.top };
+  }, face(folderId));
+  t.check(
+    "펼친 parser/ 폴더가 안의 파일 상자를 모두 감싸는 영역을 그리고 왼쪽 위에 폴더 경로를 적는다",
+    outer !== null && members.length > 0 && wraps && title.text === "parser/" && title.dx < 40 && title.dy < 40,
+    `파일 상자 ${members.length}개, 이름표 "${title.text}"`,
+  );
+  const layer = await page.evaluate((sel) => {
+    const of = (element) => Number(getComputedStyle(element.closest(".react-flow__node, svg")).zIndex);
+    const others = [...document.querySelectorAll(".react-flow__node > :not(.node-region), .react-flow__edges .edge")].map(of);
+    return { region: of(document.querySelector(sel)), lowest: Math.min(...others) };
+  }, area);
+  t.check("폴더 영역의 층이 다른 모든 노드와 선의 층보다 아래다", layer.region === 1 && layer.lowest > layer.region, `영역 ${layer.region}, 그 밖의 가장 아래층 ${layer.lowest}`);
+
+  // 영역 위의 선은 영역이 없을 때처럼 눌린다.
+  const crossing = await page.evaluate((sel) => {
+    const around = document.querySelector(sel).getBoundingClientRect();
+    for (const edge of document.querySelectorAll(".react-flow__edge .edge[data-key]")) {
+      const line = edge.querySelector(".edge-line");
+      const matrix = line.getScreenCTM();
+      for (let length = 0, total = line.getTotalLength(); length <= total; length += 8) {
+        const point = new DOMPoint(line.getPointAtLength(length).x, line.getPointAtLength(length).y).matrixTransform(matrix);
+        const within = point.x > around.left && point.x < around.right && point.y > around.top && point.y < around.bottom;
+        if (within && document.elementFromPoint(point.x, point.y)?.closest(".edge") === edge) {
+          return edge.dataset.key;
+        }
+      }
+    }
+    return null;
+  }, area);
+  t.check("영역 위를 지나는 선의 점에서 맨 위 요소가 영역이 아니라 그 선이다", crossing !== null, `${crossing}`);
+
+  // 영역의 빈 곳
+  const blank = await page.evaluate((sel) => {
+    const body = document.querySelector(sel);
+    const around = body.getBoundingClientRect();
+    for (let y = around.top + 6; y < around.bottom; y += 6) {
+      for (let x = around.left + 6; x < around.right; x += 6) {
+        if (document.elementFromPoint(x, y) === body) {
+          return { x, y };
+        }
+      }
+    }
+    return null;
+  }, area);
+  const before = columnsOf(await boxes(page), inside);
+  await t.shot();
+  await page.mouse.click(blank.x, blank.y);
+  await page.waitForSelector(`${node(folderId)} > .node-package`, { timeout: 30_000 }).catch(() => {});
+  await settle(page);
+  const folded = await boxes(page);
+  t.check(
+    "영역의 빈 곳을 누르면 폴더가 접혀 parser/ 상자 하나가 되고 선택은 생기지 않는다",
+    (await count(page, `${node(folderId)} > .node-body.node-package`)) === 1 && folded.every((b) => !inside(b.id)) && (await selectedOf(page)) === null,
+    `남은 파일 상자 ${folded.length}개, 선택 ${await selectedOf(page)}`,
+  );
+  t.check("다른 상자의 열 순서와 열 안 순서가 같다", same(columnsOf(folded, inside), before), JSON.stringify(columnsOf(folded, inside)));
+  t.check(
+    "파일트리의 parser/ 행도 접힌다",
+    (await count(page, '.tree-row.tree-file[data-node^="parser."]')) === 0,
+    `parser/ 아래 파일 행 ${await count(page, '.tree-row.tree-file[data-node^="parser."]')}개`,
+  );
+
+  await clickNode(page, folderId);
+  await page.waitForSelector(area, { timeout: 30_000 }).catch(() => {});
+  await settle(page);
+  t.check(
+    "접힌 폴더 상자를 한 번 누르면 펼쳐져 영역과 파일 상자가 다시 나온다",
+    (await count(page, area)) === 1 && (await boxes(page)).filter((b) => inside(b.id)).length === members.length && (await selectedOf(page)) === null,
+    `parser/ 안 파일 상자 ${(await boxes(page)).filter((b) => inside(b.id)).length}개`,
+  );
+  const file = members[0].id;
+  await pick(page, file);
+  t.check("영역 안의 파일 상자를 누르면 그 파일이 선택되고 폴더는 펼친 채다", (await selectedOf(page)) === file && (await count(page, area)) === 1, `선택 ${await selectedOf(page)}`);
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForSelector(`${node(folderId)} > .node-body.node-package`, { timeout: 30_000 }).catch(() => {});
+  t.check("Alt+← 두 번에 폴더를 접은 단계로 돌아간다", (await count(page, `${node(folderId)} > .node-body.node-package`)) === 1 && (await selectedOf(page)) === null);
 }
 
 async function folder(t, page) {
@@ -1022,6 +1116,11 @@ async function labels(t, page) {
   const classes = new Set(graph.nodes.filter((n) => n.kind === "class").map((n) => n.id));
   await page.getByLabel("테스트 코드").check();
   await settle(page);
+  // 레포를 열 때 접혀 있는 폴더를 파일트리에서 모두 펼쳐 파일 행을 낸다.
+  for (let closed = page.locator('.tree-row.tree-dir[aria-expanded="false"]'); (await closed.count()) > 0; ) {
+    await closed.first().click();
+    await settle(page);
+  }
   const total = { files: 0, seen: 0, classes: 0, covered: [], blocked: [] };
   let layers = null;
   for (const id of files) {
@@ -1063,8 +1162,8 @@ async function labels(t, page) {
   );
   t.check("클래스 노드가 든 화면을 하나 이상 확인했다", total.classes > 0, `클래스 노드 ${total.classes}개`);
   t.check(
-    "상자, 클래스, 선, 함수 원, 글자의 z-index가 1, 2, 3, 5, 6이다",
-    same(layers, ["1", "2", "3", "5", "6"]),
+    "상자, 클래스, 선, 함수 원, 글자의 z-index가 2, 3, 4, 6, 7이다",
+    same(layers, ["2", "3", "4", "6", "7"]),
     JSON.stringify(layers),
   );
 }
@@ -1760,6 +1859,7 @@ const SCENARIOS = [
   ["hover", hover],
   ["edge", edge],
   ["minimap", minimap],
+  ["region", region],
   ["folder", folder],
   ["folder-select", folderSelect],
   ["init-file", initFile],

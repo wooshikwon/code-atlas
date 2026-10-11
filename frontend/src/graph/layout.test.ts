@@ -124,8 +124,10 @@ describe("elkGraphs", () => {
     expect(main.children).toBeUndefined();
   });
 
-  it("펼친 폴더는 여백 없는 부모 노드이고 접은 폴더는 이름표 폭에 36을 더한 높이 40 상자다", () => {
-    expect(find(closed.components[0], "pkg")?.layoutOptions?.["elk.padding"]).toBe("[top=0,left=0,bottom=0,right=0]");
+  it("펼친 폴더는 머리 줄 28px와 여백 16px를 둔 부모 노드이고 접은 폴더는 이름표 폭에 36을 더한 높이 40 상자다", () => {
+    const region = find(closed.components[0], "pkg")!;
+    expect(region.layoutOptions?.["elk.padding"]).toBe("[top=28,left=16,bottom=16,right=16]");
+    expect(region.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("pkg/") + 32}, 44)`);
     const folded = elkGraphs(repoFixture, shownFor(null, ["pkg"]), cols, measure);
     expect(find(folded.components[0], "pkg")).toMatchObject({ width: measure("pkg/") + 36, height: 40 });
   });

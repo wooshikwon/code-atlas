@@ -24,7 +24,7 @@ export interface AtlasStore {
   error: string | null;
   view: View;
   selection: Selection;
-  /** 접은 폴더(패키지 노드 id) */
+  /** 접은 폴더(패키지 노드 id). 레포를 열면 `nestedFolders`가 고른 폴더가 접혀 있다. */
   collapsed: Set<string>;
   /** 흐름 단계 */
   depth: Depth;
@@ -59,8 +59,8 @@ export interface AtlasStore {
   /** 함수 시점 뷰에서 그 노드의 이웃을 한 단계 더 편다. */
   expandFunction(id: string): void;
   /**
-   * 더블클릭한 노드를 연다. 접힌 폴더는 펼치고 함수·메서드는 함수 시점 뷰로 들어간다. 첫 클릭이 넣은 이력 단계를
-   * 버리도록 첫 클릭 전의 이력 from에서 이어 한 단계만 넣는다. 함수 시점 뷰의 가운데 함수면 from으로 되돌리기만 한다.
+   * 더블클릭한 함수·메서드를 열어 함수 시점 뷰로 들어간다. 첫 클릭이 넣은 이력 단계를 버리도록 첫 클릭 전의 이력
+   * from에서 이어 한 단계만 넣는다. 함수 시점 뷰의 가운데 함수면 from으로 되돌리기만 한다.
    */
   open(id: string, from: History): void;
   back(): void;
@@ -113,6 +113,11 @@ export function parseUi(raw: string | null, theme: Theme): Ui {
 
 function placeOf(state: Pick<AtlasStore, "view" | "selection" | "collapsed">): Place {
   return { view: state.view, selection: state.selection, collapsed: [...state.collapsed].sort() };
+}
+
+/** 레포를 열 때 접어 두는 폴더. 소스 루트 바로 아래 폴더는 펼치고 그 아래의 폴더는 모두 접는다. */
+export function nestedFolders(graph: Graph): Set<string> {
+  return new Set(graph.nodes.filter((n) => n.kind === "package" && n.parent !== null).map((n) => n.id));
 }
 
 const START: Pick<AtlasStore, "view" | "selection" | "collapsed"> = {
@@ -200,7 +205,11 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       set(ui);
       applyTheme(ui.theme);
       Promise.all([getRepo(), getGraph(), getTree()])
-        .then(([repo, graph, tree]) => set({ repo, graph, tree, error: null }))
+        .then(([repo, graph, tree]) => {
+          const collapsed = nestedFolders(graph);
+          const place = placeOf({ ...START, collapsed });
+          set({ repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 } });
+        })
         .catch((caught: unknown) => set({ error: caught instanceof Error ? caught.message : String(caught) }));
     },
 
@@ -242,16 +251,13 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       const kind = kindOf(id);
       const place = from.entries[from.index];
       const centered = place.view.kind === "function" && place.view.center === id;
-      const folded = kind === "package" && place.collapsed.includes(id);
-      const callable = kind === "function" || kind === "method";
-      if (!centered && !folded && !callable) {
+      if (!centered && kind !== "function" && kind !== "method") {
         return;
       }
       set({ history: from, view: place.view, selection: place.selection, collapsed: new Set(place.collapsed) });
-      if (centered) {
-        return;
+      if (!centered) {
+        enter(id);
       }
-      (folded ? toggle : enter)(id);
     },
     back: () => restore(back(get().history)),
     forward: () => restore(forward(get().history)),
