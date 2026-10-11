@@ -105,6 +105,7 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
       data-key={data.key}
       data-branch={data.trunk ?? undefined}
       data-whole={data.whole ? "" : undefined}
+      data-below={data.below ? "" : undefined}
       data-pointed={data.pointed ? "" : undefined}
       data-cycle={data.cycle ? "" : undefined}
       data-route={data.route ?? undefined}

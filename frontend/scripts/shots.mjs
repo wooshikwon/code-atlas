@@ -1,9 +1,10 @@
 // 화면을 시나리오마다 조작해 확인 항목의 통과 여부를 한 줄씩 출력하고 스크린샷을 남긴다.
-// 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--only 이름,이름] [--with-summary]
+// 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wide-url 주소] [--only 이름,이름] [--with-summary]
 // 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름은 sync-engine을 연 서버가 기준이고 노드 수·선 수·줄 범위,
 // 경로와 미사용 후보는 서버 응답에서 읽는다. 순환 시나리오(cycles, cycles-change, cycles-pin)는 tests/fixtures/cycle_repo를 연 서버의 주소를
 // --cycle-url로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다. 새로고침 시나리오(reload, stale)는 대상 레포의 파일을 고쳤다가 되돌리므로
 // tests/fixtures/sample_repo를 임시 폴더로 복사해 연 서버의 주소를 --reload-url로 받았을 때만 돈다.
+// lanes 시나리오는 폴더가 여러 겹인 레포(modern-deeplearning-pipeline)를 연 서버의 주소를 --wide-url로 받으면 그 화면도 본다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
 // 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 "건너뜀"으로 출력하고 실패로 세지 않는다.
 // summary 시나리오는 Claude Code 구독 사용량을 쓰므로 --only로 지정하거나 --with-summary를 줬을 때만 돈다.
@@ -43,6 +44,8 @@ let url = "http://127.0.0.1:8766";
 let cycleUrl = null;
 /** 고정 레포 sample_repo의 임시 복사본을 연 서버의 주소. 주지 않으면 새로고침 시나리오를 건너뛴다. */
 let reloadUrl = null;
+/** 폴더가 여러 겹인 레포를 연 서버의 주소. 주지 않으면 그 화면의 확인 항목을 건너뛴다. */
+let wideUrl = null;
 let only = null;
 let withSummary = false;
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -51,6 +54,8 @@ for (let i = 2; i < process.argv.length; i += 1) {
     only = (process.argv[++i] ?? "").split(",").filter((name) => name !== "");
   } else if (arg === "--cycle-url") {
     cycleUrl = process.argv[++i] ?? null;
+  } else if (arg === "--wide-url") {
+    wideUrl = process.argv[++i] ?? null;
   } else if (arg === "--reload-url") {
     reloadUrl = process.argv[++i] ?? null;
   } else if (arg === "--with-summary") {
@@ -5978,6 +5983,98 @@ async function packFolder(t, page) {
   );
 }
 
+// ── 4단계: 선이 지나는 길 ────────────────────────────────────────
+
+/**
+ * 선이 자기 출발·도착과 그 조상·자손이 아닌 상자의 안을 지나는 곳. 선과 줄기의 경로를 3px마다 짚어 그 점이 상자의 2px 안쪽에 드는지
+ * 본다. 펼친 폴더 영역은 바탕을 지나도 되므로 상자로 세지 않고, 함수 안 import 선(`data-below`)은 세지 않는다.
+ */
+const crossingsOf = (page) =>
+  page.evaluate(() => {
+    const boxOf = (wrapper) => {
+      const [x, y] = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(wrapper.style.transform).slice(1).map(Number);
+      return { id: wrapper.dataset.id, x, y, width: parseFloat(wrapper.style.width), height: parseFloat(wrapper.style.height) };
+    };
+    const boxes = [...document.querySelectorAll(".react-flow__node")]
+      .filter((wrapper) => !wrapper.dataset.id.endsWith("#face") && wrapper.querySelector(":scope > .node-region") === null)
+      .map(boxOf);
+    const related = (a, b) => a === b || a.startsWith(`${b}.`) || a.startsWith(`${b}:`) || b.startsWith(`${a}.`) || b.startsWith(`${a}:`);
+    const found = new Set();
+    for (const edge of document.querySelectorAll(".react-flow__edge .edge[data-key]:not([data-below])")) {
+      const parts = edge.dataset.key.split("|");
+      const endsOf = (key) => {
+        const each = key.split("|");
+        return each[0] === "agg" || each[0] === "step" ? [each[1], each[2]] : [each[0], each[1]];
+      };
+      // 줄기는 도착 노드와 줄기에 든 선의 출발 노드가 양 끝이다.
+      const ends = edge.classList.contains("edge-trunk")
+        ? [parts[1], ...[...document.querySelectorAll(`.edge[data-branch="${CSS.escape(edge.dataset.key)}"]`)].map((branch) => endsOf(branch.dataset.key)[0])]
+        : endsOf(edge.dataset.key);
+      for (const line of edge.querySelectorAll(".edge-line")) {
+        const total = line.getTotalLength();
+        for (let at = 0; at <= total; at += 3) {
+          const point = line.getPointAtLength(at);
+          for (const box of boxes) {
+            const inside = point.x > box.x + 2 && point.x < box.x + box.width - 2 && point.y > box.y + 2 && point.y < box.y + box.height - 2;
+            if (inside && !ends.some((end) => related(end, box.id.replace(/#pack$/, "")))) {
+              found.add(`${edge.dataset.key} × ${box.id}`);
+            }
+          }
+        }
+      }
+    }
+    return [...found];
+  });
+
+/** 선이 출발·도착이 아닌 상자의 안을 지나지 않는지 본다. */
+async function lanes(t, page) {
+  const lines = async () => (await linesOf(page)).length;
+  await load(page);
+  const open = await crossingsOf(page);
+  t.check(`parser/를 펼친 화면의 선 ${await lines()}개가 출발·도착이 아닌 상자를 지나지 않는다`, open.length === 0, open.slice(0, 4).join(", "));
+  await t.shot();
+  await pickFile(page, FILE);
+  const file = await crossingsOf(page);
+  t.check(`arbiter.py를 고른 화면의 선 ${await lines()}개가 출발·도착이 아닌 상자를 지나지 않는다`, file.length === 0, file.slice(0, 4).join(", "));
+  await clickPack(page, FILE);
+  await pick(page, FUNCTION);
+  await rest(page);
+  const fn = await crossingsOf(page);
+  t.check(`함수를 고른 화면의 선 ${await lines()}개가 출발·도착이 아닌 상자를 지나지 않는다`, fn.length === 0, fn.slice(0, 4).join(", "));
+  await pin(page);
+  const pinned = await crossingsOf(page);
+  t.check("경로를 고정한 화면의 걸음과 선이 출발·도착이 아닌 상자를 지나지 않는다", pinned.length === 0, pinned.slice(0, 4).join(", "));
+
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서 폴더 세 개를 펼친 화면의 선이 상자를 지나지 않는다", "--wide-url을 주지 않았다");
+    return;
+  }
+  const graph = await api("/api/graph", wideUrl);
+  await page.goto(wideUrl);
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  const top = graph.nodes.filter((n) => n.kind === "package" && n.parent === null && !n.test).sort((a, b) => graph.nodes.filter((n) => n.id.startsWith(`${b.id}.`)).length - graph.nodes.filter((n) => n.id.startsWith(`${a.id}.`)).length)[0];
+  const inner = graph.nodes
+    .filter((n) => n.kind === "package" && n.parent === top.id)
+    .sort((a, b) => graph.nodes.filter((n) => n.parent === b.id).length - graph.nodes.filter((n) => n.parent === a.id).length)
+    .slice(0, 2);
+  for (const folder of [top, ...inner]) {
+    await page.click(`.tree-row.tree-dir[data-node="${folder.id}"]`);
+    await page.waitForSelector(`${node(folder.id)} > .node-region`, { timeout: 30_000 });
+    await rest(page);
+  }
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.mouse.move(1, 1);
+  await rest(page);
+  const wide = await crossingsOf(page);
+  t.check(
+    `${top.id}/와 그 안의 ${inner.map((n) => `${n.name}/`).join(", ")}를 펼친 화면의 선 ${await lines()}개가 출발·도착이 아닌 상자를 지나지 않는다`,
+    wide.length === 0,
+    wide.slice(0, 4).join(", "),
+  );
+  await page.screenshot({ path: join(OUT, "s4-lanes-wide.png") });
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -6046,6 +6143,7 @@ const SCENARIOS = [
   ["pack-overlay", packOverlay],
   ["pack-history", packHistory],
   ["pack-toggle", packToggle],
+  ["lanes", lanes],
   ["progress", progress],
   ["progress-failed", progressFailed],
   ["stale", staleScenario],
@@ -6072,6 +6170,7 @@ const STAGE4 = new Set([
   "pack-overlay",
   "pack-history",
   "pack-toggle",
+  "lanes",
   "progress",
   "progress-failed",
   "stale",

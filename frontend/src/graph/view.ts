@@ -1,7 +1,21 @@
 // 그릴 선과 배치를 합쳐 노드와 선 컴포넌트가 그대로 그리는 값을 만든다.
 import type { AtlasNode, EdgeGroup, Graph } from "../api/types";
 import { siblings } from "./columns";
-import { BADGE_HEIGHT, BADGE_OVERHANG, belowRoute, CAPTION_HEIGHT, HEADER, insideRoute, REGION_HEAD, sideRoute, type Box, type Layout, type Point } from "./layout";
+import {
+  BADGE_HEIGHT,
+  BADGE_OVERHANG,
+  belowRoute,
+  CAPTION_HEIGHT,
+  HEADER,
+  insideRoute,
+  NODE_GAP,
+  PAD,
+  REGION_HEAD,
+  sideRoute,
+  type Box,
+  type Layout,
+  type Point,
+} from "./layout";
 import type { StepKind } from "./route";
 import { aggKey, type DrawnEdge, type EdgeKey, type Tone } from "./scope";
 
@@ -21,6 +35,8 @@ export type EdgeView = {
   route: StepKind | null;
   /** 도착이 같은 선과 합류하는 선인지. 함수 안 import 선, 한쪽이 다른 쪽을 품은 선, 실행 선이 없는 이음은 합류하지 않는다. */
   joins: boolean;
+  /** 함수 안 import만 합친 선이어서 두 노드 아래로 돌아가는 경로다. 이 경로는 사이에 놓인 상자를 지날 수 있다. */
+  below: boolean;
   /** 경로에서 줄기에 들어가기 전까지. 줄기에 들지 않은 선은 경로 전체다. */
   branch: Point[];
   /** 이 선이 든 줄기의 키. 줄기에 들지 않았으면 null이다. */
@@ -78,34 +94,140 @@ export function parentFirst(graph: Graph, visible: Set<string>): AtlasNode[] {
 const JOG = 12;
 
 /**
- * 형제가 아닌 두 노드를 잇는 경로. 두 노드를 형제가 될 때까지 올린 상자 사이의 배치 경로 trunk를 따라가고,
- * 올린 쪽 끝만 원래 노드의 옆면 가운데로 옮긴다. trunk의 첫 선분과 끝 선분이 가로가 아니면 null이다.
+ * 배치에 든 상자의 포함 관계와, 선이 지나면 안 되는 사각형. 선은 자기 출발·도착과 그 조상이 아닌 상자의 안을 지나지 않는다.
+ * 자식을 그리지 않는 파일 상자와 폴더 상자는 상자 아래에 잡아 둔 글자 줄까지 막는다.
  */
-function alongRoute(trunk: Point[], source: Box | null, target: Box | null): Point[] | null {
+interface Rooms {
+  /** 상자 id → 그 안에 그린 바로 아래 상자. 어느 상자에도 들지 않은 상자는 `TOP` 아래에 담는다. */
+  kids: Map<string, string[]>;
+  parent: (id: string) => string | null;
+  block: (id: string) => Box;
+}
+
+const TOP = "";
+
+function roomsOf(layout: Layout, nodes: Map<string, AtlasNode>): Rooms {
+  const pack = "#pack";
+  const parent = (id: string) => (id.endsWith(pack) ? id.slice(0, -pack.length) : (nodes.get(id)?.parent ?? null));
+  const kids = new Map<string, string[]>();
+  for (const id of layout.boxes.keys()) {
+    const at = parent(id);
+    const room = at !== null && layout.boxes.has(at) ? at : TOP;
+    kids.set(room, [...(kids.get(room) ?? []), id]);
+  }
+  const block = (id: string): Box => {
+    const box = layout.boxes.get(id)!;
+    const kind = nodes.get(id)?.kind;
+    const captioned = (kind === "module" || kind === "package") && !kids.has(id);
+    return captioned ? { ...box, height: box.height + CAPTION_HEIGHT } : box;
+  };
+  return { kids, parent, block };
+}
+
+/** id에서 조상 top까지 거슬러 올라간 상자의 사슬. top이 앞에 온다. 배치에 없는 상자가 끼면 id 하나만 담는다. */
+function chainOf(rooms: Rooms, layout: Layout, top: string, id: string): string[] {
+  const chain = [id];
+  for (let at = rooms.parent(id); chain[0] !== top; at = rooms.parent(at)) {
+    if (at === null || !layout.boxes.has(at)) {
+      return [id];
+    }
+    chain.unshift(at);
+  }
+  return chain;
+}
+
+/**
+ * 바깥 상자 chain[0]의 옆 통로(x가 outer인 세로 줄)에서 안쪽 상자 chain의 끝까지 들어가는 경로. side가 -1이면 상자의 왼쪽 변으로,
+ * 1이면 오른쪽 변으로 들어간다. 상자를 한 겹 들어갈 때마다 그 상자 안에서 다음 상자의 열 앞 통로까지 가는 가로 줄을 고른다.
+ * 가로 줄의 높이는 끝 상자의 가운데 높이, 형제 상자의 위아래 간격의 가운데, 상자의 아래 여백 가운데 형제 상자를 지나지 않는 것으로
+ * 끝 상자의 가운데 높이에 가장 가까운 값이다. 열 앞 통로는 왼쪽이면 그 상자의 왼쪽 변에서, 오른쪽이면 그 열에서 가장 넓은 상자의
+ * 오른쪽 변에서 `JOG`만큼 떨어진 세로 줄이고, 열 사이 간격 안에 있어 상자를 지나지 않는다. 지나지 않는 가로 줄이 없는 겹이 있으면
+ * null이다.
+ */
+function legs(rooms: Rooms, layout: Layout, chain: string[], side: -1 | 1, outer: number): Point[] | null {
+  const end = layout.boxes.get(chain.at(-1)!)!;
+  const aim = end.y + end.height / 2;
+  const points: Point[] = [];
+  let x = outer;
+  for (let i = 0; i + 1 < chain.length; i++) {
+    const room = layout.boxes.get(chain[i])!;
+    const goal = layout.boxes.get(chain[i + 1])!;
+    const blocks = (rooms.kids.get(chain[i]) ?? []).map(rooms.block);
+    const column = blocks.filter((b) => Math.abs(b.x - goal.x) < SAME);
+    const lane = side < 0 ? goal.x - JOG : Math.max(...column.map((b) => b.x + b.width)) + JOG;
+    const [left, right] = [Math.min(x, lane), Math.max(x, lane)];
+    const top = Math.min(...blocks.map((b) => b.y));
+    const free = (y: number) =>
+      y > top - 1 && y < room.y + room.height && !blocks.some((b) => y > b.y - 1 && y < b.y + b.height + 1 && right > b.x && left < b.x + b.width);
+    const gaps = blocks.flatMap((b) => [b.y - NODE_GAP / 2, b.y + b.height + NODE_GAP / 2]);
+    const found = [aim, ...(points.length > 0 ? [points.at(-1)!.y] : []), ...gaps, room.y + room.height - PAD / 2]
+      .filter(free)
+      .sort((a, b) => Math.abs(a - aim) - Math.abs(b - aim))[0];
+    if (found === undefined) {
+      return null;
+    }
+    points.push({ x, y: found }, { x: lane, y: found });
+    x = lane;
+  }
+  return [...points, { x, y: aim }, { x: side < 0 ? end.x : end.x + end.width, y: aim }];
+}
+
+/** 이어진 같은 점과 한 직선 위의 가운데 점을 뺀 경로 */
+function straightened(points: Point[]): Point[] {
+  const result: Point[] = [];
+  for (const point of points) {
+    const [before, last] = [result.at(-2), result.at(-1)];
+    if (last !== undefined && samePoint(last, point)) {
+      continue;
+    }
+    if (before !== undefined && last !== undefined && ((before.x === last.x && last.x === point.x) || (before.y === last.y && last.y === point.y))) {
+      result.pop();
+    }
+    result.push(point);
+  }
+  return result;
+}
+
+/**
+ * 형제가 아닌 두 노드를 잇는 경로. 두 노드를 형제가 될 때까지 올린 상자 사이의 배치 경로 trunk를 따라가고, 올린 쪽 끝은 올린 상자
+ * 밖의 세로 줄에서 원래 노드까지 상자를 지나지 않는 길(`legs`)로 잇는다. source와 target은 올린 상자에서 원래 노드까지의 사슬이고 올리지
+ * 않은 쪽은 null이다. 그런 길이 없거나 사슬이 원래 노드 하나뿐인 쪽은 원래 노드의 가운데 높이에서 가로로 곧게 잇는다. trunk의 첫 선분과 끝 선분이 가로가 아니면
+ * null이다.
+ */
+function alongRoute(trunk: Point[], source: string[] | null, target: string[] | null, rooms: Rooms, layout: Layout): Point[] | null {
   const last = trunk.length - 1;
   if (last < 1 || trunk[0].y !== trunk[1].y || trunk[last].y !== trunk[last - 1].y) {
     return null;
   }
   const forward = trunk[1].x >= trunk[0].x;
   const arriving = trunk[last].x >= trunk[last - 1].x;
-  const start =
-    source === null
-      ? trunk[0]
-      : { x: forward ? source.x + source.width : source.x, y: source.y + source.height / 2 };
-  const end =
-    target === null
-      ? trunk[last]
-      : { x: arriving ? target.x : target.x + target.width, y: target.y + target.height / 2 };
-  if (last === 1) {
-    const x = trunk[1].x + (forward ? -JOG : JOG);
-    return start.y === end.y ? [start, end] : [start, { x, y: start.y }, { x, y: end.y }, end];
-  }
-  const points = trunk.map((p) => ({ ...p }));
-  points[0] = start;
-  points[1].y = start.y;
-  points[last] = end;
-  points[last - 1].y = end.y;
-  return points;
+  /**
+   * 올린 상자 chain[0]에서 원래 노드까지의 길. 배치 경로에서 올린 상자에 가장 가까운 세로 줄(x가 bend)을 원래 노드 쪽 가로 줄의
+   * 높이까지 늘여 잇는다. 늘인 뒤의 가로 줄이 올린 상자의 형제 상자를 지나면, 배치 경로를 올린 상자의 변(edge)까지 그대로 따라간 뒤
+   * 변에서 `JOG`만큼 떨어진 옆 통로에서 꺾는다. 배치는 선의 세로 줄을 상자에서 이보다 멀리 두므로 이 통로는 비어 있다.
+   * 올린 상자에서 바깥쪽으로 나가는 순서의 점을 낸다.
+   */
+  const side = (chain: string[], dir: -1 | 1, edge: Point, bend: number): Point[] => {
+    const box = layout.boxes.get(chain.at(-1)!)!;
+    const middle = box.y + box.height / 2;
+    const inner = (outer: number): Point[] =>
+      (chain.length > 1 ? legs(rooms, layout, chain, dir, outer) : null) ?? [{ x: outer, y: middle }, { x: dir < 0 ? box.x : box.x + box.width, y: middle }];
+    const reach = inner(bend);
+    const [left, right] = [Math.min(bend, edge.x), Math.max(bend, edge.x)];
+    const around = (rooms.kids.get(rooms.parent(chain[0]) ?? TOP) ?? []).filter((id) => id !== chain[0] && layout.boxes.has(id)).map(rooms.block);
+    const y = reach[0].y;
+    if (!around.some((b) => y > b.y - 1 && y < b.y + b.height + 1 && right > b.x && left < b.x + b.width)) {
+      return reach;
+    }
+    const jog = edge.x + dir * JOG;
+    return [{ x: bend, y: edge.y }, { x: jog, y: edge.y }, ...inner(jog)];
+  };
+  /** 올린 상자 사이를 곧게 잇는 배치 경로에는 세로 줄이 없으므로 도착 쪽 상자 앞에 하나를 둔다. */
+  const straight = trunk[1].x + (forward ? -JOG : JOG);
+  const [leave, enter] = last === 1 ? [straight, straight] : [trunk[1].x, trunk[last - 1].x];
+  const head = source === null ? [trunk[0], { x: leave, y: trunk[0].y }] : side(source, forward ? 1 : -1, trunk[0], leave).reverse();
+  const tail = target === null ? [{ x: enter, y: trunk[last].y }, trunk[last]] : side(target, arriving ? -1 : 1, trunk[last], enter);
+  return straightened([...head, ...trunk.slice(2, Math.max(2, last - 1)), ...tail]);
 }
 
 /**
@@ -116,14 +238,14 @@ function alongRoute(trunk: Point[], source: Box | null, target: Box | null): Poi
  */
 export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string, AtlasNode>): Lines {
   /** 선의 경로와 그 경로가 도착이 같은 선과 합류하는 경로인지 */
-  const route = (edge: DrawnEdge, source: Box, target: Box): { points: Point[]; joins: boolean } => {
+  const route = (edge: DrawnEdge, source: Box, target: Box): { points: Point[]; joins: boolean; below?: boolean } => {
     const joins = edge.edges.length > 0;
     const found = layout.routes.get(edge.key);
     if (found !== undefined) {
       return { points: found, joins };
     }
     if (edge.deferred) {
-      return { points: belowRoute(source, target), joins: false };
+      return { points: belowRoute(source, target), joins: false, below: true };
     }
     const ends = siblings(nodes, edge.source, edge.target);
     if (ends === null) {
@@ -132,10 +254,19 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
     const back = edge.route === "overridden" ? layout.routes.get(aggKey(ends[1], ends[0])) : undefined;
     const trunk = layout.routes.get(aggKey(ends[0], ends[1])) ?? (back === undefined ? undefined : [...back].reverse());
     const along =
-      trunk === undefined ? null : alongRoute(trunk, ends[0] === edge.source ? null : source, ends[1] === edge.target ? null : target);
+      trunk === undefined
+        ? null
+        : alongRoute(
+            trunk,
+            ends[0] === edge.source ? null : chainOf(rooms, layout, ends[0], edge.source),
+            ends[1] === edge.target ? null : chainOf(rooms, layout, ends[1], edge.target),
+            rooms,
+            layout,
+          );
     return { points: along ?? sideRoute(source, target), joins };
   };
 
+  const rooms = roomsOf(layout, nodes);
   const lettered = letteredBoxes(layout, nodes);
   const views: EdgeView[] = [];
   for (const edge of edges) {
@@ -144,7 +275,7 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
     if (source === undefined || target === undefined) {
       continue;
     }
-    const { points, joins } = route(edge, source, target);
+    const { points, joins, below = false } = route(edge, source, target);
     const counted = edge.key.startsWith("agg|") && edge.weight >= 2;
     views.push({
       key: edge.key,
@@ -158,6 +289,7 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       sites: edge.weight,
       route: edge.route,
       joins,
+      below,
       branch: points,
       trunk: null,
     });

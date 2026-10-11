@@ -38,7 +38,8 @@ export type RunElk = (graph: ElkNode) => Promise<ElkNode>;
 
 const FONT = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
 export const HEADER = 32;
-const PAD = 16;
+/** 자식을 그리는 상자의 안쪽 여백 */
+export const PAD = 16;
 export const TABLE_HEAD = 24;
 export const TABLE_ROW = 18;
 const HEX_HEIGHT = 28;
@@ -132,6 +133,9 @@ export function joined(node: ElkNode): ElkNode {
   };
 }
 
+/** 같은 열에 놓인 형제 노드 사이의 세로 간격 */
+export const NODE_GAP = 24;
+
 /** 열은 partition으로, 열 안 순서는 children 배열 순서로 고정한다. */
 const ELK_OPTIONS = {
   "elk.algorithm": "layered",
@@ -140,7 +144,7 @@ const ELK_OPTIONS = {
   "elk.partitioning.activate": "true",
   ...arrangeOptions(),
   "elk.separateConnectedComponents": "false",
-  "elk.spacing.nodeNode": "24",
+  "elk.spacing.nodeNode": String(NODE_GAP),
   "elk.layered.spacing.nodeNodeBetweenLayers": "48",
   "elk.layered.spacing.edgeNodeBetweenLayers": String(LANE_CLEAR),
 };

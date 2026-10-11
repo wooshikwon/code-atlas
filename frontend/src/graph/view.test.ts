@@ -134,6 +134,61 @@ describe("edgeViews", () => {
   });
 });
 
+describe("edgeViews: 올린 상자 안으로 들어가는 경로", () => {
+  const box = (x: number, y: number, width = 100, height = 40) => ({ x, y, width, height });
+  /** main에서 폴더 pkg 안의 pkg.util로 가는 선. 배치 경로는 main과 pkg 사이에만 있다. */
+  const edge = {
+    key: "agg|main|pkg.util",
+    source: "main",
+    target: "pkg.util",
+    group: "run" as const,
+    weight: 1,
+    kinds: {},
+    tone: "muted" as const,
+    opacity: 0.5,
+    deferred: false,
+    edges: [repoFixture.edges[0]],
+    route: null,
+  };
+  const laid = (boxes: [string, ReturnType<typeof box>][], trunk: [number, number][]): Layout => ({
+    positions: new Map(),
+    sizes: new Map(),
+    boxes: new Map(boxes),
+    routes: new Map([["agg|main|pkg", trunk.map(([x, y]) => ({ x, y }))]]),
+  });
+  const pointsOf = (layout: Layout) => edgeViews([edge], layout, nodes).views[0].points.map((p) => [p.x, p.y]);
+
+  it("도착 노드의 가운데 높이로 곧게 들어갈 수 있으면 그렇게 잇는다", () => {
+    const layout = laid([["main", box(0, 40)], ["pkg", box(200, 0, 500, 200)], ["pkg.util", box(216, 40)]], [[100, 60], [200, 60]]);
+    expect(pointsOf(layout)).toEqual([[100, 60], [216, 60]]);
+  });
+
+  it("앞 열의 상자가 그 높이를 막으면 상자 사이의 빈 가로 줄로 돌아 도착 노드의 열 앞에서 꺾는다", () => {
+    const layout = laid(
+      [["main", box(0, 40)], ["pkg", box(200, 0, 500, 200)], ["pkg.mod", box(216, 40)], ["pkg.util", box(380, 40)]],
+      [[100, 60], [200, 60]],
+    );
+    // pkg.mod는 접힌 파일 상자여서 상자 아래 글자 줄 16px까지 막는다. 그 아래 12px(노드 간격의 절반)가 빈 가로 줄이다.
+    expect(pointsOf(layout)).toEqual([[100, 60], [188, 60], [188, 108], [368, 108], [368, 60], [380, 60]]);
+  });
+
+  it("배치 경로의 세로 줄을 늘인 가로 줄이 올린 상자의 형제 상자를 지나면 올린 상자 옆 통로에서 꺾는다", () => {
+    const layout = laid(
+      [["main", box(0, 40)], ["cli", box(160, 100)], ["pkg", box(400, 0, 300, 300)], ["pkg.util", box(416, 100)]],
+      [[100, 60], [130, 60], [130, 20], [400, 20]],
+    );
+    expect(pointsOf(layout)).toEqual([[100, 60], [130, 60], [130, 20], [388, 20], [388, 120], [416, 120]]);
+  });
+
+  it("빈 가로 줄이 없으면 도착 노드의 가운데 높이로 곧게 잇는다", () => {
+    const layout = laid(
+      [["main", box(0, 40)], ["pkg", box(200, 40, 500, 40)], ["pkg.mod", box(216, 40)], ["pkg.util", box(380, 40)]],
+      [[100, 60], [200, 60]],
+    );
+    expect(pointsOf(layout)).toEqual([[100, 60], [380, 60]]);
+  });
+});
+
 describe("roundedPath, midpoint", () => {
   const points = [
     { x: 0, y: 0 },
@@ -241,7 +296,7 @@ describe("edgeViews: 강조하는 경로", () => {
 describe("trunkViews", () => {
   const view = (key: string, target: string, points: [number, number][], more: Partial<EdgeView> = {}): EdgeView => {
     const path = points.map(([x, y]) => ({ x, y }));
-    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, weight: null, sites: 1, route: null, joins: true, branch: path, trunk: null, ...more };
+    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, weight: null, sites: 1, route: null, joins: true, below: false, branch: path, trunk: null, ...more };
   };
   /** 세 선이 x=100의 세로선에 차례로 붙어 (120, 50)으로 들어간다. c는 아래에서 올라온다. */
   const a = view("a", "t", [[0, 0], [100, 0], [100, 50], [120, 50]]);

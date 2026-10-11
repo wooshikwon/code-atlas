@@ -180,6 +180,7 @@ export function callEdges(calls: Calls, center: string, layout: Layout): Lines {
       sites: edge.sites.length,
       route: null,
       joins: true,
+      below: false,
       branch: points,
       trunk: null,
     });
