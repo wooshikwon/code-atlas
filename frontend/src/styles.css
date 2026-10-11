@@ -1335,8 +1335,9 @@ ul {
   stroke-width: 1.5;
 }
 
+/* 선 가운데 숫자는 선과 같은 색으로 쓰고 선의 불투명도를 함께 받는다. 숫자 둘레는 그래프 바탕색으로 칠해 선을 끊는다. */
 .edge-weight {
-  fill: var(--ink);
+  fill: var(--tone);
   stroke: var(--surface);
   stroke-width: 3px;
   paint-order: stroke;

@@ -2,7 +2,7 @@
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
 import type { EdgeGroup } from "../../api/types";
 import { LAYER } from "../layers";
-import type { EdgeKey, Tone } from "../scope";
+import { EDGE_OPACITY, type EdgeKey, type Tone } from "../scope";
 import { roundedPath, type EdgeView } from "../view";
 
 /** pointed는 마우스를 올린 선이다. */
@@ -19,7 +19,7 @@ export function flowEdges(views: EdgeView[], pointed: EdgeKey | null): AtlasFlow
       source: view.source,
       target: view.target,
       type: "orthogonal",
-      data: on ? { ...view, tone: "strong", opacity: 1, pointed: true } : { ...view, pointed: false },
+      data: on ? { ...view, tone: "strong", opacity: EDGE_OPACITY.full, pointed: true } : { ...view, pointed: false },
       zIndex: on ? LAYER.pointed : LAYER.edge,
     };
   });

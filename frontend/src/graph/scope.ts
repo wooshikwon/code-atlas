@@ -24,6 +24,12 @@ export interface DrawnEdge {
   edges: AtlasEdge[];
 }
 
+/**
+ * 선의 불투명도. 고른 노드가 없으면 모든 선이 IDLE이라 노드의 테두리와 글자보다 연하다. 노드를 고르면 고른 노드에 닿는 선과
+ * 흐름에 든 노드 사이의 선은 FULL, 그 밖의 선은 REST다. 선 가운데 숫자는 선과 같은 색과 불투명도로 그린다.
+ */
+export const EDGE_OPACITY = { full: 1, idle: 0.5, rest: 0.2 } as const;
+
 const GROUP_ORDER: EdgeGroup[] = ["run", "use", "derive"];
 const BOX_KINDS = new Set(["module", "package", "external"]);
 
@@ -122,7 +128,7 @@ function merge(
     }
   }
   const touching = flow !== null && edges.some((e) => flow.seeds.has(e.source) !== flow.seeds.has(e.target));
-  const inFlow = flow === null || touching || edges.some((e) => member(e.source) && member(e.target));
+  const inFlow = touching || edges.some((e) => member(e.source) && member(e.target));
   return {
     key,
     source,
@@ -131,7 +137,7 @@ function merge(
     weight,
     kinds,
     tone: touching ? "strong" : "muted",
-    opacity: inFlow ? 1 : 0.2,
+    opacity: flow === null ? EDGE_OPACITY.idle : inFlow ? EDGE_OPACITY.full : EDGE_OPACITY.rest,
     deferred: edges.every((e) => e.deferred),
     edges,
   };
@@ -145,9 +151,9 @@ function merge(
  *    마우스를 올린 노드에 닿는 선은 모두 그린다.
  * 3. 편재 노드로 들어오는 접힌 상자 사이의 선은 뺀다. 편재 노드나 편재 노드를 쓰는 노드를 고르면 다시 넣는다.
  * 올린 양 끝이 같은 선은 집계 규칙으로 합치고, 올린 양 끝이 같거나 한쪽이 다른 쪽의 조상인 선은 버린다.
- * 선의 진하기는 세 단계다. 고른 노드에 닿는 선(고른 노드와 그 자손의 경계를 넘는 선)은 strong에 불투명도 1,
+ * 선의 진하기는 네 단계다. 고른 노드에 닿는 선(고른 노드와 그 자손의 경계를 넘는 선)은 strong에 불투명도 1,
  * 흐름에 든 노드 사이의 선은 muted에 불투명도 1, 그 밖의 선은 muted에 불투명도 0.2다. 고른 노드가 없으면
- * 모두 muted에 불투명도 1이다.
+ * 모두 muted에 불투명도 0.5다.
  */
 export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: string | null): DrawnEdge[] {
   const nodes = nodeIndex(graph);

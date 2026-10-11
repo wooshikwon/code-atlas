@@ -107,7 +107,7 @@ describe("drawn", () => {
       group: "run",
       kinds: { import: 1, call: 3 },
       tone: "muted",
-      opacity: 1,
+      opacity: 0.5,
       deferred: false,
     });
     expect(edges.get("pkg.mod|pkg.util|import")?.deferred).toBe(true);

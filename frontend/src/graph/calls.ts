@@ -2,7 +2,7 @@
 import type { ElkNode } from "elkjs/lib/elk-api";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { CIRCLE, CIRCLE_GAP, ENTRY_MARK, labelOf, LEAF_HEIGHT, LOC_GAP, titleOf, type Layout, type Measure, type Size } from "./layout";
-import { edgeKey } from "./scope";
+import { EDGE_OPACITY, edgeKey } from "./scope";
 import type { EdgeView } from "./view";
 import { unitOf } from "./visible";
 
@@ -155,7 +155,7 @@ export function callEdges(calls: Calls, center: string, layout: Layout): EdgeVie
       group: edge.group,
       points,
       tone: edge.source === center || edge.target === center ? "strong" : "muted",
-      opacity: 1,
+      opacity: EDGE_OPACITY.full,
       weight: null,
       sites: edge.sites.length,
     });

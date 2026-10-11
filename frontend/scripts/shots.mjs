@@ -192,9 +192,15 @@ const linesOf = (page) =>
         pointed: edge.hasAttribute("data-pointed"),
         tone: edge.classList.contains("tone-strong") ? "strong" : "muted",
         opacity: Number(getComputedStyle(edge).opacity),
+        stroke: getComputedStyle(line).stroke,
+        // 선 가운데 숫자의 글자색. 숫자가 없는 선은 null이다.
+        digits: edge.querySelector(".edge-weight") === null ? null : getComputedStyle(edge.querySelector(".edge-weight")).fill,
       };
     }),
   );
+
+/** 숫자가 있는 선마다 숫자의 글자색이 선의 색과 같은지. 숫자는 선과 같은 요소 안에 있어 불투명도를 함께 받는다. */
+const digitsMatch = (lines) => lines.filter((line) => line.digits !== null).every((line) => line.digits === line.stroke);
 
 /** 노드마다 그래프 좌표의 상자 */
 const flowBoxes = (page) =>
@@ -780,10 +786,21 @@ async function edge(t, page) {
   }, TEXTS);
   t.check("집계 선의 숫자가 노드의 글자·배지와 겹치지 않는다", weights.all > 0 && weights.covered === 0, `숫자 ${weights.all}개 가운데 겹친 숫자 ${weights.covered}개`);
 
+  const muted = (await colorOf(page, "--muted")).rgb;
+  const border = await page.evaluate(() => getComputedStyle(document.querySelector(".react-flow__node > .node-body.node-module")).borderTopColor);
+  t.check(
+    "고른 노드가 없으면 모든 선이 muted 잉크에 불투명도 0.5여서 불투명도 1인 상자 테두리보다 연하다",
+    lines.length > 0 && lines.every((line) => line.tone === "muted" && line.opacity === 0.5 && line.stroke === muted) && border === muted,
+    `선 ${lines.length}개, 불투명도 ${[...new Set(lines.map((line) => line.opacity))].join("·")}, 상자 테두리 ${border}`,
+  );
+  t.check("고른 노드가 없을 때 선 가운데 숫자의 색이 선의 색과 같다", digitsMatch(lines) && lines.some((line) => line.digits !== null), `숫자 ${lines.filter((line) => line.digits !== null).length}개`);
+
   // 마우스를 올린 선
   const { line: first, at: spot } = await hittable(page, [...leaving.filter((line) => !entries.has(ends(line)[1])), ...lines]);
   await page.mouse.move(spot.x, spot.y);
   await page.waitForSelector(".edge[data-pointed]", { timeout: 5_000 }).catch(() => {});
+  // 불투명도가 바뀌는 200ms가 지난 뒤에 읽는다.
+  await page.waitForTimeout(300);
   const over = (await linesOf(page)).find((line) => line.key === first.key);
   const rest = (await linesOf(page)).filter((line) => line.key !== first.key);
   t.check(
@@ -791,6 +808,11 @@ async function edge(t, page) {
     over.pointed && over.width > first.width && over.glow && over.tone === "strong" && over.opacity === 1 && over.layer === "5" &&
       rest.every((line) => !line.pointed && line.layer === "4" && !line.glow),
     `굵기 ${first.width} → ${over.width}, 층 ${first.layer} → ${over.layer}, 진하기 ${first.tone} → ${over.tone}`,
+  );
+  t.check(
+    "마우스를 올린 선의 숫자도 본문 잉크로 바뀐다",
+    over.digits === null ? digitsMatch(rest) : over.digits === over.stroke && over.stroke === (await colorOf(page, "--ink")).rgb,
+    `선 ${over.stroke}, 숫자 ${over.digits ?? "없음"}`,
   );
   await t.shot();
   await page.mouse.move(spot.x, spot.y - 40);
@@ -803,6 +825,13 @@ async function edge(t, page) {
   await page.mouse.click(spot.x, spot.y);
   await waitSelected(page, target).catch(() => {});
   t.check("선을 누르면 도착 노드가 선택되고 정보 패널이 그 노드를 적는다", (await selectedOf(page)) === target && (await count(page, ".info-panel-sites")) === 0, `선택 ${await selectedOf(page)}`);
+  const focusedLines = await linesOf(page);
+  const levels = [...new Set(focusedLines.map((line) => `${line.tone} ${line.opacity}`))].sort();
+  t.check(
+    "노드를 고르면 닿는 선은 본문 잉크 1, 그 밖의 선은 muted 1이나 0.2이고, 세 단계 모두 숫자의 색이 선의 색과 같다",
+    levels.includes("strong 1") && levels.includes("muted 0.2") && levels.every((level) => ["strong 1", "muted 1", "muted 0.2"].includes(level)) && digitsMatch(focusedLines),
+    levels.join(", "),
+  );
   const again = await hittable(page, (await linesOf(page)).filter((line) => ends(line)[1] === target));
   if (again === null) {
     t.skip("고른 노드로 들어오는 선을 눌러도 선택이 풀리지 않는다", "화면에 누를 선이 없다");
