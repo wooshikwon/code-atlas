@@ -1,4 +1,4 @@
-// 그래프 왼쪽 아래의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개, 변경 표시 두 색을 보여 준다.
+// 그래프 왼쪽 아래의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시 두 개, 선 모양 세 개, 변경 표시 두 색을 보여 준다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
 import { useAtlas } from "../state/store";
@@ -11,7 +11,6 @@ const SHAPES = [
   { key: "dataclass", name: "데이터 클래스" },
   { key: "function", name: "함수·메서드" },
   { key: "external", name: "외부 노드" },
-  { key: "entry", name: "진입점" },
   { key: "inflow", name: "편재 노드: 숨긴 선의 출발 노드 수" },
   { key: "loc", name: "이름표 옆 숫자: 줄 수" },
 ];
@@ -43,12 +42,6 @@ function Shape({ kind }: { kind: string }) {
       return <circle cx={11} cy={8} r={6} className="legend-node" />;
     case "external":
       return <rect x={1} y={3} width={20} height={10} rx={5} className="legend-external" />;
-    case "entry":
-      return (
-        <text x={11} y={12} textAnchor="middle" className="legend-entry">
-          ▶
-        </text>
-      );
     case "inflow":
       return (
         <text x={11} y={12} textAnchor="middle" className="legend-inflow">

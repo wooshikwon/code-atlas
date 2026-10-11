@@ -2,7 +2,7 @@
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
-import { ENTRY_MARK, labelOf } from "../layout";
+import { labelOf } from "../layout";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
@@ -53,10 +53,7 @@ export function nodeProps(base: string, data: AtlasNodeData, change: Change | nu
 
 export function Label({ data, bold = false }: { data: AtlasNodeData; bold?: boolean }) {
   return (
-    <span className={bold ? "node-label node-label-bold" : "node-label"}>
-      {data.node.entry && <span className="node-entry">{ENTRY_MARK}</span>}
-      {labelOf(data.node)}
-    </span>
+    <span className={bold ? "node-label node-label-bold" : "node-label"}>{labelOf(data.node)}</span>
   );
 }
 

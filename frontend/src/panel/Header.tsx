@@ -58,7 +58,6 @@ function whereOf(node: AtlasNode): string | null {
 
 export function Header({ item, nodes }: HeaderProps) {
   const change = useChange(item.type === "node" ? item.node.id : null);
-  let entry = false;
   let name: string;
   let chip: string;
   let facts: (string | null)[];
@@ -72,7 +71,6 @@ export function Header({ item, nodes }: HeaderProps) {
     facts = [item.path];
   } else if (item.type === "node") {
     const { node } = item;
-    entry = node.entry;
     name = nameOf(nodes, node);
     chip = [KIND_NAMES[node.kind], node.entry ? "진입점" : null, node.method_kind].filter((s) => s !== null).join(" · ");
     facts = [
@@ -102,10 +100,7 @@ export function Header({ item, nodes }: HeaderProps) {
   return (
     <>
       <div className="info-panel-title">
-        <b>
-          {entry && "▶ "}
-          {name}
-        </b>
+        <b>{name}</b>
         <span className="info-panel-chip">{chip}</span>
       </div>
       <div className="info-panel-facts">

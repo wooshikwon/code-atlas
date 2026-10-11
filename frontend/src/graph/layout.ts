@@ -47,7 +47,6 @@ export const CAPTION_HEIGHT = 16;
 export const CIRCLE = 16;
 export const LEAF_HEIGHT = 18;
 export const EXTERNAL_HEIGHT = 24;
-export const ENTRY_MARK = "▶ ";
 const LABEL_MAX = 24;
 const TABLE_ROWS_MAX = 5;
 const CIRCLE_GAP = 6;
@@ -149,9 +148,9 @@ export function moduleHeader(node: AtlasNode, functions: number): string {
   return node.kind === "module" ? `함수 ${functions}개` : "";
 }
 
-/** 진입점 표지와 이름표의 폭. loc이 참이면 이름표 오른쪽 줄 수 숫자의 폭을 더한다. */
+/** 이름표의 폭. loc이 참이면 이름표 오른쪽 줄 수 숫자의 폭을 더한다. */
 function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, loc: boolean): number {
-  const label = measure((node.entry ? ENTRY_MARK : "") + labelOf(node), bold);
+  const label = measure(labelOf(node), bold);
   return loc ? label + LOC_GAP + measure(String(node.loc)) : label;
 }
 

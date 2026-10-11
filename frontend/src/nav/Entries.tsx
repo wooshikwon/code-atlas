@@ -51,7 +51,7 @@ export function Entries() {
                   setOpen(false);
                 }}
               >
-                ▶ {titleOf(node)}
+                {titleOf(node)}
               </button>
             </li>
           ))}
