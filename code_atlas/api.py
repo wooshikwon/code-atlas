@@ -144,12 +144,12 @@ def create_app(
 
     async def begin() -> None:
         """서버가 뜬 뒤의 첫 분석. 캐시로 조립한 결과가 먼저 나오면 그 결과를 넣고, 다시 물은 뒤의 결과로 한 번 더 바꾼다."""
-        install(await runner.run(drafted=lambda analyzed: install(analyzed, True)), False)
+        await runner.run(landed=install)
         await app.state.summaries.unavailable()
 
     async def reload() -> None:
         """앞의 결과에서 증분으로 다시 분석해 결과를 바꾼다. 분석이 끝날 때까지 앞의 결과로 답한다."""
-        install(await runner.run(app.state.analyzed), False)
+        await runner.run(app.state.analyzed, install)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

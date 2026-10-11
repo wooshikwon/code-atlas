@@ -18,9 +18,11 @@ async def test_run_records_progress_and_reopens_from_the_cache_without_asking(sa
     report = first._report
     monkeypatch.setattr(first, "_report", lambda progress: (seen.append(progress), report(progress)))
     assert (first.progress.phase, first.lsp, first.error) == ("collect", "starting", None)
-    analyzed = await first.run()
+    landed = []
+    analyzed = await first.run(landed=lambda result, draft: landed.append((result, draft, first.progress.phase)))
     names = [p.phase for p in seen]
     assert sorted(set(names), key=names.index) == ["collect", "extract", "resolve", "build"]
+    assert landed == [(analyzed, False, "build")]  # 결과를 넘긴 뒤에 ready가 된다
     assert first.progress == Progress("ready") and first.analyzed is analyzed
     session = await first.session()
     assert first.lsp == "ready" and not session.stopped

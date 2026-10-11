@@ -45,18 +45,19 @@ class Runner:
         self._warming: asyncio.Task | None = None
 
     async def run(
-        self, previous: Analyzed | None = None, drafted: Callable[[Analyzed], None] | None = None
+        self, previous: Analyzed | None = None, landed: Callable[[Analyzed, bool], None] | None = None
     ) -> Analyzed:
         """레포를 분석한다. `previous`가 있으면 그 결과에서 증분으로 분석하고, 환경 지문이 그대로면 세션을 새로 띄우지 않는다.
 
-        첫 분석이 실패하면 `progress.phase`가 failed가 되고 `error`에 까닭이 남는다. 다시 분석이 실패하면 앞의 결과가
-        그대로이므로 ready로 돌아가고 세션의 본문을 앞의 결과로 되돌린다.
+        결과가 나올 때마다 `landed`에 결과와, 캐시의 판정으로 먼저 조립한 결과인지를 넘긴다. `progress.phase`는 마지막
+        결과를 `landed`에 넘긴 뒤에 ready가 된다. 첫 분석이 실패하면 `progress.phase`가 failed가 되고 `error`에 까닭이
+        남는다. 다시 분석이 실패하면 앞의 결과가 그대로이므로 ready로 돌아가고 세션의 본문을 앞의 결과로 되돌린다.
         """
 
-        def draft(analyzed: Analyzed) -> None:
+        def land(analyzed: Analyzed, draft: bool) -> None:
+            if landed is not None:
+                landed(analyzed, draft)
             self.analyzed = analyzed
-            if drafted is not None:
-                drafted(analyzed)
 
         self.error = None
         try:
@@ -72,8 +73,9 @@ class Runner:
                 cache=self._cache,
                 rebuild=self._rebuild and previous is None,
                 report=self._report,
-                drafted=draft,
+                drafted=lambda analyzed: land(analyzed, True),
             )
+            land(analyzed, False)
         except Exception as exc:
             if previous is None:
                 self.progress = Progress("failed")
@@ -82,7 +84,6 @@ class Runner:
                 self.progress = Progress("ready")
                 self._warm()
             raise
-        self.analyzed = analyzed
         self.progress = Progress("ready")
         self._warm()
         return analyzed
