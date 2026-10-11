@@ -15,10 +15,12 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import type { AtlasNode, Graph } from "../api/types";
 import { useOpened } from "../panel/opened";
 import { focusOf, type History } from "../state/history";
+import { useOverlay } from "../state/overlay";
 import { useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
+import { cycles } from "./cycles";
 import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, layout, titleOf, type Layout, type Point } from "./layout";
@@ -28,8 +30,9 @@ import { GROUP_NAMES, KIND_NAMES } from "./names";
 import { LAYER } from "./layers";
 import { flowNodes, parts, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
+import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import { concealed, drawn, type EdgeKey } from "./scope";
-import { tipOf } from "./tips";
+import { nodeTip, tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst } from "./view";
 import { boundsOf, centerOn, fitPadding, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
@@ -49,7 +52,23 @@ interface Scene {
   layout: Layout;
 }
 
-function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<string, number>, making: string[]): Drawn<AtlasNodeData>[] {
+/** 분석 덮개가 노드에 더하는 표시 */
+interface Cover {
+  /** 순환 아이콘을 다는 상자와 묶음마다 든 파일 id */
+  cycle: Map<string, string[][]>;
+  /** 미사용 덮개가 표시하는 후보. 덮개를 껐으면 비어 있다. */
+  unused: Set<string>;
+  /** 파일마다 미사용 후보 수. 덮개를 껐으면 비어 있다. */
+  candidates: Map<string, number>;
+}
+
+function itemsOf(
+  scene: Scene,
+  nodes: Map<string, AtlasNode>,
+  functions: Map<string, number>,
+  making: string[],
+  cover: Cover,
+): Drawn<AtlasNodeData>[] {
   const order = parentFirst(scene.graph, scene.shown.nodes);
   const parents = new Set(order.map((n) => n.parent));
   const dim = opacities(scene.graph, scene.flow);
@@ -74,8 +93,17 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<str
       inflow: marks.get(node.id) ?? null,
       unresolved: node.kind !== "module" && node.kind !== "package" ? node.unresolved : expanded ? 0 : (unresolved.get(node.id) ?? 0),
       busy: busy.get(node.id) ?? 0,
+      cycle: cover.cycle.get(node.id)?.map((group) => group.map((id) => titleOf(nodes.get(id)!))) ?? null,
+      unused: cover.unused.has(node.id),
+      candidates: cover.candidates.get(node.id) ?? 0,
     });
-    return { id: node.id, type: nodeType(node.kind), opacity, body, face };
+    return {
+      id: node.id,
+      type: nodeType(node.kind),
+      opacity: cover.unused.has(node.id) ? Math.min(opacity, UNUSED_OPACITY) : opacity,
+      body,
+      face,
+    };
   });
 }
 
@@ -111,6 +139,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const toggleFolder = useAtlas((s) => s.toggleFolder);
   const open = useAtlas((s) => s.open);
   const making = useSummaries(makingKey);
+  const overlay = useOverlay((s) => s.kind);
+  const candidates = useOverlay((s) => s.unused);
   const { getViewport, setViewport } = useReactFlow();
   /** 확대 비율 구간. 구간이 바뀔 때만 다시 그린다. */
   const zoom = useStore((s) => (s.transform[2] < 0.4 ? 0 : s.transform[2] < NAMED_ZOOM ? 1 : 2));
@@ -189,11 +219,21 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     [home, getViewport],
   );
 
+  /** 지금 배치의 순환 묶음. 배치가 순환 아이콘의 폭을 잡을 때와 같은 숨긴 노드로 찾는다. */
+  const loops = useMemo(() => (scene === null ? null : cycles(scene.graph, scene.shown.hidden)), [scene]);
+  const cover = useMemo((): Cover | null => {
+    if (scene === null || loops === null) {
+      return null;
+    }
+    const unused = overlay === "unused" ? candidates : new Set<string>();
+    return { cycle: cycleMarks(scene.graph, loops, scene.shown), unused, candidates: unusedCounts(scene.graph, unused) };
+  }, [scene, loops, overlay, candidates]);
+
   useEffect(() => {
-    if (scene === null || index === null) {
+    if (scene === null || index === null || cover === null) {
       return;
     }
-    const items = itemsOf(scene, index.nodes, index.functions, makingOf(making));
+    const items = itemsOf(scene, index.nodes, index.functions, makingOf(making), cover);
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
@@ -227,14 +267,22 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, index, making, getViewport, setViewport]);
+  }, [scene, index, making, cover, getViewport, setViewport]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
+  /** 그릴 선과 그 가운데 순환 선의 키. 순환 덮개를 켠 동안에만 순환 선을 넣고 칠한다. */
+  const lines = useMemo(() => {
+    if (scene === null || loops === null) {
+      return { edges: [], keys: new Set<EdgeKey>() };
+    }
+    const edges = drawn(scene.graph, scene.shown, scene.flow, hovered);
+    return overlay === "cycles" ? cycleLines(scene.graph, scene.shown, scene.flow, edges, loops) : { edges, keys: new Set<EdgeKey>() };
+  }, [scene, loops, overlay, hovered]);
   const views = useMemo(
-    () => (scene === null || index === null ? [] : edgeViews(drawn(scene.graph, scene.shown, scene.flow, hovered), scene.layout, index.nodes)),
-    [scene, index, hovered],
+    () => (scene === null || index === null ? [] : edgeViews(lines.edges, scene.layout, index.nodes)),
+    [scene, index, lines],
   );
-  const edges = useMemo(() => flowEdges(views, pointed), [views, pointed]);
+  const edges = useMemo(() => flowEdges(views, pointed, lines.keys), [views, pointed, lines]);
 
   /**
    * 연달아 누른 두 번째 클릭이면 처음 누른 노드를 열고 참을 돌려준다. 함수·메서드 노드는 함수 시점 뷰로 들어간다.
@@ -305,7 +353,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
 
   /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. */
   const onNodeOver: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
-    const text = tipOf(event.target) ?? `${titleOf(node.data.node)} · ${KIND_NAMES[node.data.node.kind]}`;
+    const text = tipOf(event.target) ?? nodeTip(titleOf(node.data.node), KIND_NAMES[node.data.node.kind], node.data.unused);
     tip.current?.show(text, event.clientX, event.clientY);
   };
   const onNodeEnter: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
@@ -342,7 +390,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   }
 
   return (
-    <div className="graph" ref={root} data-zoom={zoom} data-moving={moving ? "" : undefined}>
+    <div className="graph" ref={root} data-zoom={zoom} data-moving={moving ? "" : undefined} data-overlay={overlay ?? undefined}>
       <Markers />
       <ReactFlow
         nodes={nodes}

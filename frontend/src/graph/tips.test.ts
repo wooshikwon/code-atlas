@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture } from "./fixture";
-import { busyTip, globalTip, inflowTip, locTip, unresolvedTip } from "./tips";
+import { busyTip, cycleTip, globalTip, inflowTip, locTip, nodeTip, unresolvedTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
@@ -25,5 +25,25 @@ describe("배지 말풍선", () => {
     expect(busyTip(folder, 2)).toBe("LLM 요약을 만드는 중 2개 · 이 상자와 안에 든 노드");
     expect(inflowTip(8).split("\n")[0]).toBe("편재 노드: 선을 숨긴 출발 노드 8개");
     expect(locTip({ ...fn, loc: 131 })).toBe("줄 수 131줄 · 빈 줄을 뺀 수");
+  });
+
+  it("순환 아이콘은 묶음의 파일 수와 이름을 적고 여섯 개부터는 줄인다", () => {
+    expect(cycleTip(file, [["a.py", "b.py", "c.py"]])).toBe("순환 묶음: 파일 3개가 서로를 import해 돌아온다\na.py, b.py, c.py");
+    const seven = ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py", "g.py"];
+    expect(cycleTip(file, [seven]).split("\n")[1]).toBe("a.py, b.py, c.py, d.py, e.py 외 2개");
+    expect(cycleTip(folder, [["a.py", "b.py"]]).split("\n")[0]).toBe("순환 묶음: 파일 2개가 서로를 import해 돌아온다 · 이 폴더 안의 파일이 든 묶음");
+    expect(cycleTip(folder, [["a.py", "b.py"], ["c.py", "d.py", "e.py"]]).split("\n")).toEqual([
+      "순환 묶음 2개 · 이 폴더 안의 파일이 든 묶음",
+      "파일 2개: a.py, b.py",
+      "파일 3개: c.py, d.py, e.py",
+    ]);
+  });
+
+  it("미사용 후보는 노드의 말풍선 둘째 줄에 뜻을 적는다", () => {
+    expect(nodeTip("run()", "함수", false)).toBe("run() · 함수");
+    expect(nodeTip("run()", "함수", true).split("\n")).toEqual([
+      "run() · 함수",
+      "미사용 후보 · 들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다",
+    ]);
   });
 });

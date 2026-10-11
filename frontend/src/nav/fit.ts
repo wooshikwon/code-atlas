@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useState, type RefObject } from "react";
 
 /**
  * 줄이는 순서. full은 통계 문구 전체와 토글 세 개를 한 줄에 그린다. brief는 통계 문구를 호출 확인 비율만 적는다.
- * menu는 토글을 "설정" 목록으로 접는다. rows는 뒤로·앞으로 버튼과 탐색 경로를 첫 줄에, 나머지를 둘째 줄에 둔다.
+ * menu는 토글과 덮개 버튼을 "설정" 목록으로 접는다. rows는 뒤로·앞으로 버튼과 탐색 경로를 첫 줄에, 나머지를 둘째 줄에 둔다.
  * rows에서도 모자라면 둘째 줄의 요소가 다음 줄로 넘어가고, 탐색 경로는 어느 단계에서나 앞 단계부터 줄어든다.
  */
 export const FITS = ["full", "brief", "menu", "rows"] as const;

@@ -1824,3 +1824,198 @@ ul {
 .info-panel-resize[data-dir$="w"] {
   left: 0;
 }
+
+/* 분석 덮개 */
+
+/* 덮개 메뉴. 상단 줄에 넉넉하면 버튼과 그 아래 목록으로, 토글을 "설정"으로 접는 단계부터는 "설정" 목록의 "분석 덮개" 구역으로 그린다. */
+.toolbar-overlays {
+  position: relative;
+  flex: none;
+}
+
+.toolbar:is([data-fit="menu"], [data-fit="rows"]) .toolbar-overlays,
+.toolbar-toggles-overlays {
+  display: none;
+}
+
+.toolbar:is([data-fit="menu"], [data-fit="rows"]) .toolbar-toggles-overlays {
+  display: block;
+  margin: 0 -4px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+}
+
+.toolbar-toggles-label {
+  display: block;
+  padding: 0 4px 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.overlay-menu {
+  right: 0;
+  left: auto;
+  min-width: 190px;
+}
+
+.overlay-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 8px 2px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.overlay-option::before {
+  content: "";
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+}
+
+.overlay-option[aria-checked="true"]::before {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.overlay-option:hover,
+.overlay-option[aria-checked="true"] {
+  background: var(--hover-bg);
+}
+
+.overlay-option-count {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* 순환 아이콘은 덮개와 관계없이 muted 잉크로 적는다. 아이콘을 더해도 파일 상자 폭을 넘지 않게 이름표를 줄인다. */
+.cycle-mark {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  color: var(--muted);
+  vertical-align: -2px;
+}
+
+.cycle-mark svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+[data-cycle] > :is(.node-module-name, .node-module-head) > .node-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 순환 덮개가 칠하는 순환 선과 그 화살촉, 숫자 */
+.tone-critical {
+  --tone: var(--critical);
+}
+
+/* 순환 덮개를 켠 동안에는 critical과 수정 표시 색을 한 화면에 두지 않는다. 그래프의 변경 표시는 색 막대와 테두리 색을 빼고
+   글자만 남기고, 범례와 파일트리, 정보 패널의 수정 표시는 muted 잉크로 그린다. */
+.graph[data-overlay="cycles"] .node-body:is(.node-module, .node-dataclass, .node-package)[data-change] {
+  border-left-color: var(--muted);
+  box-shadow: none;
+}
+
+.graph[data-overlay="cycles"] .node-body:is(.node-function, .node-call)[data-change] .node-circle {
+  border-color: var(--muted);
+}
+
+.graph[data-overlay="cycles"] .node-body.node-call[data-change] .call-shape {
+  stroke: var(--muted);
+}
+
+.graph[data-overlay="cycles"] .node-hexagon-change {
+  display: none;
+}
+
+.app:has(.graph[data-overlay="cycles"]) [data-change="modified"] {
+  --change: var(--muted);
+}
+
+/* 미사용 덮개는 후보의 테두리를 점선으로 그린다. 색은 쓰지 않는다. */
+.node-body[data-unused] .node-circle,
+.node-body.node-dataclass[data-unused] {
+  border-style: dashed;
+}
+
+.node-body[data-unused] :is(.node-hexagon polygon, .call-shape),
+.legend-unused {
+  stroke-dasharray: 3 2;
+}
+
+/* 범례의 찾은 경로 선 */
+.legend-edge.legend-route {
+  stroke-width: 3;
+}
+
+/* 정보 패널의 덮개 요약 */
+.overview {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 7px 12px 10px;
+  border-top: 1px solid var(--line);
+  overflow-y: auto;
+}
+
+.overview-count,
+.overview-hint {
+  margin: 0;
+}
+
+.overview-hint {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.overview-file {
+  margin: 9px 0 2px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.overview-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 1px 4px;
+  border-radius: 2px;
+  text-align: left;
+}
+
+.overview-row:hover {
+  background: var(--hover-bg);
+}
+
+.overview-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.overview-aside {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}

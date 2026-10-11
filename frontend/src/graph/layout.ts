@@ -3,6 +3,8 @@ import ELK, { type ElkExtendedEdge, type ElkNode } from "elkjs/lib/elk-api";
 import elkWorkerUrl from "elkjs/lib/elk-worker.min.js?url";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { entryUnits, siblings, type Columns } from "./columns";
+import { cycles } from "./cycles";
+import { cycleMarks } from "./overlay";
 import { aggKey, edgeKey, type EdgeKey } from "./scope";
 import { lift, nodeIndex, type Shown } from "./visible";
 
@@ -48,6 +50,8 @@ export const CIRCLE = 16;
 export const LEAF_HEIGHT = 18;
 export const EXTERNAL_HEIGHT = 24;
 export const ENTRY_MARK = "▶ ";
+/** 순환 묶음에 든 파일 상자와 그런 파일을 품은 접힌 폴더 상자의 이름표 앞에 그리는 순환 아이콘의 폭. 아이콘 12px와 이름표까지의 4px다. */
+export const CYCLE_MARK_WIDTH = 16;
 const LABEL_MAX = 36;
 const TABLE_ROWS_MAX = 5;
 /**
@@ -172,40 +176,46 @@ export function moduleHeader(node: AtlasNode, functions: number): string {
   return node.kind === "module" ? `함수 ${functions}개` : "";
 }
 
-/** 진입점 표지와 이름표의 폭. loc이 참이면 이름표 오른쪽 줄 수 숫자의 폭을 더한다. */
-function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, loc: boolean): number {
-  const label = measure((node.entry ? ENTRY_MARK : "") + labelOf(node), bold);
+/** 접힌 파일 상자 아래에 적는 글자. 파일 안의 미사용 후보 수 unused가 0이 아니면 함수 수 뒤에 붙인다. 상자 크기에 들지 않는다. */
+export function moduleCaption(node: AtlasNode, functions: number, unused: number): string {
+  const count = moduleHeader(node, functions);
+  return unused === 0 ? count : `${count} · 미사용 후보 ${unused}`;
+}
+
+/** 순환 아이콘, 진입점 표지, 이름표의 폭. loc이 참이면 이름표 오른쪽 줄 수 숫자의 폭을 더한다. */
+function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, loc: boolean, cycle: boolean): number {
+  const label = (cycle ? CYCLE_MARK_WIDTH : 0) + measure((node.entry ? ENTRY_MARK : "") + labelOf(node), bold);
   return loc ? label + LOC_GAP + measure(String(node.loc)) : label;
 }
 
 function tableSize(node: AtlasNode, measure: Measure): Size {
-  const widths = [labelWidth(node, measure, true, true), ...tableRows(node).map((r) => measure(r))];
+  const widths = [labelWidth(node, measure, true, true, false), ...tableRows(node).map((r) => measure(r))];
   return { width: Math.ceil(Math.max(...widths)) + 16, height: tableHeight(node) };
 }
 
-/** 자식을 그리지 않는 노드의 크기 */
-function leafSize(node: AtlasNode, measure: Measure): Size {
+/** 자식을 그리지 않는 노드의 크기. cycle은 이름표 앞에 순환 아이콘을 다는지다. */
+function leafSize(node: AtlasNode, measure: Measure, cycle: boolean): Size {
   switch (node.kind) {
     case "function":
     case "method":
-      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true), height: LEAF_HEIGHT };
+      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true, false), height: LEAF_HEIGHT };
     case "class":
-      return { width: labelWidth(node, measure, true, false) + 28, height: HEX_HEIGHT };
+      return { width: labelWidth(node, measure, true, false, false) + 28, height: HEX_HEIGHT };
     case "dataclass":
       return tableSize(node, measure);
     case "package":
-      return { width: labelWidth(node, measure, true, false) + FOLDER_PAD, height: MODULE_HEIGHT };
+      return { width: labelWidth(node, measure, true, false, cycle) + FOLDER_PAD, height: MODULE_HEIGHT };
     case "external":
-      return { width: labelWidth(node, measure, false, false) + 24, height: EXTERNAL_HEIGHT };
+      return { width: labelWidth(node, measure, false, false, false) + 24, height: EXTERNAL_HEIGHT };
     case "module":
       return { width: MODULE_WIDTH, height: MODULE_HEIGHT };
   }
 }
 
 /** 자식을 그리는 노드의 안쪽 여백과 최소 크기. 펼친 폴더 영역은 머리 줄에 폴더 경로만 적는다. */
-function boxOptions(node: AtlasNode, functions: number, measure: Measure): Record<string, string> {
+function boxOptions(node: AtlasNode, functions: number, measure: Measure, cycle: boolean): Record<string, string> {
   let top = node.kind === "package" ? REGION_HEAD : HEADER;
-  let minWidth = labelWidth(node, measure, true, node.kind === "module") + 2 * PAD;
+  let minWidth = labelWidth(node, measure, true, node.kind === "module", cycle) + 2 * PAD;
   if (node.kind === "module") {
     minWidth += COUNT_GAP + measure(moduleHeader(node, functions));
   }
@@ -275,6 +285,7 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
 /**
  * 보이는 노드를 연결 묶음마다 parent 사슬로 중첩한 ELK 입력. 자식을 그리는 노드마다 따로 배치하므로 선은 형제 사이로
  * 올려 그 부모에 선언한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣는다.
+ * 순환 아이콘을 다는 상자는 아이콘의 폭을 크기에 더한다.
  */
 export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure: Measure): ElkInput {
   const nodes = nodeIndex(graph);
@@ -295,6 +306,7 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
       .map((link) => ({ id: link.key, sources: [link.source], targets: [link.target] }));
 
   const functions = functionCounts(graph);
+  const marked = cycleMarks(graph, cycles(graph, shown.hidden), shown);
   const build = (node: AtlasNode): ElkNode => {
     const kids = children.get(node.id) ?? [];
     const options: Record<string, string> = {
@@ -306,16 +318,16 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
         id: node.id,
         children: kids.map(build),
         edges: edgesOf(node.id),
-        layoutOptions: { ...ELK_OPTIONS, ...options, ...boxOptions(node, functions.get(node.id) ?? 0, measure) },
+        layoutOptions: { ...ELK_OPTIONS, ...options, ...boxOptions(node, functions.get(node.id) ?? 0, measure, marked.has(node.id)) },
       };
     }
     if (node.kind !== "module") {
-      return { id: node.id, ...leafSize(node, measure), layoutOptions: options };
+      return { id: node.id, ...leafSize(node, measure, marked.has(node.id)), layoutOptions: options };
     }
     const caption = moduleHeader(node, functions.get(node.id) ?? 0);
     return {
       id: node.id,
-      ...leafSize(node, measure),
+      ...leafSize(node, measure, marked.has(node.id)),
       labels: [{ text: caption, width: measure(caption), height: CAPTION_HEIGHT }],
       layoutOptions: { ...options, "elk.nodeLabels.placement": "OUTSIDE V_BOTTOM H_LEFT" },
     };

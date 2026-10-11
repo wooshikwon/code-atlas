@@ -6,12 +6,14 @@ import { fitPadding, FRAME_ZOOM, stageOf } from "./graph/viewport";
 import { Entries } from "./nav/Entries";
 import { useFit } from "./nav/fit";
 import { bind } from "./nav/keys";
+import { Overlays } from "./nav/Overlays";
 import { Toggles } from "./nav/Toggles";
 import { Trail } from "./nav/Trail";
 import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
 import { Palette } from "./search/Palette";
 import { useBranch, useStaleCount, watch } from "./state/changes";
+import { useOverlay } from "./state/overlay";
 import { useAtlas, type Depth } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
@@ -24,6 +26,7 @@ function Toolbar() {
   const canForward = useAtlas((s) => s.history.index < s.history.entries.length - 1);
   const depth = useAtlas((s) => s.depth);
   const theme = useAtlas((s) => s.theme);
+  const overlay = useOverlay((s) => s.kind);
   const back = useAtlas((s) => s.back);
   const forward = useAtlas((s) => s.forward);
   const setDepth = useAtlas((s) => s.setDepth);
@@ -46,7 +49,7 @@ function Toolbar() {
 
   const bar = useRef<HTMLDivElement | null>(null);
   const tools = useRef<HTMLDivElement | null>(null);
-  const fit = useFit(bar, tools, `${summary}|${branch}|${stale}`);
+  const fit = useFit(bar, tools, `${summary}|${branch}|${stale}|${overlay}`);
 
   return (
     <div className="toolbar" data-fit={fit} ref={bar}>
@@ -88,6 +91,7 @@ function Toolbar() {
           />
           {depth}
         </label>
+        <Overlays />
         <Toggles />
         <button className="toolbar-button" onClick={fitGraph}>
           화면 맞춤

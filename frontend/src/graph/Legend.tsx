@@ -1,8 +1,11 @@
-// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개, 변경 표시 두 색을 보여 준다.
+// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개와 찾은 경로의 선,
+// 변경 표시 두 색을 보여 주고, 분석 덮개를 켜면 그 덮개의 표시를 끝에 덧붙인다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
+import { useOverlay, type OverlayKind } from "../state/overlay";
 import { useAtlas } from "../state/store";
 import { GROUP_NAMES } from "./names";
+import { CycleMark } from "./nodes/common";
 
 const SHAPES = [
   { key: "package", name: "접힌 폴더" },
@@ -64,8 +67,31 @@ function Shape({ kind }: { kind: string }) {
   }
 }
 
+/** 켠 덮개의 견본과 뜻. 순환은 critical 색 import 선과 순환 아이콘, 미사용은 점선 테두리다. */
+function Overlay({ kind }: { kind: OverlayKind }) {
+  return kind === "cycles" ? (
+    <li className="legend-overlay" data-kind={kind}>
+      <svg width={30} height={16}>
+        <path d="M2,8 L27,8" className="legend-edge edge-use tone-critical" markerEnd="url(#arrow-use-critical)" />
+      </svg>
+      <span>
+        <CycleMark />
+        순환 묶음과 묶음 안 import
+      </span>
+    </li>
+  ) : (
+    <li className="legend-overlay" data-kind={kind}>
+      <svg width={30} height={16}>
+        <circle cx={15} cy={8} r={6} className="legend-node legend-unused" />
+      </svg>
+      미사용 후보
+    </li>
+  );
+}
+
 export function Legend() {
   const open = useAtlas((s) => s.legendOpen);
+  const overlay = useOverlay((s) => s.kind);
   if (!open) {
     return null;
   }
@@ -94,6 +120,12 @@ export function Legend() {
             {GROUP_NAMES[group]}
           </li>
         ))}
+        <li>
+          <svg width={30} height={16}>
+            <path d="M2,8 L27,8" className="legend-edge legend-route tone-strong" />
+          </svg>
+          찾은 경로
+        </li>
         {CHANGES.map(({ change, name }) => (
           <li key={change} data-change={change}>
             <svg width={30} height={16}>
@@ -106,6 +138,7 @@ export function Legend() {
             {name}
           </li>
         ))}
+        {overlay !== null && <Overlay kind={overlay} />}
       </ul>
     </div>
   );

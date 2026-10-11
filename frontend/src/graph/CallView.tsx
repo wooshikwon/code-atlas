@@ -11,6 +11,7 @@ import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { AtlasNode } from "../api/types";
 import type { History } from "../state/history";
+import { useOverlay } from "../state/overlay";
 import { useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
@@ -20,7 +21,8 @@ import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { flowNodes, parts, type Drawn } from "./nodes/common";
-import { tipOf } from "./tips";
+import { UNUSED_OPACITY } from "./overlay";
+import { nodeTip, tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { GROUP_NAMES, KIND_NAMES } from "./names";
 import type { EdgeKey } from "./scope";
@@ -28,6 +30,8 @@ import { boundsOf, fitPadding, FRAME_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN }
 import { hidden, nodeIndex } from "./visible";
 
 const nodeTypes: NodeTypes = { call: CallNode };
+/** 함수 시점 뷰는 파일 사이의 import 선을 그리지 않으므로 순환 선이 없다. */
+const NO_CYCLES = new Set<EdgeKey>();
 
 /** 배치 한 번과 그 배치를 만든 입력. 노드와 선은 늘 같은 Scene에서 만든다. */
 interface Scene {
@@ -36,8 +40,14 @@ interface Scene {
   layout: Layout;
 }
 
-/** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. */
-function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string | null, making: string[]): Drawn<CallNodeData>[] {
+/** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. unused는 미사용 덮개가 표시할 후보다. */
+function itemsOf(
+  scene: Scene,
+  nodes: Map<string, AtlasNode>,
+  selected: string | null,
+  making: string[],
+  unused: Set<string>,
+): Drawn<CallNodeData>[] {
   return scene.calls.nodes.map((id) => {
     const node = nodes.get(id)!;
     const data = parts({
@@ -50,12 +60,15 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string |
       inflow: null,
       unresolved: node.unresolved,
       busy: making.includes(id) ? 1 : 0,
+      cycle: null,
+      unused: unused.has(id),
+      candidates: 0,
       label: callLabel(nodes, node),
       file: fileLabel(nodes, node),
       side: scene.calls.side.get(id)!,
       more: scene.calls.more.has(id),
     });
-    return { id, type: "call", opacity: 1, ...data };
+    return { id, type: "call", opacity: unused.has(id) ? UNUSED_OPACITY : 1, ...data };
   });
 }
 
@@ -69,6 +82,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const open = useAtlas((s) => s.open);
   const expandFunction = useAtlas((s) => s.expandFunction);
   const making = useSummaries(makingKey);
+  const overlay = useOverlay((s) => s.kind);
+  const candidates = useOverlay((s) => s.unused);
   const { setViewport } = useReactFlow();
   const selected = selection?.type === "node" ? selection.id : null;
 
@@ -89,6 +104,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const clicked = useRef<{ id: string; from: History } | null>(null);
 
   const index = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
+  const unused = useMemo(() => (overlay === "unused" ? candidates : new Set<string>()), [overlay, candidates]);
   const calls = useMemo(
     () => (graph === null ? null : callview(graph, center, expanded, hidden(graph, { showTests, showExternal }))),
     [graph, center, expanded, showTests, showExternal],
@@ -111,7 +127,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     if (scene === null || index === null) {
       return;
     }
-    const items = itemsOf(scene, index, selected, makingOf(making));
+    const items = itemsOf(scene, index, selected, makingOf(making), unused);
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
@@ -144,13 +160,13 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, index, selected, making, setViewport]);
+  }, [scene, index, selected, making, unused, setViewport]);
 
   const edges = useMemo((): AtlasFlowEdge[] => {
     if (scene === null) {
       return [];
     }
-    return flowEdges(callEdges(scene.calls, scene.center, scene.layout), pointed);
+    return flowEdges(callEdges(scene.calls, scene.center, scene.layout), pointed, NO_CYCLES);
   }, [scene, pointed]);
 
   /**
@@ -206,7 +222,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. */
   const onNodeOver: NodeMouseHandler<CallFlowNode> = (event, node) => {
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
-    tip.current?.show(tipOf(event.target) ?? `${title} · ${KIND_NAMES[node.data.node.kind]}`, event.clientX, event.clientY);
+    tip.current?.show(tipOf(event.target) ?? nodeTip(title, KIND_NAMES[node.data.node.kind], node.data.unused), event.clientX, event.clientY);
   };
   const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
     setPointed(edge.id);
@@ -235,7 +251,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   }
 
   return (
-    <div className="graph" ref={root} data-moving={moving ? "" : undefined}>
+    <div className="graph" ref={root} data-moving={moving ? "" : undefined} data-overlay={overlay ?? undefined}>
       <Markers />
       <ReactFlow
         nodes={nodes}

@@ -1,8 +1,10 @@
 // 상단 줄의 토글 세 개. 줄 폭이 넉넉하면 줄에 나란히 그리고, 모자라면 "설정" 버튼 아래 목록으로 접는다.
+// 접은 목록은 토글 아래 "분석 덮개" 구역에 덮개를 고르는 행을 함께 담는다.
 // 어느 쪽으로 그릴지는 nav/fit.ts가 상단 줄에 적는 단계(data-fit)가 정한다.
 import { useLayoutEffect, useRef, useState } from "react";
 import { useAtlas } from "../state/store";
 import { useDismiss } from "./menu";
+import { OverlayOptions } from "./Overlays";
 
 export function Toggles() {
   const showTests = useAtlas((s) => s.showTests);
@@ -50,6 +52,10 @@ export function Toggles() {
           <input type="checkbox" checked={autoSummary} onChange={toggleAutoSummary} />
           자동 요약
         </label>
+        <div className="toolbar-toggles-overlays" role="group" aria-label="분석 덮개">
+          <span className="toolbar-toggles-label">분석 덮개</span>
+          <OverlayOptions />
+        </div>
       </div>
     </div>
   );

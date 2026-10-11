@@ -6,7 +6,7 @@ import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
 import { BADGE_OVERHANG, CIRCLE_GAP, ENTRY_MARK, labelOf, type Box } from "../layout";
-import { busyTip, CHANGE_TIPS, ENTRY_TIP, globalTip, inflowTip, locTip, unresolvedTip } from "../tips";
+import { busyTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, inflowTip, locTip, unresolvedTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
@@ -27,6 +27,12 @@ export interface AtlasNodeData extends Record<string, unknown> {
   unresolved: number;
   /** 이 노드와 이 노드로 올린 안쪽 노드 가운데 LLM 요약을 만드는 중인 노드 수 */
   busy: number;
+  /** 순환 아이콘을 다는 상자면 묶음마다 든 파일의 이름표. 아니면 null이다. */
+  cycle: string[][] | null;
+  /** 미사용 덮개가 표시하는 후보다 */
+  unused: boolean;
+  /** 접힌 파일 상자 아래에 적는 미사용 후보 수. 미사용 덮개를 껐으면 0이다. */
+  candidates: number;
 }
 
 export type AtlasFlowNode = Node<AtlasNodeData>;
@@ -96,6 +102,7 @@ export function Handles({ data }: { data: AtlasNodeData }) {
 /**
  * 노드 뿌리 요소의 속성. 바탕 요소는 `node-body`, 글자 요소는 `node-face`를 받는다. 흐름에 든 노드는 `data-flow`를,
  * 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을, 마지막 커밋 뒤에 바뀐 노드는 `data-change`를 받는다.
+ * 순환 아이콘을 다는 상자는 `data-cycle`을, 미사용 덮개가 표시하는 후보는 `data-unused`를 받는다.
  */
 export function nodeProps(base: string, data: AtlasNodeData, change: Change | null) {
   return {
@@ -103,6 +110,8 @@ export function nodeProps(base: string, data: AtlasNodeData, change: Change | nu
     "data-flow": data.flow ? "" : undefined,
     "data-local": data.local ? "" : undefined,
     "data-change": change ?? undefined,
+    "data-cycle": data.cycle !== null ? "" : undefined,
+    "data-unused": data.unused ? "" : undefined,
   };
 }
 
@@ -115,9 +124,22 @@ export function EntryMark({ className }: { className?: string }) {
   );
 }
 
+/** 순환 아이콘 ⟳. 12px 칸에 그리고 폭은 layout.ts의 CYCLE_MARK_WIDTH가 잡는다. tip을 주면 마우스를 올렸을 때 말풍선이 뜬다. */
+export function CycleMark({ tip }: { tip?: string }) {
+  return (
+    <span className="cycle-mark" role="img" aria-label="순환 묶음" data-tip={tip}>
+      <svg viewBox="0 0 12 12" width={12} height={12}>
+        <path d="M10 6 A4 4 0 1 1 8 2.54" />
+        <path d="M8.5 0.5 L8.2 2.7 L6 2.4" />
+      </svg>
+    </span>
+  );
+}
+
 export function Label({ data, bold = false }: { data: AtlasNodeData; bold?: boolean }) {
   return (
     <span className={bold ? "node-label node-label-bold" : "node-label"}>
+      {data.cycle !== null && <CycleMark tip={cycleTip(data.node, data.cycle)} />}
       {data.node.entry && <EntryMark className="node-entry" />}
       {labelOf(data.node)}
     </span>

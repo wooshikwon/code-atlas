@@ -48,6 +48,31 @@ export function locTip(node: AtlasNode): string {
   return `줄 수 ${node.loc}줄 · 빈 줄을 뺀 수`;
 }
 
+const CYCLE_NAMES_MAX = 5;
+
+/**
+ * 순환 아이콘. groups는 묶음마다 든 파일의 이름표다. 묶음마다 파일 이름을 한 줄에 적고 여섯 개부터는 "외 k개"로 줄인다.
+ * 접힌 폴더 상자는 안에 든 파일의 묶음임을 밝히고, 묶음이 여럿이면 묶음 수를 적는다.
+ */
+export function cycleTip(node: AtlasNode, groups: string[][]): string {
+  const inside = node.kind === "package" ? " · 이 폴더 안의 파일이 든 묶음" : "";
+  const names = (files: string[]) => {
+    const rest = files.length - CYCLE_NAMES_MAX;
+    return files.slice(0, CYCLE_NAMES_MAX).join(", ") + (rest > 0 ? ` 외 ${rest}개` : "");
+  };
+  if (groups.length === 1) {
+    return `순환 묶음: 파일 ${groups[0].length}개가 서로를 import해 돌아온다${inside}\n${names(groups[0])}`;
+  }
+  return [`순환 묶음 ${groups.length}개${inside}`, ...groups.map((files) => `파일 ${files.length}개: ${names(files)}`)].join("\n");
+}
+
+export const UNUSED_TIP = "미사용 후보 · 들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다";
+
+/** 노드의 말풍선. 이름과 종류를 적고, 미사용 덮개가 표시한 후보면 둘째 줄에 그 뜻을 적는다. */
+export function nodeTip(title: string, kind: string, unused: boolean): string {
+  return unused ? `${title} · ${kind}\n${UNUSED_TIP}` : `${title} · ${kind}`;
+}
+
 /** 마우스 아래 요소나 그 조상이 담은 말풍선 글. 없으면 null이다. */
 export function tipOf(target: EventTarget | null): string | null {
   return target instanceof Element ? (target.closest<HTMLElement>("[data-tip]")?.dataset.tip ?? null) : null;

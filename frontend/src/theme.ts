@@ -15,11 +15,13 @@ export interface Colors {
   changed: string;
   /** 변경 표시: 마지막 커밋에 없다 */
   added: string;
+  /** 순환 덮개의 순환 선 */
+  critical: string;
 }
 
 const PALETTE: Record<Theme, Colors> = {
-  light: { surface: "#fcfcfb", ink: "#0b0b0b", muted: "#898781", loc: "#1d8169", changed: "#eb6834", added: "#2a78d6" },
-  dark: { surface: "#1a1a19", ink: "#ffffff", muted: "#898781", loc: "#3fb79a", changed: "#d95926", added: "#3987e5" },
+  light: { surface: "#fcfcfb", ink: "#0b0b0b", muted: "#898781", loc: "#1d8169", changed: "#eb6834", added: "#2a78d6", critical: "#d03b3b" },
+  dark: { surface: "#1a1a19", ink: "#ffffff", muted: "#898781", loc: "#3fb79a", changed: "#d95926", added: "#3987e5", critical: "#d03b3b" },
 };
 
 export function colors(theme: Theme): Colors {

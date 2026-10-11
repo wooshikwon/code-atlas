@@ -1,4 +1,5 @@
 // 관계 그래프 위에 떠 있는 정보 패널. 저장소의 선택을 머리 줄, LLM 요약 칸, 지점 목록, 코드 뷰어로 바꾼다.
+// 아무것도 고르지 않았으면 레포 머리 줄 아래에 켠 분석 덮개의 요약을 보인다.
 import { useMemo, useState } from "react";
 import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
@@ -9,6 +10,7 @@ import { focusOf } from "../state/history";
 import { useAtlas, type Selection } from "../state/store";
 import { Header, type HeaderItem, type PickedEdge } from "./Header";
 import { useOpened } from "./opened";
+import { Overview } from "./Overview";
 import type { Dir } from "./rect";
 import { Sites } from "./Sites";
 import { Summary } from "./Summary";
@@ -144,6 +146,7 @@ export function InfoPanel() {
           <div className="info-panel-head" onPointerDown={grip("move")} onDoubleClick={reset} title="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다">
             <Header item={item} nodes={index.nodes} />
           </div>
+          {item.type === "repo" && <Overview nodes={index.nodes} />}
           {node !== undefined && SUMMARIZED.has(node.kind) && <Summary node={node.id} />}
           {file === null && edge !== null && <Sites sites={edge.sites} opened={site} open={(picked) => setOpened({ selection, site: picked })} />}
           {code !== null && <CodeView {...code} />}

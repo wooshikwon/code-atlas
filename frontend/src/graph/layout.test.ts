@@ -3,7 +3,7 @@ import type { ElkNode } from "elkjs/lib/elk-api";
 import { describe, expect, it } from "vitest";
 import type { AtlasNode, Graph } from "../api/types";
 import { columns } from "./columns";
-import { repoFixture } from "./fixture";
+import { repoFixture, routeFixture } from "./fixture";
 import { flow } from "./flow";
 import {
   arrange,
@@ -13,6 +13,7 @@ import {
   CIRCLE_GAP,
   elkGraphs,
   labelOf,
+  moduleCaption,
   sideRoute,
   titleOf,
   type Box,
@@ -130,6 +131,26 @@ describe("elkGraphs", () => {
     expect(region.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("pkg/") + 32}, 44)`);
     const folded = elkGraphs(repoFixture, shownFor(null, ["pkg"]), cols, measure);
     expect(find(folded.components[0], "pkg")).toMatchObject({ width: measure("pkg/") + 36, height: 40 });
+  });
+
+  it("순환 아이콘을 다는 접힌 폴더 상자는 아이콘의 폭을 더하고, 파일 상자와 펼친 폴더 영역의 크기는 그대로다", () => {
+    const routeCols = columns(routeFixture, toggles);
+    const input = (collapsed: string[]) => {
+      const visible = shown(routeFixture, { ...toggles, collapsed: new Set(collapsed), flow: null });
+      const built = elkGraphs(routeFixture, visible, routeCols, measure);
+      return { id: "all", children: [...built.components, ...built.shelf] };
+    };
+    const folded = input(["ring", "lazy"]);
+    expect(find(folded, "ring")).toMatchObject({ width: measure("ring/") + 16 + 36, height: 40 });
+    expect(find(folded, "lazy")).toMatchObject({ width: measure("lazy/") + 36, height: 40 });
+    const open = input([]);
+    expect(find(open, "ring.a")).toMatchObject({ width: 320, height: 40 });
+    expect(find(open, "ring")!.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("ring/") + 32}, 44)`);
+  });
+
+  it("접힌 파일 상자 아래 글자는 미사용 후보가 있을 때만 그 수를 붙인다", () => {
+    expect(moduleCaption(nodes.get("main")!, 13, 0)).toBe("함수 13개");
+    expect(moduleCaption(nodes.get("main")!, 13, 3)).toBe("함수 13개 · 미사용 후보 3");
   });
 
   it("펼친 파일 상자는 머리 줄 여백을 두고 안의 노드를 소스 정의 순서로 품는다", () => {
