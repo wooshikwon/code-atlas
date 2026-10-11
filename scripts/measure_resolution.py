@@ -1,9 +1,9 @@
 """호출 지점의 basedpyright 해석 결과를 표본으로 뽑아 직접 확인한 대상과 대조한다.
 
-    measure_resolution.py <레포> [--seed 0] [--n 100] [--out PATH] [--force]
+    measure_resolution.py <레포> [--python P] [--seed 0] [--n 100] [--out PATH] [--force]
     measure_resolution.py --report [--out PATH]
 
-첫 형식은 분석을 돌려 `status: builtin`을 뺀 호출 지점의 상태별 비율을 출력하고, 고정 시드로 뽑은 표본을
+첫 형식은 캐시를 읽지 않고 분석을 돌려 `status: builtin`을 뺀 호출 지점의 상태별 비율을 출력하고, 고정 시드로 뽑은 표본을
 한 줄에 지점 하나씩 JSONL로 쓴다. 표본 줄의 `manual_target`·`verdict`·`manual_note`·`reason`은 비워 두고
 코드를 읽어 직접 채운다. `--report`는 채운 JSONL을 읽어 일치율, 불일치 목록, 미확인 사유별 수를 마크다운 표로 출력한다.
 
@@ -27,11 +27,12 @@ DEFAULT_OUT = Path.home() / "data" / "code-atlas" / "resolution-sample.jsonl"
 VERDICTS = ("match", "mismatch", "unresolved")
 
 
-def _sample(repo: str, seed: int, n: int, out: Path, force: bool) -> int:
+def _sample(repo: str, python: str | None, seed: int, n: int, out: Path, force: bool) -> int:
     if out.exists() and not force:
         print(f"{out}가 이미 있다. 직접 채운 판정을 덮어쓰려면 --force를 준다.", file=sys.stderr)
         return 2
-    analysis, files = analyze(repo)
+    analyzed = analyze(repo, python, cache=False)
+    analysis, files = analyzed.analysis, analyzed.files
     calls = [s for s in analysis.sites if s.kind == "call" and s.status != "builtin"]
     counts = Counter(s.status for s in calls)
     print(f"호출 지점 {len(calls)}개 (builtin 제외)")
@@ -102,6 +103,7 @@ def _report(out: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="호출 해석률 표본 측정")
     parser.add_argument("repo", nargs="?")
+    parser.add_argument("--python", help="대상 레포의 파이썬 인터프리터 경로")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n", type=int, default=100)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
@@ -112,7 +114,7 @@ def main() -> int:
         return _report(args.out)
     if args.repo is None:
         parser.error("레포 경로가 필요하다")
-    return _sample(args.repo, args.seed, args.n, args.out, args.force)
+    return _sample(args.repo, args.python, args.seed, args.n, args.out, args.force)
 
 
 if __name__ == "__main__":
