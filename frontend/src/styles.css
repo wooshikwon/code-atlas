@@ -698,6 +698,10 @@ ul {
   font-weight: 600;
 }
 
+.node-entry {
+  font-weight: 400;
+}
+
 .loc {
   margin-left: 5px;
   color: var(--loc);
@@ -1174,6 +1178,11 @@ ul {
 
 .legend-external {
   fill: color-mix(in srgb, var(--muted) 22%, var(--surface));
+}
+
+.legend-entry {
+  fill: var(--ink);
+  font-size: 11px;
 }
 
 .legend-inflow {
