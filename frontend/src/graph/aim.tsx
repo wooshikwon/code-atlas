@@ -91,6 +91,11 @@ export function useAim({ lines, boxes, tip, name, describe, only, skip, pick, op
   const state = useRef({ lines, boxes });
   state.current = { lines, boxes };
   useEffect(() => () => void usePick.getState().close(), []);
+  // 배치가 바뀌면 선이 커서 밑에서 옮겨 가므로 강조와 말풍선을 거둔다.
+  useEffect(() => {
+    setAimed([]);
+    tip.current?.hide();
+  }, [boxes, tip]);
 
   /** 커서 밑의 선. 출발 노드의 위에서 아래, 왼쪽에서 오른쪽 순서다. */
   const under = (event: ReactMouseEvent): EdgeView[] => {
