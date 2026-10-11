@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_repo"
+CYCLE_FIXTURE = Path(__file__).parent / "fixtures" / "cycle_repo"
 
 collect_ignore_glob = ["fixtures/*"]
 
