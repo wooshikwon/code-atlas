@@ -1,6 +1,7 @@
-// 토글·접은 폴더·흐름에서 화면에 보이는 노드를 정하고, 보이지 않는 노드를 보이는 가장 가까운 조상으로 올린다.
+// 토글·접은 폴더·흐름·강조하는 경로에서 화면에 보이는 노드를 정하고, 보이지 않는 노드를 보이는 가장 가까운 조상으로 올린다.
 import type { AtlasNode, Graph } from "../api/types";
 import type { Flow } from "./flow";
+import type { Lit } from "./route";
 
 export interface Shown {
   nodes: Set<string>;
@@ -83,14 +84,23 @@ function folded(nodes: Map<string, AtlasNode>, collapsed: Set<string>, node: Atl
  * 2. 파일 상자 안의 노드는 흐름이 있을 때만 남긴다. 고른 노드가 든 파일 상자는 안의 노드를 모두 남기고,
  *    다른 파일 상자는 흐름 단위가 "node"일 때 나가는 흐름에 든 노드와 고른 노드로 선을 보내는 노드만 남긴다.
  * 3. 클래스 안 메서드가 남으면 그 클래스 노드도 남긴다.
+ * 4. 강조하는 경로 lit이 있으면 흐름을 보지 않는다. 경로 위 노드를 품은 접은 폴더는 펼친 것으로 다루고,
+ *    파일 상자 안의 노드는 경로 위 노드만 남긴다.
  */
 export function shown(
   graph: Graph,
-  opts: { showTests: boolean; showExternal: boolean; collapsed: Set<string>; flow: Flow | null },
+  opts: { showTests: boolean; showExternal: boolean; collapsed: Set<string>; flow: Flow | null; lit: Lit | null },
 ): Shown {
   const nodes = nodeIndex(graph);
   const off = hidden(graph, opts);
-  const { collapsed, flow } = opts;
+  const { lit } = opts;
+  const flow = lit === null ? opts.flow : null;
+  const collapsed = new Set(opts.collapsed);
+  for (const id of lit?.nodes ?? []) {
+    for (let at = nodes.get(id); at !== undefined; at = at.parent === null ? undefined : nodes.get(at.parent)) {
+      collapsed.delete(at.id);
+    }
+  }
   const result: Shown = { nodes: new Set(), open: new Set(), hidden: off };
   for (const node of graph.nodes) {
     if (off.has(node.id) || folded(nodes, collapsed, node)) {
@@ -100,11 +110,8 @@ export function shown(
       result.nodes.add(node.id);
       continue;
     }
-    if (flow === null) {
-      continue;
-    }
-    const inFlow = flow.unit === "node" && (flow.out.has(node.id) || flow.incoming.has(node.id));
-    if (!inFlow && !local(nodes, flow, node.id)) {
+    const inFlow = flow !== null && flow.unit === "node" && (flow.out.has(node.id) || flow.incoming.has(node.id));
+    if (lit !== null ? !lit.nodes.has(node.id) : flow === null || (!inFlow && !local(nodes, flow, node.id))) {
       continue;
     }
     let inner: AtlasNode | undefined = node;

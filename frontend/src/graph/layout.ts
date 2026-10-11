@@ -63,6 +63,12 @@ export const BADGE_GAP = 3;
 /** 원과 그 오른쪽 이름표 사이의 폭. 배지가 나온 폭과 배지 뒤에 남기는 폭을 더한 값이다. */
 export const CIRCLE_GAP = BADGE_OVERHANG + BADGE_GAP;
 export const LOC_GAP = 5;
+/** 강조하는 경로의 출발 노드와 도착 노드 이름표 뒤에 적는 표지 */
+export const END_NAMES = { from: "출발", to: "도착" } as const;
+export type RouteEnd = keyof typeof END_NAMES;
+/** 표지 앞에 띄우는 폭과 표지의 좌우 안쪽 여백 */
+export const END_GAP = 6;
+export const END_PAD = 6;
 const COUNT_GAP = 12;
 const FOLDER_PAD = 36;
 /** 펼친 폴더 영역에서 폴더 경로를 적는 머리 줄의 높이 */
@@ -172,27 +178,28 @@ export function moduleHeader(node: AtlasNode, functions: number): string {
   return node.kind === "module" ? `함수 ${functions}개` : "";
 }
 
-/** 진입점 표지와 이름표의 폭. loc이 참이면 이름표 오른쪽 줄 수 숫자의 폭을 더한다. */
-function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, loc: boolean): number {
+/** 진입점 표지와 이름표의 폭. loc이 참이면 이름표 오른쪽 줄 수 숫자의 폭을, end가 있으면 출발·도착 표지의 폭을 더한다. */
+function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, loc: boolean, end?: RouteEnd): number {
   const label = measure((node.entry ? ENTRY_MARK : "") + labelOf(node), bold);
-  return loc ? label + LOC_GAP + measure(String(node.loc)) : label;
+  const tag = end === undefined ? 0 : END_GAP + measure(END_NAMES[end], true) + 2 * END_PAD;
+  return (loc ? label + LOC_GAP + measure(String(node.loc)) : label) + tag;
 }
 
-function tableSize(node: AtlasNode, measure: Measure): Size {
-  const widths = [labelWidth(node, measure, true, true), ...tableRows(node).map((r) => measure(r))];
+function tableSize(node: AtlasNode, measure: Measure, end?: RouteEnd): Size {
+  const widths = [labelWidth(node, measure, true, true, end), ...tableRows(node).map((r) => measure(r))];
   return { width: Math.ceil(Math.max(...widths)) + 16, height: tableHeight(node) };
 }
 
-/** 자식을 그리지 않는 노드의 크기 */
-function leafSize(node: AtlasNode, measure: Measure): Size {
+/** 자식을 그리지 않는 노드의 크기. 접힌 파일 상자는 폭이 정해져 있어 표지의 폭을 더하지 않는다. */
+function leafSize(node: AtlasNode, measure: Measure, end?: RouteEnd): Size {
   switch (node.kind) {
     case "function":
     case "method":
-      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true), height: LEAF_HEIGHT };
+      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true, end), height: LEAF_HEIGHT };
     case "class":
-      return { width: labelWidth(node, measure, true, false) + 28, height: HEX_HEIGHT };
+      return { width: labelWidth(node, measure, true, false, end) + 28, height: HEX_HEIGHT };
     case "dataclass":
-      return tableSize(node, measure);
+      return tableSize(node, measure, end);
     case "package":
       return { width: labelWidth(node, measure, true, false) + FOLDER_PAD, height: MODULE_HEIGHT };
     case "external":
@@ -203,14 +210,14 @@ function leafSize(node: AtlasNode, measure: Measure): Size {
 }
 
 /** 자식을 그리는 노드의 안쪽 여백과 최소 크기. 펼친 폴더 영역은 머리 줄에 폴더 경로만 적는다. */
-function boxOptions(node: AtlasNode, functions: number, measure: Measure): Record<string, string> {
+function boxOptions(node: AtlasNode, functions: number, measure: Measure, end?: RouteEnd): Record<string, string> {
   let top = node.kind === "package" ? REGION_HEAD : HEADER;
-  let minWidth = labelWidth(node, measure, true, node.kind === "module") + 2 * PAD;
+  let minWidth = labelWidth(node, measure, true, node.kind === "module", end) + 2 * PAD;
   if (node.kind === "module") {
     minWidth += COUNT_GAP + measure(moduleHeader(node, functions));
   }
   if (node.kind === "dataclass") {
-    const table = tableSize(node, measure);
+    const table = tableSize(node, measure, end);
     top = table.height + PAD;
     minWidth = table.width;
   }
@@ -275,8 +282,9 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
 /**
  * 보이는 노드를 연결 묶음마다 parent 사슬로 중첩한 ELK 입력. 자식을 그리는 노드마다 따로 배치하므로 선은 형제 사이로
  * 올려 그 부모에 선언한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣는다.
+ * ends는 강조하는 경로의 출발 노드와 도착 노드이고, 그 노드의 크기에 표지의 폭을 더한다.
  */
-export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure: Measure): ElkInput {
+export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure: Measure, ends: Map<string, RouteEnd>): ElkInput {
   const nodes = nodeIndex(graph);
   const children = new Map<string, AtlasNode[]>();
   for (const node of graph.nodes) {
@@ -306,11 +314,11 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
         id: node.id,
         children: kids.map(build),
         edges: edgesOf(node.id),
-        layoutOptions: { ...ELK_OPTIONS, ...options, ...boxOptions(node, functions.get(node.id) ?? 0, measure) },
+        layoutOptions: { ...ELK_OPTIONS, ...options, ...boxOptions(node, functions.get(node.id) ?? 0, measure, ends.get(node.id)) },
       };
     }
     if (node.kind !== "module") {
-      return { id: node.id, ...leafSize(node, measure), layoutOptions: options };
+      return { id: node.id, ...leafSize(node, measure, ends.get(node.id)), layoutOptions: options };
     }
     const caption = moduleHeader(node, functions.get(node.id) ?? 0);
     return {
@@ -429,6 +437,19 @@ export function belowRoute(source: Box, target: Box): Point[] {
 }
 
 /**
+ * 한쪽이 다른 쪽을 품은 두 상자를 잇는 경로. 안쪽 상자의 왼쪽 변 가운데와 같은 높이의 바깥 상자 왼쪽 변을 가로로 잇는다.
+ * 클래스에서 그 생성자 메서드로 가는 걸음처럼 품은 노드와 안의 노드를 잇는 경로의 걸음이 쓴다.
+ */
+export function insideRoute(source: Box, target: Box): Point[] {
+  const inner = source.x > target.x ? source : target;
+  const y = inner.y + inner.height / 2;
+  return [
+    { x: source.x, y },
+    { x: target.x, y },
+  ];
+}
+
+/**
  * 배치가 경로를 내지 않은 선의 경로. 진입점 단위 사이 선이 이 경로를 쓴다. 화면에 보이는 양 끝 상자의 위치로 정한다.
  * 도착 상자가 오른쪽에 있으면 출발 상자의 오른쪽 변 가운데에서 나와 도착 상자 `ROUTE_GAP` 앞에서 세로로 꺾어 왼쪽 변 가운데로
  * 들어간다. 도착 상자가 왼쪽에 있으면 좌우를 뒤집은 경로다. 두 상자가 가로로 겹치면 같은 열이므로 두 상자의 오른쪽
@@ -477,9 +498,9 @@ export const runElk: RunElk = (input) => {
   return elk.layout(input);
 };
 
-export async function layout(graph: Graph, shown: Shown, columns: Columns): Promise<Layout> {
+export async function layout(graph: Graph, shown: Shown, columns: Columns, ends: Map<string, RouteEnd>): Promise<Layout> {
   const started = performance.now();
-  const result = await arrange(elkGraphs(graph, shown, columns, measureText), runElk);
+  const result = await arrange(elkGraphs(graph, shown, columns, measureText, ends), runElk);
   console.info(`layout ${shown.nodes.size} nodes ${Math.round(performance.now() - started)}ms`);
   return result;
 }

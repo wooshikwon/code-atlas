@@ -50,6 +50,7 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, selected: string |
       inflow: null,
       unresolved: node.unresolved,
       busy: making.includes(id) ? 1 : 0,
+      route: null,
       label: callLabel(nodes, node),
       file: fileLabel(nodes, node),
       side: scene.calls.side.get(id)!,
