@@ -1,6 +1,7 @@
 // 보이는 노드 사이에 그릴 선과 편재 노드를 정한다. 배치와 독립이므로 선을 바꿔 그려도 layout을 다시 부르지 않는다.
 import type { AtlasEdge, AtlasNode, EdgeGroup, EdgeKind, Graph } from "../api/types";
 import type { Flow } from "./flow";
+import type { Lit, StepKind } from "./route";
 import { lift, local, nodeIndex, unitOf, within, type Shown } from "./visible";
 
 export type EdgeKey = string;
@@ -8,7 +9,10 @@ export type EdgeKey = string;
 /** 선의 진하기. strong은 본문 잉크, muted는 muted 잉크로 그린다. */
 export type Tone = "strong" | "muted";
 
-/** 화면에 그리는 선 하나. 양 끝을 올려 합친 집계 선은 `agg|…` 키를, 올리지 않은 선은 edge_key를 쓴다. */
+/**
+ * 화면에 그리는 선 하나. 양 끝을 올려 합친 집계 선은 `agg|…` 키를, 올리지 않은 선은 edge_key를 쓴다.
+ * 경로의 걸음 가운데 실행 선이 없는 이음은 `step|…` 키를 쓰고 edges가 비어 있다.
+ */
 export interface DrawnEdge {
   key: EdgeKey;
   source: string;
@@ -22,11 +26,14 @@ export interface DrawnEdge {
   deferred: boolean;
   /** 합친 원래 선 */
   edges: AtlasEdge[];
+  /** 강조하는 경로의 걸음을 그리는 선이면 그 걸음의 종류 */
+  route: StepKind | null;
 }
 
 /**
  * 선의 불투명도. 고른 노드가 없으면 모든 선이 IDLE이라 노드의 테두리와 글자보다 연하다. 노드를 고르면 고른 노드에 닿는 선과
- * 흐름에 든 노드 사이의 선은 FULL, 그 밖의 선은 REST다. 선 가운데 숫자는 선과 같은 색과 불투명도로 그린다.
+ * 흐름에 든 노드 사이의 선은 FULL, 그 밖의 선은 REST다. 경로를 강조하는 동안에는 경로의 걸음이 FULL, 그 밖의 선이 REST다.
+ * 선 가운데 숫자는 선과 같은 색과 불투명도로 그린다.
  */
 export const EDGE_OPACITY = { full: 1, idle: 0.5, rest: 0.2 } as const;
 
@@ -39,6 +46,10 @@ export function edgeKey(edge: AtlasEdge): EdgeKey {
 
 export function aggKey(source: string, target: string): EdgeKey {
   return `agg|${source}|${target}`;
+}
+
+export function stepKey(source: string, target: string): EdgeKey {
+  return `step|${source}|${target}`;
 }
 
 /** 노드가 든 파일 상자를 화면에 보이는 가장 가까운 상자로 올린다. */
@@ -109,16 +120,23 @@ export function concealed(graph: Graph, shown: Shown, flow: Flow | null): Map<st
   return result;
 }
 
-function merge(
-  key: EdgeKey,
-  source: string,
-  target: string,
-  edges: AtlasEdge[],
-  flow: Flow | null,
-  member: (id: string) => boolean,
-): DrawnEdge {
+type Shade = Pick<DrawnEdge, "tone" | "opacity" | "route">;
+
+/** 흐름에서 정한 선의 진하기. edges는 선 하나에 합친 원래 선이다. */
+function shadeOf(edges: AtlasEdge[], flow: Flow | null, member: (id: string) => boolean): Shade {
+  const touching = flow !== null && edges.some((e) => flow.seeds.has(e.source) !== flow.seeds.has(e.target));
+  const inFlow = touching || edges.some((e) => member(e.source) && member(e.target));
+  return {
+    tone: touching ? "strong" : "muted",
+    opacity: flow === null ? EDGE_OPACITY.idle : inFlow ? EDGE_OPACITY.full : EDGE_OPACITY.rest,
+    route: null,
+  };
+}
+
+/** 원래 선 edges를 선 하나로 합친다. edges가 비면 분류는 실행이고 무게는 0이다. */
+function merge(key: EdgeKey, source: string, target: string, edges: AtlasEdge[], shade: Shade): DrawnEdge {
   const kinds: DrawnEdge["kinds"] = {};
-  let group = edges[0].group;
+  let group = edges[0]?.group ?? "run";
   let weight = 0;
   for (const edge of edges) {
     weight += edge.sites.length;
@@ -127,20 +145,27 @@ function merge(
       group = edge.group;
     }
   }
-  const touching = flow !== null && edges.some((e) => flow.seeds.has(e.source) !== flow.seeds.has(e.target));
-  const inFlow = touching || edges.some((e) => member(e.source) && member(e.target));
-  return {
-    key,
-    source,
-    target,
-    group,
-    weight,
-    kinds,
-    tone: touching ? "strong" : "muted",
-    opacity: flow === null ? EDGE_OPACITY.idle : inFlow ? EDGE_OPACITY.full : EDGE_OPACITY.rest,
-    deferred: edges.every((e) => e.deferred),
-    edges,
-  };
+  return { key, source, target, group, weight, kinds, ...shade, deferred: edges.length > 0 && edges.every((e) => e.deferred), edges };
+}
+
+/**
+ * 강조하는 경로의 걸음마다 선 하나. 실행 선이 있는 걸음은 그 선의 edge_key와 원래 선을 담고, 생성자 이음과 오버라이드 이음은
+ * `step|…` 키에 원래 선 없이 낸다.
+ */
+function strides(graph: Graph, lit: Lit): DrawnEdge[] {
+  const shade = (route: StepKind): Shade => ({ tone: "strong", opacity: EDGE_OPACITY.full, route });
+  const result: DrawnEdge[] = [];
+  for (let i = 0; i + 1 < lit.path.length; i++) {
+    const [source, target] = [lit.path[i], lit.path[i + 1]];
+    const kind = lit.kinds.get(`${source}|${target}`)!;
+    const edge = graph.edges.find((e) => e.source === source && e.target === target && e.kind === kind);
+    result.push(
+      edge === undefined
+        ? merge(stepKey(source, target), source, target, [], shade(kind))
+        : merge(edgeKey(edge), source, target, [edge], shade(kind)),
+    );
+  }
+  return result;
 }
 
 /**
@@ -151,11 +176,17 @@ function merge(
  *    마우스를 올린 노드에 닿는 선은 모두 그린다.
  * 3. 편재 노드로 들어오는 접힌 상자 사이의 선은 뺀다. 편재 노드나 편재 노드를 쓰는 노드를 고르면 다시 넣는다.
  * 올린 양 끝이 같은 선은 집계 규칙으로 합치고, 올린 양 끝이 같거나 한쪽이 다른 쪽의 조상인 선은 버린다.
- * 선의 진하기는 네 단계다. 고른 노드에 닿는 선(고른 노드와 그 자손의 경계를 넘는 선)은 strong에 불투명도 1,
+ * 선의 진하기는 다섯 단계이고 경로 고정이 가장 앞선다. 강조하는 경로 lit이 있으면 흐름과 hover를 보지 않고,
+ * 경로의 걸음마다 선 하나를 strong에 불투명도 1로, 접힌 상자 사이의 선을 muted에 불투명도 0.2로 그린다.
+ * lit이 없으면 고른 노드에 닿는 선(고른 노드와 그 자손의 경계를 넘는 선)은 strong에 불투명도 1,
  * 흐름에 든 노드 사이의 선은 muted에 불투명도 1, 그 밖의 선은 muted에 불투명도 0.2다. 고른 노드가 없으면
  * 모두 muted에 불투명도 0.5다.
  */
-export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: string | null): DrawnEdge[] {
+export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: string | null, lit: Lit | null): DrawnEdge[] {
+  if (lit !== null) {
+    flow = null;
+    hover = null;
+  }
   const nodes = nodeIndex(graph);
   const closed = (id: string) => BOX_KINDS.has(nodes.get(id)!.kind) && !shown.open.has(id);
   const member = (id: string) =>
@@ -163,7 +194,13 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
 
   const off = concealed(graph, shown, flow);
 
+  const shade = (edges: AtlasEdge[]): Shade =>
+    lit === null ? shadeOf(edges, flow, member) : { tone: "muted", opacity: EDGE_OPACITY.rest, route: null };
+
   const inScope = (edge: AtlasEdge, source: string, target: string): boolean => {
+    if (lit !== null) {
+      return closed(source) && closed(target) && !off.has(target);
+    }
     if (flow === null) {
       return !off.has(target);
     }
@@ -206,12 +243,12 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
   const result: DrawnEdge[] = [];
   for (const { source, target, edges, lifted } of pairs.values()) {
     if (lifted) {
-      result.push(merge(aggKey(source, target), source, target, edges, flow, member));
+      result.push(merge(aggKey(source, target), source, target, edges, shade(edges)));
     } else {
-      result.push(...edges.map((e) => merge(edgeKey(e), source, target, [e], flow, member)));
+      result.push(...edges.map((e) => merge(edgeKey(e), source, target, [e], shade([e]))));
     }
   }
-  return result;
+  return lit === null ? result : [...result, ...strides(graph, lit)];
 }
 
 /**
@@ -237,10 +274,10 @@ export function picked(graph: Graph, shown: Shown, flow: Flow | null, key: EdgeK
   const [tag, source, target] = key.split("|");
   if (tag !== "agg") {
     const edge = graph.edges.find((e) => edgeKey(e) === key);
-    return edge === undefined ? null : merge(key, edge.source, edge.target, [edge], null, () => false);
+    return edge === undefined ? null : merge(key, edge.source, edge.target, [edge], shadeOf([edge], null, () => false));
   }
   for (const hover of [null, source, target]) {
-    const found = drawn(graph, shown, flow, hover).find((e) => e.key === key);
+    const found = drawn(graph, shown, flow, hover, null).find((e) => e.key === key);
     if (found !== undefined) {
       return found;
     }

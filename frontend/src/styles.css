@@ -1855,3 +1855,47 @@ ul {
 .info-panel-resize[data-dir$="w"] {
   left: 0;
 }
+
+/* 경로 고정 */
+
+/* 경로의 걸음은 3px로 그리고 실행 선이 없는 생성자 이음과 오버라이드 이음은 점선으로 그린다. 색과 불투명도는 graph/scope.ts의
+   drawn이 본문 잉크 100%로 정한다. 마우스를 올리면 다른 선처럼 1px 굵어진다. */
+.edge[data-route] .edge-line {
+  stroke-width: 3;
+}
+
+.edge:is([data-route="init"], [data-route="overridden"]) .edge-line {
+  stroke-dasharray: 4 3;
+}
+
+.edge[data-route][data-pointed] .edge-line {
+  stroke-width: 4;
+}
+
+/* 출발 노드와 도착 노드의 표지. 앞 간격과 좌우 여백은 layout.ts의 END_GAP과 END_PAD를 컴포넌트가 넣는다. */
+.route-end {
+  flex: none;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+/* 경로 고정 중에는 경로 위 노드([data-route])와 걸음만 누를 수 있다. 그 밖의 노드·선·파일 상자 머리 줄·폴더 영역 머리 줄은
+   누를 수 없음을 커서로 보이고 마우스를 올려도 바탕을 바꾸지 않는다. */
+.graph[data-pinned] :is(.node-package, .node-module, .node-class, .node-dataclass, .node-function, .node-external):not([data-route], .node-module-open),
+.graph[data-pinned] :not([data-route]) > :is(.node-module-head, .node-region-head),
+.graph[data-pinned] .edge:not([data-route]) :is(.edge-hit, .edge-line, .edge-weight) {
+  cursor: not-allowed;
+}
+
+.graph[data-pinned] .edge[data-route] .edge-line {
+  cursor: pointer;
+}
+
+.graph[data-pinned] :not([data-route]) > :is(.node-module-head, .node-region-head):hover {
+  background: none;
+}

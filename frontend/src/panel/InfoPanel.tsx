@@ -80,7 +80,7 @@ export function InfoPanel() {
     const off = hidden(graph, toggles);
     const focus = focusOf(selection);
     const focused = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
-    return { flow: focused, shown: shown(graph, { ...toggles, collapsed, flow: focused }) };
+    return { flow: focused, shown: shown(graph, { ...toggles, collapsed, flow: focused, lit: null }) };
   }, [graph, index, selection, showTests, showExternal, collapsed, depth]);
 
   const edge = useMemo(() => {
@@ -98,7 +98,7 @@ export function InfoPanel() {
     if (graph === null || index === null || scene === null || node === undefined || !UNITS.has(node.kind)) {
       return null;
     }
-    const { external, ...counts } = neighbors(drawn(graph, scene.shown, scene.flow, null), index.nodes, node.id);
+    const { external, ...counts } = neighbors(drawn(graph, scene.shown, scene.flow, null, null), index.nodes, node.id);
     return {
       ...counts,
       external: showExternal ? external : null,

@@ -1,7 +1,8 @@
 // 그릴 선과 배치를 합쳐 노드와 선 컴포넌트가 그대로 그리는 값을 만든다.
 import type { AtlasNode, EdgeGroup, Graph } from "../api/types";
 import { siblings } from "./columns";
-import { BADGE_HEIGHT, BADGE_OVERHANG, belowRoute, CAPTION_HEIGHT, HEADER, REGION_HEAD, sideRoute, type Box, type Layout, type Point } from "./layout";
+import { BADGE_HEIGHT, BADGE_OVERHANG, belowRoute, CAPTION_HEIGHT, HEADER, insideRoute, REGION_HEAD, sideRoute, type Box, type Layout, type Point } from "./layout";
+import type { StepKind } from "./route";
 import { aggKey, type DrawnEdge, type EdgeKey, type Tone } from "./scope";
 
 export type EdgeView = {
@@ -16,6 +17,8 @@ export type EdgeView = {
   weight: { count: number; at: Point } | null;
   /** 합친 선의 sites 수 합 */
   sites: number;
+  /** 강조하는 경로의 걸음을 그리는 선이면 그 걸음의 종류 */
+  route: StepKind | null;
 };
 
 /** 부모가 자식보다 앞에 오는 순서. 같은 층의 바탕 요소는 이 순서로 그리므로 부모 위에 자식이 놓인다. */
@@ -70,8 +73,9 @@ function alongRoute(trunk: Point[], source: Box | null, target: Box | null): Poi
 
 /**
  * 그릴 선마다 경로를 정한다. 배치가 낸 경로를 먼저 쓴다. 없으면 함수 안 import만 합친 선은 `belowRoute`로,
- * 형제가 아닌 두 노드를 잇는 선은 두 노드를 형제로 올린 상자 사이의 배치 경로를 따라가는 경로로 만들고,
- * 따라갈 경로가 없으면 `sideRoute`로 만든다. 배치에 양 끝 상자가 없는 선은 뺀다.
+ * 한쪽이 다른 쪽을 품은 두 노드를 잇는 선은 `insideRoute`로, 형제가 아닌 두 노드를 잇는 선은 두 노드를 형제로 올린
+ * 상자 사이의 배치 경로를 따라가는 경로로 만들고, 따라갈 경로가 없으면 `sideRoute`로 만든다. 오버라이드 이음은 오버라이드 선을
+ * 거꾸로 가므로 올린 상자 사이에 반대 방향 배치 경로만 있으면 그 경로를 뒤집어 따라간다. 배치에 양 끝 상자가 없는 선은 뺀다.
  */
 export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string, AtlasNode>): EdgeView[] {
   const route = (edge: DrawnEdge, source: Box, target: Box): Point[] => {
@@ -83,11 +87,13 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       return belowRoute(source, target);
     }
     const ends = siblings(nodes, edge.source, edge.target);
-    const trunk = ends === null ? undefined : layout.routes.get(aggKey(ends[0], ends[1]));
+    if (ends === null) {
+      return insideRoute(source, target);
+    }
+    const back = edge.route === "overridden" ? layout.routes.get(aggKey(ends[1], ends[0])) : undefined;
+    const trunk = layout.routes.get(aggKey(ends[0], ends[1])) ?? (back === undefined ? undefined : [...back].reverse());
     const along =
-      ends === null || trunk === undefined
-        ? null
-        : alongRoute(trunk, ends[0] === edge.source ? null : source, ends[1] === edge.target ? null : target);
+      trunk === undefined ? null : alongRoute(trunk, ends[0] === edge.source ? null : source, ends[1] === edge.target ? null : target);
     return along ?? sideRoute(source, target);
   };
 
@@ -111,6 +117,7 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       opacity: edge.opacity,
       weight: counted ? { count: edge.weight, at: weightPoint(points, String(edge.weight).length, lettered) } : null,
       sites: edge.weight,
+      route: edge.route,
     });
   }
   return views;

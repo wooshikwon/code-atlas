@@ -1,5 +1,6 @@
 // 관계 그래프. 저장소의 뷰 종류에 따라 구조 뷰나 함수 시점 뷰를 그린다. 구조 뷰는 저장소 상태에서 보이는 노드와
-// 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드로 화면을 옮긴다.
+// 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드로 화면을 옮긴다. 경로 고정 중에는 고른 노드의 흐름 대신
+// 강조하는 경로를 그리고, 경로가 바뀌면 출발 노드와 도착 노드가 함께 보이게 화면을 옮긴다.
 import {
   getViewportForBounds,
   ReactFlow,
@@ -15,24 +16,25 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import type { AtlasNode, Graph } from "../api/types";
 import { useOpened } from "../panel/opened";
 import { focusOf, type History } from "../state/history";
-import { useAtlas } from "../state/store";
+import { litOf, useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
-import { functionCounts, layout, titleOf, type Layout, type Point } from "./layout";
+import { functionCounts, layout, titleOf, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
-import { GROUP_NAMES, KIND_NAMES } from "./names";
+import { GROUP_NAMES, KIND_NAMES, STEP_NAMES } from "./names";
 import { LAYER } from "./layers";
 import { flowNodes, parts, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
+import type { Lit } from "./route";
 import { concealed, drawn, type EdgeKey } from "./scope";
 import { tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst } from "./view";
-import { boundsOf, centerOn, fitPadding, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { boundsOf, centerOn, fitPadding, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, lift, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -44,15 +46,34 @@ interface Scene {
   columns: Columns;
   shown: Shown;
   flow: Flow | null;
+  /** 경로 고정 중에 강조하는 경로. 있으면 flow와 focus는 null이다. */
+  lit: Lit | null;
   /** 초점을 둔 노드 */
   focus: string | null;
   layout: Layout;
 }
 
-function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<string, number>, making: string[]): Drawn<AtlasNodeData>[] {
+/** 강조하는 경로의 출발 노드와 도착 노드 */
+function endsOf(lit: Lit | null): Map<string, RouteEnd> {
+  const ends = new Map<string, RouteEnd>();
+  if (lit !== null) {
+    ends.set(lit.path[0], "from").set(lit.path[lit.path.length - 1], "to");
+  }
+  return ends;
+}
+
+/** selected는 선택 고리를 그리는 노드다. */
+function itemsOf(
+  scene: Scene,
+  nodes: Map<string, AtlasNode>,
+  functions: Map<string, number>,
+  making: string[],
+  selected: string | null,
+): Drawn<AtlasNodeData>[] {
   const order = parentFirst(scene.graph, scene.shown.nodes);
   const parents = new Set(order.map((n) => n.parent));
-  const dim = opacities(scene.graph, scene.flow);
+  const dim = opacities(scene.graph, scene.flow, scene.lit);
+  const ends = endsOf(scene.lit);
   const marks = concealed(scene.graph, scene.shown, scene.flow);
   const unresolved = unresolvedWithin(scene.graph, scene.shown.hidden);
   /** 화면에 보이는 노드마다, 그 노드로 올린 노드 가운데 요약을 만드는 중인 노드 수 */
@@ -64,16 +85,18 @@ function itemsOf(scene: Scene, nodes: Map<string, AtlasNode>, functions: Map<str
   return order.map((node) => {
     const opacity = dim.get(node.id) ?? 1;
     const expanded = parents.has(node.id);
+    const route: AtlasNodeData["route"] = scene.lit?.nodes.has(node.id) === true ? (ends.get(node.id) ?? "via") : null;
     const { body, face } = parts({
       node,
       functions: functions.get(node.id) ?? 0,
       expanded,
-      selected: node.id === scene.focus,
-      flow: scene.flow !== null && opacity > 0.2,
+      selected: node.id === selected,
+      flow: (scene.flow !== null || scene.lit !== null) && opacity > 0.2,
       local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
       inflow: marks.get(node.id) ?? null,
       unresolved: node.kind !== "module" && node.kind !== "package" ? node.unresolved : expanded ? 0 : (unresolved.get(node.id) ?? 0),
       busy: busy.get(node.id) ?? 0,
+      route,
     });
     return { id: node.id, type: nodeType(node.kind), opacity, body, face };
   });
@@ -106,6 +129,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const selection = useAtlas((s) => s.selection);
   const depth = useAtlas((s) => s.depth);
   const collapsed = useAtlas((s) => s.collapsed);
+  const finder = useAtlas((s) => s.finder);
   const select = useAtlas((s) => s.select);
   const selectEdge = useAtlas((s) => s.selectEdge);
   const toggleFolder = useAtlas((s) => s.toggleFolder);
@@ -131,12 +155,14 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
   const onScreen = useRef<Layout | null>(null);
-  /** 화면을 옮겨 둔 노드 */
-  const panned = useRef<string | null>(null);
+  /** 화면을 옮겨 둔 노드나 경로 */
+  const panned = useRef<string | Lit | null>(null);
   /** 직전에 한 번 누른 노드와 누르기 전의 이력. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
   const clicked = useRef<{ id: string; from: History } | null>(null);
   /** 초점을 둔 노드. 선을 골라도 직전에 고른 노드의 초점을 유지한다. */
   const focus = focusOf(selection);
+  const lit = useMemo(() => litOf(finder), [finder.route, finder.pick]);
+  const pinFocus = finder.focus;
 
   const index = useMemo(
     () => (graph === null ? null : { nodes: nodeIndex(graph), functions: functionCounts(graph) }),
@@ -151,17 +177,20 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return null;
     }
     const toggles = { showTests, showExternal };
+    if (lit !== null) {
+      return { flow: null, lit, focus: null, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
+    }
     const off = hidden(graph, toggles);
     const picked = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
-    return { flow: picked, focus: picked === null ? null : focus, shown: shown(graph, { ...toggles, collapsed, flow: picked }) };
-  }, [graph, index, showTests, showExternal, collapsed, focus, depth]);
+    return { flow: picked, lit, focus: picked === null ? null : focus, shown: shown(graph, { ...toggles, collapsed, flow: picked, lit }) };
+  }, [graph, index, showTests, showExternal, collapsed, focus, depth, lit]);
 
   useEffect(() => {
     if (graph === null || cols === null || target === null) {
       return;
     }
     let stale = false;
-    layout(graph, target.shown, cols)
+    layout(graph, target.shown, cols, endsOf(target.lit))
       .then((result) => !stale && setScene({ graph, columns: cols, ...target, layout: result }))
       .catch((caught: unknown) => !stale && setError(caught instanceof Error ? caught.message : String(caught)));
     return () => {
@@ -193,7 +222,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     if (scene === null || index === null) {
       return;
     }
-    const items = itemsOf(scene, index.nodes, index.functions, makingOf(making));
+    const items = itemsOf(scene, index.nodes, index.functions, makingOf(making), scene.lit === null ? scene.focus : pinFocus);
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
@@ -203,12 +232,16 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       setShelf(shelfCorner(scene, at));
     };
 
-    if (scene.focus !== panned.current) {
-      panned.current = scene.focus;
-      const box = scene.focus === null ? undefined : to.boxes.get(scene.focus);
-      if (box !== undefined && root.current !== null) {
-        const scale = Math.max(getViewport().zoom, NAMED_ZOOM);
-        const view = { ...centerOn(box, stageOf(root.current).free, scale), zoom: scale };
+    const aim = scene.lit ?? scene.focus;
+    if (aim !== panned.current && root.current !== null) {
+      panned.current = aim;
+      const stage = stageOf(root.current);
+      const zoom = getViewport().zoom;
+      const boxes = typeof aim === "string" ? [to.boxes.get(aim)] : aim === null ? [] : [to.boxes.get(aim.path[0]), to.boxes.get(aim.path[aim.path.length - 1])];
+      const [first, last] = boxes;
+      if (first !== undefined) {
+        const scale = Math.max(zoom, NAMED_ZOOM);
+        const view = last === undefined ? { ...centerOn(first, stage.free, scale), zoom: scale } : frameOn([first, last], stage, zoom);
         void setViewport(view, { duration: still ? 0 : PAN_MS });
       }
     }
@@ -227,11 +260,11 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, index, making, getViewport, setViewport]);
+  }, [scene, index, making, pinFocus, getViewport, setViewport]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
   const views = useMemo(
-    () => (scene === null || index === null ? [] : edgeViews(drawn(scene.graph, scene.shown, scene.flow, hovered), scene.layout, index.nodes)),
+    () => (scene === null || index === null ? [] : edgeViews(drawn(scene.graph, scene.shown, scene.flow, hovered, scene.lit), scene.layout, index.nodes)),
     [scene, index, hovered],
   );
   const edges = useMemo(() => flowEdges(views, pointed), [views, pointed]);
@@ -287,6 +320,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       select(null);
     }
   };
+  /** 정보 패널이 보이는 노드. 경로 고정 중에는 경로 위에서 누른 노드다. */
+  const chosen = lit !== null ? pinFocus : selection?.type === "node" ? selection.id : null;
   /** 선을 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 선을 골라 정보 패널에 지점 목록을 연다. */
   const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
     tip.current?.hide();
@@ -297,7 +332,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     clicked.current = null;
     if (event.shiftKey) {
       selectEdge(edge.id);
-    } else if (edge.data !== undefined && !(selection?.type === "node" && selection.id === edge.data.target)) {
+    } else if (edge.data !== undefined && edge.data.target !== chosen) {
       press(edge.data.target);
       clicked.current = null;
     }
@@ -319,8 +354,9 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return node === undefined ? id : titleOf(node);
     };
     if (edge.data !== undefined) {
-      const { source, target, group, sites } = edge.data;
-      tip.current?.show(`${name(source)} → ${name(target)} · ${GROUP_NAMES[group]} · ${sites}곳`, event.clientX, event.clientY);
+      const { source, target, group, sites, route } = edge.data;
+      const kind = sites === 0 && route !== null ? STEP_NAMES[route] : `${GROUP_NAMES[group]} · ${sites}곳`;
+      tip.current?.show(`${name(source)} → ${name(target)} · ${kind}`, event.clientX, event.clientY);
     }
   };
   const onMove = (event: ReactMouseEvent) => tip.current?.move(event.clientX, event.clientY);
@@ -342,7 +378,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   }
 
   return (
-    <div className="graph" ref={root} data-zoom={zoom} data-moving={moving ? "" : undefined}>
+    <div className="graph" ref={root} data-zoom={zoom} data-moving={moving ? "" : undefined} data-pinned={scene.lit !== null ? "" : undefined}>
       <Markers />
       <ReactFlow
         nodes={nodes}

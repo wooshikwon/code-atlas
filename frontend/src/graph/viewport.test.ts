@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsOf, centerOn, fitPadding, freeRect } from "./viewport";
+import { boundsOf, centerOn, fitPadding, frameOn, freeRect } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -81,5 +81,34 @@ describe("boundsOf", () => {
 
   it("상자가 없으면 크기가 0이다", () => {
     expect(boundsOf([])).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+  });
+});
+
+describe("frameOn", () => {
+  const free = { x: 0, y: 0, width: 900, height: 600 };
+  const stage = { area, free };
+  const from = { x: 100, y: 100, width: 120, height: 18 };
+
+  it("두 상자가 영역에 들어가면 두 상자를 품는 사각형을 영역의 가운데에 둔다", () => {
+    const to = { x: 500, y: 300, width: 100, height: 18 };
+    expect(frameOn([from, to], stage, 1)).toEqual({ x: 450 - 350, y: 300 - 209, zoom: 1 });
+  });
+
+  it("확대 비율이 0.8보다 작으면 0.8로 키우고 그보다 크면 그대로 둔다", () => {
+    const to = { x: 300, y: 200, width: 100, height: 18 };
+    expect(frameOn([from, to], stage, 0.3).zoom).toBe(0.8);
+    expect(frameOn([from, to], stage, 1.5).zoom).toBe(1.5);
+  });
+
+  it("두 상자가 영역에 들어가지 않으면 출발 상자를 왼쪽 끝에서 20px 안쪽, 세로 가운데에 둔다", () => {
+    const to = { x: 2000, y: 100, width: 100, height: 18 };
+    expect(frameOn([from, to], stage, 1)).toEqual({ x: 20 - 100, y: 300 - 109, zoom: 1 });
+    const tall = { x: 300, y: 1500, width: 100, height: 18 };
+    expect(frameOn([from, tall], stage, 0.5)).toEqual({ x: 20 - 80, y: 300 - 109 * 0.8, zoom: 0.8 });
+  });
+
+  it("도착 상자가 출발 상자의 왼쪽에 있어도 들어가지 않으면 출발 상자를 왼쪽 끝에 둔다", () => {
+    const to = { x: -3000, y: 100, width: 100, height: 18 };
+    expect(frameOn([from, to], stage, 1).x).toBe(20 - 100);
   });
 });

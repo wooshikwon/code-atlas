@@ -1,5 +1,6 @@
 // 고른 노드에서 나가는 흐름의 단계와 노드 불투명도를 정한다.
 import type { Graph } from "../api/types";
+import type { Lit } from "./route";
 import { nodeIndex, unitOf } from "./visible";
 
 export interface Flow {
@@ -92,10 +93,14 @@ export function opacity(flow: Flow | null, id: string): Opacity {
   return step === flow.depth && flow.depth >= 2 ? 0.5 : 1;
 }
 
-/** 노드마다 불투명도를 정한다. 상자는 자기 값과 안에 든 노드의 값 가운데 가장 큰 값을 받는다. */
-export function opacities(graph: Graph, flow: Flow | null): Map<string, Opacity> {
+/**
+ * 노드마다 불투명도를 정한다. 상자는 자기 값과 안에 든 노드의 값 가운데 가장 큰 값을 받는다.
+ * 강조하는 경로 lit이 있으면 흐름을 보지 않고 경로 위 노드를 1, 그 밖을 0.2로 둔다.
+ */
+export function opacities(graph: Graph, flow: Flow | null, lit: Lit | null): Map<string, Opacity> {
   const nodes = nodeIndex(graph);
-  const result = new Map(graph.nodes.map((n) => [n.id, opacity(flow, n.id)]));
+  const own = (id: string): Opacity => (lit === null ? opacity(flow, id) : lit.nodes.has(id) ? 1 : 0.2);
+  const result = new Map(graph.nodes.map((n) => [n.id, own(n.id)]));
   for (const node of graph.nodes) {
     const own = result.get(node.id)!;
     let parent = node.parent;

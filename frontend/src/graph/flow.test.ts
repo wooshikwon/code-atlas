@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture } from "./fixture";
+import { repoFixture, routeFixture } from "./fixture";
 import { flow, opacities, opacity } from "./flow";
+import { lit, route } from "./route";
 import { hidden } from "./visible";
 
 const off = hidden(repoFixture, { showTests: false, showExternal: false });
@@ -77,7 +78,7 @@ describe("opacity", () => {
 
 describe("opacities", () => {
   it("상자는 안에 든 노드 가운데 가장 큰 값을 받는다", () => {
-    const result = opacities(repoFixture, flow(repoFixture, "main:run", 2, off));
+    const result = opacities(repoFixture, flow(repoFixture, "main:run", 2, off), null);
     expect(result.get("main")).toBe(1);
     expect(result.get("main:helper")).toBe(1);
     expect(result.get("cli")).toBe(1);
@@ -89,7 +90,7 @@ describe("opacities", () => {
   });
 
   it("파일 상자를 고르면 파일 상자와 그 폴더가 값을 받는다", () => {
-    const result = opacities(repoFixture, flow(repoFixture, "pkg.mod", 2, off));
+    const result = opacities(repoFixture, flow(repoFixture, "pkg.mod", 2, off), null);
     expect(result.get("main")).toBe(1);
     expect(result.get("cli")).toBe(0.5);
     expect(result.get("pkg.util")).toBe(1);
@@ -97,10 +98,22 @@ describe("opacities", () => {
   });
 
   it("폴더를 고르면 그 폴더와 흐름에 든 파일 상자가 값을 받는다", () => {
-    const result = opacities(repoFixture, flow(repoFixture, "pkg", 2, off));
+    const result = opacities(repoFixture, flow(repoFixture, "pkg", 2, off), null);
     expect(result.get("pkg")).toBe(1);
     expect(result.get("main")).toBe(1);
     expect(result.get("cli")).toBe(0.5);
     expect(result.get("app")).toBe(0.2);
+  });
+
+  it("강조하는 경로가 있으면 흐름을 보지 않고 경로 위 노드와 그 조상 상자를 1, 그 밖을 0.2로 둔다", () => {
+    const none = hidden(routeFixture, { showTests: false, showExternal: false });
+    const path = lit(route(routeFixture, "flow.build:make", "flow.sink:tune", none), 0)!;
+    const result = opacities(routeFixture, flow(routeFixture, "flow.walk:begin", 2, none), path);
+    for (const id of ["flow.build:make", "flow.build:Engine", "flow.build:Engine.__init__", "flow.sink:tune", "flow.build", "flow.sink", "flow"]) {
+      expect(result.get(id)).toBe(1);
+    }
+    for (const id of ["flow.build:Base", "flow.build:Base.run", "flow.walk", "flow.walk:begin", "flow.walk:left", "ring", "ring.a"]) {
+      expect(result.get(id)).toBe(0.2);
+    }
   });
 });

@@ -5,7 +5,7 @@ import type { CSSProperties } from "react";
 import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
-import { BADGE_OVERHANG, CIRCLE_GAP, ENTRY_MARK, labelOf, type Box } from "../layout";
+import { BADGE_OVERHANG, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, ENTRY_MARK, labelOf, type Box, type RouteEnd } from "../layout";
 import { busyTip, CHANGE_TIPS, ENTRY_TIP, globalTip, inflowTip, locTip, unresolvedTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
@@ -27,6 +27,8 @@ export interface AtlasNodeData extends Record<string, unknown> {
   unresolved: number;
   /** 이 노드와 이 노드로 올린 안쪽 노드 가운데 LLM 요약을 만드는 중인 노드 수 */
   busy: number;
+  /** 강조하는 경로 위의 노드면 출발 노드, 도착 노드, 그 사이의 노드 가운데 어느 것인지 */
+  route: RouteEnd | "via" | null;
 }
 
 export type AtlasFlowNode = Node<AtlasNodeData>;
@@ -95,7 +97,8 @@ export function Handles({ data }: { data: AtlasNodeData }) {
 
 /**
  * 노드 뿌리 요소의 속성. 바탕 요소는 `node-body`, 글자 요소는 `node-face`를 받는다. 흐름에 든 노드는 `data-flow`를,
- * 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을, 마지막 커밋 뒤에 바뀐 노드는 `data-change`를 받는다.
+ * 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을, 마지막 커밋 뒤에 바뀐 노드는 `data-change`를,
+ * 강조하는 경로 위의 노드는 `data-route`를 받는다.
  */
 export function nodeProps(base: string, data: AtlasNodeData, change: Change | null) {
   return {
@@ -103,6 +106,7 @@ export function nodeProps(base: string, data: AtlasNodeData, change: Change | nu
     "data-flow": data.flow ? "" : undefined,
     "data-local": data.local ? "" : undefined,
     "data-change": change ?? undefined,
+    "data-route": data.route ?? undefined,
   };
 }
 
@@ -115,12 +119,20 @@ export function EntryMark({ className }: { className?: string }) {
   );
 }
 
+/** 이름표. 강조하는 경로의 출발 노드와 도착 노드는 이름표 뒤에 표지를 적는다. 표지의 폭은 layout.ts가 노드 크기에 더한다. */
 export function Label({ data, bold = false }: { data: AtlasNodeData; bold?: boolean }) {
   return (
-    <span className={bold ? "node-label node-label-bold" : "node-label"}>
-      {data.node.entry && <EntryMark className="node-entry" />}
-      {labelOf(data.node)}
-    </span>
+    <>
+      <span className={bold ? "node-label node-label-bold" : "node-label"}>
+        {data.node.entry && <EntryMark className="node-entry" />}
+        {labelOf(data.node)}
+      </span>
+      {data.route !== null && data.route !== "via" && (
+        <span className="route-end" style={{ marginLeft: END_GAP, padding: `0 ${END_PAD}px` }}>
+          {END_NAMES[data.route]}
+        </span>
+      )}
+    </>
   );
 }
 
