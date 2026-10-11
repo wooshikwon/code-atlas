@@ -1287,9 +1287,9 @@ ul {
   vertical-align: 1px;
 }
 
-/* 코드 뷰어가 있으면 요약 칸은 패널 높이의 반까지만 쓴다. 넘치는 설명은 칸 안에서 스크롤한다. */
+/* 코드 뷰어가 없으면 요약 칸이 패널의 남은 높이를 쓰고, 있으면 패널 높이의 반까지만 쓴다. 넘치는 설명은 칸 안에서 스크롤한다. */
 .info-panel-summary {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   padding: 7px 12px;
   border-top: 1px solid var(--line);
@@ -1308,11 +1308,6 @@ ul {
 
 .info-panel-hint {
   color: var(--muted);
-}
-
-/* 요약이 도착해도 패널 높이가 바뀌지 않게 두 줄 높이를 미리 둔다. */
-.summary-body {
-  min-height: 3em;
 }
 
 .summary-head {
@@ -1337,11 +1332,10 @@ ul {
 
 .summary-text p {
   margin: 0 0 6px;
-  color: var(--muted);
 }
 
 .summary-text .summary-lead {
-  color: var(--ink);
+  font-weight: 600;
 }
 
 .summary-part {
@@ -1356,7 +1350,6 @@ ul {
   padding: 0 3px;
   border-radius: 3px;
   background: color-mix(in srgb, var(--ink) 6%, transparent);
-  color: var(--ink);
 }
 
 .summary-action {

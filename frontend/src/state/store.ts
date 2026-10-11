@@ -69,7 +69,7 @@ export interface AtlasStore {
   toggleExternal(): void;
   toggleAutoSummary(): void;
   setTheme(theme: Theme): void;
-  setPanel(rect: Rect): void;
+  setPanel(rect: Rect | null): void;
   toggleLegend(): void;
   setPalette(open: boolean): void;
 }

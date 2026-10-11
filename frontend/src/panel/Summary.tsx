@@ -110,29 +110,27 @@ export function Summary({ node }: { node: string }) {
           </button>
         )}
       </div>
-      <div className="summary-body">
-        {state.phase === "reading" && <span className="info-panel-hint">&nbsp;</span>}
-        {state.phase === "empty" && (
-          <button className="summary-action summary-make" onClick={() => ask("make")}>
-            요약 생성
+      {state.phase === "reading" && <span className="info-panel-hint">&nbsp;</span>}
+      {state.phase === "empty" && (
+        <button className="summary-action summary-make" onClick={() => ask("make")}>
+          요약 생성
+        </button>
+      )}
+      {state.phase === "making" && <span className="info-panel-hint">요약을 만드는 중</span>}
+      {state.phase === "done" && <Explained summary={state.summary} />}
+      {state.phase === "failed" && (
+        <>
+          <span className="info-panel-hint">{state.error}</span>
+          <button className="summary-action" onClick={() => ask(state.mode)}>
+            다시 시도
           </button>
-        )}
-        {state.phase === "making" && <span className="info-panel-hint">요약을 만드는 중</span>}
-        {state.phase === "done" && <Explained summary={state.summary} />}
-        {state.phase === "failed" && (
-          <>
-            <span className="info-panel-hint">{state.error}</span>
-            <button className="summary-action" onClick={() => ask(state.mode)}>
-              다시 시도
-            </button>
-          </>
-        )}
-        {state.phase === "unavailable" && (
-          <span className="info-panel-hint">
-            {state.reason}. Claude Code를 설치하고 터미널에서 <code>claude auth login</code>으로 로그인하면 요약을 만든다
-          </span>
-        )}
-      </div>
+        </>
+      )}
+      {state.phase === "unavailable" && (
+        <span className="info-panel-hint">
+          {state.reason}. Claude Code를 설치하고 터미널에서 <code>claude auth login</code>으로 로그인하면 요약을 만든다
+        </span>
+      )}
     </div>
   );
 }
