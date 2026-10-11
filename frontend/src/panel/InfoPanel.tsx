@@ -145,7 +145,7 @@ export function InfoPanel() {
         : site !== null
           ? { path: site.path, range: siteRange, highlight: site.line }
           : null;
-  const { ref, rect, grip, reset } = usePanelRect();
+  const { ref, rect, docked, grip, reset } = usePanelRect();
   const summarized = node !== undefined && SUMMARIZED.has(node.kind);
 
   /** LLM 요약 칸과 코드 뷰어 사이의 경계선을 끌어 요약 칸의 높이를 바꾸고, 그 높이를 패널 높이로 나눈 값을 저장한다. */
@@ -185,6 +185,7 @@ export function InfoPanel() {
     <div
       ref={ref}
       className="info-panel"
+      data-docked={docked ? "" : undefined}
       style={
         rect === null
           ? undefined

@@ -670,13 +670,13 @@ describe("경로 고정", () => {
     store().setEnd("from", begin);
     store().toggleLegend();
     vi.unstubAllGlobals();
-    expect(Object.keys(JSON.parse(saved.get("code-atlas:ui:v1")!) as object)).not.toContain("finder");
+    expect(Object.keys(JSON.parse(saved.get("code-atlas:ui:v2")!) as object)).not.toContain("finder");
     expect(saved.size).toBe(1);
   });
 });
 
 describe("화면 설정", () => {
-  it("흐름 단계·화면 색·패널·범례·미니맵·자동 요약을 code-atlas:ui:v1에 쓴다", () => {
+  it("흐름 단계·화면 색·패널·범례·미니맵·자동 요약을 code-atlas:ui:v2에 쓴다", () => {
     const saved = new Map<string, string>();
     vi.stubGlobal("localStorage", { setItem: (key: string, value: string) => saved.set(key, value) });
     vi.stubGlobal("document", { documentElement: { style: { setProperty: () => undefined }, dataset: {} } });
@@ -689,7 +689,7 @@ describe("화면 설정", () => {
     store().toggleAutoSummary();
     vi.unstubAllGlobals();
     expect(store().history.entries).toHaveLength(1);
-    expect(parseUi(saved.get("code-atlas:ui:v1")!, "light")).toEqual({
+    expect(parseUi(saved.get("code-atlas:ui:v2")!, "light")).toEqual({
       panel: { x: 10, y: 20, width: 300, height: 200 },
       split: 0.4,
       legendOpen: true,
@@ -737,7 +737,7 @@ describe("reopen", () => {
     expect([now.finder.open, now.finder.from, now.finder.route]).toEqual([false, null, null]);
     expect([now.repo, now.graph, now.tree, now.epoch]).toEqual([repo, repoFixture, tree, 1]);
     expect(useOverlay.getState().kind).toBe("cycles");
-    expect(parseUi(saved.get("code-atlas:ui:v1")!, "light")).toMatchObject({ depth: 2, autoSummary: false });
+    expect(parseUi(saved.get("code-atlas:ui:v2")!, "light")).toMatchObject({ depth: 2, autoSummary: false });
   });
 
   it("화면 색, 정보 패널의 사각형과 요약 칸 비율, 미니맵·범례의 접힘은 그대로 둔다", () => {

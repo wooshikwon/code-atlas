@@ -5,13 +5,13 @@ const area = { width: 1000, height: 800 };
 const rect = { x: 400, y: 100, width: 480, height: 420 };
 
 describe("initial", () => {
-  it("영역의 오른쪽 가장자리에 붙어 위·오른쪽·아래에 8px를 두고 위에서 아래까지 찬다", () => {
-    expect(initial(area)).toEqual({ x: 1000 - 480 - 8, y: 8, width: 480, height: 800 - 16 });
-    expect(initial({ width: 1000, height: 600 })).toMatchObject({ y: 8, height: 600 - 16 });
+  it("영역의 오른쪽 끝에 붙어 영역 폭의 30%를 차지하고 위에서 아래까지 빈틈없이 찬다", () => {
+    expect(initial(area)).toEqual({ x: 700, y: 0, width: 300, height: 800 });
+    expect(initial({ width: 1440, height: 600 })).toEqual({ x: 1008, y: 0, width: 432, height: 600 });
   });
 
-  it("영역이 기본 폭보다 좁거나 최소 높이보다 낮으면 clamp가 맞춘다", () => {
-    expect(initial({ width: 400, height: 800 })).toMatchObject({ width: 400, height: 784 });
+  it("영역 폭의 30%가 최소 폭보다 좁으면 최소 폭으로 오른쪽 끝에 붙고, 영역이 최소 높이보다 낮으면 최소 높이다", () => {
+    expect(initial({ width: 460, height: 800 })).toEqual({ x: 460 - MIN_WIDTH, y: 0, width: MIN_WIDTH, height: 800 });
     expect(initial({ width: 1000, height: 40 })).toMatchObject({ y: 0, height: MIN_HEIGHT });
   });
 });

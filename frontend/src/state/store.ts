@@ -145,7 +145,7 @@ export interface AtlasStore {
 
 type Ui = Pick<AtlasStore, "panel" | "split" | "legendOpen" | "minimapOpen" | "theme" | "depth" | "autoSummary">;
 
-const UI_KEY = "code-atlas:ui:v1";
+const UI_KEY = "code-atlas:ui:v2";
 
 function isRect(value: unknown): value is Rect {
   if (typeof value !== "object" || value === null) {

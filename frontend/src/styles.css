@@ -1567,6 +1567,12 @@ ul {
   box-shadow: 0 4px 18px color-mix(in srgb, var(--ink) 12%, transparent);
 }
 
+/* 기본 사각형은 영역의 위·오른쪽·아래 끝에 붙으므로 왼쪽 변에만 테두리를 그리고 모서리를 둥글리지 않는다. */
+.info-panel[data-docked] {
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+}
+
 .info-panel-head {
   flex: none;
   padding: 8px 12px 7px;

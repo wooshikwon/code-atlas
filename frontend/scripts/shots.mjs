@@ -25,6 +25,9 @@ const FUNCTION = "arbiter:_rebuild_note_sections";
 const DIM = 0.2;
 /** 함수 이름표가 모두 보이는 확대 비율 구간의 시작값. 이보다 작은 확대 비율에서 노드를 고르면 이 값이 된다. */
 const NAMED_ZOOM = 0.8;
+/** 정보 패널의 기본 폭을 관계 그래프 영역의 폭으로 나눈 값과 패널의 최소 폭 */
+const PANEL_SHARE = 0.3;
+const PANEL_MIN = 260;
 /** 큰 상자를 패널을 뺀 영역의 시작 끝에서 띄우는 폭 */
 const INSET = 20;
 const DARK = { surface: "#1a1a19", ink: "#ffffff" };
@@ -532,8 +535,8 @@ async function open(t, page) {
   const { area, panel } = await stageOf(page);
   const gaps = { top: panel.y - area.y, right: area.x + area.width - panel.x - panel.width, bottom: area.y + area.height - panel.y - panel.height };
   t.check(
-    "정보 패널이 관계 그래프 영역의 오른쪽에 붙어 위·오른쪽·아래에 같은 여백을 두고 위에서 아래까지 찬다",
-    gaps.top > 0 && near(gaps.top, gaps.bottom) && near(gaps.top, gaps.right) && near(panel.width, 480),
+    "정보 패널이 관계 그래프 영역의 오른쪽 끝에 붙어 영역 폭의 30%를 차지하고 위에서 아래까지 빈틈없이 찬다",
+    near(gaps.top, 0) && near(gaps.bottom, 0) && near(gaps.right, 0) && near(panel.width, area.width * PANEL_SHARE),
     `여백 위 ${gaps.top}, 오른쪽 ${gaps.right}, 아래 ${gaps.bottom}, 패널 ${panel.width}×${panel.height}, 영역 높이 ${area.height}`,
   );
   const unresolved = graph.nodes.filter((n) => !n.test).reduce((sum, n) => sum + n.unresolved, 0);
@@ -729,9 +732,37 @@ async function panel(t, page) {
     sameRect(short, { ...start, height: start.height - 200 }),
     `${rectText(start)} → ${rectText(short)}`,
   );
+  /** 기본 사각형이 지금의 관계 그래프 영역에서 오른쪽 끝에 붙어 폭의 30%(최소 폭보다 좁으면 최소 폭)와 높이 전체를 차지하는지 */
+  const docked = async () => {
+    const { area, panel: box } = await stageOf(page);
+    const width = Math.max(PANEL_MIN, Math.round(area.width * PANEL_SHARE));
+    const ok = near(box.width, width) && near(box.x + box.width, area.x + area.width) && near(box.y, area.y) && near(box.height, area.height);
+    return { ok, text: `영역 ${Math.round(area.width)}×${Math.round(area.height)}, 패널 ${rectText(box)}, 기대 폭 ${width}` };
+  };
+  /** 창 크기를 바꾼 뒤 기본 패널이 새 영역에 다시 놓일 때까지 기다린다. */
+  const redocked = async () => {
+    await page
+      .waitForFunction(
+        ([share, least]) => {
+          const [box, stage] = [document.querySelector(".info-panel").getBoundingClientRect(), document.querySelector(".stage").getBoundingClientRect()];
+          return Math.abs(box.width - Math.max(least, Math.round(stage.width * share))) <= 1 && Math.abs(box.right - stage.right) <= 1 && Math.abs(box.height - stage.height) <= 1;
+        },
+        [PANEL_SHARE, PANEL_MIN],
+        { timeout: 5_000 },
+      )
+      .catch(() => {});
+    await settle(page);
+  };
+  for (const width of [1280, 720]) {
+    await page.setViewportSize({ width, height: VIEW.height });
+    await redocked();
+    const narrow = await docked();
+    t.check(`창 폭을 ${width}px로 바꾸면 기본 패널이 영역 폭의 30%를 따라 다시 놓인다`, narrow.ok, narrow.text);
+  }
   await page.setViewportSize(VIEW);
-  await page.waitForFunction((height) => document.querySelector(".info-panel").getBoundingClientRect().height === height, start.height, { timeout: 5_000 }).catch(() => {});
-  await settle(page);
+  await redocked();
+  const wide = await docked();
+  t.check("기본 패널은 영역의 오른쪽 끝에 붙어 영역 폭의 30%와 상단 줄 아래의 높이 전체를 차지한다", wide.ok && sameRect(await rectOf(page, ".info-panel"), start), wide.text);
   await drag(page, center(await rectOf(page, ".info-panel-head")), -300, 40);
   await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="nw"]')), -60, 80);
   const moved = await rectOf(page, ".info-panel");
@@ -2733,8 +2764,8 @@ async function toolbar(t, page) {
       `마지막 단계 "${bar.last?.text}" ${bar.last?.width}px${bar.last?.whole ? "" : "(말줄임)"}, 줄인 단계 "${bar.cut ?? "없음"}"`,
     );
     t.check(
-      `${name}: 관계 그래프 영역이 상단 줄 바로 아래에서 시작하고 정보 패널의 위아래 여백이 같다`,
-      near(bar.gaps[2], 0) && bar.gaps[0] > 0 && near(bar.gaps[0], bar.gaps[1]),
+      `${name}: 관계 그래프 영역이 상단 줄 바로 아래에서 시작하고 정보 패널이 영역의 위 끝부터 아래 끝까지 찬다`,
+      near(bar.gaps[2], 0) && near(bar.gaps[0], 0) && near(bar.gaps[1], 0),
       `패널 위 ${bar.gaps[0]}, 아래 ${bar.gaps[1]}, 상단 줄과 영역 사이 ${bar.gaps[2]}`,
     );
     await page.click(".filter-button");
