@@ -51,10 +51,19 @@ export function nodeProps(base: string, data: AtlasNodeData, change: Change | nu
   };
 }
 
+/** 진입점 표지 ▶. 마우스를 올리면 "진입점"이 보이고 접근성 이름도 "진입점"이다. */
+export function EntryMark({ className }: { className?: string }) {
+  return (
+    <span className={className} role="img" aria-label="진입점" title="진입점">
+      {ENTRY_MARK}
+    </span>
+  );
+}
+
 export function Label({ data, bold = false }: { data: AtlasNodeData; bold?: boolean }) {
   return (
     <span className={bold ? "node-label node-label-bold" : "node-label"}>
-      {data.node.entry && <span className="node-entry">{ENTRY_MARK}</span>}
+      {data.node.entry && <EntryMark className="node-entry" />}
       {labelOf(data.node)}
     </span>
   );

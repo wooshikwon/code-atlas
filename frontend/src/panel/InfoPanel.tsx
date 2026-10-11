@@ -129,21 +129,17 @@ export function InfoPanel() {
         : site !== null && siteRange !== null
           ? { path: site.path, range: siteRange, highlight: site.line }
           : null;
-  const { ref, rect, fitted, grip } = usePanelRect(code === null);
+  const { ref, rect, grip, reset } = usePanelRect();
 
   return (
     <div
       ref={ref}
       className="info-panel"
-      style={
-        rect === null
-          ? undefined
-          : { left: rect.x, top: rect.y, width: rect.width, ...(fitted ? { maxHeight: rect.height } : { height: rect.height }) }
-      }
+      style={rect === null ? undefined : { left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
     >
       {rect !== null && item !== null && index !== null && (
         <>
-          <div className="info-panel-head" onPointerDown={grip("move")}>
+          <div className="info-panel-head" onPointerDown={grip("move")} onDoubleClick={reset} title="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다">
             <Header item={item} nodes={index.nodes} />
           </div>
           {node !== undefined && SUMMARIZED.has(node.kind) && <Summary key={node.id} node={node.id} />}

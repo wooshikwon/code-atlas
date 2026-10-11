@@ -10,6 +10,9 @@ export interface Area {
 }
 
 export const MIN_WIDTH = 260;
+const DEFAULT_WIDTH = 480;
+/** 기본 사각형이 영역의 위·오른쪽·아래 가장자리에서 떨어지는 길이 */
+const DEFAULT_GAP = 8;
 export const MIN_HEIGHT = 58;
 /** 머리 줄이 관계 그래프 영역 안에 남아야 하는 가로·세로 길이 */
 const KEEP_X = 60;
@@ -25,6 +28,19 @@ export function clamp(rect: Rect, area: Area): Rect {
     width,
     height,
   };
+}
+
+/** 사용자가 옮기거나 크기를 바꾸기 전의 사각형. 영역의 오른쪽 가장자리에 붙어 위에서 아래까지 찬다. */
+export function initial(area: Area): Rect {
+  return clamp(
+    {
+      x: area.width - DEFAULT_WIDTH - DEFAULT_GAP,
+      y: DEFAULT_GAP,
+      width: DEFAULT_WIDTH,
+      height: area.height - 2 * DEFAULT_GAP,
+    },
+    area,
+  );
 }
 
 export function move(rect: Rect, dx: number, dy: number, area: Area): Rect {

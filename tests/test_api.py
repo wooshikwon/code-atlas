@@ -18,6 +18,11 @@ from code_atlas.summary import Summaries, SummaryError
 RUN_ENGINE_CALL = {"path": "src/app/cli.py", "line": 10, "col": 21}  # 한글 문자열 뒤의 run_engine
 
 
+def name_in(prompt: str) -> str:
+    """요약 프롬프트의 `이름:` 줄에 적힌 이름."""
+    return prompt.split("\n이름: ", 1)[1].split("\n", 1)[0]
+
+
 @pytest.fixture(scope="module")
 def client(module_repo, tmp_path_factory):
     with pytest.MonkeyPatch.context() as patch:
@@ -29,12 +34,12 @@ def client(module_repo, tmp_path_factory):
 
 @pytest.fixture
 def generated(client, tmp_path, monkeypatch):
-    """빈 요약 캐시로 바꾸고 `claude` 호출을 가짜로 바꾼다. 가짜가 받은 (종류, 이름, 코드)를 돌려준 목록에 담는다."""
-    calls: list[tuple[str, str, str]] = []
+    """빈 요약 캐시로 바꾸고 `claude` 호출을 가짜로 바꾼다. 가짜가 받은 (시스템 프롬프트, 프롬프트)를 돌려준 목록에 담는다."""
+    calls: list[tuple[str, str]] = []
 
-    async def generate(kind, name, code):
-        calls.append((kind, name, code))
-        return f"{name} 요약 {len(calls)}"
+    async def generate(system, prompt):
+        calls.append((system, prompt))
+        return f"{name_in(prompt)} 요약 {len(calls)}"
 
     async def unavailable():
         return None
@@ -293,10 +298,10 @@ async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects
     made: list[str] = []
     release = asyncio.Event()
 
-    async def generate(kind, name, code):
-        made.append(name)
+    async def generate(system, prompt):
+        made.append(name_in(prompt))
         await release.wait()
-        return f"{name} 요약"
+        return f"{name_in(prompt)} 요약"
 
     async def unavailable():
         return None
@@ -334,9 +339,14 @@ def test_summary_is_made_on_post_and_read_from_cache(client, generated):
     assert generated == []
 
     assert client.post("/api/summary", params=node).json() == {"summary": "run_engine 요약 1"}
-    kind, name, code = generated[0]
-    assert (kind, name) == ("function", "run_engine")
-    assert code.startswith("def run_engine(config: Config) -> Engine:") and code.endswith("return engine")
+    system, prompt = generated[0]
+    assert system == summary.system_prompt_of(None)
+    assert prompt.startswith(
+        "[대상]\n종류: 함수\n이름: run_engine\n위치: src/app/core.py 31~35줄\n\n[코드]\ndef run_engine(config: Config) -> Engine:"
+    )
+    assert '- main (src/app/cli.py) · 호출\n    9:     config = Config("x")\n    10>     label = "엔진 시작"; run_engine(config)' in prompt
+    assert "- Engine.start (src/app/core.py)\n    def start(self, label: 'Config') -> Optional[Config]:" in prompt
+    assert "- Config (src/app/models.py): name: str, retries: int" in prompt
 
     assert client.post("/api/summary", params=node).json() == {"summary": "run_engine 요약 1"}
     assert client.get("/api/summary", params=node).json()["summary"] == "run_engine 요약 1"
@@ -349,14 +359,53 @@ def test_summary_is_made_on_post_and_read_from_cache(client, generated):
 def test_summary_of_method_and_file(client, generated):
     client.post("/api/summary", params={"node": "app.core:Engine.start"})
     client.post("/api/summary", params={"node": "app.core"})
-    (_, method_name, method_code), (file_kind, file_name, file_code) = generated
-    assert method_name == "Engine.start" and method_code.lstrip().startswith("def start(self")
-    assert (file_kind, file_name) == ("module", "src/app/core.py")
-    assert file_code.splitlines() == [
-        "def helper(value):",
-        "class Engine:",
-        "def run_engine(config: Config) -> Engine:",
-    ]
+    (_, method), (_, file) = generated
+    assert name_in(method) == "Engine.start" and "\n[코드]\n    def start(self" in method
+    assert "[대상이 든 클래스]\nclass Engine:" in method
+    assert file.startswith(
+        "[대상]\n종류: 파일\n이름: src/app/core.py\n위치: src/app/core.py\n\n[최상위 정의의 시그니처 목록]\ndef helper(value):\nclass Engine:\n"
+    )
+    assert "[이 파일을 쓰는 파일과 가져다 쓰는 이름]\n- src/app/" in file
+    assert "[이 파일이 쓰는 파일과 가져다 쓰는 이름]\n- src/app/models.py: Config" in file
+
+
+@pytest.fixture
+def guided(module_repo, tmp_path, monkeypatch):
+    """서술 규약 문서 경로를 준 서버, 그 경로, 가짜 `claude` 호출이 받은 (시스템 프롬프트, 프롬프트) 목록."""
+    guide = tmp_path / "guide.md"
+    calls: list[tuple[str, str]] = []
+
+    async def generate(system, prompt):
+        calls.append((system, prompt))
+        return "요약"
+
+    async def unavailable():
+        return None
+
+    monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+    monkeypatch.setattr(summary, "generate", generate)
+    monkeypatch.setattr(summary, "unavailable", unavailable)
+    with TestClient(create_app(module_repo, sys.executable, style_guide=guide)) as client:
+        yield client, guide, calls
+
+
+def test_summary_reports_unreadable_style_guide_and_reads_it_for_every_request(guided):
+    client, guide, calls = guided
+    node = {"node": "app.core:helper"}
+    body = client.get("/api/summary", params=node).json()
+    assert (body["summary"], body["available"]) == (None, False) and str(guide) in body["reason"]
+    response = client.post("/api/summary", params=node)
+    assert response.status_code == 503 and "서술 규약 문서를 읽지 못했다" in response.json()["error"]
+    assert calls == []
+
+    guide.write_text("문장은 서술어로 끝낸다.")
+    assert client.get("/api/summary", params=node).json() == {"summary": None, "available": True, "reason": None}
+    assert client.post("/api/summary", params=node).json() == {"summary": "요약"}
+    assert "<서술 규약 문서>\n문장은 서술어로 끝낸다.\n</서술 규약 문서>" in calls[0][0]
+    assert client.get("/api/summary", params=node).json()["summary"] == "요약"
+
+    guide.write_text("고친 규약")
+    assert client.get("/api/summary", params=node).json()["summary"] is None
 
 
 def test_summary_reports_unavailable_cli(client, generated, monkeypatch):
@@ -369,13 +418,13 @@ def test_summary_reports_unavailable_cli(client, generated, monkeypatch):
 
 
 def test_summary_failure_is_503(client, generated, monkeypatch):
-    async def generate(kind, name, code):
-        raise SummaryError("Claude Code CLI가 60초 안에 응답하지 않았다")
+    async def generate(system, prompt):
+        raise SummaryError("Claude Code CLI가 120초 안에 응답하지 않았다")
 
     monkeypatch.setattr(summary, "generate", generate)
     response = client.post("/api/summary", params={"node": "app.core:helper"})
     assert response.status_code == 503
-    assert response.json() == {"error": "Claude Code CLI가 60초 안에 응답하지 않았다"}
+    assert response.json() == {"error": "Claude Code CLI가 120초 안에 응답하지 않았다"}
     assert client.get("/api/summary", params={"node": "app.core:helper"}).json()["summary"] is None
 
 

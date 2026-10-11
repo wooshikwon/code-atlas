@@ -9,6 +9,8 @@ import pytest
 
 from conftest import group_ended
 
+from code_atlas import cli
+
 # 분석을 시작할 때 언어 서버의 pid를 출력한다. 인자가 "serve"가 아니면 분석을 끝내지 않고, "analyze"면 `code-atlas analyze`를 돌린다.
 SERVE = """
 import asyncio, sys
@@ -65,3 +67,8 @@ def test_sigint_ends_the_server_and_the_language_server(sample_repo, tmp_path, m
     assert server.returncode in ((130,) if signals == 1 else (130, -signal.SIGINT))
     if signals == 1:
         assert "Traceback" not in errors
+
+
+def test_serve_parser_reads_style_guide_option():
+    assert cli._serve_parser().parse_args(["repo", "--style-guide", "guide.md"]).style_guide == "guide.md"
+    assert cli._serve_parser().parse_args(["repo"]).style_guide is None

@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { clamp, MIN_HEIGHT, MIN_WIDTH, move, resize, type Dir } from "./rect";
+import { clamp, initial, MIN_HEIGHT, MIN_WIDTH, move, resize, type Dir } from "./rect";
 
 const area = { width: 1000, height: 800 };
 const rect = { x: 400, y: 100, width: 480, height: 420 };
+
+describe("initial", () => {
+  it("영역의 오른쪽 가장자리에 붙어 위·오른쪽·아래에 8px를 두고 위에서 아래까지 찬다", () => {
+    expect(initial(area)).toEqual({ x: 1000 - 480 - 8, y: 8, width: 480, height: 800 - 16 });
+    expect(initial({ width: 1000, height: 600 })).toMatchObject({ y: 8, height: 600 - 16 });
+  });
+
+  it("영역이 기본 폭보다 좁거나 최소 높이보다 낮으면 clamp가 맞춘다", () => {
+    expect(initial({ width: 400, height: 800 })).toMatchObject({ width: 400, height: 784 });
+    expect(initial({ width: 1000, height: 40 })).toMatchObject({ y: 0, height: MIN_HEIGHT });
+  });
+});
 
 describe("move", () => {
   it("옮긴 만큼 위치가 바뀌고 크기는 그대로다", () => {

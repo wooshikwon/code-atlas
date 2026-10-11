@@ -279,6 +279,8 @@ async function drag(page, from, dx, dy) {
 }
 
 const center = (rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+const sameRect = (a, b) => near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height);
+const rectText = (r) => `(${r.x.toFixed(0)}, ${r.y.toFixed(0)}) ${r.width.toFixed(0)}×${r.height.toFixed(0)}`;
 
 // ── 시나리오 ──────────────────────────────────────────────────────
 
@@ -320,8 +322,13 @@ async function open(t, page) {
     into("parser.plan") > 0 && into("date_engine") > 0,
     `parser/plan.py ${into("parser.plan")}개, date_engine.py ${into("date_engine")}개, 그린 선 ${edges.length}개`,
   );
-  const [panel, head] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-head")];
-  t.check("정보 패널 높이가 머리 줄 높이에 테두리 2px를 더한 값이다", near(panel.height, head.height + 2), `패널 ${panel.height}, 머리 줄 ${head.height}`);
+  const { area, panel } = await stageOf(page);
+  const gaps = { top: panel.y - area.y, right: area.x + area.width - panel.x - panel.width, bottom: area.y + area.height - panel.y - panel.height };
+  t.check(
+    "정보 패널이 관계 그래프 영역의 오른쪽에 붙어 위·오른쪽·아래에 같은 여백을 두고 위에서 아래까지 찬다",
+    gaps.top > 0 && near(gaps.top, gaps.bottom) && near(gaps.top, gaps.right) && near(panel.width, 480),
+    `여백 위 ${gaps.top}, 오른쪽 ${gaps.right}, 아래 ${gaps.bottom}, 패널 ${panel.width}×${panel.height}, 영역 높이 ${area.height}`,
+  );
   const unresolved = graph.nodes.filter((n) => !n.test).reduce((sum, n) => sum + n.unresolved, 0);
   const badges = await page.evaluate(() =>
     [...document.querySelectorAll(".react-flow__node .badge-unresolved")].map((badge) => Number(badge.textContent.slice(1))),
@@ -335,7 +342,7 @@ async function open(t, page) {
 
 async function file(t, page) {
   await load(page);
-  const before = { columns: columnsOf(await boxes(page)), zoom: await zoomOf(page) };
+  const before = { columns: columnsOf(await boxes(page)), zoom: await zoomOf(page), panel: await rectOf(page, ".info-panel") };
   await pick(page, FILE);
   const graph = await api("/api/graph");
   const all = await boxes(page);
@@ -346,12 +353,13 @@ async function file(t, page) {
   t.check("누르기 전과 후에 파일 상자의 열 순서와 열 안 순서가 같다", same(columnsOf(all), before.columns), JSON.stringify(columnsOf(all)));
   const [panel, head, summary] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-head"), await rectOf(page, ".info-panel-summary")];
   t.check(
-    "정보 패널에 코드 뷰어가 없고 패널 높이가 머리 줄과 LLM 요약 칸 높이의 합에 테두리 2px를 더한 값이다",
-    (await count(page, ".info-panel .code")) === 0 && summary !== null && near(panel.height, head.height + summary.height + 2),
-    `패널 ${panel.height}, 머리 줄 ${head.height}, 요약 칸 ${summary?.height}`,
+    "정보 패널에 코드 뷰어가 없고, 패널의 사각형이 고르기 전과 같으며, LLM 요약 칸이 머리 줄 아래의 남은 높이를 쓴다",
+    (await count(page, ".info-panel .code")) === 0 && summary !== null && sameRect(panel, before.panel) && near(panel.height, head.height + summary.height + 2),
+    `패널 ${rectText(before.panel)} → ${rectText(panel)}, 머리 줄 ${head.height}, 요약 칸 ${summary?.height}`,
   );
   const zoom = await zoomOf(page);
-  t.check("확대 비율이 누르기 전과 같다", near(zoom, before.zoom, 0.001), `${before.zoom.toFixed(3)} → ${zoom.toFixed(3)}`);
+  const named = Math.max(before.zoom, NAMED_ZOOM);
+  t.check("확대 비율이 누르기 전과 같거나, 80%보다 작았으면 80%다", near(zoom, named, 0.001), `${before.zoom.toFixed(3)} → ${zoom.toFixed(3)}`);
   const edges = await edgesOf(page);
   const touching = edges.filter((e) => e.source === FILE || e.target === FILE);
   const levels = toneLevels(edges);
@@ -396,10 +404,17 @@ async function file(t, page) {
 
 /** 파일 상자를 펼치고 함수를 고른 뒤 function 시나리오의 확인 항목을 본다. dark 시나리오가 함께 쓴다. */
 async function focused(t, page) {
+  const opened = await rectOf(page, ".info-panel");
   await pick(page, FILE);
   const before = await zoomOf(page);
   await pick(page, FUNCTION);
   await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+  const [panel, summary, code] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-summary"), await rectOf(page, ".info-panel .code")];
+  t.check(
+    "함수를 골라도 패널의 사각형이 처음과 같고, LLM 요약 칸이 패널 높이의 반을 넘지 않으며 코드 뷰어가 나머지 높이를 쓴다",
+    sameRect(panel, opened) && summary.height <= panel.height / 2 + 1 && near(code.y + code.height, panel.y + panel.height - 1),
+    `패널 ${rectText(opened)} → ${rectText(panel)}, 요약 칸 ${summary.height}, 코드 뷰어 ${code.height}`,
+  );
   const graph = await api("/api/graph");
   const [want, span] = [touchingOf(graph, FUNCTION), spanOf(graph, FUNCTION)];
   const edges = await edgesOf(page);
@@ -487,18 +502,40 @@ async function body(t, page) {
 async function panel(t, page) {
   await load(page);
   const start = await rectOf(page, ".info-panel");
-  await drag(page, center(await rectOf(page, ".info-panel-head")), -300, 300);
-  await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="nw"]')), -60, -80);
+  await page.setViewportSize({ width: VIEW.width, height: VIEW.height - 200 });
+  await page.waitForFunction((height) => document.querySelector(".info-panel").getBoundingClientRect().height !== height, start.height, { timeout: 5_000 }).catch(() => {});
+  await settle(page);
+  const short = await rectOf(page, ".info-panel");
+  t.check(
+    "창 높이를 200px 줄이면 기본 패널의 높이가 200px 줄고 위치와 폭은 그대로다",
+    sameRect(short, { ...start, height: start.height - 200 }),
+    `${rectText(start)} → ${rectText(short)}`,
+  );
+  await page.setViewportSize(VIEW);
+  await page.waitForFunction((height) => document.querySelector(".info-panel").getBoundingClientRect().height === height, start.height, { timeout: 5_000 }).catch(() => {});
+  await settle(page);
+  await drag(page, center(await rectOf(page, ".info-panel-head")), -300, 40);
+  await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="nw"]')), -60, 80);
   const moved = await rectOf(page, ".info-panel");
-  const want = { x: start.x - 360, y: start.y + 220, width: start.width + 60, height: start.height + 80 };
-  const text = (r) => `(${r.x.toFixed(0)}, ${r.y.toFixed(0)}) ${r.width.toFixed(0)}×${r.height.toFixed(0)}`;
-  const equal = (a, b) => near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height);
-  t.check("머리 줄을 끌면 패널이 옮겨지고 왼쪽 위 모서리를 끌면 크기가 바뀐다", equal(moved, want), `${text(start)} → ${text(moved)}, 기대 ${text(want)}`);
+  const want = { x: start.x - 360, y: start.y + 120, width: start.width + 60, height: start.height - 80 };
+  t.check("머리 줄을 끌면 패널이 옮겨지고 왼쪽 위 모서리를 끌면 크기가 바뀐다", sameRect(moved, want), `${rectText(start)} → ${rectText(moved)}, 기대 ${rectText(want)}`);
   await page.reload();
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
   await settle(page);
   const kept = await rectOf(page, ".info-panel");
-  t.check("새로고침 뒤 위치와 크기가 유지된다", equal(kept, moved), text(kept));
+  t.check("새로고침 뒤 위치와 크기가 유지된다", sameRect(kept, moved), rectText(kept));
+  await pick(page, FILE);
+  const picked = await rectOf(page, ".info-panel");
+  t.check("파일 상자를 골라도 사용자가 정한 사각형이 유지된다", sameRect(picked, moved), rectText(picked));
+  await page.dblclick(".info-panel-head");
+  await settle(page);
+  const reset = await rectOf(page, ".info-panel");
+  t.check("머리 줄을 더블클릭하면 기본 사각형으로 돌아간다", sameRect(reset, start), `${rectText(moved)} → ${rectText(reset)}`);
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  const again = await rectOf(page, ".info-panel");
+  t.check("새로고침 뒤에도 기본 사각형이다", sameRect(again, start), rectText(again));
 }
 
 /** 코드 뷰어에서 word가 처음 나오는 곳의 화면 사각형 */
@@ -1038,7 +1075,7 @@ async function summary(t, page) {
   const started = Date.now();
   await page.waitForFunction(() => document.querySelector(".info-panel-summary .info-panel-hint")?.textContent === "요약을 만드는 중", null, { timeout: 5_000 }).catch(() => {});
   const making = await summaryHint(page);
-  await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 90_000 }).catch(() => {});
+  await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 130_000 }).catch(() => {});
   const seconds = (Date.now() - started) / 1000;
   const made = await page.evaluate(() => document.querySelector(".info-panel-summary .summary-text")?.textContent ?? null);
   t.check(
