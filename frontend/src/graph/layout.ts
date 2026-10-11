@@ -94,16 +94,33 @@ const LANE_CLEAR = 2 * ROUTE_GAP;
 /** 같은 열의 두 상자를 잇는 선이 상자의 옆면에서 드나드는 높이. 마주 보는 쪽 모서리에서 이만큼 안쪽이다. */
 const CORNER_INSET = 6;
 
-/** 열은 partition으로, 열 안 순서는 children 배열 순서로 고정한다. 교차 최소화는 children 순서를 바꾸므로 끈다. */
+/**
+ * 열 안의 노드를 `ordered`가 적은 순서대로 놓게 하는 ELK 옵션. semiInteractive를 켜면 ELK가 같은 열의 노드를 `elk.position`의 y가
+ * 작은 것부터 놓도록 묶어 두고, 여러 열을 건너는 선이 지나는 높이만 교차가 줄어들게 고른다. 교차 최소화는 한 번만 돈다(thoroughness 1).
+ * 무작위로 다시 시작하는 횟수만큼 계산 시간이 늘고, ELK 기본값인 일곱 번을 돌아도 sync-engine과 mdp에서 줄어드는 교차가 7% 이하다.
+ * 모델 순서 옵션(`considerModelOrder`)은 쓰지 않는다. 그 옵션이 켜는 정렬 단계가 선이 수백 개인 배치에서 계산 시간의 90% 이상을 쓴다.
+ * 구조 뷰와 함수 시점 뷰의 ELK 입력이 함께 쓴다.
+ */
+export function arrangeOptions(): Record<string, string> {
+  return {
+    "elk.layered.crossingMinimization.semiInteractive": "true",
+    "elk.layered.crossingMinimization.greedySwitch.type": "OFF",
+    "elk.layered.thoroughness": "1",
+  };
+}
+
+/** 형제 노드마다 배열 순서를 `elk.position`의 y로 적는다. ELK는 이 값을 같은 열에 놓인 노드의 순서로만 읽는다. */
+export function ordered(children: ElkNode[]): ElkNode[] {
+  return children.map((child, i) => ({ ...child, layoutOptions: { ...child.layoutOptions, "elk.position": `(0,${i})` } }));
+}
+
+/** 열은 partition으로, 열 안 순서는 children 배열 순서로 고정한다. */
 const ELK_OPTIONS = {
   "elk.algorithm": "layered",
   "elk.direction": "RIGHT",
   "elk.edgeRouting": "ORTHOGONAL",
   "elk.partitioning.activate": "true",
-  "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
-  "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
-  "elk.layered.crossingMinimization.strategy": "NONE",
-  "elk.layered.crossingMinimization.greedySwitch.type": "OFF",
+  ...arrangeOptions(),
   "elk.separateConnectedComponents": "false",
   "elk.spacing.nodeNode": "24",
   "elk.layered.spacing.nodeNodeBetweenLayers": "48",
@@ -310,7 +327,7 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
 
 /**
  * 보이는 노드를 연결 묶음마다 parent 사슬로 중첩한 ELK 입력. 자식을 그리는 노드마다 따로 배치하므로 선은 형제 사이로
- * 올려 그 부모에 선언한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣는다.
+ * 올려 그 부모에 선언한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣어 그 순서를 `ordered`로 적는다.
  * ends는 강조하는 경로의 출발 노드와 도착 노드이고, 그 노드의 크기에 표지의 폭을 더한다.
  * 순환 아이콘을 다는 상자는 아이콘의 폭을 크기에 더한다. 접힌 파일 상자와 접힌 폴더 상자는 아래 글자의 줄을 상자 아래에 잡아 둔다.
  */
@@ -344,7 +361,7 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
     if (kids.length > 0) {
       return {
         id: node.id,
-        children: kids.map(build),
+        children: ordered(kids.map(build)),
         edges: edgesOf(node.id),
         layoutOptions: { ...ELK_OPTIONS, ...options, ...boxOptions(node, functions.get(node.id) ?? 0, measure, marksOf(node.id)) },
       };
@@ -365,7 +382,7 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
     components: columns.components.map((ids, i) => ({
       id: `component:${i}`,
       layoutOptions: ROOT_OPTIONS,
-      children: ids.map((id) => build(nodes.get(id)!)),
+      children: ordered(ids.map((id) => build(nodes.get(id)!))),
       edges: edgesOf(null, new Set(ids)),
     })),
     shelf: columns.shelf.map((id) => build(nodes.get(id)!)),
@@ -529,6 +546,15 @@ export const runElk: RunElk = (input) => {
   elk ??= new ELK({ workerFactory: () => new Worker(elkWorkerUrl) });
   return elk.layout(input);
 };
+
+/**
+ * 돌고 있는 ELK 계산을 worker와 함께 끝낸다. worker는 요청을 차례로 처리하므로 버린 계산을 끝내야 다음 계산이 바로 시작한다.
+ * 끝낸 계산의 응답은 오지 않고, 다음 `runElk`가 새 worker를 띄운다.
+ */
+export function stopElk(): void {
+  elk?.terminateWorker();
+  elk = null;
+}
 
 export async function layout(graph: Graph, shown: Shown, columns: Columns, ends: Map<string, RouteEnd>): Promise<Layout> {
   const started = performance.now();

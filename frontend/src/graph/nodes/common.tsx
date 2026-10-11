@@ -83,6 +83,33 @@ export function flowNodes<D extends AtlasNodeData>(items: Drawn<D>[], at: Map<st
   return [...items.map((item) => node(item, item.body)), ...items.map((item) => node(item, item.face))];
 }
 
+/** 마우스를 올린 노드의 React Flow 노드가 받는 클래스. styles.css가 이 클래스에 굵은 이름표와 옅은 빛을 준다. */
+export const POINTED = "pointed";
+
+/** 노드 위의 요소 target이 눌리는 곳인지. 펼친 파일 상자와 폴더 영역은 머리 줄만 눌린다. */
+export function pressable(data: AtlasNodeData, target: EventTarget): boolean {
+  const container = data.expanded && (data.node.kind === "module" || data.node.kind === "package");
+  return !container || (target as Element).closest(".node-module-head, .node-region-head") !== null;
+}
+
+/**
+ * 마우스를 올린 노드 id의 React Flow 노드를 선의 hover처럼 가장 진한 단계로 바꾼 목록. 불투명도를 1로 올리고 `POINTED` 클래스를 준다.
+ * 펼친 파일 상자와 폴더 영역은 머리 줄을 그리는 글자 요소만 바꾼다. 다른 노드는 같은 객체를 그대로 돌려주므로 다시 그리지 않는다.
+ */
+export function pointing<D extends AtlasNodeData>(nodes: Node<D>[], id: string | null): Node<D>[] {
+  if (id === null) {
+    return nodes;
+  }
+  const face = faceId(id);
+  return nodes.map((node) => {
+    const container = node.data.expanded && (node.data.node.kind === "module" || node.data.node.kind === "package");
+    if (node.id !== face && (node.id !== id || container)) {
+      return node;
+    }
+    return { ...node, className: POINTED, style: { ...node.style, opacity: 1 } };
+  });
+}
+
 /** 움직이는 동안에는 위치만 바뀌므로 데이터와 크기가 같으면 노드 본문을 다시 그리지 않는다. */
 export function sameNode(a: NodeProps<AtlasFlowNode>, b: NodeProps<AtlasFlowNode>): boolean {
   return a.data === b.data && a.width === b.width && a.height === b.height;

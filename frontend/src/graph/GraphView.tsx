@@ -19,6 +19,7 @@ import { focusOf, type History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { chosenOf, litOf, useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
+import { Arranging, keepLayout, watchLayout } from "./arranging";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
@@ -29,7 +30,7 @@ import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { GROUP_NAMES, KIND_NAMES, STEP_NAMES } from "./names";
 import { LAYER } from "./layers";
-import { flowNodes, parts, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
+import { flowNodes, parts, pointing, pressable, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
 import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
@@ -37,7 +38,7 @@ import { concealed, drawn, type EdgeKey } from "./scope";
 import { nodeTip, tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { edgeViews, parentFirst } from "./view";
-import { boundsOf, centerOn, fitPadding, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, lift, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -53,6 +54,8 @@ interface Scene {
   lit: Lit | null;
   /** 초점을 둔 노드 */
   focus: string | null;
+  /** 토글, 접은 폴더, 초점을 둔 노드, 흐름 단계를 적은 글. 같은 그래프와 경로에서 이 글이 같으면 배치가 같다. */
+  key: string;
   layout: Layout;
 }
 
@@ -174,6 +177,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const [hover, setHover] = useState<string | null>(null);
   /** 마우스를 올린 선 */
   const [pointed, setPointed] = useState<EdgeKey | null>(null);
+  /** 마우스를 올린 노드 가운데 그 위치에서 눌리는 노드 id. 경로 고정 중에는 경로 위 노드만이다. */
+  const [aimedNode, setAimedNode] = useState<string | null>(null);
 
   /** 이 컴포넌트를 그리기 시작할 때의 화면 */
   const [start] = useState(() => home.current ?? undefined);
@@ -181,6 +186,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
   const onScreen = useRef<Layout | null>(null);
+  /** 화면에 그린 배치의 입력 */
+  const arranged = useRef<Pick<Scene, "graph" | "columns" | "lit" | "key"> | null>(null);
   /** 화면을 옮겨 둔 노드나 경로와 그때의 finder.aimed */
   const panned = useRef<{ aim: string | Lit | null; aimed: number }>({ aim: null, aimed: 0 });
   /** 직전에 한 번 누른 노드와 누르기 전의 이력. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
@@ -204,28 +211,39 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return null;
     }
     const toggles = { showTests, showExternal };
+    const folds = [...collapsed].sort();
     if (lit !== null) {
-      return { flow: null, lit, focus: null, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
+      const key = JSON.stringify([toggles, folds]);
+      return { flow: null, lit, focus: null, key, shown: shown(graph, { ...toggles, collapsed, flow: null, lit }) };
     }
     const off = hidden(graph, toggles);
     const picked = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
-    return { flow: picked, lit, focus: picked === null ? null : focus, shown: shown(graph, { ...toggles, collapsed, flow: picked, lit }) };
+    const key = JSON.stringify([toggles, folds, picked === null ? null : [focus, depth]]);
+    return { flow: picked, lit, focus: picked === null ? null : focus, key, shown: shown(graph, { ...toggles, collapsed, flow: picked, lit }) };
   }, [graph, index, showTests, showExternal, collapsed, focus, depth, lit]);
 
+  // 느린 배치를 취소하면 입력이 화면에 그린 배치의 입력으로 돌아오므로 다시 계산하지 않는다.
   useEffect(() => {
     if (graph === null || cols === null || target === null) {
       return;
     }
-    let stale = false;
-    layout(graph, target.shown, cols, endsOf(target.lit))
-      .then((result) => !stale && setScene({ graph, columns: cols, ...target, layout: result }))
-      .catch((caught: unknown) => !stale && setError(caught instanceof Error ? caught.message : String(caught)));
-    return () => {
-      stale = true;
-    };
+    const input = { graph, columns: cols, lit: target.lit, key: target.key };
+    const last = arranged.current;
+    if (last !== null && last.graph === graph && last.columns === cols && last.lit === input.lit && last.key === input.key) {
+      keepLayout();
+      return;
+    }
+    return watchLayout(
+      layout(graph, target.shown, cols, endsOf(target.lit)),
+      (result) => {
+        arranged.current = input;
+        setScene({ graph, columns: cols, ...target, layout: result });
+      },
+      setError,
+    );
   }, [graph, cols, target]);
 
-  // 레포를 열면 정보 패널이 가리지 않는 영역에 그래프 전체를 맞춘다. 함수 시점 뷰에서 돌아오면 떠날 때의 화면에서 시작한다.
+  // 레포를 열면 정보 패널이 가리지 않는 영역에 그래프 전체를 맞추고 확대 비율을 100%보다 키우지 않는다. 함수 시점 뷰에서 돌아오면 떠날 때의 화면에서 시작한다.
   useEffect(() => {
     if (scene === null || home.current !== null || root.current === null) {
       return;
@@ -233,7 +251,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const stage = stageOf(root.current);
     const { width, height } = stage.area;
     const bounds = boundsOf(scene.layout.boxes.values());
-    home.current = getViewportForBounds(bounds, width, height, ZOOM_MIN, ZOOM_MAX, fitPadding(stage.area, stage.free));
+    home.current = getViewportForBounds(bounds, width, height, ZOOM_MIN, FRAME_ZOOM, fitPadding(stage.area, stage.free));
     void setViewport(home.current);
   }, [scene, home, setViewport]);
   useEffect(
@@ -321,6 +339,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     [scene, index, lines],
   );
   const edges = useMemo(() => flowEdges(views, pointed, lines.keys), [views, pointed, lines]);
+  const drawnNodes = useMemo(() => pointing(nodes, aimedNode), [nodes, aimedNode]);
 
   /**
    * 연달아 누른 두 번째 클릭이면 처음 누른 노드를 열고 참을 돌려준다. 함수·메서드 노드는 함수 시점 뷰로 들어간다.
@@ -390,8 +409,12 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
   };
 
-  /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. */
+  /**
+   * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 그 위치에서 눌리는 노드면 선의 hover처럼
+   * 가장 진한 단계로 그린다. 경로 고정 중에는 경로 위 노드만 그렇게 그린다.
+   */
   const onNodeOver: NodeMouseHandler<AtlasFlowNode> = (event, node) => {
+    setAimedNode((lit === null || node.data.route !== null) && pressable(node.data, event.target) ? node.data.node.id : null);
     const text = tipOf(event.target) ?? nodeTip(titleOf(node.data.node), KIND_NAMES[node.data.node.kind], node.data.unused);
     tip.current?.show(text, event.clientX, event.clientY);
   };
@@ -417,6 +440,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const onMove = (event: ReactMouseEvent) => tip.current?.move(event.clientX, event.clientY);
   const onNodeLeave = () => {
     setHover(null);
+    setAimedNode(null);
     tip.current?.hide();
   };
   const onEdgeLeave = () => {
@@ -443,7 +467,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     >
       <Markers />
       <ReactFlow
-        nodes={nodes}
+        nodes={drawnNodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -478,6 +502,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         )}
       </ReactFlow>
       <Dock />
+      <Arranging />
       <Tooltip ref={tip} />
     </div>
   );

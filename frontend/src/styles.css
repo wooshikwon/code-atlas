@@ -1125,6 +1125,40 @@ ul {
   margin-left: 4px;
 }
 
+/* 마우스를 올린 노드는 선의 hover처럼 가장 진한 단계로 그린다. 불투명도는 nodes/common.tsx의 pointing이 1로 올리고, 여기서는 모양의
+   테두리를 본문 잉크로 바꿔 옅은 빛을 두르고 이름표를 굵게 보이게 한다. 이름표는 글자 외곽선으로 굵히므로 폭이 바뀌지 않는다.
+   변경 표시 색으로 그린 테두리는 그대로 둔다. 펼친 파일 상자와 폴더 영역은 머리 줄의 이름표만 바꾼다. */
+.react-flow__node.pointed > .node-body:is(.node-module, .node-package, .node-dataclass, .node-external) {
+  border-top-color: var(--ink);
+  border-right-color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.react-flow__node.pointed > .node-body:is(.node-module, .node-package, .node-dataclass, .node-external):not([data-change]) {
+  border-left-color: var(--ink);
+}
+
+.react-flow__node.pointed > .node-body:not([data-change]) .node-circle {
+  border-color: var(--ink);
+}
+
+.react-flow__node.pointed > .node-body:not([data-change]) :is(.node-hexagon polygon, .call-shape) {
+  stroke: var(--ink);
+}
+
+.react-flow__node.pointed > .node-body {
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--ink) 45%, transparent));
+}
+
+.react-flow__node.pointed .node-label {
+  color: var(--ink);
+  -webkit-text-stroke: 0.5px currentColor;
+}
+
+.react-flow__node.pointed :is(.node-module-head, .node-region-head) .node-label {
+  text-shadow: 0 0 2px color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
 /* 이름표는 확대 비율 구간에 따라 숨긴다. 40% 미만은 폴더·파일 이름만, 80% 미만은 클래스·데이터 클래스 이름까지 보인다.
    초점 상태에서 흐름에 든 노드와 선택한 노드가 든 파일 상자 안의 노드는 이름표가 확대 비율과 관계없이 보인다. */
 .graph[data-zoom="0"] :is(.node-class, .node-dataclass, .node-function):not([data-flow], [data-local]) :is(.node-label, .loc),
@@ -1318,6 +1352,25 @@ ul {
   border-radius: 4px;
   background: var(--panel-bg);
   font-size: 12px;
+}
+
+/* 느린 배치의 표시. 그래프 영역 위쪽 가운데에 뜨고 마우스를 받지 않는다. */
+.arranging {
+  position: absolute;
+  z-index: var(--z-overlay);
+  top: 12px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  font-size: 12px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 /* 왼쪽 아래 칸. 아랫줄에 둥근 버튼을, 그 위에 펼친 미니맵과 범례, 경로 탐색 창을 나란히 둔다. 폭이 모자라면 오른쪽 칸부터 위로 올라간다.
@@ -1546,6 +1599,12 @@ ul {
   overflow: hidden;
   background: var(--surface);
   box-shadow: 0 4px 18px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+/* 기본 사각형은 영역의 위·오른쪽·아래 끝에 붙으므로 왼쪽 변에만 테두리를 그리고 모서리를 둥글리지 않는다. */
+.info-panel[data-docked] {
+  border-width: 0 0 0 1px;
+  border-radius: 0;
 }
 
 .info-panel-head {

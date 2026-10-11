@@ -1,7 +1,20 @@
 // 함수 시점 뷰에 그릴 노드와 실행 선을 정하고 ELK 입력을 만든다. 파일 상자와 열 배정을 쓰지 않는다.
 import type { ElkNode } from "elkjs/lib/elk-api";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
-import { CIRCLE, CIRCLE_GAP, ENTRY_MARK, labelOf, LEAF_HEIGHT, LOC_GAP, titleOf, type Layout, type Measure, type Size } from "./layout";
+import {
+  arrangeOptions,
+  CIRCLE,
+  CIRCLE_GAP,
+  ENTRY_MARK,
+  labelOf,
+  LEAF_HEIGHT,
+  LOC_GAP,
+  ordered,
+  titleOf,
+  type Layout,
+  type Measure,
+  type Size,
+} from "./layout";
 import { EDGE_OPACITY, edgeKey } from "./scope";
 import type { EdgeView } from "./view";
 import { unitOf } from "./visible";
@@ -29,7 +42,7 @@ const CALL_OPTIONS = {
   "elk.algorithm": "layered",
   "elk.direction": "RIGHT",
   "elk.edgeRouting": "ORTHOGONAL",
-  "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+  ...arrangeOptions(),
   "elk.spacing.nodeNode": "24",
   "elk.layered.spacing.nodeNodeBetweenLayers": "48",
   "elk.padding": "[top=0,left=0,bottom=0,right=0]",
@@ -131,12 +144,12 @@ export function callSize(calls: Calls, nodes: Map<string, AtlasNode>, node: Atla
   };
 }
 
-/** 모든 노드와 실행 선을 한 번에 배치하는 ELK 입력. 노드 수가 적으므로 partition을 쓰지 않는다. */
+/** 모든 노드와 실행 선을 한 번에 배치하는 ELK 입력. 열은 ELK가 선으로 정하고, 열 안에서는 `Calls.nodes`의 순서대로 놓는다. */
 export function callElk(calls: Calls, size: (id: string) => Size): ElkNode {
   return {
     id: "calls",
     layoutOptions: CALL_OPTIONS,
-    children: calls.nodes.map((id) => ({ id, ...size(id) })),
+    children: ordered(calls.nodes.map((id) => ({ id, ...size(id) }))),
     edges: calls.edges.map((edge) => ({ id: edgeKey(edge), sources: [edge.source], targets: [edge.target] })),
   };
 }

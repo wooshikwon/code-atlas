@@ -1,7 +1,7 @@
 // 분석 결과와 화면 상태를 파일트리·그래프·정보 패널이 함께 쓴다. 컴포넌트는 선택자로 필요한 필드만 구독한다.
 import { create } from "zustand";
 import { getGraph, getRepo, getTree } from "../api/client";
-import type { Graph, Repo, Tree } from "../api/types";
+import type { AtlasNode, Graph, Repo, Tree } from "../api/types";
 import { cycles } from "../graph/cycles";
 import { lit, route, type Lit, type Route } from "../graph/route";
 import type { EdgeKey } from "../graph/scope";
@@ -46,7 +46,7 @@ export interface AtlasStore {
   error: string | null;
   view: View;
   selection: Selection;
-  /** 접은 폴더(패키지 노드 id). 레포를 열면 `nestedFolders`가 고른 폴더가 접혀 있다. */
+  /** 접은 폴더(패키지 노드 id). 레포를 열면 `startFolds`가 고른 폴더가 접혀 있다. */
   collapsed: Set<string>;
   /** 흐름 단계 */
   depth: Depth;
@@ -70,6 +70,10 @@ export interface AtlasStore {
   reloadError: string | null;
   /** 레포를 다시 연 횟수. 파일트리와 그래프가 이 값이 바뀌면 처음 상태로 다시 그린다. */
   epoch: number;
+  /** 배치 계산이 펼치기·접기의 움직임 시간을 넘겨 도는 중이다(`graph/arranging.tsx`). 그동안 그래프는 앞의 배치를 그대로 그린다. */
+  arranging: boolean;
+  /** 화면에 그린 배치를 계산하기 시작한 때의 탐색 이력. 그린 배치가 없으면 null이다. */
+  arranged: History | null;
 
   /** 저장해 둔 화면 설정을 되살리고 레포·그래프·파일트리를 받는다. */
   load(): void;
@@ -105,9 +109,15 @@ export interface AtlasStore {
    * from에서 이어 한 단계만 넣는다. 함수 시점 뷰의 가운데 함수면 from으로 되돌리기만 한다.
    */
   open(id: string, from: History): void;
+  /** 이력의 앞 단계로 돌아간다. 되돌릴 느린 배치가 있으면(`undoable`) 그 배치를 취소한다. */
   back(): void;
   forward(): void;
   jump(index: number): void;
+  /**
+   * 느린 배치를 취소한다. 뷰·선택·접은 폴더·탐색 이력을 화면에 그린 배치의 것(`arranged`)으로 되돌리고 참을 돌려준다.
+   * 되돌릴 조작이 없으면(`undoable`) 아무것도 하지 않고 거짓을 돌려준다.
+   */
+  cancelArranging(): boolean;
   /** 두 칸이 차 있으면 바뀐 토글로 경로를 다시 찾는다. */
   toggleTests(): void;
   toggleExternal(): void;
@@ -135,7 +145,7 @@ export interface AtlasStore {
 
 type Ui = Pick<AtlasStore, "panel" | "split" | "legendOpen" | "minimapOpen" | "theme" | "depth" | "autoSummary">;
 
-const UI_KEY = "code-atlas:ui:v1";
+const UI_KEY = "code-atlas:ui:v2";
 
 function isRect(value: unknown): value is Rect {
   if (typeof value !== "object" || value === null) {
@@ -173,9 +183,23 @@ function placeOf(state: Pick<AtlasStore, "view" | "selection" | "collapsed">): P
   return { view: state.view, selection: state.selection, collapsed: [...state.collapsed].sort() };
 }
 
-/** 레포를 열 때 접어 두는 폴더. 소스 루트 바로 아래 폴더는 펼치고 그 아래의 폴더는 모두 접는다. */
-export function nestedFolders(graph: Graph): Set<string> {
-  return new Set(graph.nodes.filter((n) => n.kind === "package" && n.parent !== null).map((n) => n.id));
+/**
+ * 레포를 열 때 접어 두는 폴더. 모든 폴더를 접되, 소스 루트부터 내려가며 그 층에 보이는 상자(파일 상자와 폴더 상자)가 폴더 하나뿐인
+ * 동안 그 폴더를 펼친다. 테스트 코드 토글이 꺼져 숨는 파일과 폴더는 세지 않는다.
+ */
+export function startFolds(graph: Graph, showTests: boolean): Set<string> {
+  const off = hidden(graph, { showTests, showExternal: false });
+  const boxes = new Map<string | null, AtlasNode[]>();
+  for (const node of graph.nodes) {
+    if ((node.kind === "module" || node.kind === "package") && !off.has(node.id)) {
+      boxes.set(node.parent, [...(boxes.get(node.parent) ?? []), node]);
+    }
+  }
+  const folds = new Set(graph.nodes.filter((n) => n.kind === "package").map((n) => n.id));
+  for (let layer = boxes.get(null) ?? []; layer.length === 1 && layer[0].kind === "package"; layer = boxes.get(layer[0].id) ?? []) {
+    folds.delete(layer[0].id);
+  }
+  return folds;
 }
 
 /** 경로 고정 상태인지. 찾은 경로가 하나라도 있으면 고정이다. */
@@ -186,6 +210,14 @@ export function pinned(finder: Finder): boolean {
 /** 고정 중에 강조하는 경로. 고정이 아니면 null이다. */
 export function litOf(finder: Finder): Lit | null {
   return finder.route === null ? null : lit(finder.route, finder.pick);
+}
+
+/**
+ * 느린 배치를 취소해 되돌릴 조작이 있는지. 배치 계산이 길어지는 중이고, 화면에 그린 배치 뒤에 탐색 이력이 바뀌었을 때다.
+ * 레포를 연 첫 배치, 토글·흐름 단계·경로 고정이 부른 배치는 이력을 바꾸지 않으므로 되돌릴 조작이 없다.
+ */
+export function undoable(state: Pick<AtlasStore, "arranging" | "arranged" | "history" | "finder">): boolean {
+  return state.arranging && state.arranged !== null && state.arranged !== state.history && !pinned(state.finder);
 }
 
 /** 정보 패널·탐색 경로 표시·파일트리가 보이는 노드. 경로 고정 중에는 finder.focus이고 그 밖에는 고른 노드다. */
@@ -216,11 +248,11 @@ const START: Pick<AtlasStore, "view" | "selection" | "collapsed"> = {
 
 const FINDER: Finder = { open: false, from: null, to: null, route: null, pick: 0, focus: null, blocked: 0, aimed: 0 };
 
-/** 받은 분석 결과와, 레포를 처음 열 때의 뷰·선택·접은 폴더·탐색 이력 */
-function opened(repo: Repo, graph: Graph, tree: Tree) {
-  const collapsed = nestedFolders(graph);
+/** 받은 분석 결과와, 레포를 처음 열 때의 뷰·선택·접은 폴더·탐색 이력. 테스트 코드 토글이 showTests일 때의 화면이다. */
+function opened(repo: Repo, graph: Graph, tree: Tree, showTests: boolean) {
+  const collapsed = startFolds(graph, showTests);
   const place = placeOf({ ...START, collapsed });
-  return { repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 } };
+  return { repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 }, arranging: false, arranged: null };
 }
 
 /** 레포를 열 때의 덮개. 지금 토글에서 순환 묶음이 하나라도 있으면 순환 덮개를 켜고 없으면 끈다. */
@@ -341,6 +373,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     reloading: false,
     reloadError: null,
     epoch: 0,
+    arranging: false,
+    arranged: null,
 
     load: () => {
       const ui = parseUi(localStorage.getItem(UI_KEY), preferredTheme());
@@ -348,13 +382,13 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       applyTheme(ui.theme);
       Promise.all([getRepo(), getGraph(), getTree()])
         .then(([repo, graph, tree]) => {
-          set(opened(repo, graph, tree));
+          set(opened(repo, graph, tree, get().showTests));
           cover(graph, get());
         })
         .catch((caught: unknown) => set({ error: caught instanceof Error ? caught.message : String(caught) }));
     },
     reopen: (repo, graph, tree) => {
-      set({ ...opened(repo, graph, tree), showTests: false, showExternal: false, finder: FINDER, paletteOpen: false, epoch: get().epoch + 1 });
+      set({ ...opened(repo, graph, tree, false), showTests: false, showExternal: false, finder: FINDER, paletteOpen: false, epoch: get().epoch + 1 });
       keep({ depth: 2, autoSummary: false });
       cover(graph, get());
     },
@@ -409,9 +443,21 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         enter(id);
       }
     }),
-    back: guarded(() => restore(back(get().history))),
+    back: guarded(() => {
+      if (!get().cancelArranging()) {
+        restore(back(get().history));
+      }
+    }),
     forward: guarded(() => restore(forward(get().history))),
     jump: guarded((index) => restore(jump(get().history, index))),
+    cancelArranging: () => {
+      const { arranged } = get();
+      if (arranged === null || !undoable(get())) {
+        return false;
+      }
+      restore(arranged);
+      return true;
+    },
     toggleTests: guarded(() => {
       set((state) => ({ showTests: !state.showTests }));
       seek(get().finder.from, get().finder.to);

@@ -1,5 +1,6 @@
 // 정보 패널의 사각형을 저장소에서 읽어 관계 그래프 영역에 맞추고, 머리 줄과 손잡이를 끄는 동작을 사각형으로 바꾼다.
-// 저장한 사각형이 없으면 영역의 오른쪽에 붙어 위에서 아래까지 차는 기본 사각형을 쓴다.
+// 저장한 사각형이 없으면 영역의 오른쪽 끝에 붙어 영역 폭의 30%를 차지하고 위에서 아래까지 차는 기본 사각형을 쓴다.
+// 기본 사각형은 영역의 크기가 바뀔 때마다 다시 계산한다.
 import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useAtlas, type Rect } from "../state/store";
 import { drag } from "./drag";
@@ -11,6 +12,8 @@ interface PanelRect {
   ref: RefObject<HTMLDivElement | null>;
   /** 관계 그래프 영역의 크기를 재기 전에는 null이다. */
   rect: Rect | null;
+  /** 기본 사각형으로 그리는 중인지. 영역의 위·오른쪽·아래 끝에 붙어 있다. */
+  docked: boolean;
   /** 머리 줄("move")이나 손잡이의 pointerdown에 넣는 처리기 */
   grip: (kind: Grip) => (event: ReactPointerEvent<HTMLElement>) => void;
   /** 저장한 사각형을 지워 기본 사각형으로 돌아간다. */
@@ -65,5 +68,5 @@ export function usePanelRect(): PanelRect {
     );
   };
 
-  return { ref, rect, grip, reset: () => setPanel(null) };
+  return { ref, rect, docked: saved === null, grip, reset: () => setPanel(null) };
 }

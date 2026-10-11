@@ -25,6 +25,9 @@ const FUNCTION = "arbiter:_rebuild_note_sections";
 const DIM = 0.2;
 /** 함수 이름표가 모두 보이는 확대 비율 구간의 시작값. 이보다 작은 확대 비율에서 노드를 고르면 이 값이 된다. */
 const NAMED_ZOOM = 0.8;
+/** 정보 패널의 기본 폭을 관계 그래프 영역의 폭으로 나눈 값과 패널의 최소 폭 */
+const PANEL_SHARE = 0.3;
+const PANEL_MIN = 260;
 /** 큰 상자를 패널을 뺀 영역의 시작 끝에서 띄우는 폭 */
 const INSET = 20;
 const DARK = { surface: "#1a1a19", ink: "#ffffff" };
@@ -325,10 +328,37 @@ async function settle(page, quiet = 500) {
   );
 }
 
-async function load(page, at = url) {
+/** 접힌 폴더를 파일트리의 폴더 행으로 펼친다. 이미 펼친 폴더는 그대로 둔다. */
+async function openFolder(page, id) {
+  if ((await count(page, `${node(id)} > .node-package`)) === 0) {
+    return;
+  }
+  await page.click(`.tree-row.tree-dir[data-node="${id}"]`);
+  await page.waitForSelector(`${node(id)} > .node-region`, { timeout: 30_000 });
+  await settle(page);
+}
+
+/**
+ * 화면을 연다. 레포는 폴더를 접은 채로 열리므로, unfold가 참이면 소스 루트 바로 아래의 접힌 폴더를 파일트리의 폴더 행으로 차례로
+ * 펼치고 "화면 맞춤"으로 그래프 전체를 맞춘다. 폴더 안의 파일 상자를 보는 시나리오는 이 화면에서 시작한다.
+ */
+async function load(page, at = url, unfold = true) {
   await page.goto(at);
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
   await settle(page);
+  if (!unfold) {
+    return;
+  }
+  const graph = await api("/api/graph", at);
+  for (const folder of graph.nodes.filter((n) => n.kind === "package" && n.parent === null && !n.test)) {
+    if ((await count(page, `${node(folder.id)} > .node-package`)) === 0) {
+      continue;
+    }
+    await openFolder(page, folder.id);
+    await page.getByRole("button", { name: "화면 맞춤" }).click();
+    await page.mouse.move(1, 1);
+    await settle(page);
+  }
 }
 
 /** 노드의 이름표(펼친 파일 상자는 머리 줄) 가운데를 마우스로 누른다. times가 2면 더블클릭이다. */
@@ -505,8 +535,8 @@ async function open(t, page) {
   const { area, panel } = await stageOf(page);
   const gaps = { top: panel.y - area.y, right: area.x + area.width - panel.x - panel.width, bottom: area.y + area.height - panel.y - panel.height };
   t.check(
-    "정보 패널이 관계 그래프 영역의 오른쪽에 붙어 위·오른쪽·아래에 같은 여백을 두고 위에서 아래까지 찬다",
-    gaps.top > 0 && near(gaps.top, gaps.bottom) && near(gaps.top, gaps.right) && near(panel.width, 480),
+    "정보 패널이 관계 그래프 영역의 오른쪽 끝에 붙어 영역 폭의 30%를 차지하고 위에서 아래까지 빈틈없이 찬다",
+    near(gaps.top, 0) && near(gaps.bottom, 0) && near(gaps.right, 0) && near(panel.width, area.width * PANEL_SHARE),
     `여백 위 ${gaps.top}, 오른쪽 ${gaps.right}, 아래 ${gaps.bottom}, 패널 ${panel.width}×${panel.height}, 영역 높이 ${area.height}`,
   );
   const unresolved = graph.nodes.filter((n) => !n.test).reduce((sum, n) => sum + n.unresolved, 0);
@@ -702,9 +732,37 @@ async function panel(t, page) {
     sameRect(short, { ...start, height: start.height - 200 }),
     `${rectText(start)} → ${rectText(short)}`,
   );
+  /** 기본 사각형이 지금의 관계 그래프 영역에서 오른쪽 끝에 붙어 폭의 30%(최소 폭보다 좁으면 최소 폭)와 높이 전체를 차지하는지 */
+  const docked = async () => {
+    const { area, panel: box } = await stageOf(page);
+    const width = Math.max(PANEL_MIN, Math.round(area.width * PANEL_SHARE));
+    const ok = near(box.width, width) && near(box.x + box.width, area.x + area.width) && near(box.y, area.y) && near(box.height, area.height);
+    return { ok, text: `영역 ${Math.round(area.width)}×${Math.round(area.height)}, 패널 ${rectText(box)}, 기대 폭 ${width}` };
+  };
+  /** 창 크기를 바꾼 뒤 기본 패널이 새 영역에 다시 놓일 때까지 기다린다. */
+  const redocked = async () => {
+    await page
+      .waitForFunction(
+        ([share, least]) => {
+          const [box, stage] = [document.querySelector(".info-panel").getBoundingClientRect(), document.querySelector(".stage").getBoundingClientRect()];
+          return Math.abs(box.width - Math.max(least, Math.round(stage.width * share))) <= 1 && Math.abs(box.right - stage.right) <= 1 && Math.abs(box.height - stage.height) <= 1;
+        },
+        [PANEL_SHARE, PANEL_MIN],
+        { timeout: 5_000 },
+      )
+      .catch(() => {});
+    await settle(page);
+  };
+  for (const width of [1280, 720]) {
+    await page.setViewportSize({ width, height: VIEW.height });
+    await redocked();
+    const narrow = await docked();
+    t.check(`창 폭을 ${width}px로 바꾸면 기본 패널이 영역 폭의 30%를 따라 다시 놓인다`, narrow.ok, narrow.text);
+  }
   await page.setViewportSize(VIEW);
-  await page.waitForFunction((height) => document.querySelector(".info-panel").getBoundingClientRect().height === height, start.height, { timeout: 5_000 }).catch(() => {});
-  await settle(page);
+  await redocked();
+  const wide = await docked();
+  t.check("기본 패널은 영역의 오른쪽 끝에 붙어 영역 폭의 30%와 상단 줄 아래의 높이 전체를 차지한다", wide.ok && sameRect(await rectOf(page, ".info-panel"), start), wide.text);
   await drag(page, center(await rectOf(page, ".info-panel-head")), -300, 40);
   await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="nw"]')), -60, 80);
   const moved = await rectOf(page, ".info-panel");
@@ -2654,6 +2712,7 @@ async function toolbar(t, page) {
     await page.evaluate(() => localStorage.clear());
     await page.reload();
     await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+    await openFolder(page, NARROW.owner.split(".")[0]);
     await page.click(`.tree-row.tree-file[data-node="${NARROW.owner}"]`);
     await page.waitForSelector(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`, { timeout: 10_000 });
     await page.click(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`);
@@ -2705,8 +2764,8 @@ async function toolbar(t, page) {
       `마지막 단계 "${bar.last?.text}" ${bar.last?.width}px${bar.last?.whole ? "" : "(말줄임)"}, 줄인 단계 "${bar.cut ?? "없음"}"`,
     );
     t.check(
-      `${name}: 관계 그래프 영역이 상단 줄 바로 아래에서 시작하고 정보 패널의 위아래 여백이 같다`,
-      near(bar.gaps[2], 0) && bar.gaps[0] > 0 && near(bar.gaps[0], bar.gaps[1]),
+      `${name}: 관계 그래프 영역이 상단 줄 바로 아래에서 시작하고 정보 패널이 영역의 위 끝부터 아래 끝까지 찬다`,
+      near(bar.gaps[2], 0) && near(bar.gaps[0], 0) && near(bar.gaps[1], 0),
       `패널 위 ${bar.gaps[0]}, 아래 ${bar.gaps[1]}, 상단 줄과 영역 사이 ${bar.gaps[2]}`,
     );
     await page.click(".filter-button");
@@ -4517,6 +4576,324 @@ async function cyclesPin(t, page) {
   t.check("덮개를 끄면 폴더 상자 아래 글자가 없다", (await belowOf(page, "a")) === "");
 }
 
+/** 화면에 그린 파일 상자와 폴더 상자(접힌 상자와 펼친 영역)의 노드 id를 정렬한 목록 */
+const boxIds = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".react-flow__node")]
+      .filter((wrapper) => wrapper.querySelector(":scope > .node-body:is(.node-module, .node-package, .node-region)") !== null)
+      .map((wrapper) => wrapper.dataset.id)
+      .sort(),
+  );
+
+/**
+ * 레포를 연 화면. 모든 폴더를 접어 열고, 그 층에 보이는 상자가 폴더 하나뿐인 폴더만 펼친다. 그 폴더가 있는 화면은
+ * --reload-url의 고정 레포(`src/app/` 하나와 숨은 `tests/`)에서 본다.
+ */
+async function start(t, page) {
+  const expected = async (base) => {
+    const graph = await api("/api/graph", base);
+    const boxes = graph.nodes.filter((n) => (n.kind === "module" || n.kind === "package") && !n.test);
+    const under = (parent) => boxes.filter((n) => n.parent === parent);
+    const opened = [];
+    let layer = under(null);
+    while (layer.length === 1 && layer[0].kind === "package") {
+      opened.push(layer[0].id);
+      layer = under(layer[0].id);
+    }
+    return { graph, opened, shown: [...opened, ...layer.map((n) => n.id)].sort() };
+  };
+  const folded = (id) => count(page, `${node(id)} > .node-package`);
+
+  await load(page, url, false);
+  const sync = await expected(url);
+  const shown = await boxIds(page);
+  const files = sync.graph.nodes.filter((n) => n.kind === "module" && !n.test && n.parent === null).length;
+  t.check(
+    `레포를 열면 parser/가 접힌 폴더 상자이고 소스 루트 바로 아래의 파일 상자 ${files}개가 보인다`,
+    sync.opened.length === 0 && same(shown, sync.shown) && (await folded("parser")) === 1 && (await boxes(page)).length === files,
+    shown.join(", "),
+  );
+  t.check('"뒤로" 버튼을 누를 수 없다', await page.getByRole("button", { name: "뒤로" }).isDisabled());
+  const { free } = await stageOf(page);
+  const rects = await Promise.all(shown.map((id) => rectOf(page, node(id))));
+  const zoom = await zoomOf(page);
+  t.check(
+    "그래프 전체가 정보 패널이 가리지 않는 영역에 들어오고 확대 비율이 100%를 넘지 않는다",
+    zoom <= 1 && rects.every((r) => r.x >= free.x && r.y >= free.y && r.x + r.width <= free.x + free.width && r.y + r.height <= free.y + free.height),
+    `확대 비율 ${zoom.toFixed(3)}`,
+  );
+  await t.shot();
+
+  await clickNode(page, "parser");
+  await page.waitForSelector(`${node("parser")} > .node-region`, { timeout: 30_000 });
+  await settle(page);
+  const inside = sync.graph.nodes.filter((n) => n.parent === "parser" && n.kind === "module" && !n.test).map((n) => n.id);
+  const after = await boxIds(page);
+  t.check(`parser/를 누르면 안의 파일 상자 ${inside.length}개가 폴더 영역 안에 나타난다`, inside.length > 0 && inside.every((id) => after.includes(id)), after.join(", "));
+
+  if (reloadUrl === null) {
+    t.skip("그 층에 보이는 상자가 폴더 하나뿐이면 그 폴더를 펼쳐 연다", "--reload-url을 주지 않았다");
+    return;
+  }
+  await load(page, reloadUrl, false);
+  const sample = await expected(reloadUrl);
+  const seen = await boxIds(page);
+  const nested = sample.graph.nodes.filter((n) => n.kind === "package" && !n.test && !sample.opened.includes(n.id) && seen.includes(n.id)).map((n) => n.id);
+  const closed = await Promise.all(nested.map(folded));
+  t.check(
+    "그 층에 보이는 상자가 폴더 하나뿐이면 그 폴더를 펼쳐 열고 그 아래의 폴더는 접어 둔다",
+    sample.opened.length > 0 &&
+      same(seen, sample.shown) &&
+      (await count(page, `${node(sample.opened[0])} > .node-region`)) === 1 &&
+      nested.length > 0 &&
+      closed.every((n) => n === 1),
+    `펼친 폴더 ${sample.opened.join(", ")}, 접힌 폴더 ${nested.join(", ")}, 상자 ${seen.join(", ")}`,
+  );
+}
+
+/**
+ * 느린 배치. ELK worker로 가는 배치 요청을 늦춰, 배치가 펼치기·접기의 움직임 시간(300ms)을 넘기면 앞의 그래프를 둔 채
+ * 표시가 뜨는지, Esc와 뒤로 가기가 그 조작만 되돌리는지 본다.
+ */
+async function arranging(t, page) {
+  /** 늦추는 시간(ms). 표시가 뜨는 300ms와 확인하는 시각을 넉넉히 넘긴다. */
+  const DELAY = 2500;
+  await page.addInitScript(() => {
+    window.__shotsElkDelay = 0;
+    window.__shotsWorkers = 0;
+    const Native = window.Worker;
+    window.Worker = class extends Native {
+      constructor(address, options) {
+        super(address, options);
+        window.__shotsWorkers += 1;
+        const post = this.postMessage.bind(this);
+        this.postMessage = (message, ...rest) => {
+          if (message?.cmd === "layout" && window.__shotsElkDelay > 0) {
+            setTimeout(() => post(message, ...rest), window.__shotsElkDelay);
+          } else {
+            post(message, ...rest);
+          }
+        };
+      }
+    };
+    window.__shotsArranging = 0;
+    const watcher = new MutationObserver(() => {
+      if (document.querySelector(".arranging") !== null) {
+        window.__shotsArranging += 1;
+      }
+    });
+    document.addEventListener("DOMContentLoaded", () => watcher.observe(document.body, { childList: true, subtree: true }));
+  });
+  const slow = (ms) => page.evaluate((value) => void (window.__shotsElkDelay = value), ms);
+  const sign = () => page.evaluate(() => document.querySelector(".arranging")?.textContent ?? null);
+  const seen = () => page.evaluate(() => window.__shotsArranging);
+  const nav = async () => [await page.getByRole("button", { name: "뒤로" }).isDisabled(), await page.getByRole("button", { name: "앞으로" }).isDisabled()];
+
+  await load(page, url, false);
+  const first = await boxIds(page);
+  await clickNode(page, "parser");
+  await page.waitForSelector(`${node("parser")} > .node-region`, { timeout: 30_000 });
+  await settle(page);
+  const opened = await boxIds(page);
+  t.check("움직임 시간 안에 끝나는 배치에는 표시가 뜨지 않는다", opened.length > first.length && (await seen()) === 0, `표시가 뜬 횟수 ${await seen()}`);
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 });
+  await settle(page);
+
+  const before = await nav();
+  await slow(DELAY);
+  await clickNode(page, "parser");
+  await page.waitForTimeout(150);
+  const early = await sign();
+  await page.waitForSelector(".arranging", { timeout: 5_000 });
+  t.check(
+    "배치가 300ms를 넘기면 앞의 그래프를 그대로 둔 채 그래프 위쪽에 표시가 뜬다",
+    early === null && (await sign()) === "배치 계산 중 · Esc로 취소" && same(await boxIds(page), first),
+    `150ms의 표시 ${early}, 뜬 표시 ${await sign()}`,
+  );
+  const [sized, area] = [await rectOf(page, ".arranging"), (await stageOf(page)).area];
+  t.check(
+    "표시는 관계 그래프 영역의 위쪽 가운데에 있다",
+    near(sized.x + sized.width / 2, area.x + area.width / 2, 1) && sized.y > area.y && sized.y < area.y + area.height / 4,
+    `표시 가운데 ${Math.round(sized.x + sized.width / 2)}, 영역 가운데 ${Math.round(area.x + area.width / 2)}, 위 ${Math.round(sized.y)}`,
+  );
+  await t.shot();
+  const workers = await page.evaluate(() => window.__shotsWorkers);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(100);
+  t.check(
+    "Esc를 누르면 표시가 사라지고 폴더를 펼치기 전의 화면과 이력으로 돌아간다",
+    (await sign()) === null && same(await boxIds(page), first) && same(await nav(), before) && (await count(page, '.tree-row.tree-dir[data-node="parser"][aria-expanded="true"]')) === 0,
+    `표시 ${await sign()}, 뒤로·앞으로 버튼의 누를 수 없음 ${before} → ${await nav()}`,
+  );
+  await page.waitForTimeout(DELAY + 500);
+  t.check("늦게 끝난 배치는 화면을 바꾸지 않는다", same(await boxIds(page), first) && (await sign()) === null);
+
+  await slow(0);
+  await clickNode(page, "parser");
+  await page.waitForSelector(`${node("parser")} > .node-region`, { timeout: 30_000 });
+  await settle(page);
+  t.check(
+    "취소한 뒤에 다시 펼치면 새 worker가 배치한다",
+    same(await boxIds(page), opened) && (await page.evaluate(() => window.__shotsWorkers)) === workers + 1,
+    `worker ${workers}개 → ${await page.evaluate(() => window.__shotsWorkers)}개`,
+  );
+
+  await slow(DELAY);
+  await clickNode(page, FILE);
+  await page.waitForSelector(".arranging", { timeout: 5_000 });
+  const picked = (await headOf(page)).split("\n")[0];
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForTimeout(100);
+  t.check(
+    "노드를 고른 배치가 길어질 때 뒤로 가기를 누르면 그 선택만 취소한다",
+    picked.includes(`${FILE}.py`) && (await sign()) === null && (await selectedOf(page)) === null && same(await boxIds(page), opened) && same(await nav(), [false, true]),
+    `고른 동안의 정보 패널 ${picked}, 표시 ${await sign()}, 뒤로·앞으로 버튼의 누를 수 없음 ${await nav()}`,
+  );
+
+  await inFilters(page, async () => {
+    await page.locator(".filter-panel").getByLabel("테스트 코드").click();
+    await page.waitForSelector(".arranging", { timeout: 5_000 });
+    const text = await sign();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(100);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(100);
+    t.check("탐색 이력을 바꾸지 않는 조작의 배치는 취소하는 키 없이 표시만 하고 Esc로 사라지지 않는다", text === "배치 계산 중" && (await sign()) === "배치 계산 중", `표시 ${text} → ${await sign()}`);
+  });
+  await page.waitForSelector(".arranging", { state: "detached", timeout: 30_000 });
+  await slow(0);
+  await settle(page);
+}
+
+/**
+ * 노드의 hover. 마우스를 올린 노드는 선의 hover처럼 가장 진한 단계(불투명도 1)로 그리고 이름표를 굵게, 모양에 옅은 빛을 준다.
+ * 이름표와 상자의 위치·폭은 그대로이고, 옆 노드와 부모·자식 상자의 단계는 바뀌지 않는다.
+ */
+async function nodeHover(t, page) {
+  /** 화면에서 이름표의 가운데가 그 노드로 눌리는 노드마다 종류, 불투명도, 이름표 가운데 점 */
+  const candidates = () =>
+    page.evaluate(() => {
+      const area = document.querySelector(".graph").getBoundingClientRect();
+      const covers = [...document.querySelectorAll(".info-panel, .dock-panels > *, .dock-buttons")].map((element) => element.getBoundingClientRect());
+      const kinds = ["node-region", "node-module-open", "node-module", "node-package", "node-class", "node-dataclass", "node-function"];
+      const list = [];
+      for (const face of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
+        const root = face.firstElementChild;
+        const label = face.querySelector(".node-label");
+        const kind = kinds.find((name) => root?.classList.contains(name));
+        if (kind === undefined || label === null || getComputedStyle(label).visibility !== "visible") {
+          continue;
+        }
+        const rect = label.getBoundingClientRect();
+        const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
+        const inside = x > area.left && x < area.right && y > area.top && y < area.bottom && covers.every((c) => x < c.left || x > c.right || y < c.top || y > c.bottom);
+        if (inside && face.contains(document.elementFromPoint(x, y))) {
+          list.push({ id: face.dataset.id.replace(/#face$/, ""), kind: kind.replace("node-", ""), opacity: Number(face.style.opacity), route: root.dataset.route ?? null, x, y });
+        }
+      }
+      return list;
+    });
+  /** 노드의 두 요소가 받은 불투명도와 클래스, 이름표의 외곽선·위치·폭, 모양의 빛, 상자의 사각형 */
+  const look = (id) =>
+    page.evaluate((id) => {
+      const body = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+      const face = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}#face"]`);
+      const label = face.querySelector(".node-label");
+      const round = (rect) => [rect.left, rect.top, rect.width, rect.height].map((n) => Math.round(n * 100) / 100).join(",");
+      return {
+        opacity: [Number(getComputedStyle(body).opacity), Number(getComputedStyle(face).opacity)],
+        pointed: [body.classList.contains("pointed"), face.classList.contains("pointed")],
+        stroke: parseFloat(getComputedStyle(label).webkitTextStrokeWidth),
+        glow: getComputedStyle(body.firstElementChild).filter !== "none",
+        shadow: getComputedStyle(label).textShadow !== "none",
+        layers: `${body.style.zIndex},${face.style.zIndex}`,
+        place: [round(label.getBoundingClientRect()), round(body.getBoundingClientRect()), round((face.querySelector(".loc") ?? label).getBoundingClientRect())].join(" / "),
+      };
+    }, id);
+  const over = async (at) => {
+    await page.mouse.move(at.x, at.y);
+    await page.waitForTimeout(500);
+  };
+  const away = async () => {
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(500);
+  };
+
+  await load(page);
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await away();
+  await settle(page);
+  const list = await candidates();
+  const leaf = (item) => item.kind !== "region" && item.kind !== "module-open";
+  const levels = [
+    ["활성 노드", list.find((item) => leaf(item) && item.opacity === 1 && item.id !== FUNCTION)],
+    ["불투명도 50%인 흐름 노드", list.find((item) => leaf(item) && item.opacity === 0.5)],
+    ["흐린 노드", list.find((item) => leaf(item) && item.opacity === DIM)],
+  ];
+  for (const [name, at] of levels) {
+    if (at === undefined) {
+      t.skip(`${name}에 마우스를 올리면 가장 진한 단계로 그린다`, "이 화면에 그 단계의 노드가 없다");
+      continue;
+    }
+    const other = list.find((item) => item.id !== at.id && item.opacity === at.opacity && leaf(item)) ?? list.find((item) => item.id !== at.id);
+    const [before, aside] = [await look(at.id), await look(other.id)];
+    await over(at);
+    const [on, beside] = [await look(at.id), await look(other.id)];
+    if (name === "흐린 노드") {
+      await t.shot();
+    }
+    await away();
+    const after = await look(at.id);
+    t.check(
+      `${name}에 마우스를 올리면 불투명도 1, 굵은 이름표, 옅은 빛으로 그리고 떠나면 돌아온다`,
+      same(before.opacity, [at.opacity, at.opacity]) && same(on.opacity, [1, 1]) && before.stroke === 0 && on.stroke > 0 && !before.glow && on.glow && same(after, before),
+      `${at.id}: 불투명도 ${before.opacity} → ${on.opacity} → ${after.opacity}, 외곽선 ${before.stroke} → ${on.stroke}px, 빛 ${before.glow} → ${on.glow}`,
+    );
+    t.check(`${name}: 이름표·상자·줄 수 숫자의 위치와 폭, 층이 그대로다`, on.place === before.place && on.layers === before.layers, `${before.place} → ${on.place}, 층 ${on.layers}`);
+    t.check(`${name}: 옆 노드의 단계는 그대로다`, same(beside, aside), `${other.id} 불투명도 ${aside.opacity} → ${beside.opacity}`);
+  }
+
+  // 펼친 파일 상자는 머리 줄만, 그 안의 함수는 함수만 진해진다.
+  const inner = list.find((item) => item.kind === "function" && item.id !== FUNCTION && list.some((box) => box.kind === "module-open" && item.id.startsWith(`${box.id}:`)));
+  const opened = list.find((box) => box.kind === "module-open" && inner?.id.startsWith(`${box.id}:`));
+  if (opened === undefined) {
+    t.skip("펼친 파일 상자의 머리 줄에 올리면 머리 줄의 이름표만 굵어진다", "머리 줄과 안의 함수가 함께 보이는 펼친 파일 상자가 화면에 없다");
+  } else {
+    await over(opened);
+    const [box, child] = [await look(opened.id), await look(inner.id)];
+    t.check(
+      "펼친 파일 상자의 머리 줄에 올리면 머리 줄의 이름표만 굵어지고 상자의 바탕과 안의 함수는 그대로다",
+      same(box.pointed, [false, true]) && box.stroke > 0 && box.shadow && !box.glow && same(child.pointed, [false, false]),
+      `${opened.id} ${box.pointed}, 안의 함수 ${inner.id} ${child.pointed}`,
+    );
+    await over(inner);
+    const [boxed, aimed] = [await look(opened.id), await look(inner.id)];
+    t.check("그 안의 함수에 올리면 함수만 진해지고 파일 상자는 그대로다", same(aimed.pointed, [true, true]) && same(boxed.pointed, [false, false]), `함수 ${aimed.pointed}, 파일 상자 ${boxed.pointed}`);
+  }
+  await away();
+  t.check("마우스가 떠나면 진해진 노드가 없다", (await count(page, ".react-flow__node.pointed")) === 0);
+
+  // 경로 고정 중에는 경로 위 노드만 진해진다.
+  await page.keyboard.press("Escape");
+  await pin(page);
+  await away();
+  const pinned = await candidates();
+  const [off, onPath] = [pinned.find((item) => item.route === null && leaf(item)), pinned.find((item) => item.route !== null && leaf(item))];
+  await over(off);
+  const blocked = await look(off.id);
+  await over(onPath);
+  const lit = await look(onPath.id);
+  await away();
+  t.check(
+    "경로 고정 중에 경로 밖 노드에 올리면 바뀌지 않고 경로 위 노드에 올리면 진해진다",
+    same(blocked.pointed, [false, false]) && blocked.opacity[0] === off.opacity && same(lit.pointed, [true, true]),
+    `경로 밖 ${off.id} ${blocked.pointed} 불투명도 ${blocked.opacity}, 경로 위 ${onPath.id} ${lit.pointed}`,
+  );
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -4568,10 +4945,15 @@ const SCENARIOS = [
   ["cycles", cyclesScenario],
   ["cycles-change", cyclesChange],
   ["cycles-pin", cyclesPin],
+  ["start", start],
+  ["arranging", arranging],
+  ["node-hover", nodeHover],
 ];
 
 /** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
 const STAGE3 = new Set(SCENARIOS.slice(SCENARIOS.findIndex(([name]) => name === "finder-open")).map(([name]) => name));
+/** 4단계 시나리오. 스크린샷 이름이 s4-로 시작한다. */
+const STAGE4 = new Set(["start", "arranging", "node-hover"]);
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 
@@ -4596,7 +4978,7 @@ async function run(browser, name, scenario) {
   });
   const results = [];
   const errors = [];
-  const path = join(OUT, `${STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
+  const path = join(OUT, `${STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
   const page = await context.newPage();
   let shot = false;
   const t = {

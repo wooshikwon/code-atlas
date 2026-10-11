@@ -14,13 +14,14 @@ import type { History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
+import { Arranging, watchLayout } from "./arranging";
 import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
 import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
-import { flowNodes, parts, type Drawn } from "./nodes/common";
+import { flowNodes, parts, pointing, type Drawn } from "./nodes/common";
 import { UNUSED_OPACITY } from "./overlay";
 import { nodeTip, tipOf } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
@@ -94,6 +95,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const [error, setError] = useState<string | null>(null);
   /** 마우스를 올린 선 */
   const [pointed, setPointed] = useState<EdgeKey | null>(null);
+  /** 마우스를 올린 노드 id */
+  const [aimedNode, setAimedNode] = useState<string | null>(null);
 
   const root = useRef<HTMLDivElement | null>(null);
   const tip = useRef<TooltipHandle | null>(null);
@@ -115,13 +118,11 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     if (calls === null || index === null) {
       return;
     }
-    let stale = false;
-    runElk(callElk(calls, (id) => callSize(calls, index, index.get(id)!, measureText)))
-      .then((done) => !stale && setScene({ calls, center, layout: fromElk(done) }))
-      .catch((caught: unknown) => !stale && setError(caught instanceof Error ? caught.message : String(caught)));
-    return () => {
-      stale = true;
-    };
+    return watchLayout(
+      runElk(callElk(calls, (id) => callSize(calls, index, index.get(id)!, measureText))),
+      (done) => setScene({ calls, center, layout: fromElk(done) }),
+      setError,
+    );
   }, [calls, index, center]);
 
   useEffect(() => {
@@ -169,6 +170,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     }
     return flowEdges(callEdges(scene.calls, scene.center, scene.layout), pointed, NO_CYCLES);
   }, [scene, pointed]);
+
+  const drawnNodes = useMemo(() => pointing(nodes, aimedNode), [nodes, aimedNode]);
 
   /**
    * 연달아 누른 두 번째 클릭이면 처음 누른 함수·메서드를 가운데로 옮기고 참을 돌려준다. 가운데 함수면 첫 클릭 전으로
@@ -220,8 +223,9 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     }
   };
 
-  /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. */
+  /** 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 올린 노드는 선의 hover처럼 가장 진한 단계로 그린다. */
   const onNodeOver: NodeMouseHandler<CallFlowNode> = (event, node) => {
+    setAimedNode(node.data.node.id);
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
     tip.current?.show(tipOf(event.target) ?? nodeTip(title, KIND_NAMES[node.data.node.kind], node.data.unused), event.clientX, event.clientY);
   };
@@ -237,7 +241,10 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     }
   };
   const onMove = (event: ReactMouseEvent) => tip.current?.move(event.clientX, event.clientY);
-  const onLeave = () => tip.current?.hide();
+  const onLeave = () => {
+    setAimedNode(null);
+    tip.current?.hide();
+  };
   const onEdgeLeave = () => {
     setPointed(null);
     tip.current?.hide();
@@ -255,7 +262,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     <div className="graph" ref={root} data-moving={moving ? "" : undefined} data-overlay={overlay ?? undefined}>
       <Markers />
       <ReactFlow
-        nodes={nodes}
+        nodes={drawnNodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -278,6 +285,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
         proOptions={{ hideAttribution: true }}
       />
       <Dock />
+      <Arranging />
       <Tooltip ref={tip} />
     </div>
   );
