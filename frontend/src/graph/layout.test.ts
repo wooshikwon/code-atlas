@@ -158,6 +158,13 @@ describe("elkGraphs", () => {
     expect(find(open, "ring")!.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("ring/") + 32}, 44)`);
   });
 
+  it("접힌 폴더 상자는 접힌 파일 상자처럼 아래 글자의 줄을 상자 아래에 잡아 둔다", () => {
+    const folded = elkGraphs(repoFixture, shownFor(null, ["pkg"]), cols, measure, new Map());
+    const pkg = find(folded.components[0], "pkg")!;
+    expect(pkg.labels).toEqual([{ text: "미사용 후보 999", width: measure("미사용 후보 999"), height: 16 }]);
+    expect(pkg.layoutOptions?.["elk.nodeLabels.placement"]).toBe("OUTSIDE V_BOTTOM H_LEFT");
+  });
+
   it("접힌 상자 아래 글자는 미사용 후보가 있을 때만 그 수를 붙이고 폴더 상자는 후보 수만 적는다", () => {
     expect(boxCaption(nodes.get("main")!, 13, 0)).toBe("함수 13개");
     expect(boxCaption(nodes.get("main")!, 13, 3)).toBe("함수 13개 · 미사용 후보 3");

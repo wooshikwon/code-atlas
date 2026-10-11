@@ -182,6 +182,9 @@ export function moduleHeader(node: AtlasNode, functions: number): string {
   return node.kind === "module" ? `함수 ${functions}개` : "";
 }
 
+/** 접힌 폴더 상자 아래에 잡아 두는 줄의 글자. 미사용 덮개를 켜고 꺼도 배치가 같도록 후보 수와 관계없이 이 폭을 잡는다. */
+const FOLDER_CAPTION = "미사용 후보 999";
+
 /**
  * 접힌 파일 상자와 접힌 폴더 상자 아래에 적는 글자. 파일 상자는 함수 수를 적고, 안에 든 미사용 후보 수 unused가 0이 아니면
  * 그 수를 뒤에 붙인다. 상자 크기에 들지 않는다.
@@ -303,7 +306,7 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
  * 보이는 노드를 연결 묶음마다 parent 사슬로 중첩한 ELK 입력. 자식을 그리는 노드마다 따로 배치하므로 선은 형제 사이로
  * 올려 그 부모에 선언한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣는다.
  * ends는 강조하는 경로의 출발 노드와 도착 노드이고, 그 노드의 크기에 표지의 폭을 더한다.
- * 순환 아이콘을 다는 상자는 아이콘의 폭을 크기에 더한다.
+ * 순환 아이콘을 다는 상자는 아이콘의 폭을 크기에 더한다. 접힌 파일 상자와 접힌 폴더 상자는 아래 글자의 줄을 상자 아래에 잡아 둔다.
  */
 export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure: Measure, ends: Map<string, RouteEnd>): ElkInput {
   const nodes = nodeIndex(graph);
@@ -340,10 +343,10 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
         layoutOptions: { ...ELK_OPTIONS, ...options, ...boxOptions(node, functions.get(node.id) ?? 0, measure, marksOf(node.id)) },
       };
     }
-    if (node.kind !== "module") {
+    if (node.kind !== "module" && node.kind !== "package") {
       return { id: node.id, ...leafSize(node, measure, marksOf(node.id)), layoutOptions: options };
     }
-    const caption = moduleHeader(node, functions.get(node.id) ?? 0);
+    const caption = node.kind === "module" ? moduleHeader(node, functions.get(node.id) ?? 0) : FOLDER_CAPTION;
     return {
       id: node.id,
       ...leafSize(node, measure, marksOf(node.id)),
