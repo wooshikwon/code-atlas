@@ -97,7 +97,7 @@ export interface AtlasStore {
    */
   reopen(repo: Repo, graph: Graph, tree: Tree): void;
   /**
-   * 경로 고정 중에는 selectEdge, toggleFolder, togglePack, setDepth, enterFunction, expandFunction, open, back, forward, jump,
+   * 경로 고정 중에는 selectEdge, toggleFolder, openFolder, togglePack, setDepth, enterFunction, expandFunction, open, back, forward, jump,
    * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다(`barred`). select와 show는
    * 강조한 경로 위의 노드를 받으면 finder.focus만 그 노드로 바꾸고, 그 밖의 노드를 받으면 같은 방식으로 막힌다.
    * select(null)은 고정 중에 아무것도 하지 않는다.
@@ -112,6 +112,8 @@ export interface AtlasStore {
   selectEdge(key: EdgeKey): void;
   /** 폴더를 접거나 펼친다. 초점을 둔 노드가 든 폴더를 접거나 초점을 둔 폴더를 펼치면 선택을 푼다. */
   toggleFolder(id: string): void;
+  /** 선이 가리키는 폴더로 간다. 접힌 폴더면 펼치고 선택을 푼다. 달라지는 것이 없으면 이력에 넣지 않는다. */
+  openFolder(id: string): void;
   /** 파일 상자의 손잡이를 눌러 전부 펼침과 펼침을 오간다. 선택과 초점은 바꾸지 않는다. */
   togglePack(id: string): void;
   setDepth(depth: Depth): void;
@@ -437,6 +439,13 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       })(),
     selectEdge: guarded((key) => visit({ selection: { type: "edge", key, focus: focusOf(get().selection) } })),
     toggleFolder: guarded(toggle),
+    openFolder: guarded((id) => {
+      const { collapsed, selection } = get();
+      if (kindOf(id) !== "package" || (selection === null && !collapsed.has(id))) {
+        return;
+      }
+      visit({ collapsed: new Set([...collapsed].filter((folder) => folder !== id)), selection: null });
+    }),
     togglePack: guarded((id) => {
       const unpacked = new Set(get().unpacked);
       if (!unpacked.delete(id)) {

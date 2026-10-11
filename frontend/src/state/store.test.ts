@@ -88,6 +88,32 @@ describe("selectEdge", () => {
   });
 });
 
+describe("openFolder", () => {
+  it("접힌 폴더를 펼치고 다른 노드의 선택을 풀어 이력에 한 단계만 넣는다", () => {
+    store().toggleFolder(folder);
+    store().select(a);
+    store().openFolder(folder);
+    expect(store().selection).toBeNull();
+    expect(store().collapsed).toEqual(new Set());
+    expect(store().history.entries).toHaveLength(4);
+    store().back();
+    expect(store().selection).toEqual(node(a));
+    expect(store().collapsed).toEqual(new Set([folder]));
+  });
+
+  it("펼친 폴더면 선택만 풀고, 달라지는 것이 없거나 폴더가 아니면 이력에 넣지 않는다", () => {
+    store().select(a);
+    store().openFolder(folder);
+    expect(store().selection).toBeNull();
+    expect(store().collapsed).toEqual(new Set());
+    expect(store().history.entries).toHaveLength(3);
+    store().openFolder(folder);
+    store().openFolder(a);
+    expect(store().selection).toBeNull();
+    expect(store().history.entries).toHaveLength(3);
+  });
+});
+
 describe("show", () => {
   it("함수 시점 뷰에서 구조 뷰로 돌아가 그 노드를 고르고 이력에 한 단계를 넣는다", () => {
     store().enterFunction(a);
@@ -483,6 +509,7 @@ describe("경로 고정", () => {
     ["show", (state) => state.show(probe)],
     ["selectEdge", (state) => state.selectEdge("agg|x|y")],
     ["toggleFolder", (state) => state.toggleFolder("flow")],
+    ["openFolder", (state) => state.openFolder("flow")],
     ["togglePack", (state) => state.togglePack("flow")],
     ["enterFunction", (state) => state.enterFunction(begin)],
     ["expandFunction", (state) => state.expandFunction(left)],

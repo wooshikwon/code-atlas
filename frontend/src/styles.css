@@ -976,6 +976,25 @@ ul {
   pointer-events: none;
 }
 
+/* 선을 눌러 간 폴더 영역에 1.2초 동안 그렸다가 지우는 도착 표시 */
+.reached {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  border: 3px solid var(--ink);
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: none;
+  animation: reached-out 1.2s ease-out;
+}
+
+@keyframes reached-out {
+  from {
+    opacity: 1;
+  }
+}
+
 .node-class .node-header {
   justify-content: center;
   height: 100%;

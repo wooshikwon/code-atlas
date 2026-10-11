@@ -6559,6 +6559,144 @@ async function overlap(t, page) {
   );
 }
 
+/** 선을 눌러 가는 폴더. 파일 file을 고른 채 흐리게 그려진, 상자 from에서 접힌 폴더 상자 to로 가는 집계 선을 누른다. */
+const LINE_FOLDER = { file: "doc_update", from: "arbiter", to: "parser" };
+/** --wide-url의 레포에서 선을 눌러 가는 폴더. 폴더 open을 차례로 펼친 뒤 file을 고른다. */
+const WIDE_LINE_FOLDER = { open: ["mdp", "mdp.settings"], file: "mdp.settings.loader", from: "mdp.cli", to: "mdp.runtime" };
+
+/**
+ * 접힌 폴더 상자 to로 들어가는 선을 at에서 누른 뒤의 화면. 도착 표시는 배치 움직임이 끝난 뒤 1.2초 동안만 있으므로 화면이 멎기 전에 읽고,
+ * shot을 받았으면 그때 부른다.
+ * fits는 펼친 폴더 영역이 가리지 않는 영역 안에 들어와 있는지다.
+ */
+async function lineToFolder(page, to, at, shot = null) {
+  await page.mouse.click(at.x, at.y);
+  await page.mouse.move(1, 1);
+  const marked = await page.waitForSelector(`.reached[data-node="${to}"]`, { timeout: 5_000 }).then(() => true, () => false);
+  await shot?.();
+  await settle(page);
+  const [box, { clear }] = [await rectOf(page, `${node(to)}:has(> .node-region)`), await stageOf(page)];
+  /** 영역이 들어가는 축은 전부 들어와 있고, 영역이 더 긴 축은 시작 끝이 20px 안쪽에 있는지 */
+  const along = (start, length, low, room) => (length > room ? near(start, low + INSET, 2) : start >= low && start + length <= low + room);
+  return {
+    marked,
+    opened: box !== null,
+    fits: box !== null && along(box.x, box.width, clear.x, clear.width) && along(box.y, box.height, clear.y, clear.height),
+    selected: await selectedOf(page),
+    strong: (await linesOf(page)).filter((line) => line.tone === "strong").length,
+    text: box === null ? "펼친 폴더 영역 없음" : `영역 (${Math.round(box.x)}, ${Math.round(box.y)}) ${Math.round(box.width)}×${Math.round(box.height)}, 가리지 않는 영역 (${Math.round(clear.x)}, ${Math.round(clear.y)}) ${Math.round(clear.width)}×${Math.round(clear.height)}`,
+  };
+}
+
+/**
+ * 흐리게 그려진, 상자 from에서 접힌 폴더 상자 to로 가는 집계 선과 누를 점. 선이 화면 밖에 있으면 그래프 바탕을 끌어 선의 가운데를
+ * 가리지 않는 영역의 가운데로 옮긴 뒤 찾는다. 없으면 null이다.
+ */
+async function dimFolderLine(page, from, to) {
+  const line = (await linesOf(page)).find((each) => same(endsOfKey(each.key), [from, to]) && each.opacity === DIM);
+  if (line === undefined || (await count(page, `${node(to)} > .node-package`)) === 0) {
+    return null;
+  }
+  const found = await hittable(page, [line]);
+  if (found !== null) {
+    return found;
+  }
+  const { clear } = await stageOf(page);
+  const spots = await page.evaluate((key) => {
+    const path = [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].find((edge) => edge.dataset.key === key).querySelector(".edge-line");
+    const at = path.getPointAtLength(path.getTotalLength() / 2);
+    const middle = new DOMPoint(at.x, at.y).matrixTransform(path.getScreenCTM());
+    const area = document.querySelector(".graph").getBoundingClientRect();
+    for (let y = area.top + 60; y < area.bottom - 120; y += 20) {
+      for (let x = area.left + 20; x < area.right - 20; x += 20) {
+        if (document.elementFromPoint(x, y)?.classList.contains("react-flow__pane") === true) {
+          return { middle: { x: middle.x, y: middle.y }, pane: { x, y } };
+        }
+      }
+    }
+    return null;
+  }, line.key);
+  if (spots === null) {
+    return null;
+  }
+  await drag(page, spots.pane, center(clear).x - spots.middle.x, center(clear).y - spots.middle.y);
+  await page.mouse.move(1, 1);
+  await settle(page);
+  return hittable(page, [line]);
+}
+
+/** 선의 도착 노드가 접힌 폴더 상자일 때 선 클릭이 그 폴더로 가는지 본다. */
+async function lineFolder(t, page) {
+  const { file, from, to } = LINE_FOLDER;
+  await load(page, url, false);
+  const plain = await hittable(page, (await linesOf(page)).filter((line) => same(endsOfKey(line.key), [from, to])));
+  const first = await lineToFolder(page, to, plain.at);
+  t.check(
+    "고른 노드가 없을 때 접힌 폴더 상자로 들어가는 선을 누르면 그 폴더가 펼쳐지고 펼친 영역에 도착 표시가 잠깐 그려진다",
+    first.opened && first.marked && first.selected === null,
+    `펼침 ${first.opened}, 도착 표시 ${first.marked}, ${first.text}`,
+  );
+  t.check("도착 표시는 사라진다", (await page.waitForSelector(".reached", { state: "detached", timeout: 5_000 }).then(() => true, () => false)));
+
+  await load(page, url, false);
+  await pick(page, file);
+  const shifted = await dimFolderLine(page, from, to);
+  await page.keyboard.down("Shift");
+  await page.mouse.click(shifted.at.x, shifted.at.y);
+  await page.keyboard.up("Shift");
+  await page.waitForSelector(".info-panel-sites", { timeout: 10_000 }).catch(() => {});
+  await page.mouse.move(1, 1);
+  await settle(page);
+  t.check(
+    "Shift를 누른 채 누르면 폴더는 접힌 채로 코드 줄 목록만 열리고 고른 파일의 초점은 그대로다",
+    (await count(page, ".info-panel-sites")) > 0 && (await count(page, `${node(to)} > .node-package`)) > 0 && (await selectedOf(page)) === file,
+    `선택 ${await selectedOf(page)}`,
+  );
+  await page.getByRole("button", { name: "뒤로" }).click();
+  await settle(page);
+
+  const dim = await dimFolderLine(page, from, to);
+  const before = await zoomOf(page);
+  const went = await lineToFolder(page, to, dim.at);
+  t.check(
+    `${file}.py를 고른 채 흐린 선 ${from} → ${to}/를 누르면 ${to}/가 펼쳐지고 앞 선택과 그 흐름의 강조가 풀린다`,
+    went.opened && went.selected === null && went.strong === 0 && (await count(page, `${node(file)} > .node-module-open`)) === 0,
+    `펼침 ${went.opened}, 선택 ${went.selected}, 본문 잉크 선 ${went.strong}개`,
+  );
+  t.check(`펼친 ${to}/ 영역이 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역 안에 오고 확대 비율은 그대로다`, went.fits && near(await zoomOf(page), before, 0.001), went.text);
+  t.check("펼친 영역에 도착 표시가 잠깐 그려진다", went.marked);
+  await page.getByRole("button", { name: "뒤로" }).click();
+  await waitSelected(page, file).catch(() => {});
+  t.check("뒤로 한 번이면 폴더가 접히고 앞 선택이 돌아온다", (await selectedOf(page)) === file && (await count(page, `${node(to)} > .node-package`)) > 0, `선택 ${await selectedOf(page)}`);
+
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서 고른 파일과 떨어진 접힌 폴더로 가는 선을 누른다", "--wide-url을 주지 않았다");
+    return;
+  }
+  const wide = WIDE_LINE_FOLDER;
+  await page.goto(wideUrl);
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  for (const folder of wide.open) {
+    await openFolder(page, folder);
+  }
+  await pick(page, wide.file);
+  const far = await dimFolderLine(page, wide.from, wide.to);
+  if (far === null) {
+    t.skip(`${wide.file}을 고른 채 흐린 선 ${wide.from} → ${wide.to}/를 누른다`, "그 선이 화면에 없거나 누를 점이 다른 선에 덮였다");
+    return;
+  }
+  const scale = await zoomOf(page);
+  const there = await lineToFolder(page, wide.to, far.at, t.shot);
+  t.check(
+    `${wide.file}을 고른 채 흐린 선 ${wide.from} → ${wide.to}/를 누르면 ${wide.to}/가 펼쳐지고 앞 선택과 그 흐름의 강조가 풀린다`,
+    there.opened && there.selected === null && there.strong === 0 && (await count(page, `${node(wide.file)} > .node-module-open`)) === 0,
+    `펼침 ${there.opened}, 선택 ${there.selected}, 본문 잉크 선 ${there.strong}개`,
+  );
+  t.check(`펼친 ${wide.to}/ 영역이 가리지 않는 영역 안에 오고 확대 비율은 그대로다`, there.fits && near(await zoomOf(page), scale, 0.001), there.text);
+  t.check("펼친 영역에 도착 표시가 잠깐 그려진다", there.marked);
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -6630,6 +6768,7 @@ const SCENARIOS = [
   ["lanes", lanes],
   ["numbers", numbers],
   ["overlap", overlap],
+  ["line-folder", lineFolder],
   ["progress", progress],
   ["progress-failed", progressFailed],
   ["stale", staleScenario],
@@ -6659,6 +6798,7 @@ const STAGE4 = new Set([
   "lanes",
   "numbers",
   "overlap",
+  "line-folder",
   "progress",
   "progress-failed",
   "stale",

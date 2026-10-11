@@ -1,5 +1,5 @@
 // 관계 그래프. 저장소의 뷰 종류에 따라 구조 뷰나 함수 시점 뷰를 그린다. 구조 뷰는 저장소 상태에서 보이는 노드와
-// 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드로 화면을 옮긴다. 경로 고정 중에는 고른 노드의 흐름 대신
+// 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드나 선이 가리킨 폴더로 화면을 옮긴다. 경로 고정 중에는 고른 노드의 흐름 대신
 // 강조하는 경로를 그리고, finder.focus를 정할 때마다 그 노드와 다음 걸음이 보이게 화면을 옮긴다. 전체 맞춤 상태(저장소의 fitted)에서는
 // 배치가 바뀔 때마다 화면을 다시 맞추고, 이름표가 읽히는 확대 비율 아래로 줄이지 않는다.
 import {
@@ -171,6 +171,11 @@ function shelfCorner(scene: Scene, at: Layout): Point | null {
   return { x: Math.min(...boxes.map((b) => b.x)), y: Math.min(...boxes.map((b) => b.y)) };
 }
 
+/** 도착 표시를 상자의 테두리에 맞춰 그리는 자리 */
+function ringOf(box: Box) {
+  return { transform: `translate(${box.x}px, ${box.y}px)`, width: box.width, height: box.height };
+}
+
 /**
  * 코드가 스스로 맞추는 화면(`autoView`). 배치 전체가 이름표가 읽히는 확대 비율로 정보 패널이 가리지 않는 영역에 들어오면 전체를 맞추고
  * (확대 비율을 100%보다 키우지 않는다), 들어오지 않으면 사용자가 방금 펼치거나 접은 상자 pressed의 왼쪽 위를, 그런 상자가 없으면
@@ -204,6 +209,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const select = useAtlas((s) => s.select);
   const selectEdge = useAtlas((s) => s.selectEdge);
   const toggleFolder = useAtlas((s) => s.toggleFolder);
+  const openFolder = useAtlas((s) => s.openFolder);
   const togglePack = useAtlas((s) => s.togglePack);
   const unpacked = useAtlas((s) => s.unpacked);
   const open = useAtlas((s) => s.open);
@@ -220,6 +226,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const [shelf, setShelf] = useState<Point | null>(null);
   const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 선을 눌러 간 폴더와 간 횟수. 그 폴더 영역에 도착 표시를 잠깐 그린다. */
+  const [reached, setReached] = useState<{ id: string; count: number } | null>(null);
   /** 마우스를 올린 노드 id */
   const [hover, setHover] = useState<string | null>(null);
   /** 마우스를 올린 노드 가운데 그 위치에서 눌리는 노드 id. 경로 고정 중에는 경로 위 노드만이다. */
@@ -237,6 +245,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const folds = useRef<Pick<Scene, "graph" | "collapsed" | "unpacked"> | null>(null);
   /** 화면을 옮겨 둔 노드나 경로와 그때의 finder.aimed */
   const panned = useRef<{ aim: string | Lit | null; aimed: number }>({ aim: null, aimed: 0 });
+  /** 선을 눌러 가는 폴더. 그 폴더를 펼친 배치가 오면 화면을 옮긴다. */
+  const bound = useRef<string | null>(null);
   /** 직전에 한 번 누른 노드와 누르기 전의 이력. 두 번째 클릭이 어디에 떨어져도 이 노드의 더블클릭으로 본다. */
   const clicked = useRef<{ id: string; from: History } | null>(null);
   /** 초점을 둔 노드. 선을 골라도 직전에 고른 노드의 초점을 유지한다. */
@@ -269,6 +279,23 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const key = JSON.stringify([...state, picked === null ? null : [focus, depth]]);
     return { flow: picked, lit, focus: picked === null ? null : focus, key, collapsed, unpacked, shown: shown(graph, { ...toggles, ...boxes, flow: picked, lit }) };
   }, [graph, index, showTests, showExternal, collapsed, unpacked, overlay, candidates, focus, depth, lit]);
+
+  /** 상자가 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역의 가운데에 오게 화면을 옮기고 전체 맞춤 상태를 끈다. 확대 비율은 `NAMED_ZOOM`보다 작을 때만 그 값으로 키운다. */
+  const panTo = (box: Box) => {
+    if (root.current === null) {
+      return;
+    }
+    const scale = Math.max(getViewport().zoom, NAMED_ZOOM);
+    useAtlas.setState({ fitted: false });
+    void setViewport({ ...centerOn(box, stageOf(root.current).clear, scale), zoom: scale }, { duration: reducedMotion() ? 0 : PAN_MS });
+  };
+  /** 선을 눌러 폴더 id에 왔다. 전체 맞춤 상태가 아니면 그 폴더의 상자로 화면을 옮기고, 도착 표시를 그린다. */
+  const arrive = (id: string, box: Box) => {
+    setReached((before) => ({ id, count: (before?.count ?? 0) + 1 }));
+    if (!useAtlas.getState().fitted) {
+      panTo(box);
+    }
+  };
 
   // 느린 배치를 취소하면 입력이 화면에 그린 배치의 입력으로 돌아오므로 다시 계산하지 않는다.
   useEffect(() => {
@@ -335,25 +362,29 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const changed = last === null || last.graph !== scene.graph ? [] : [...differ(last.collapsed, scene.collapsed), ...differ(last.unpacked, scene.unpacked)];
     const aim = scene.lit ?? scene.focus;
     const fresh = aim !== panned.current.aim;
+    /** 이 배치가 펼친, 선을 눌러 가는 폴더의 상자. 배치가 그 폴더를 펼치지 않았으면(느린 배치를 취소했으면) 가지 않는다. */
+    const came = last === scene || bound.current === null || scene.collapsed.has(bound.current) ? undefined : to.boxes.get(bound.current);
+    if (last !== scene) {
+      if (came !== undefined) {
+        arrive(bound.current!, came);
+      }
+      bound.current = null;
+    }
 
     // 고른 노드나 강조하는 경로가 바뀌면 화면을 옮기고 전체 맞춤 상태를 끈다. 경로 고정 중에는 finder.focus를 정할 때마다 옮긴다.
     // 강조하는 경로의 배치가 아직 오지 않았으면 그 배치가 올 때까지 기다린다.
     if (scene.lit === lit && (fresh || (lit !== null && aimed !== panned.current.aimed)) && root.current !== null) {
       panned.current = { aim, aimed };
-      const { clear } = stageOf(root.current);
-      const view = getViewport();
       const path = scene.lit?.path.filter((id) => to.boxes.has(id)) ?? [];
       const at = Math.max(path.indexOf(pinFocus ?? ""), 0);
       const box = to.boxes.get(scene.lit === null ? (scene.focus ?? "") : path[at]);
-      if (box !== undefined) {
-        const scale = Math.max(view.zoom, NAMED_ZOOM);
+      if (box !== undefined && scene.lit === null) {
+        panTo(box);
+      } else if (box !== undefined) {
         const boxes = path.map((id) => to.boxes.get(id)!);
         const step = boundsOf([box, boxes[at + 1] ?? boxes[at - 1] ?? box]);
         useAtlas.setState({ fitted: false });
-        void setViewport(
-          scene.lit === null ? { ...centerOn(box, clear, scale), zoom: scale } : frameOn(boxes, step, box, clear, view, fresh),
-          { duration: still ? 0 : PAN_MS },
-        );
+        void setViewport(frameOn(boxes, step, box, stageOf(root.current).clear, getViewport(), fresh), { duration: still ? 0 : PAN_MS });
       }
     }
 
@@ -364,8 +395,9 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
 
     // 전체 맞춤 상태가 아닐 때 폴더나 손잡이를 눌러 상자 하나를 펼치거나 접었으면 그 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 둔다.
-    // 확대 비율은 그대로다. 노드를 골라 그 노드를 품은 폴더가 펼쳐졌으면 고른 노드로 화면을 옮기므로 상자를 붙잡지 않는다.
-    const toggled = !whole && changed.length === 1 && (aim === null || !fresh) ? changed[0] : null;
+    // 확대 비율은 그대로다. 노드를 골라 그 노드를 품은 폴더가 펼쳐졌으면 고른 노드로, 선을 눌러 폴더를 펼쳤으면 그 폴더로 화면을 옮기므로
+    // 상자를 붙잡지 않는다.
+    const toggled = !whole && came === undefined && changed.length === 1 && (aim === null || !fresh) ? changed[0] : null;
     const before = toggled === null ? undefined : from?.boxes.get(toggled);
     const held = before === undefined ? null : { id: toggled!, before, view: getViewport() };
 
@@ -431,7 +463,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     return node === undefined ? id : titleOf(node);
   };
   /**
-   * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 도착 노드를 고르고 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 그 선을 골라
+   * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 도착 노드를 고르고 이미 고른 노드면 그대로 둔다. 도착 노드가 폴더면 그 폴더로 간다(`go`). Shift를 누른 채면 그 선을 골라
    * 정보 패널에 지점 목록을 연다. 경로 고정 중에는 경로의 걸음만 강조하고, 그 밖의 선은 말풍선만 띄운다.
    */
   const aim = useAim({
@@ -448,9 +480,11 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return again;
     },
     pick: (target) => {
-      if (target !== chosen) {
-        press(target);
-        clicked.current = null;
+      clicked.current = null;
+      if (index?.nodes.get(target)?.kind === "package") {
+        go(target);
+      } else if (target !== chosen) {
+        select(target);
       }
     },
     open: selectEdge,
@@ -484,6 +518,23 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
     clicked.current = { id, from: useAtlas.getState().history };
     select(id);
+  };
+
+  /**
+   * 선이 가리키는 폴더로 간다. 접힌 폴더면 펼치고 선택을 푼 뒤, 새 배치가 오면 펼친 폴더 영역으로 화면을 옮긴다(`arrive`).
+   * 이미 펼쳐 있고 고른 노드도 없어 배치가 그대로면 바로 옮긴다.
+   */
+  const go = (id: string) => {
+    const before = useAtlas.getState().history;
+    openFolder(id);
+    if (useAtlas.getState().history !== before) {
+      bound.current = id;
+      return;
+    }
+    const box = onScreen.current?.boxes.get(id);
+    if (lit === null && box !== undefined) {
+      arrive(id, box);
+    }
   };
 
   const onNodeClick: NodeMouseHandler<AtlasFlowNode | PackFlowNode> = (event, node) => {
@@ -587,6 +638,17 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         maxZoom={ZOOM_MAX}
         proOptions={{ hideAttribution: true }}
       >
+        {reached !== null && !moving && scene.layout.boxes.has(reached.id) && (
+          <ViewportPortal>
+            <span
+              key={reached.count}
+              className="reached"
+              data-node={reached.id}
+              style={{ zIndex: LAYER.text, ...ringOf(scene.layout.boxes.get(reached.id)!) }}
+              onAnimationEnd={() => setReached(null)}
+            />
+          </ViewportPortal>
+        )}
         {shelf !== null && (
           <ViewportPortal>
             <span
