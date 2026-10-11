@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { repoFixture, routeFixture } from "../graph/fixture";
 import { back, jump, push, type History, type Place } from "./history";
-import { litOf, nestedFolders, parseUi, pinned, useAtlas, type AtlasStore } from "./store";
+import { barred, litOf, nestedFolders, parseUi, pinned, useAtlas, type AtlasStore } from "./store";
 
 const [a, b, c] = repoFixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
 const folder = repoFixture.nodes.find((n) => n.kind === "package")!.id;
@@ -429,6 +429,14 @@ describe("경로 고정", () => {
     expect(store().finder).toMatchObject({ focus: right, blocked: 1 });
     store().select(left);
     expect(store().finder).toMatchObject({ focus: right, blocked: 2 });
+  });
+
+  it("barred는 고정 밖에서 거짓이고, 고정 중에는 blocked를 늘리고 창을 편 뒤 참을 낸다", () => {
+    expect(barred()).toBe(false);
+    expect(store().finder).toMatchObject({ open: false, blocked: 0 });
+    pin();
+    expect(barred()).toBe(true);
+    expect(store().finder).toMatchObject({ open: true, blocked: 1 });
   });
 
   it("select(null)은 고정을 풀지 않고 blocked도 늘리지 않는다", () => {

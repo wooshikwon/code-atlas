@@ -65,7 +65,7 @@ export interface AtlasStore {
   load(): void;
   /**
    * 경로 고정 중에는 selectEdge, toggleFolder, setDepth, enterFunction, expandFunction, open, back, forward, jump,
-   * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다. select와 show는
+   * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다(`barred`). select와 show는
    * 강조한 경로 위의 노드를 받으면 finder.focus만 그 노드로 바꾸고, 그 밖의 노드를 받으면 같은 방식으로 막힌다.
    * select(null)은 고정 중에 아무것도 하지 않는다.
    *
@@ -172,6 +172,18 @@ export function litOf(finder: Finder): Lit | null {
   return finder.route === null ? null : lit(finder.route, finder.pick);
 }
 
+/**
+ * 경로 고정 중이면 막힌 횟수를 늘리고 경로 탐색 창을 편 뒤 참을 돌려준다. 고정 중에 막는 진입은 모두 이 함수로 판정한다.
+ */
+export function barred(): boolean {
+  const { finder } = useAtlas.getState();
+  if (!pinned(finder)) {
+    return false;
+  }
+  useAtlas.setState({ finder: { ...finder, open: true, blocked: finder.blocked + 1 } });
+  return true;
+}
+
 const START: Pick<AtlasStore, "view" | "selection" | "collapsed"> = {
   view: { kind: "structure" },
   selection: null,
@@ -199,15 +211,13 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     localStorage.setItem(UI_KEY, JSON.stringify({ panel, split, legendOpen, minimapOpen, theme, depth, autoSummary }));
   };
 
-  /** 경로 고정 중에는 액션을 실행하지 않고 막힌 횟수를 늘리며 경로 탐색 창을 편다. */
+  /** 경로 고정 중에는 액션을 실행하지 않는다. */
   const guarded =
     <Args extends unknown[]>(action: (...args: Args) => void) =>
     (...args: Args) => {
-      if (pinned(get().finder)) {
-        set((state) => ({ finder: { ...state.finder, open: true, blocked: state.finder.blocked + 1 } }));
-        return;
+      if (!barred()) {
+        action(...args);
       }
-      action(...args);
     };
 
   /** 경로 고정 중에 null이나 강조한 경로 위의 노드를 받았는지. 경로 위의 노드면 finder.focus를 그 노드로 바꾼다. */
