@@ -3,6 +3,7 @@
 import type { AtlasNode, Graph } from "../api/types";
 import type { Cycles } from "./cycles";
 import type { Flow } from "./flow";
+import type { Lit } from "./route";
 import { EDGE_OPACITY, edgeKey, picked, type DrawnEdge, type EdgeKey } from "./scope";
 import { lift, nodeIndex, unitOf, type Shown } from "./visible";
 
@@ -31,11 +32,13 @@ export function cycleMarks(graph: Graph, cycles: Cycles, shown: Shown): Map<stri
  * 순환 덮개를 켰을 때 그릴 선과 그 가운데 순환 선의 키. 순환 선은 양 끝이 화면에 보이는 파일 상자인 묶음 안 import 선이고,
  * 접힌 폴더로 올라간 집계 선은 순환 선이 아니다. 두 파일 상자 사이의 집계 선이 그 import 선을 합쳤으면 집계 선이 순환 선이다.
  * 그리는 범위 규칙으로 빠진 순환 선은 다시 넣는다. 순환 선은 초점과 관계없이 불투명도 1로 그려 critical 색의 대비를 지킨다.
+ * 경로 고정 중(lit이 있다)에는 경로가 먼저 읽히도록 순환 선도 경로 밖 선의 불투명도로 그리고 색만 남긴다.
  */
 export function cycleLines(
   graph: Graph,
   shown: Shown,
   flow: Flow | null,
+  lit: Lit | null,
   edges: DrawnEdge[],
   cycles: Cycles,
 ): { edges: DrawnEdge[]; keys: Set<EdgeKey> } {
@@ -59,7 +62,8 @@ export function cycleLines(
       keys.add(key);
     }
   }
-  return { edges: [...edges, ...added].map((e) => (keys.has(e.key) ? { ...e, opacity: EDGE_OPACITY.full } : e)), keys };
+  const opacity = lit === null ? EDGE_OPACITY.full : EDGE_OPACITY.rest;
+  return { edges: [...edges, ...added].map((e) => (keys.has(e.key) ? { ...e, opacity } : e)), keys };
 }
 
 /** 파일마다 그 안에 든 미사용 후보 수. 그래프에 없는 id는 세지 않는다. */

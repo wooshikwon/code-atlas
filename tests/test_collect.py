@@ -1,4 +1,5 @@
-from code_atlas.collect import collect, collected, disk_path, find_source_root, is_test_path, module_id
+from code_atlas import collect as collecting
+from code_atlas.collect import collect, collected, config_texts, disk_path, find_source_root, is_test_path, module_id
 
 
 def test_collect_skips_ignored_and_venv(sample_repo):
@@ -26,6 +27,22 @@ def test_collected_judges_paths_like_collect(sample_repo):
     assert collected(sample_repo, paths) == {"src/app/core.py", "src/app/late.py"}
     assert {f.path for f in collect(sample_repo).files} >= {"src/app/core.py"}
     assert collected(sample_repo, []) == set()
+
+
+def test_config_texts_read_config_files_like_collect(sample_repo, monkeypatch):
+    (sample_repo / "conf").mkdir()
+    (sample_repo / "conf" / "run.yaml").write_text("target: app.core.helper\n")
+    (sample_repo / "setup.cfg").write_text("[metadata]\n")
+    (sample_repo / "notes.md").write_text("target: app.core.spare\n")
+    (sample_repo / "ignored_dir" / "skip.json").write_text("{}\n")
+    (sample_repo / "env" / "lib" / "site.ini").write_text("[x]\n")
+    (sample_repo / ".tools").mkdir()
+    (sample_repo / ".tools" / "hidden.yml").write_text("a: 1\n")
+    pyproject = (sample_repo / "pyproject.toml").read_text()
+    assert sorted(config_texts(sample_repo)) == sorted(["target: app.core.helper\n", "[metadata]\n", pyproject])
+
+    monkeypatch.setattr(collecting, "CONFIG_LIMIT", len(pyproject.encode()) - 1)
+    assert sorted(config_texts(sample_repo)) == ["[metadata]\n", "target: app.core.helper\n"]
 
 
 def test_collect_source_root_and_ids(sample_repo):

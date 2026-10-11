@@ -63,6 +63,7 @@ function itemsOf(
       cycle: null,
       unused: unused.has(id),
       candidates: 0,
+      route: null,
       label: callLabel(nodes, node),
       file: fileLabel(nodes, node),
       side: scene.calls.side.get(id)!,

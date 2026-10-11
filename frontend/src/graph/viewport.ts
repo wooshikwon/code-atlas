@@ -1,4 +1,4 @@
-// 고른 노드로 화면을 옮길 좌표와 "화면 맞춤"의 여백을 정한다. 좌표는 관계 그래프 영역의 왼쪽 위를 원점으로 한다.
+// 고른 노드와 강조하는 경로로 화면을 옮길 좌표, "화면 맞춤"의 여백을 정한다. 좌표는 관계 그래프 영역의 왼쪽 위를 원점으로 한다.
 import type { Rect } from "../state/store";
 import type { Box, Point } from "./layout";
 
@@ -50,6 +50,21 @@ export function centerOn(box: Box, free: Rect, zoom: number): Point {
   return { x: along(box.x, box.width, free.x, free.width), y: along(box.y, box.height, free.y, free.height) };
 }
 
+/**
+ * 강조하는 경로의 출발 노드 from과 도착 노드 to가 함께 보이는 화면 위치와 확대 비율. 확대 비율은 zoom을 줄이지 않고
+ * `NAMED_ZOOM`보다 작으면 그 값으로 키운다. 두 상자를 품는 사각형이 정보 패널이 가리지 않는 영역에 20px씩 남기고
+ * 들어가면 그 사각형을 영역의 가운데에 두고, 들어가지 않으면 출발 노드를 영역의 왼쪽 끝에서 20px 안쪽, 세로 가운데에 둔다.
+ */
+export function frameOn([from, to]: [Box, Box], { free }: Stage, zoom: number): Point & { zoom: number } {
+  const scale = Math.max(zoom, NAMED_ZOOM);
+  const both = boundsOf([from, to]);
+  const fits = both.width * scale + 2 * INSET <= free.width && both.height * scale + 2 * INSET <= free.height;
+  const at = fits
+    ? centerOn(both, free, scale)
+    : { x: free.x + INSET - from.x * scale, y: free.y + free.height / 2 - (from.y + from.height / 2) * scale };
+  return { ...at, zoom: scale };
+}
+
 /** 상자를 모두 품는 가장 작은 사각형 */
 export function boundsOf(boxes: Iterable<Box>): Box {
   let left = Infinity;
@@ -66,7 +81,7 @@ export function boundsOf(boxes: Iterable<Box>): Box {
 }
 
 /** 관계 그래프 영역과 그 안에서 정보 패널이 가리지 않는 사각형 */
-interface Stage {
+export interface Stage {
   area: Rect;
   free: Rect;
 }

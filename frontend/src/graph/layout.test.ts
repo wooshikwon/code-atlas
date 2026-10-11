@@ -32,11 +32,11 @@ const cols = columns(repoFixture, toggles);
 
 function shownFor(selection: string | null, collapsed: string[] = []): Shown {
   const picked = selection === null ? null : flow(repoFixture, selection, 2, hidden(repoFixture, toggles));
-  return shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), flow: picked });
+  return shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), flow: picked, lit: null });
 }
 
 function arranged(selection: string | null, collapsed: string[] = []): Promise<Layout> {
-  return arrange(elkGraphs(repoFixture, shownFor(selection, collapsed), cols, measure), run);
+  return arrange(elkGraphs(repoFixture, shownFor(selection, collapsed), cols, measure, new Map()), run);
 }
 
 function find(node: ElkNode, id: string): ElkNode | undefined {
@@ -106,8 +106,8 @@ describe("labelOf", () => {
 });
 
 describe("elkGraphs", () => {
-  const closed = elkGraphs(repoFixture, shownFor(null), cols, measure);
-  const opened = elkGraphs(repoFixture, shownFor("pkg.mod"), cols, measure);
+  const closed = elkGraphs(repoFixture, shownFor(null), cols, measure, new Map());
+  const opened = elkGraphs(repoFixture, shownFor("pkg.mod"), cols, measure, new Map());
 
   it("연결 묶음마다 뿌리 하나를 만들고 단위를 열 안 순서로 넣어 열 번호를 partition으로 준다", () => {
     expect(closed.components).toHaveLength(1);
@@ -117,6 +117,16 @@ describe("elkGraphs", () => {
     expect(find(root, "app")?.children?.map((c) => c.id)).toEqual(["app.__init__", "app.text", "app.web"]);
     expect(find(root, "app.text")?.layoutOptions?.["elk.partitioning.partition"]).toBe("1");
     expect(closed.shelf.map((n) => n.id)).toEqual(["scratch"]);
+  });
+
+  it("강조하는 경로의 출발 노드와 도착 노드는 표지의 폭만큼 넓고 그 밖의 노드는 크기가 같다", () => {
+    const ends = new Map([["pkg.mod:Store.load", "from"], ["pkg.mod:parse", "to"]] as const);
+    const tagged = elkGraphs(repoFixture, shownFor("pkg.mod"), cols, measure, ends);
+    const tag = 6 + measure("출발") + 12;
+    for (const id of ["pkg.mod:Store.load", "pkg.mod:parse"]) {
+      expect(find(tagged.components[0], id)!.width).toBe(find(opened.components[0], id)!.width! + tag);
+    }
+    expect(find(tagged.components[0], "pkg.mod:Store.save")).toEqual(find(opened.components[0], "pkg.mod:Store.save"));
   });
 
   it("접힌 파일 상자는 320×40이고 함수 수 글자를 상자 아래 이름표로 넘긴다", () => {
@@ -129,15 +139,15 @@ describe("elkGraphs", () => {
     const region = find(closed.components[0], "pkg")!;
     expect(region.layoutOptions?.["elk.padding"]).toBe("[top=28,left=16,bottom=16,right=16]");
     expect(region.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("pkg/") + 32}, 44)`);
-    const folded = elkGraphs(repoFixture, shownFor(null, ["pkg"]), cols, measure);
+    const folded = elkGraphs(repoFixture, shownFor(null, ["pkg"]), cols, measure, new Map());
     expect(find(folded.components[0], "pkg")).toMatchObject({ width: measure("pkg/") + 36, height: 40 });
   });
 
   it("순환 아이콘을 다는 접힌 폴더 상자는 아이콘의 폭을 더하고, 파일 상자와 펼친 폴더 영역의 크기는 그대로다", () => {
     const routeCols = columns(routeFixture, toggles);
     const input = (collapsed: string[]) => {
-      const visible = shown(routeFixture, { ...toggles, collapsed: new Set(collapsed), flow: null });
-      const built = elkGraphs(routeFixture, visible, routeCols, measure);
+      const visible = shown(routeFixture, { ...toggles, collapsed: new Set(collapsed), flow: null, lit: null });
+      const built = elkGraphs(routeFixture, visible, routeCols, measure, new Map());
       return { id: "all", children: [...built.components, ...built.shelf] };
     };
     const folded = input(["ring", "lazy"]);
@@ -304,8 +314,8 @@ describe("arrange", async () => {
       edges: [edge("a", "b"), edge("c", "d"), edge("d", "e")],
     };
     const all = columns(graph, toggles);
-    const visible = shown(graph, { ...toggles, collapsed: new Set(), flow: null });
-    const result = await arrange(elkGraphs(graph, visible, all, measure), run);
+    const visible = shown(graph, { ...toggles, collapsed: new Set(), flow: null, lit: null });
+    const result = await arrange(elkGraphs(graph, visible, all, measure, new Map()), run);
     expect(all.components).toEqual([
       ["c", "d", "e"],
       ["a", "b"],

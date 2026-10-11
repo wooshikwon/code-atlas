@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
-import { repoFixture } from "./fixture";
+import { repoFixture, routeFixture } from "./fixture";
 import { flow } from "./flow";
+import { lit, route } from "./route";
 import { concealed, degrees, drawn, neighbors, picked, ubiquitous, type DrawnEdge } from "./scope";
 import { hidden, nodeIndex, shown, unitOf } from "./visible";
 
@@ -11,12 +12,12 @@ const off = hidden(repoFixture, toggles);
 /** 고른 노드와 접은 폴더에서 그릴 선을 키로 찾는 표를 만든다. */
 function draw(selection: string | null, collapsed: string[] = [], hover: string | null = null): Map<string, DrawnEdge> {
   const focus = selection === null ? null : flow(repoFixture, selection, 2, off);
-  const visible = shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), flow: focus });
-  return new Map(drawn(repoFixture, visible, focus, hover).map((e) => [e.key, e]));
+  const visible = shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), flow: focus, lit: null });
+  return new Map(drawn(repoFixture, visible, focus, hover, null).map((e) => [e.key, e]));
 }
 
 describe("ubiquitous", () => {
-  const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null });
+  const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
 
   it("상자 수의 절반 이상에서 선이 들어오는 상자와 선을 보내는 상자 수를 낸다", () => {
     expect([...ubiquitous(repoFixture, closed)]).toEqual([["common", 5]]);
@@ -24,7 +25,7 @@ describe("ubiquitous", () => {
 
   it("파일 상자를 펼쳐도 결과가 같다", () => {
     const focus = flow(repoFixture, "cli:main", 2, off);
-    const visible = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus });
+    const visible = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus, lit: null });
     expect([...ubiquitous(repoFixture, visible)]).toEqual([["common", 5]]);
   });
 });
@@ -32,7 +33,7 @@ describe("ubiquitous", () => {
 describe("concealed", () => {
   const scene = (selection: string | null) => {
     const focus = selection === null ? null : flow(repoFixture, selection, 2, off);
-    return [shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus }), focus] as const;
+    return [shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus, lit: null }), focus] as const;
   };
 
   it("초점이 없으면 편재 노드마다 숨긴 선의 출발 노드 수를 낸다", () => {
@@ -82,8 +83,8 @@ describe("neighbors", () => {
     const user = repoFixture.edges.find((e) => e.target === "ext:json")!.source;
     const box = unitOf(nodes, user);
     const focus = flow(repoFixture, box, 2, hiddenOn);
-    const visible = shown(repoFixture, { ...on, collapsed: new Set(), flow: focus });
-    const withExternal = neighbors(drawn(repoFixture, visible, focus, null), nodes, box);
+    const visible = shown(repoFixture, { ...on, collapsed: new Set(), flow: focus, lit: null });
+    const withExternal = neighbors(drawn(repoFixture, visible, focus, null, null), nodes, box);
     expect(withExternal.external).toBe(1);
     expect(withExternal.outgoing).toBe(count(box).outgoing);
   });
@@ -121,16 +122,16 @@ describe("drawn", () => {
   });
 
   it("테스트 코드를 켜면 접은 폴더 안 테스트 파일의 선을 폴더의 집계 선에 넣는다", () => {
-    const visible = shown(repoFixture, { showTests: true, showExternal: false, collapsed: new Set(["pkg"]), flow: null });
-    const edges = new Map(drawn(repoFixture, visible, null, null).map((e) => [e.key, e]));
+    const visible = shown(repoFixture, { showTests: true, showExternal: false, collapsed: new Set(["pkg"]), flow: null, lit: null });
+    const edges = new Map(drawn(repoFixture, visible, null, null, null).map((e) => [e.key, e]));
     expect(edges.get("agg|pkg|main")).toMatchObject({ weight: 2, kinds: { call: 2 } });
     expect(edges.get("agg|tests.test_mod|pkg")?.weight).toBe(1);
   });
 
   it("흐름이 depth보다 앞 단계에서 끝나면 끝 단계로 가는 선을 흐리지 않는다", () => {
     const focus = flow(repoFixture, "app.web:render", 3, off);
-    const visible = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus });
-    const pad = drawn(repoFixture, visible, focus, null).find((e) => e.key === "app.text:wrap|app.text:pad|call");
+    const visible = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus, lit: null });
+    const pad = drawn(repoFixture, visible, focus, null, null).find((e) => e.key === "app.text:wrap|app.text:pad|call");
     expect(pad?.opacity).toBe(1);
   });
 
@@ -236,8 +237,8 @@ describe("drawn", () => {
         const skipped = hidden(repoFixture, opts);
         for (const [selection, collapsed] of selections) {
           const focus = selection === null ? null : flow(repoFixture, selection, 3, skipped);
-          const visible = shown(repoFixture, { ...opts, collapsed: new Set(collapsed), flow: focus });
-          for (const e of drawn(repoFixture, visible, focus, null)) {
+          const visible = shown(repoFixture, { ...opts, collapsed: new Set(collapsed), flow: focus, lit: null });
+          for (const e of drawn(repoFixture, visible, focus, null, null)) {
             expect(visible.nodes.has(e.source) && visible.nodes.has(e.target), `${selection} ${e.key}`).toBe(true);
           }
         }
@@ -269,10 +270,10 @@ describe("picked", () => {
     edges: [edge("pkg.a:f", "m:K", "construct", [3]), edge("pkg.a:f", "m:K.go", "call", [4, 5])],
   };
   const focus = flow(graph, "m:K", 2, new Set());
-  const visible = shown(graph, { ...toggles, collapsed: new Set(["pkg"]), flow: focus });
+  const visible = shown(graph, { ...toggles, collapsed: new Set(["pkg"]), flow: focus, lit: null });
 
   it("집계 선은 그래프가 그 키로 합친 선만 담는다", () => {
-    const edges = new Map(drawn(graph, visible, focus, null).map((e) => [e.key, e]));
+    const edges = new Map(drawn(graph, visible, focus, null, null).map((e) => [e.key, e]));
     expect(edges.get("agg|pkg|m:K")?.weight).toBe(1);
     expect(edges.get("agg|pkg|m:K.go")?.weight).toBe(2);
     const found = picked(graph, visible, focus, "agg|pkg|m:K");
@@ -282,17 +283,81 @@ describe("picked", () => {
   });
 
   it("집계 선이 아닌 키는 보이는 노드와 관계없이 원래 선 하나다", () => {
-    const closed = shown(graph, { ...toggles, collapsed: new Set(), flow: null });
+    const closed = shown(graph, { ...toggles, collapsed: new Set(), flow: null, lit: null });
     expect(picked(graph, closed, null, "pkg.a:f|m:K.go|call")).toMatchObject({ source: "pkg.a:f", target: "m:K.go", weight: 2 });
   });
 
   it("마우스를 올려야 그려지는 집계 선과 없는 키", () => {
     const off = hidden(repoFixture, toggles);
-    const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null });
+    const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
     expect(off.size).toBeGreaterThan(0);
-    expect(drawn(repoFixture, closed, null, null).some((e) => e.key === "agg|cli|common")).toBe(false);
+    expect(drawn(repoFixture, closed, null, null, null).some((e) => e.key === "agg|cli|common")).toBe(false);
     expect(picked(repoFixture, closed, null, "agg|cli|common")?.weight).toBe(2);
     expect(picked(repoFixture, closed, null, "agg|scratch|common")).toBeNull();
     expect(picked(repoFixture, closed, null, "x|y|call")).toBeNull();
+  });
+});
+
+describe("drawn: 강조하는 경로", () => {
+  const none = hidden(routeFixture, toggles);
+  const scene = (from: string, to: string, collapsed: string[] = []) => {
+    const path = lit(route(routeFixture, from, to, none), 0)!;
+    return { path, visible: shown(routeFixture, { ...toggles, collapsed: new Set(collapsed), flow: null, lit: path }) };
+  };
+  const steps = (edges: DrawnEdge[]) => edges.filter((e) => e.route !== null);
+
+  it("걸음마다 선 하나를 strong에 불투명도 1로 내고 실행 선이 있는 걸음은 그 선의 키와 원래 선을 담는다", () => {
+    const { path, visible } = scene("flow.walk:begin", "flow.walk:finish");
+    const edges = steps(drawn(routeFixture, visible, null, null, path));
+    expect(edges.map((e) => [e.key, e.route, e.tone, e.opacity, e.edges.length])).toEqual([
+      ["flow.walk:begin|flow.walk:left|call", "call", "strong", 1, 1],
+      ["flow.walk:left|flow.walk:finish|call", "call", "strong", 1, 1],
+    ]);
+  });
+
+  it("생성자 이음과 오버라이드 이음은 `step|…` 키에 원래 선 없이 낸다", () => {
+    const built = scene("flow.build:make", "flow.sink:tune");
+    expect(steps(drawn(routeFixture, built.visible, null, null, built.path)).map((e) => [e.key, e.route, e.group, e.weight, e.edges.length])).toEqual([
+      ["flow.build:make|flow.build:Engine|construct", "construct", "run", 1, 1],
+      ["step|flow.build:Engine|flow.build:Engine.__init__", "init", "run", 0, 0],
+      ["flow.build:Engine.__init__|flow.sink:tune|call", "call", "run", 1, 1],
+    ]);
+    const stepped = scene("flow.build:Base.run", "flow.sink:emit");
+    expect(steps(drawn(routeFixture, stepped.visible, null, null, stepped.path)).map((e) => [e.key, e.route])).toEqual([
+      ["flow.build:Base.run|flow.build:Base.step|call", "call"],
+      ["step|flow.build:Base.step|flow.build:Child.step", "overridden"],
+      ["flow.build:Child.step|flow.sink:emit|call", "call"],
+    ]);
+  });
+
+  it("걸음이 아닌 선은 접힌 상자 사이의 선만 muted에 불투명도 0.2로 낸다", () => {
+    const { path, visible } = scene("flow.build:make", "flow.sink:tune");
+    const rest = drawn(routeFixture, visible, null, null, path).filter((e) => e.route === null);
+    expect(rest.length).toBeGreaterThan(0);
+    for (const e of rest) {
+      expect([e.tone, e.opacity]).toEqual(["muted", 0.2]);
+      expect(visible.open.has(e.source) || visible.open.has(e.target)).toBe(false);
+      expect(e.source.includes(":") || e.target.includes(":")).toBe(false);
+    }
+    expect(rest.map((e) => e.key)).toContain("ring.a|ring.b|import");
+    expect(rest.map((e) => e.key)).not.toContain("flow.build|flow.sink|import");
+  });
+
+  it("접은 폴더 안의 경로도 걸음마다 선을 내고 다른 접은 폴더로 가는 선은 집계 선으로 남긴다", () => {
+    const { path, visible } = scene("flow.walk:begin", "flow.walk:finish", ["flow", "ring", "lazy"]);
+    const edges = drawn(routeFixture, visible, null, null, path);
+    expect(steps(edges)).toHaveLength(2);
+    expect(edges.find((e) => e.key === "agg|ring|lazy")).toMatchObject({ tone: "muted", opacity: 0.2, route: null });
+  });
+
+  it("흐름과 마우스를 올린 노드를 보지 않는다", () => {
+    const { path, visible } = scene("flow.walk:begin", "flow.walk:finish");
+    const focus = flow(routeFixture, "flow.build:Base.run", 2, none);
+    expect(drawn(routeFixture, visible, focus, "flow.build", path)).toEqual(drawn(routeFixture, visible, null, null, path));
+  });
+
+  it("경로가 없으면 모든 선의 route가 null이다", () => {
+    const visible = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
+    expect(drawn(routeFixture, visible, null, null, null).every((e) => e.route === null)).toBe(true);
   });
 });

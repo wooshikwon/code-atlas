@@ -10,12 +10,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import venv
-from .collect import RepoFiles, collect
+from .collect import RepoFiles, collect, config_texts
 from .extract import FileFacts, extract_repo, read_source
 from .graph import build
 from .lsp import REQUEST_TIMEOUT, Location, Session
 from .model import Analysis, Site
 from .resolve import Index, resolve
+from .unused import Unused, candidates
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class Analyzed:
     texts: dict[str, str]  # 레포 루트 기준 경로 → 본문
     stamps: dict[str, tuple[int, int] | None]  # 레포 루트 기준 경로 → 내용이 본문과 같던 때의 수정 시각과 크기
     probe: tuple[str, int, int] | None  # `Session.wait_ready`에 넘기는 지점
+    unused: Unused
 
     def stale(self) -> set[str]:
         """분석할 때 읽은 본문과 지금 디스크의 본문이 다른 파일. 수정 시각과 크기가 그대로면 본문을 읽지 않는다."""
@@ -156,10 +158,11 @@ async def analyze_async(repo: RepoFiles, session: Session) -> Analyzed:
     analysis = build(repo, facts, resolve(facts, locations, index), texts)
     analysis.stats["timed_out"] = timed_out
     analysis.stats["elapsed_ms"] = round((time.monotonic() - started) * 1000)
-    return Analyzed(analysis, repo, index, texts, stamps, probe)
+    unused = candidates(analysis, facts, texts, config_texts(repo.root))
+    return Analyzed(analysis, repo, index, texts, stamps, probe, unused)
 
 
-def analyze(repo: str | Path, python: str | None = None) -> tuple[Analysis, RepoFiles]:
+def analyze(repo: str | Path, python: str | None = None) -> Analyzed:
     python = require_python(repo, python)
     files = collect(repo)
 
@@ -167,4 +170,4 @@ def analyze(repo: str | Path, python: str | None = None) -> tuple[Analysis, Repo
         async with Session(files.root, python, files.extra_paths) as session:
             return await analyze_async(files, session)
 
-    return asyncio.run(run()).analysis, files
+    return asyncio.run(run())

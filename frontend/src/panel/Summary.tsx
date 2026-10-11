@@ -31,7 +31,13 @@ function Explained({ summary, stale }: { summary: string; stale: boolean }) {
   );
 }
 
-export function Summary({ node }: { node: string }) {
+interface SummaryProps {
+  node: string;
+  /** 사용자가 경계선을 끌어 정한 높이를 정보 패널 높이로 나눈 값. null이면 내용만큼 쓴다. */
+  split: number | null;
+}
+
+export function Summary({ node, split }: SummaryProps) {
   const auto = useAtlas((s) => s.autoSummary);
   const state = useSummaries((s) => s.states[node]) ?? READING;
   const read = useSummaries((s) => s.read);
@@ -50,7 +56,7 @@ export function Summary({ node }: { node: string }) {
   }, [waiting, node, make]);
 
   return (
-    <div className="info-panel-summary">
+    <div className="info-panel-summary" data-sized={split === null ? undefined : ""} style={split === null ? undefined : { height: `${split * 100}%`, maxHeight: "none" }}>
       <div className="summary-head">
         <span className="info-panel-label">LLM 요약</span>
         {state.phase === "done" && state.available && (

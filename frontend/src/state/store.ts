@@ -55,6 +55,8 @@ export interface AtlasStore {
   finder: Finder;
   /** 정보 패널의 사각형. null이면 기본 위치(오른쪽 위)다. */
   panel: Rect | null;
+  /** 코드 뷰어와 함께 보이는 LLM 요약 칸의 높이를 정보 패널 높이로 나눈 값. null이면 요약 칸이 내용만큼, 패널 높이의 4분의 1까지 쓴다. */
+  split: number | null;
   legendOpen: boolean;
   minimapOpen: boolean;
   paletteOpen: boolean;
@@ -109,12 +111,13 @@ export interface AtlasStore {
   toggleAutoSummary(): void;
   setTheme(theme: Theme): void;
   setPanel(rect: Rect | null): void;
+  setSplit(split: number | null): void;
   toggleLegend(): void;
   toggleMinimap(): void;
   setPalette(open: boolean): void;
 }
 
-type Ui = Pick<AtlasStore, "panel" | "legendOpen" | "minimapOpen" | "theme" | "depth" | "autoSummary">;
+type Ui = Pick<AtlasStore, "panel" | "split" | "legendOpen" | "minimapOpen" | "theme" | "depth" | "autoSummary">;
 
 const UI_KEY = "code-atlas:ui:v1";
 
@@ -141,6 +144,7 @@ export function parseUi(raw: string | null, theme: Theme): Ui {
     panel: isRect(saved.panel)
       ? { x: saved.panel.x, y: saved.panel.y, width: saved.panel.width, height: saved.panel.height }
       : null,
+    split: typeof saved.split === "number" && saved.split > 0 && saved.split < 1 ? saved.split : null,
     legendOpen: saved.legendOpen === true,
     minimapOpen: saved.minimapOpen !== false,
     theme: saved.theme === "light" || saved.theme === "dark" ? saved.theme : theme,
@@ -191,8 +195,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
   /** 화면 설정을 바꾸고 localStorage에 쓴다. */
   const keep = (change: Partial<Ui>) => {
     set(change);
-    const { panel, legendOpen, minimapOpen, theme, depth, autoSummary } = get();
-    localStorage.setItem(UI_KEY, JSON.stringify({ panel, legendOpen, minimapOpen, theme, depth, autoSummary }));
+    const { panel, split, legendOpen, minimapOpen, theme, depth, autoSummary } = get();
+    localStorage.setItem(UI_KEY, JSON.stringify({ panel, split, legendOpen, minimapOpen, theme, depth, autoSummary }));
   };
 
   /** 경로 고정 중에는 액션을 실행하지 않고 막힌 횟수를 늘리며 경로 탐색 창을 편다. */
@@ -282,6 +286,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     history: { entries: [placeOf(START)], index: 0 },
     finder: { open: false, from: null, to: null, route: null, pick: 0, focus: null, blocked: 0 },
     panel: null,
+    split: null,
     legendOpen: false,
     minimapOpen: true,
     paletteOpen: false,
@@ -384,6 +389,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       applyTheme(theme);
     },
     setPanel: (rect) => keep({ panel: rect }),
+    setSplit: (split) => keep({ split }),
     toggleLegend: () => keep({ legendOpen: !get().legendOpen }),
     toggleMinimap: () => keep({ minimapOpen: !get().minimapOpen }),
     setPalette: (open) => set({ paletteOpen: open }),

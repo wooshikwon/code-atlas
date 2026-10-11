@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture } from "./fixture";
+import { repoFixture, routeFixture } from "./fixture";
 import { flow } from "./flow";
+import { lit, route } from "./route";
 import { sideRoute, type Layout } from "./layout";
 import { drawn } from "./scope";
 import { edgeViews, letteredBoxes, midpoint, parentFirst, roundedPath, weightPoint, type EdgeView } from "./view";
@@ -12,7 +13,7 @@ const nodes = nodeIndex(repoFixture);
 
 function scene(selection: string | null) {
   const picked = selection === null ? null : flow(repoFixture, selection, 2, off);
-  return { flow: picked, shown: shown(repoFixture, { ...toggles, collapsed: new Set(), flow: picked }) };
+  return { flow: picked, shown: shown(repoFixture, { ...toggles, collapsed: new Set(), flow: picked, lit: null }) };
 }
 
 /** 보이는 노드를 가로 한 줄로 늘어놓은 배치. 경로는 집계 선 하나만 배치 결과로 준다. */
@@ -32,7 +33,7 @@ function lineLayout(visible: Shown): Layout {
 
 function views(selection: string | null): Map<string, EdgeView> {
   const { flow: picked, shown: visible } = scene(selection);
-  return new Map(edgeViews(drawn(repoFixture, visible, picked, null), lineLayout(visible), nodes).map((v) => [v.key, v]));
+  return new Map(edgeViews(drawn(repoFixture, visible, picked, null, null), lineLayout(visible), nodes).map((v) => [v.key, v]));
 }
 
 describe("parentFirst", () => {
@@ -70,7 +71,7 @@ describe("edgeViews", () => {
       { x: 120, y: 30 },
       { x: 200, y: 30 },
     ]);
-    const view = edgeViews(drawn(repoFixture, visible, picked, null), layout, nodes).find(
+    const view = edgeViews(drawn(repoFixture, visible, picked, null, null), layout, nodes).find(
       (v) => v.key === "pkg.mod:Store.save|main:helper|call",
     )!;
     expect(view.points).toEqual([
@@ -84,7 +85,7 @@ describe("edgeViews", () => {
       { x: 40, y: 10 },
       { x: 200, y: 10 },
     ]);
-    const straight = edgeViews(drawn(repoFixture, visible, picked, null), layout, nodes).find(
+    const straight = edgeViews(drawn(repoFixture, visible, picked, null, null), layout, nodes).find(
       (v) => v.key === "pkg.mod:Store.save|main:helper|call",
     )!;
     expect(straight.points).toEqual([
@@ -98,7 +99,7 @@ describe("edgeViews", () => {
   it("진입점 단위 사이 선은 보이는 양 끝 상자의 위치로 정한 경로를 받는다", () => {
     const { shown: visible } = scene(null);
     const layout = lineLayout(visible);
-    const view = edgeViews(drawn(repoFixture, visible, null, null), layout, nodes).find((v) => v.key === "agg|cli|main")!;
+    const view = edgeViews(drawn(repoFixture, visible, null, null, null), layout, nodes).find((v) => v.key === "agg|cli|main")!;
     expect(view.points).toEqual(sideRoute(layout.boxes.get("cli")!, layout.boxes.get("main")!));
   });
 
@@ -127,7 +128,7 @@ describe("edgeViews", () => {
     const { shown: visible } = scene(null);
     const layout = lineLayout(visible);
     layout.boxes.delete("main");
-    const keys = edgeViews(drawn(repoFixture, visible, null, null), layout, nodes).map((v) => v.key);
+    const keys = edgeViews(drawn(repoFixture, visible, null, null, null), layout, nodes).map((v) => v.key);
     expect(keys).not.toContain("agg|main|pkg.mod");
     expect(keys).toContain("pkg.mod|pkg.util|import");
   });
@@ -178,5 +179,61 @@ describe("letteredBoxes, weightPoint", () => {
     expect(lettered).toContainEqual({ x: run.x, y: -7, width: 40 + 6, height: 7 + 20 + 7 });
     expect(lettered).toContainEqual({ ...layout.boxes.get("pkg")!, height: 28 });
     expect(lettered).toHaveLength(visible.nodes.size);
+  });
+});
+
+describe("edgeViews: 강조하는 경로", () => {
+  const none = hidden(routeFixture, toggles);
+  const routeNodes = nodeIndex(routeFixture);
+  const scene = (from: string, to: string) => {
+    const path = lit(route(routeFixture, from, to, none), 0)!;
+    const visible = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: null, lit: path });
+    return { visible, edges: drawn(routeFixture, visible, null, null, path) };
+  };
+  const box = (x: number, y: number, width: number, height: number) => ({ x, y, width, height });
+
+  it("걸음의 종류를 선에 그대로 담는다", () => {
+    const { visible, edges } = scene("flow.build:make", "flow.sink:tune");
+    const views = edgeViews(edges, { ...lineLayout(visible), routes: new Map() }, routeNodes);
+    expect(views.filter((v) => v.route !== null).map((v) => v.route)).toEqual(["construct", "init", "call"]);
+    expect(views.filter((v) => v.route === null).every((v) => v.opacity === 0.2)).toBe(true);
+  });
+
+  it("클래스에서 그 생성자 메서드로 가는 걸음은 클래스의 왼쪽 변에서 메서드의 왼쪽 변으로 가로로 잇는다", () => {
+    const { edges } = scene("flow.build:make", "flow.sink:tune");
+    const boxes = new Map([
+      ["flow.build:Engine", box(100, 50, 200, 66)],
+      ["flow.build:Engine.__init__", box(116, 82, 90, 18)],
+    ]);
+    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes: new Map() }, routeNodes);
+    expect(view.key).toBe("step|flow.build:Engine|flow.build:Engine.__init__");
+    expect(view.points).toEqual([
+      { x: 100, y: 91 },
+      { x: 116, y: 91 },
+    ]);
+  });
+
+  it("오버라이드 이음은 두 클래스 사이에 반대 방향 배치 경로만 있으면 그 경로를 뒤집어 따라간다", () => {
+    const { edges } = scene("flow.build:Base.run", "flow.sink:emit");
+    const boxes = new Map([
+      ["flow.build:Base.step", box(316, 40, 60, 18)],
+      ["flow.build:Child.step", box(16, 140, 60, 18)],
+    ]);
+    const trunk = [
+      { x: 100, y: 150 },
+      { x: 200, y: 150 },
+      { x: 200, y: 60 },
+      { x: 300, y: 60 },
+    ];
+    const routes = new Map([["agg|flow.build:Child|flow.build:Base", trunk]]);
+    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes }, routeNodes);
+    expect(view.route).toBe("overridden");
+    expect(view.points).toEqual([
+      { x: 316, y: 49 },
+      { x: 200, y: 49 },
+      { x: 200, y: 149 },
+      { x: 76, y: 149 },
+    ]);
+    expect(trunk[0]).toEqual({ x: 100, y: 150 });
   });
 });

@@ -1,4 +1,4 @@
-"""레포에서 분석할 `.py` 파일을 모으고 소스 루트·테스트 코드·진입점 설정을 판정한다."""
+"""레포에서 분석할 `.py` 파일을 모으고 소스 루트·테스트 코드·진입점 설정을 판정한다. 설정 파일의 본문도 여기서 읽는다."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ import pathspec
 
 SKIP_DIRS = {"__pycache__", "node_modules", "site-packages"}
 TEST_DIRS = {"tests", "test"}
+CONFIG_SUFFIXES = (".yaml", ".yml", ".toml", ".json", ".cfg", ".ini")
+CONFIG_LIMIT = 500_000
 
 
 @dataclass
@@ -96,7 +98,7 @@ def _skipped(root: Path, rel: str, ignore: pathspec.PathSpec) -> bool:
     return (root / rel / "pyvenv.cfg").exists() or ignore.match_file(rel + "/")
 
 
-def _walk(root: Path, ignore: pathspec.PathSpec) -> list[str]:
+def _walk(root: Path, ignore: pathspec.PathSpec, suffixes: tuple[str, ...] = (".py",)) -> list[str]:
     found: list[str] = []
     stack = [root]
     while stack:
@@ -106,7 +108,7 @@ def _walk(root: Path, ignore: pathspec.PathSpec) -> list[str]:
             if entry.is_dir():
                 if not _skipped(root, rel, ignore):
                     stack.append(entry)
-            elif entry.suffix == ".py" and not ignore.match_file(rel):
+            elif entry.suffix in suffixes and not ignore.match_file(rel):
                 found.append(rel)
     return sorted(found)
 
@@ -135,6 +137,18 @@ def collected(root: Path, paths: list[str]) -> set[str]:
         if path.endswith(".py") and not ignore.match_file(path) and not any(_skipped(root, f, ignore) for f in folders):
             found.add(path)
     return found
+
+
+def config_texts(root: Path) -> list[str]:
+    """레포의 설정 파일 가운데 `CONFIG_LIMIT`바이트 이하인 파일의 본문. 훑지 않는 폴더와 `.gitignore`는 `collect`와 같다."""
+    texts: list[str] = []
+    for rel in _walk(root, _load_gitignore(root), CONFIG_SUFFIXES):
+        try:
+            if (root / rel).stat().st_size <= CONFIG_LIMIT:
+                texts.append((root / rel).read_bytes().decode("utf-8", errors="replace"))
+        except OSError:
+            continue
+    return texts
 
 
 def collect(repo: str | Path) -> RepoFiles:

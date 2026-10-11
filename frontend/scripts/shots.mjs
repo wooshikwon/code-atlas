@@ -465,11 +465,18 @@ async function file(t, page) {
   const opened = all.filter((b) => b.open).map((b) => b.id);
   t.check("다른 파일 상자는 접혀 있다", same(opened, [FILE]), `펼친 상자 ${opened.join(", ")}`);
   t.check("누르기 전과 후에 파일 상자의 열 순서와 열 안 순서가 같다", same(columnsOf(all), before.columns), JSON.stringify(columnsOf(all)));
-  const [panel, head, summary] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-head"), await rectOf(page, ".info-panel-summary")];
+  await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+  const [panel, summary, code] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-summary"), await rectOf(page, ".info-panel .code")];
   t.check(
-    "정보 패널에 코드 뷰어가 없고, 패널의 사각형이 고르기 전과 같으며, LLM 요약 칸이 머리 줄 아래의 남은 높이를 쓴다",
-    (await count(page, ".info-panel .code")) === 0 && summary !== null && sameRect(panel, before.panel) && near(panel.height, head.height + summary.height + 2),
-    `패널 ${rectText(before.panel)} → ${rectText(panel)}, 머리 줄 ${head.height}, 요약 칸 ${summary?.height}`,
+    "패널의 사각형이 고르기 전과 같고, LLM 요약 칸이 패널 높이의 4분의 1을 넘지 않으며 코드 뷰어가 나머지 높이를 쓴다",
+    sameRect(panel, before.panel) && summary.height <= panel.height / 4 + 1 && near(code.y + code.height, panel.y + panel.height - 1),
+    `패널 ${rectText(before.panel)} → ${rectText(panel)}, 요약 칸 ${summary.height}, 코드 뷰어 ${code.height}`,
+  );
+  const rows = await codeRows(page);
+  t.check(
+    "코드 뷰어가 파일의 1번 줄부터 보이고 흐린 줄과 범위 세로 줄이 없다",
+    rows[0]?.line === 1 && rows.every((row) => !row.dim) && (await count(page, ".info-panel .code-scope")) === 0,
+    `첫 줄 번호 ${rows[0]?.line}, 흐린 줄 ${rows.filter((row) => row.dim).length}개`,
   );
   const zoom = await zoomOf(page);
   const named = Math.max(before.zoom, NAMED_ZOOM);
@@ -650,6 +657,100 @@ async function panel(t, page) {
   await settle(page);
   const again = await rectOf(page, ".info-panel");
   t.check("새로고침 뒤에도 기본 사각형이다", sameRect(again, start), rectText(again));
+}
+
+/** 코드 뷰어에 보이는 줄마다 줄 번호와 흐린 글자가 있는지, 코드 뷰어 위 끝에서 잰 높이. 위에서 아래 순서다. */
+const codeRows = (page) =>
+  page.evaluate(() => {
+    const editor = document.querySelector(".info-panel .monaco-editor");
+    const top = document.querySelector(".info-panel .code").getBoundingClientRect().top;
+    const at = (element) => Math.round(element.getBoundingClientRect().top - top);
+    const numbers = new Map([...editor.querySelectorAll(".line-numbers")].map((element) => [at(element), Number(element.textContent)]));
+    return [...editor.querySelectorAll(".view-line")]
+      .map((element) => ({ line: numbers.get(at(element)) ?? null, dim: element.querySelector(".code-dim") !== null, blank: element.textContent.trim() === "", y: at(element) }))
+      .filter((row) => row.line !== null)
+      .sort((a, b) => a.y - b.y);
+  });
+
+/** 파일을 고르면 파일 전체가, 함수를 고르면 파일 전체에서 그 함수 밖의 줄만 흐리게 보이는지 본다. */
+async function codeScope(t, page) {
+  const asked = [];
+  page.on("request", (request) => {
+    const at = new URL(request.url());
+    if (at.pathname === "/api/file") {
+      asked.push(at.searchParams.get("path"));
+    }
+  });
+  await load(page);
+  const graph = await api("/api/graph");
+  const find = (id) => graph.nodes.find((n) => n.id === id);
+  const [target, path] = [find(FUNCTION), find(FUNCTION).path];
+  const total = (await api(`/api/file?path=${encodeURIComponent(path)}`)).text.split("\n").length;
+  /** 같은 파일에서 고른 함수보다 뒤에 정의된 함수 */
+  const later = graph.nodes.find((n) => n.kind === "function" && n.path === path && n.range[0] > target.range[1]);
+  /** 줄 번호가 range 밖인 줄만, 그리고 빈 줄이 아니면 모두 흐린가 */
+  const dimmedOutside = (rows, range) => rows.every((row) => (row.line < range[0] || row.line > range[1] ? row.dim || row.blank : !row.dim));
+
+  await pickInTree(page, { id: FUNCTION, owner: FILE });
+  await page.waitForSelector(".info-panel .code-scope", { timeout: 30_000 });
+  await page.waitForTimeout(300);
+  const code = await rectOf(page, ".info-panel .code");
+  const opened = await codeRows(page);
+  t.check(
+    `함수를 고르면 정의의 첫 줄 ${target.range[0]}번이 코드 뷰어 맨 위에 있고 그 줄부터 흐리지 않다`,
+    opened[0]?.line === target.range[0] && near(opened[0].y, 0, 2) && dimmedOutside(opened, target.range),
+    `첫 줄 번호 ${opened[0]?.line}, 높이 ${opened[0]?.y}`,
+  );
+  await page.mouse.move(code.x + code.width / 2, code.y + code.height / 2);
+  for (let i = 0; i < 10; i += 1) {
+    await page.mouse.wheel(0, -40);
+  }
+  await page.waitForTimeout(300);
+  const above = await codeRows(page);
+  t.check(
+    "위로 스크롤하면 정의 앞의 줄이 흐린 글자로 보이고 정의의 줄은 문법 색 그대로다",
+    above[0]?.line < target.range[0] && above.some((row) => row.dim) && above.some((row) => row.line >= target.range[0]) && dimmedOutside(above, target.range),
+    `보이는 줄 ${above[0]?.line}~${above.at(-1)?.line}, 흐린 줄 ${above.filter((row) => row.dim).length}개`,
+  );
+  const colors = await page.evaluate(() => {
+    const editor = document.querySelector(".info-panel .monaco-editor");
+    const dim = getComputedStyle(editor.querySelector(".code-dim")).color;
+    const mark = getComputedStyle(editor.querySelector(".code-scope")).borderLeftColor;
+    return { dim, mark };
+  });
+  const muted = await colorOf(page, "--muted");
+  t.check("흐린 글자와 범위 세로 줄의 색이 --muted다", colors.dim === muted.rgb && colors.mark === muted.rgb, `${colors.dim}, ${colors.mark}`);
+  await t.shot();
+  await drag(page, center(await rectOf(page, ".info-panel .monaco-editor .scrollbar.vertical .slider")), 0, code.height);
+  await page.waitForTimeout(300);
+  const bottom = await codeRows(page);
+  t.check(
+    `맨 아래로 스크롤하면 마지막 줄 번호가 파일의 줄 수 ${total}이고 정의 뒤의 줄이 흐리다`,
+    bottom.at(-1)?.line === total && dimmedOutside(bottom, target.range),
+    `마지막 줄 번호 ${bottom.at(-1)?.line}`,
+  );
+
+  await page.click(`.tree-row.tree-symbol[data-node="${later.id}"]`);
+  await waitSelected(page, later.id);
+  await page.waitForFunction((line) => [...document.querySelectorAll(".info-panel .monaco-editor .line-numbers")].some((n) => n.textContent === String(line)), later.range[0], { timeout: 10_000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const moved = await codeRows(page);
+  t.check(
+    `같은 파일의 다른 함수를 고르면 그 정의의 첫 줄 ${later.range[0]}번이 맨 위로 오고 흐린 범위가 바뀐다`,
+    moved[0]?.line === later.range[0] && dimmedOutside(moved, later.range),
+    `첫 줄 번호 ${moved[0]?.line}`,
+  );
+  await page.click(`.tree-row.tree-file[data-node="${FILE}"]`);
+  await waitSelected(page, FILE);
+  await page.waitForFunction(() => document.querySelector(".info-panel .code-scope") === null, null, { timeout: 10_000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const whole = await codeRows(page);
+  t.check(
+    "그 파일을 고르면 1번 줄부터 보이고 흐린 줄이 없다",
+    whole[0]?.line === 1 && whole.every((row) => !row.dim) && (await count(page, ".info-panel .code-scope")) === 0,
+    `첫 줄 번호 ${whole[0]?.line}, 흐린 줄 ${whole.filter((row) => row.dim).length}개`,
+  );
+  t.check(`함수 둘과 파일을 차례로 고르는 동안 /api/file 요청이 ${path} 한 번뿐이다`, same(asked, [path]), asked.join(", "));
 }
 
 /** 코드 뷰어에서 word가 처음 나오는 곳의 화면 사각형 */
@@ -851,6 +952,18 @@ async function edge(t, page) {
     "Shift를 누른 채 선을 누르면 정보 패널이 그 선의 코드 줄 목록을 열고 고른 노드의 초점은 그대로다",
     (await count(page, ".info-panel-site")) > 0 && head.includes("→") && (await selectedOf(page)) === chosen,
     `${head.replaceAll("\n", " / ").slice(0, 80)}, 코드 줄 ${await count(page, ".info-panel-site")}개`,
+  );
+  const site = Number((await page.textContent(".info-panel-site .info-panel-hint")).trim().split(":").at(-1));
+  await page.click(".info-panel-site");
+  await page.waitForSelector(".info-panel .monaco-editor .code-range", { timeout: 30_000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const [painted, viewer] = [await rectOf(page, ".info-panel .monaco-editor .code-range"), await rectOf(page, ".info-panel .code")];
+  const shownRows = await codeRows(page);
+  const row = painted === null ? undefined : shownRows.find((r) => near(r.y, painted.y - viewer.y, 2));
+  t.check(
+    `코드 줄 목록의 첫 줄을 누르면 코드 뷰어가 파일 전체에서 ${site}번 줄을 칠해 보인다`,
+    row?.line === site && !row.dim && painted.y >= viewer.y && painted.y + painted.height <= viewer.y + viewer.height,
+    `칠한 줄 ${row?.line}, 보이는 줄 ${shownRows[0]?.line}~${shownRows.at(-1)?.line}`,
   );
 
   // 함수 시점 뷰
@@ -1633,6 +1746,71 @@ async function summaryPanel(t, page) {
   );
 }
 
+/** LLM 요약 칸과 코드 뷰어 사이의 경계선을 끌어 두 영역의 높이를 바꾼다. */
+async function split(t, page) {
+  await answerSummaryReads(page, () => ({ summary: null, stale: false, available: true, reason: null }));
+  const open = async () => {
+    await pick(page, FILE);
+    await pick(page, FUNCTION);
+    await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+    await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 });
+  };
+  const sizes = async () => ({
+    panel: await rectOf(page, ".info-panel"),
+    summary: (await rectOf(page, ".info-panel-summary")).height,
+    code: (await rectOf(page, ".info-panel .code")).height,
+    editor: (await rectOf(page, ".info-panel .monaco-editor")).height,
+  });
+  const pull = async (dy) => {
+    await drag(page, center(await rectOf(page, ".info-panel-divide")), 0, dy);
+    await page.waitForTimeout(300);
+    return sizes();
+  };
+  const text = (s) => `요약 칸 ${s.summary.toFixed(1)}, 코드 뷰어 ${s.code.toFixed(1)}`;
+  await load(page);
+  t.check("노드를 고르지 않았으면 경계선이 없다", (await count(page, ".info-panel-divide")) === 0);
+  await open();
+  const start = await sizes();
+  const cursor = await page.evaluate(() => getComputedStyle(document.querySelector(".info-panel-divide")).cursor);
+  t.check("요약이 없는 함수에서도 요약 칸과 코드 뷰어 사이에 row-resize 커서의 경계선이 있다", cursor === "row-resize" && start.summary < start.panel.height / 4, `커서 ${cursor}, ${text(start)}`);
+  const lower = await pull(140);
+  t.check(
+    "경계선을 아래로 140px 끌면 요약 칸이 140px 늘고 코드 뷰어가 140px 줄며 Monaco가 코드 뷰어의 높이를 따른다",
+    near(lower.summary, start.summary + 140, 1.5) && near(lower.code, start.code - 140, 1.5) && sameRect(lower.panel, start.panel) && near(lower.editor, lower.code, 2),
+    `${text(start)} → ${text(lower)}, Monaco ${lower.editor.toFixed(1)}`,
+  );
+  await t.shot();
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  await open();
+  const kept = await sizes();
+  t.check("새로 고친 뒤에도 요약 칸의 높이가 유지된다", near(kept.summary, lower.summary, 1.5) && near(kept.code, lower.code, 1.5), text(kept));
+  await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="s"]')), 0, -300);
+  await page.waitForTimeout(300);
+  const shorter = await sizes();
+  t.check(
+    "패널의 높이를 줄이면 요약 칸이 패널 높이에 대한 비율을 유지한다",
+    shorter.panel.height < kept.panel.height - 100 && near(shorter.summary / shorter.panel.height, kept.summary / kept.panel.height, 0.005),
+    `패널 ${kept.panel.height.toFixed(0)} → ${shorter.panel.height.toFixed(0)}, ${text(shorter)}`,
+  );
+  const [top, bottom] = [await pull(-2000), await pull(2000)];
+  t.check("끝까지 끌어도 요약 칸은 56px, 코드 뷰어는 96px 아래로 줄지 않는다", near(top.summary, 56, 1.5) && near(bottom.code, 96, 1.5), `위로 ${text(top)}, 아래로 ${text(bottom)}`);
+  await page.dblclick(".info-panel-divide");
+  await page.waitForTimeout(300);
+  const again = await sizes();
+  t.check("경계선을 더블클릭하면 요약 칸이 끌기 전의 높이로 돌아간다", near(again.summary, start.summary, 1) && sameRect(again.panel, shorter.panel), text(again));
+  await pull(140);
+  await page.dblclick(".info-panel-head");
+  await settle(page);
+  const reset = await sizes();
+  t.check(
+    "머리 줄을 더블클릭하면 패널의 사각형과 요약 칸의 높이가 처음 값으로 돌아간다",
+    sameRect(reset.panel, start.panel) && near(reset.summary, start.summary, 1) && near(reset.code, start.code, 1),
+    `패널 ${rectText(reset.panel)}, ${text(reset)}`,
+  );
+}
+
 /**
  * POST /api/summary를 서버로 보내지 않고 붙잡아 둔다. 돌려준 배열의 항목마다 노드 id와, 요약으로 답하는 answer가 있다.
  */
@@ -2132,7 +2310,7 @@ async function initFile(t, page) {
   await t.shot();
   await page.keyboard.press("Escape");
   await page.waitForSelector(".info-panel-summary", { timeout: 10_000 }).catch(() => {});
-  t.check("Esc에 연 파일만 닫히고 선택은 그대로다", (await selectedOf(page)) === FILE && (await count(page, ".info-panel .code")) === 0 && (await headOf(page)).includes("arbiter.py"), `선택 ${await selectedOf(page)}`);
+  t.check("Esc에 연 파일만 닫히고 선택은 그대로다", (await selectedOf(page)) === FILE && (await count(page, ".info-panel-summary")) === 1 && (await headOf(page)).includes("arbiter.py"), `선택 ${await selectedOf(page)}`);
   await page.click(row);
   await page.waitForSelector(".info-panel .code", { timeout: 10_000 }).catch(() => {});
   await page.click(`.tree-row.tree-symbol[data-node="${FUNCTION}"]`);
@@ -2333,6 +2511,7 @@ const SCENARIOS = [
   ["function", functionScenario],
   ["body", body],
   ["panel", panel],
+  ["code-scope", codeScope],
   ["hover", hover],
   ["edge", edge],
   ["badge-tip", badgeTip],
@@ -2353,6 +2532,7 @@ const SCENARIOS = [
   ["changes", changes],
   ["zoom-keep", zoomKeep],
   ["summary-panel", summaryPanel],
+  ["split", split],
   ["summary-busy", summaryBusy],
   ["summary-stale", summaryStale],
   ["explain", explain],

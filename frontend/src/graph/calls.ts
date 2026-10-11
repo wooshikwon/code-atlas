@@ -158,6 +158,7 @@ export function callEdges(calls: Calls, center: string, layout: Layout): EdgeVie
       opacity: EDGE_OPACITY.full,
       weight: null,
       sites: edge.sites.length,
+      route: null,
     });
   }
   return views;

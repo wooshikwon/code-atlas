@@ -11,11 +11,9 @@ type CodeEditor = Parameters<OnMount>[0];
 interface RangeNotesProps {
   editor: CodeEditor;
   path: string;
-  /** 코드 뷰어 첫 줄의 파일 줄 번호 */
-  first: number;
 }
 
-/** 끌어 고른 줄 범위(파일 줄 번호)와 버튼을 띄울 코드 뷰어 안의 좌표 */
+/** 끌어 고른 줄 범위와 버튼을 띄울 코드 뷰어 안의 좌표 */
 interface Picked {
   start: number;
   end: number;
@@ -28,7 +26,7 @@ const NONE: Note[] = [];
 const MARGIN = 6;
 
 /** 지금 고른 범위. 고른 글자가 없으면 null이다. 줄 머리에서 끝난 선택은 그 앞줄까지로 센다. */
-function pickedOf(editor: CodeEditor, first: number): Picked | null {
+function pickedOf(editor: CodeEditor): Picked | null {
   const selection = editor.getSelection();
   if (selection === null || selection.isEmpty()) {
     return null;
@@ -38,7 +36,7 @@ function pickedOf(editor: CodeEditor, first: number): Picked | null {
   if (at === null) {
     return null;
   }
-  return { start: selection.startLineNumber + first - 1, end: end + first - 1, x: at.left, y: at.top + at.height };
+  return { start: selection.startLineNumber, end, x: at.left, y: at.top + at.height };
 }
 
 function Window({ note, path, top, close }: { note: Note; path: string; top: number; close: () => void }) {
@@ -91,8 +89,8 @@ function Window({ note, path, top, close }: { note: Note; path: string; top: num
   );
 }
 
-/** 코드 뷰어의 모델이 바뀌면 `key`로 새로 그린다. */
-export function RangeNotes({ editor, path, first }: RangeNotesProps) {
+/** 코드 뷰어의 파일이나 문법 색으로 그리는 범위가 바뀌면 `key`로 새로 그린다. */
+export function RangeNotes({ editor, path }: RangeNotesProps) {
   const notes = useExplanations((s) => s.files[path]) ?? NONE;
   const load = useExplanations((s) => s.load);
   const make = useExplanations((s) => s.make);
@@ -105,8 +103,8 @@ export function RangeNotes({ editor, path, first }: RangeNotesProps) {
 
   useEffect(() => load(path), [path, load]);
 
-  const last = first + (editor.getModel()?.getLineCount() ?? 0) - 1;
-  const shown = notes.filter((note) => note.start >= first && note.end <= last);
+  const last = editor.getModel()?.getLineCount() ?? 0;
+  const shown = notes.filter((note) => note.end <= last);
   const opened = shown.find((note) => noteKey(note) === open);
   const glyphs = shown.map((note) => `${noteKey(note)}:${note.state.phase}:${note.state.phase === "done" && note.state.stale}`).join(" ");
 
@@ -120,9 +118,9 @@ export function RangeNotes({ editor, path, first }: RangeNotesProps) {
       }),
       editor.onMouseUp(() => {
         dragging = false;
-        setPicked(pickedOf(editor, first));
+        setPicked(pickedOf(editor));
       }),
-      editor.onDidChangeCursorSelection(() => !dragging && setPicked(pickedOf(editor, first))),
+      editor.onDidChangeCursorSelection(() => !dragging && setPicked(pickedOf(editor))),
       editor.onDidScrollChange(() => {
         setPicked(null);
         moved();
@@ -130,25 +128,24 @@ export function RangeNotes({ editor, path, first }: RangeNotesProps) {
       editor.onDidLayoutChange(moved),
     ];
     return () => listeners.forEach((listener) => listener.dispose());
-  }, [editor, first]);
+  }, [editor]);
 
   // 설명이 있는 범위의 시작 줄 왼쪽에 말풍선 표지를 달고, 창을 연 범위의 줄을 칠한다.
   useEffect(() => {
-    const line = (file: number) => file - first + 1;
     const decorations = editor.createDecorationsCollection(
       shown.flatMap((note) => {
         const classes = ["code-note-glyph", note.state.phase === "making" ? "code-note-making" : "", note.state.phase === "done" && note.state.stale ? "code-note-stale" : ""];
         const mark = {
-          range: new monaco.Range(line(note.start), 1, line(note.start), 1),
+          range: new monaco.Range(note.start, 1, note.start, 1),
           options: { glyphMarginClassName: classes.filter((name) => name !== "").join(" "), glyphMarginHoverMessage: { value: `${note.start}~${note.end}줄 설명` } },
         };
-        const lines = { range: new monaco.Range(line(note.start), 1, line(note.end), 1), options: { isWholeLine: true, className: "code-range" } };
+        const lines = { range: new monaco.Range(note.start, 1, note.end, 1), options: { isWholeLine: true, className: "code-range" } };
         return noteKey(note) === open ? [mark, lines] : [mark];
       }),
     );
     return () => decorations.clear();
     // shown은 glyphs가 같으면 같은 표지를 내므로 glyphs가 바뀔 때만 다시 단다.
-  }, [editor, first, glyphs, open]);
+  }, [editor, glyphs, open]);
 
   // 표지를 누르면 그 줄에서 시작하는 범위의 창을 열고, 열려 있으면 접는다.
   useEffect(() => {
@@ -157,13 +154,13 @@ export function RangeNotes({ editor, path, first }: RangeNotesProps) {
       if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || line === undefined) {
         return;
       }
-      const found = useExplanations.getState().files[path]?.find((note) => note.start === line + first - 1);
+      const found = useExplanations.getState().files[path]?.find((note) => note.start === line);
       if (found !== undefined) {
         setOpen((now) => (now === noteKey(found) ? null : noteKey(found)));
       }
     });
     return () => listener.dispose();
-  }, [editor, path, first]);
+  }, [editor, path]);
 
   const explain = () => {
     if (picked === null) {
@@ -176,7 +173,7 @@ export function RangeNotes({ editor, path, first }: RangeNotesProps) {
 
   /** 창을 범위의 끝 줄 아래에 두고, 코드 뷰어 밖으로 나가면 안으로 들인다. */
   const top = (note: Note): number => {
-    const below = editor.getTopForLineNumber(note.end - first + 2) - editor.getScrollTop();
+    const below = editor.getTopForLineNumber(note.end + 1) - editor.getScrollTop();
     const room = editor.getLayoutInfo().height - (frame.current?.firstElementChild?.getBoundingClientRect().height ?? 0) - MARGIN;
     return Math.max(MARGIN, Math.min(below, room));
   };
