@@ -1,6 +1,7 @@
 // 노드 컴포넌트가 함께 쓰는 데이터 형태와 이름표·배지·보이지 않는 연결점.
 // 노드 컴포넌트는 바탕 요소와 글자 요소를 같은 뼈대로 그리고(`layers.ts`), 요소에 따라 테두리·채움이나 글자·배지만 그린다.
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import type { CSSProperties } from "react";
 import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
@@ -140,7 +141,7 @@ export function Badges({ data }: { data: AtlasNodeData }) {
   if (data.part === "body") {
     return null;
   }
-  const style = { right: -BADGE_OVERHANG };
+  const style = { "--overhang": `${BADGE_OVERHANG}px` } as CSSProperties;
   return (
     <>
       {data.unresolved > 0 && (

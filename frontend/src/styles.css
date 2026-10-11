@@ -701,7 +701,8 @@ ul {
 }
 
 /* 노드 하나는 바탕 요소(.node-body)와 글자 요소(.node-face)로 그린다. 두 요소는 같은 종류 클래스로 크기와 안쪽 배치를 함께 쓰고,
-   바탕 요소가 테두리와 채움을, 글자 요소가 이름표·줄 수 숫자·배지·선택 고리를 그린다. 두 요소의 층은 graph/layers.ts가 정한다. */
+   바탕 요소가 테두리와 채움을, 글자 요소가 이름표·줄 수 숫자·배지·선택 고리를 그린다. 글자 요소는 테두리 대신 같은 폭의 안쪽 여백을 둔다.
+   두 요소의 층은 graph/layers.ts가 정한다. */
 .node-package,
 .node-module,
 .node-class,
@@ -784,12 +785,15 @@ ul {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
   border-radius: 8px;
 }
 
 .node-body.node-package {
-  border-color: var(--muted);
+  border: 1px solid var(--muted);
+}
+
+.node-face.node-package {
+  padding: 1px;
 }
 
 .node-package-open {
@@ -798,12 +802,15 @@ ul {
 }
 
 .node-module {
-  border: 1.5px solid transparent;
   border-radius: 4px;
 }
 
+.node-face:is(.node-module, .node-dataclass, .node-external) {
+  padding: 1.5px;
+}
+
 .node-body.node-module {
-  border-color: var(--muted);
+  border: 1.5px solid var(--muted);
   background: color-mix(in srgb, var(--ink) 4%, var(--surface));
 }
 
@@ -895,12 +902,11 @@ ul {
 }
 
 .node-dataclass {
-  border: 1.5px solid transparent;
   border-radius: 2px;
 }
 
 .node-body.node-dataclass {
-  border-color: var(--muted);
+  border: 1.5px solid var(--muted);
   background: var(--surface);
 }
 
@@ -938,12 +944,11 @@ ul {
   flex: none;
   width: 16px;
   height: 16px;
-  border: 1.5px solid transparent;
   border-radius: 50%;
 }
 
 .node-body .node-circle {
-  border-color: var(--muted);
+  border: 1.5px solid var(--muted);
   background: var(--surface);
 }
 
@@ -951,12 +956,11 @@ ul {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid transparent;
   border-radius: 12px;
 }
 
 .node-body.node-external {
-  border-color: var(--muted);
+  border: 1.5px solid var(--muted);
   background: color-mix(in srgb, var(--muted) 22%, var(--surface));
 }
 
@@ -1041,9 +1045,11 @@ ul {
   visibility: hidden;
 }
 
-/* 배지는 감싼 모양의 오른쪽 위·아래 모서리에 세로 가운데를 맞춘다. 오른쪽으로 나가는 폭은 layout.ts의 BADGE_OVERHANG을 컴포넌트가 넣는다. */
+/* 배지는 감싼 모양의 오른쪽 위·아래 모서리에 세로 가운데를 맞춘다. 오른쪽으로 나가는 폭 --overhang은 layout.ts의 BADGE_OVERHANG을
+   컴포넌트가 넣는다. 글자 요소는 테두리가 없으므로 배지의 위치를 모양의 바깥 변에서 잰다. */
 .badge {
   position: absolute;
+  right: calc(0px - var(--overhang));
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
