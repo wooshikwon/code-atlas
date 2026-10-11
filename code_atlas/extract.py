@@ -594,12 +594,14 @@ class _Extractor:
         return FileFacts(self.file, self.nodes, self.defs, self.sites)
 
 
-def _top_level_names(tree: ast.Module) -> set[str]:
-    names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
-    return names
+def defined_names(text: str) -> list[str]:
+    """본문이 정의한 함수와 클래스의 이름. 함수 안에 중첩한 정의도 넣고, 문법 오류가 있거나 식이 깊은 파일은 빈 목록이다."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, RecursionError):
+        return []
+    defs = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    return sorted({node.name for node in ast.walk(tree) if isinstance(node, defs)})
 
 
 def read_source(repo: RepoFiles, file: SourceFile) -> str:
@@ -622,11 +624,5 @@ def extract(file: SourceFile, text: str, repo_names: frozenset[str]) -> FileFact
 def extract_repo(repo: RepoFiles) -> list[FileFacts]:
     """레포 전체 정의 이름을 먼저 모은 뒤 파일마다 extract를 실행한다."""
     texts = {f.path: read_source(repo, f) for f in repo.files}
-    names: set[str] = set()
-    for f in repo.files:
-        try:
-            names |= _top_level_names(ast.parse(texts[f.path]))
-        except (SyntaxError, RecursionError):
-            pass
-    repo_names = frozenset(names)
+    repo_names = frozenset(name for text in texts.values() for name in defined_names(text))
     return [extract(f, texts[f.path], repo_names) for f in repo.files]

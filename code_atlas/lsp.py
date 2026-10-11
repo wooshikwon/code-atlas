@@ -81,6 +81,8 @@ class Session:
         self.extra_paths = [str((self.root / p).resolve()) for p in extra_paths]
         self.client = LanguageClient("code-atlas", "0.1.0")
         self._lines: dict[str, list[str]] = {}
+        self._opened: dict[str, tuple[int, str]] = {}  # 레포 루트 기준 경로 → 서버에 알린 판 번호와 본문
+        self._synced = False  # `sync_files`를 한 번이라도 불렀다
         self._answered = 0.0  # 서버가 마지막으로 요청에 응답한 때(이벤트 루프 시각)
         self._register_handlers()
 
@@ -201,18 +203,48 @@ class Session:
         """basedpyright 프로세스가 끝났으면 참이다. 끝난 세션에는 요청을 보내지 못한다."""
         return self.client.stopped
 
-    def open_files(self, texts: dict[str, str]) -> None:
-        """레포 루트 기준 경로와 본문을 받아 모두 didOpen으로 연다."""
+    def sync_files(self, texts: dict[str, str]) -> None:
+        """세션이 연 파일을 레포 루트 기준 경로와 본문의 표에 맞춘다.
+
+        새 파일은 didOpen, 본문이 달라진 파일은 didChange, 표에 없는 파일은 didClose로 알린다. 생기거나 없어진 파일은
+        서버가 import를 다시 찾도록 `workspace/didChangeWatchedFiles`로도 알린다.
+        """
+        events: list[types.FileEvent] = []
+        for rel in [r for r in self._opened if r not in texts]:
+            path = self.root / rel
+            del self._opened[rel]
+            self._lines.pop(str(path), None)
+            self.client.text_document_did_close(
+                types.DidCloseTextDocumentParams(text_document=types.TextDocumentIdentifier(uri=path.as_uri()))
+            )
+            events.append(types.FileEvent(uri=path.as_uri(), type=types.FileChangeType.Deleted))
         for rel, text in texts.items():
             path = self.root / rel
+            version, opened = self._opened.get(rel, (0, None))
+            if opened == text:
+                continue
+            self._opened[rel] = (version + 1, text)
             self._lines[str(path)] = text.splitlines()
-            self.client.text_document_did_open(
-                types.DidOpenTextDocumentParams(
-                    text_document=types.TextDocumentItem(
-                        uri=path.as_uri(), language_id="python", version=1, text=text
+            if opened is None:
+                self.client.text_document_did_open(
+                    types.DidOpenTextDocumentParams(
+                        text_document=types.TextDocumentItem(
+                            uri=path.as_uri(), language_id="python", version=version + 1, text=text
+                        )
                     )
                 )
-            )
+                if self._synced:
+                    events.append(types.FileEvent(uri=path.as_uri(), type=types.FileChangeType.Created))
+            else:
+                self.client.text_document_did_change(
+                    types.DidChangeTextDocumentParams(
+                        text_document=types.VersionedTextDocumentIdentifier(uri=path.as_uri(), version=version + 1),
+                        content_changes=[types.TextDocumentContentChangeWholeDocument(text=text)],
+                    )
+                )
+        if events:
+            self.client.workspace_did_change_watched_files(types.DidChangeWatchedFilesParams(changes=events))
+        self._synced = True
 
     def _line(self, path: str, line: int) -> str:
         lines = self._lines.get(path)

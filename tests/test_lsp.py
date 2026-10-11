@@ -13,7 +13,7 @@ from concurrent.futures import Future
 from conftest import group_ended
 
 from code_atlas import lsp
-from code_atlas.analyze import analyze_async
+from code_atlas.analyze import refresh
 from code_atlas.collect import collect
 from code_atlas.lsp import Session, markdown_of, to_utf16, to_utf8
 
@@ -42,7 +42,7 @@ def test_markdown_of_hover_content_forms():
 async def test_hover_and_definition_at_after_korean_string(sample_repo):
     files = collect(sample_repo)
     async with Session(files.root, sys.executable, files.extra_paths) as session:
-        analyzed = await analyze_async(files, session)
+        analyzed = await refresh(sample_repo, sys.executable, session)
         line = analyzed.texts["src/app/cli.py"].splitlines()[9]
         col = line.index("run_engine")
         assert col != line.encode().index(b"run_engine")
@@ -61,7 +61,7 @@ async def test_hover_and_definition_at_after_korean_string(sample_repo):
 async def test_timed_out_request_is_cancelled_on_the_server(sample_repo, monkeypatch):
     files = collect(sample_repo)
     async with Session(files.root, sys.executable, files.extra_paths) as session:
-        await analyze_async(files, session)
+        await refresh(sample_repo, sys.executable, session)
         cancelled: list[types.CancelParams] = []
         cancel_request = session.client.cancel_request
         monkeypatch.setattr(session.client, "cancel_request", lambda params: (cancelled.append(params), cancel_request(params)))
