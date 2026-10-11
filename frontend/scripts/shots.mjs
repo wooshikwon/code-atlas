@@ -803,7 +803,7 @@ async function panel(t, page) {
 const codeRows = (page) =>
   page.evaluate(() => {
     const editor = document.querySelector(".info-panel .monaco-editor");
-    const top = document.querySelector(".info-panel .code").getBoundingClientRect().top;
+    const top = editor.getBoundingClientRect().top;
     const at = (element) => Math.round(element.getBoundingClientRect().top - top);
     const numbers = new Map([...editor.querySelectorAll(".line-numbers")].map((element) => [at(element), Number(element.textContent)]));
     return [...editor.querySelectorAll(".view-line")]
@@ -845,6 +845,14 @@ async function codeScope(t, page) {
     opened[0]?.line === target.range[0] && near(opened[0].y, 0, 2) && dimmedOutside(opened, target.range),
     `첫 줄 번호 ${opened[0]?.line}, 높이 ${opened[0]?.y}`,
   );
+  const gap = await page.evaluate(() => {
+    const [viewer, editor] = [document.querySelector(".info-panel .code"), document.querySelector(".info-panel .monaco-editor")];
+    return {
+      top: editor.getBoundingClientRect().top - viewer.getBoundingClientRect().top - viewer.clientTop,
+      line: editor.querySelector(".view-line").getBoundingClientRect().height,
+    };
+  });
+  t.check("요약 칸 아래 경계선과 코드 첫 줄 사이에 코드 한 줄 높이를 비운다", gap.line > 0 && near(gap.top, gap.line), `여백 ${gap.top}px, 줄 높이 ${gap.line}px`);
   await page.mouse.move(code.x + code.width / 2, code.y + code.height / 2);
   for (let i = 0; i < 10; i += 1) {
     await page.mouse.wheel(0, -40);
@@ -1109,7 +1117,7 @@ async function edge(t, page) {
   await page.click(".info-panel-site");
   await page.waitForSelector(".info-panel .monaco-editor .code-range", { timeout: 30_000 }).catch(() => {});
   await page.waitForTimeout(300);
-  const [painted, viewer] = [await rectOf(page, ".info-panel .monaco-editor .code-range"), await rectOf(page, ".info-panel .code")];
+  const [painted, viewer] = [await rectOf(page, ".info-panel .monaco-editor .code-range"), await rectOf(page, ".info-panel .monaco-editor")];
   const shownRows = await codeRows(page);
   const row = painted === null ? undefined : shownRows.find((r) => near(r.y, painted.y - viewer.y, 2));
   t.check(
@@ -1936,6 +1944,11 @@ async function split(t, page) {
     summary: (await rectOf(page, ".info-panel-summary")).height,
     code: (await rectOf(page, ".info-panel .code")).height,
     editor: (await rectOf(page, ".info-panel .monaco-editor")).height,
+    /** 코드 뷰어에서 위쪽 여백과 경계선을 뺀 높이 */
+    room: await page.evaluate(() => {
+      const viewer = document.querySelector(".info-panel .code");
+      return viewer.clientHeight - parseFloat(getComputedStyle(viewer).paddingTop);
+    }),
   });
   const pull = async (dy) => {
     await drag(page, center(await rectOf(page, ".info-panel-divide")), 0, dy);
@@ -1952,7 +1965,7 @@ async function split(t, page) {
   const lower = await pull(140);
   t.check(
     "경계선을 아래로 140px 끌면 요약 칸이 140px 늘고 코드 뷰어가 140px 줄며 Monaco가 코드 뷰어의 높이를 따른다",
-    near(lower.summary, start.summary + 140, 1.5) && near(lower.code, start.code - 140, 1.5) && sameRect(lower.panel, start.panel) && near(lower.editor, lower.code, 2),
+    near(lower.summary, start.summary + 140, 1.5) && near(lower.code, start.code - 140, 1.5) && sameRect(lower.panel, start.panel) && near(lower.editor, lower.room, 2),
     `${text(start)} → ${text(lower)}, Monaco ${lower.editor.toFixed(1)}`,
   );
   await t.shot();

@@ -1,5 +1,6 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { useEffect, useState } from "react";
+import * as monaco from "monaco-editor/editor";
+import { useEffect, useState, type CSSProperties } from "react";
 import { getDefinition, getFile } from "../api/client";
 import type { FileText } from "../api/types";
 import { useAtlas } from "../state/store";
@@ -29,6 +30,8 @@ const OPTIONS = {
   minimap: { enabled: false },
   glyphMargin: true,
   scrollBeyondLastLine: false,
+  // 첫 줄 위의 여백과 코드 사이에 스크롤 그림자가 줄을 긋지 않게 한다.
+  scrollbar: { useShadows: false },
   fontSize: 13,
   renderLineHighlight: "none" as const,
   automaticLayout: true,
@@ -41,6 +44,8 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
   const [file, setFile] = useState<FileText | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<CodeEditor | null>(null);
+  /** 코드 뷰어 위에 비우는 높이. 코드 한 줄의 높이다. */
+  const [top, setTop] = useState(0);
   /** 정의가 레포 밖에 있을 때 누른 곳 옆에 잠시 띄우는 말풍선 */
   const [note, setNote] = useState<Note | null>(null);
 
@@ -205,7 +210,7 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
   }, [note]);
 
   return (
-    <div className="code">
+    <div className="code" style={{ "--code-top": `${top}px` } as CSSProperties}>
       {error !== null && <div className="code-error">{error}</div>}
       {code !== undefined && (
         <Editor
@@ -213,7 +218,10 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
           defaultLanguage="python"
           value={code}
           theme={monacoTheme(theme)}
-          onMount={(mounted) => setEditor(mounted)}
+          onMount={(mounted) => {
+            setTop(mounted.getOption(monaco.editor.EditorOption.lineHeight));
+            setEditor(mounted);
+          }}
           options={OPTIONS}
         />
       )}

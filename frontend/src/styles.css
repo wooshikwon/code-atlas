@@ -555,13 +555,16 @@ ul {
   height: 100%;
 }
 
-/* 코드 뷰어 */
+/* 코드 뷰어. 첫 줄 위에 코드 한 줄 높이(--code-top)를 비운다. */
 
 .code {
   position: relative;
   flex: 1;
+  box-sizing: border-box;
   min-height: 0;
+  padding-top: var(--code-top, 0px);
   border-top: 1px solid var(--line);
+  background: var(--surface);
   isolation: isolate;
 }
 
@@ -578,6 +581,7 @@ ul {
   border-radius: 4px;
   background: var(--panel-bg);
   font-size: 11px;
+  margin-top: var(--code-top, 0px);
   white-space: nowrap;
   pointer-events: none;
   transform: translate(8px, -100%);
@@ -596,7 +600,7 @@ ul {
 .code-notes {
   position: absolute;
   z-index: var(--z-menu);
-  inset: 0;
+  inset: var(--code-top, 0px) 0 0;
   pointer-events: none;
 }
 
