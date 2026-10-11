@@ -254,12 +254,12 @@ def test_stopped_session_is_reopened(client, monkeypatch):
 async def test_cancelled_start_ends_the_session_and_leaves_the_app_empty(sample_repo, monkeypatch):
     sessions = []
 
-    async def analyze_async(files, session):
+    async def refresh(repo, python, session, **options):
         sessions.append(session)
         app.state.starting.get_loop().call_soon(app.state.starting.cancel)
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(api, "analyze_async", analyze_async)
+    monkeypatch.setattr(api, "refresh", refresh)
     app = create_app(sample_repo, sys.executable)
     started = time.monotonic()
     async with app.router.lifespan_context(app):
@@ -562,9 +562,9 @@ def test_changes_mark_changed_definitions_and_stale_files(changed, git_repo):
         {"path": "src/app/cli.py", "status": "deleted", "stale": True, "test": False},
         {"path": "src/app/core.py", "status": "modified", "stale": False, "test": False},
         {"path": "src/app/extra.py", "status": "added", "stale": True, "test": False},
-        {"path": "src/app/late.py", "status": "added", "stale": False, "test": False},
+        {"path": "src/app/late.py", "status": "added", "stale": True, "test": False},
         {"path": "src/app/models.py", "status": "modified", "stale": True, "test": False},
-        {"path": "tests/test_late.py", "status": "added", "stale": False, "test": True},
+        {"path": "tests/test_late.py", "status": "added", "stale": True, "test": True},
     ]
     assert body["nodes"] == {
         "app.core": "modified",
@@ -648,14 +648,14 @@ async def test_reload_replaces_the_analysis_and_ends_the_previous_session(sample
 async def test_reloads_asked_together_analyze_once(sample_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
     monkeypatch.setattr(summary, "find_cli", lambda: None)
-    analyze_async = api.analyze_async
+    refresh = api.refresh
     runs = []
 
-    async def counted(files, session):
+    async def counted(repo, python, session, **options):
         runs.append(session)
-        return await analyze_async(files, session)
+        return await refresh(repo, python, session, **options)
 
-    monkeypatch.setattr(api, "analyze_async", counted)
+    monkeypatch.setattr(api, "refresh", counted)
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
         assert len(runs) == 1
@@ -678,12 +678,12 @@ async def test_failed_reload_keeps_the_previous_analysis(sample_repo, tmp_path, 
         add_function(sample_repo)
         opened = []
 
-        async def fail(files, session):
+        async def fail(repo, python, session, **options):
             opened.append(session)
             raise RuntimeError("분석이 멈췄다")
 
         with monkeypatch.context() as patch:
-            patch.setattr(api, "analyze_async", fail)
+            patch.setattr(api, "refresh", fail)
             status, body = await call(app, "POST", "/api/reload", {})
         assert status == 500 and body == {"error": "다시 분석하지 못했다: 분석이 멈췄다"}
         assert state.graph is before and state.session is first and not first.stopped

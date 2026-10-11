@@ -1,27 +1,39 @@
-"""collect·extract·lsp·resolve·graph를 차례로 부르는 분석 진입점."""
+"""collect·extract·lsp·resolve·graph를 차례로 부르는 분석 진입점.
+
+`refresh`가 앞의 분석 결과나 캐시의 판정에서 시작해 바뀐 파일을 가리고 다시 물을 지점을 고른다. 캐시가 비었으면 모든
+파일이 바뀐 파일이므로 전체 분석이 같은 경로로 돈다.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
 import shutil
+import sqlite3
+import threading
 import time
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from . import venv
-from .collect import RepoFiles, collect, config_texts
-from .extract import FileFacts, extract_repo, read_source
+from .cache import Answers, Cache, Stored, environment
+from .collect import RepoFiles, SourceFile, collect, config_texts
+from .extract import FileFacts, defined_names, extract, read_source
 from .graph import build
 from .lsp import REQUEST_TIMEOUT, Location, Session
-from .model import Analysis, Site
-from .resolve import Index, resolve
+from .model import Analysis, Node, Site
+from .resolve import Index, Resolution, ResolvedSite, resolve_site, restore
 from .unused import Unused, candidates
 
 logger = logging.getLogger(__name__)
 
 # basedpyright는 요청을 하나씩 처리한다. 처리 중인 요청 하나와 기다리는 요청 하나가 있으면 서버가 쉬지 않는다.
 CONCURRENCY = 2
+_IDENTIFIER = re.compile(r"[^\W\d]\w*")
 
 
 class PythonNotFound(Exception):
@@ -29,8 +41,20 @@ class PythonNotFound(Exception):
 
 
 @dataclass
+class Progress:
+    """분석이 지금 도는 단계와 진행 수. phase는 collect·extract·resolve·build 가운데 하나다.
+
+    done과 total은 extract에서 파일 수, resolve에서 보낸 정의 요청 수와 보낼 전체 수이고 나머지 단계에서는 0이다.
+    """
+
+    phase: str
+    done: int = 0
+    total: int = 0
+
+
+@dataclass
 class Analyzed:
-    """분석 결과와, 떠 있는 서버가 위치 질의와 세션 다시 열기에 쓰는 자료."""
+    """분석 결과와, 떠 있는 서버가 위치 질의와 세션 다시 열기, 다음 증분 분석에 쓰는 자료."""
 
     analysis: Analysis
     files: RepoFiles
@@ -39,10 +63,16 @@ class Analyzed:
     stamps: dict[str, tuple[int, int] | None]  # 레포 루트 기준 경로 → 내용이 본문과 같던 때의 수정 시각과 크기
     probe: tuple[str, int, int] | None  # `Session.wait_ready`에 넘기는 지점
     unused: Unused
+    stored: dict[str, Stored]  # 레포 루트 기준 경로 → 추출 결과
+    answers: dict[str, Answers]  # 레포 루트 기준 경로 → 지점의 판정. 다시 물을 지점이 남은 결과에서는 비어 있다
+    env: str  # 판정을 낸 때의 환경 지문
 
     def stale(self) -> set[str]:
-        """분석할 때 읽은 본문과 지금 디스크의 본문이 다른 파일. 수정 시각과 크기가 그대로면 본문을 읽지 않는다."""
-        found: set[str] = set()
+        """분석할 때 읽은 본문과 지금 디스크의 본문이 다른 파일, 분석 뒤에 생긴 파일, 없어진 파일.
+
+        수정 시각과 크기가 그대로면 본문을 읽지 않는다.
+        """
+        found = {f.path for f in collect(self.files.root).files} - set(self.texts)
         for path, text in self.texts.items():
             file = self.files.abs_path(path)
             stamp = _stamp(file)
@@ -86,6 +116,20 @@ def _imported_module(site: Site) -> str:
     return text[len("import ") :]
 
 
+def _named_module(site: Site, file: SourceFile) -> str:
+    """import 문이 적은 모듈의 소스 루트 기준 점 경로. 상대 import는 그 파일의 패키지에서 센다."""
+    name = _imported_module(site)
+    rest = name.lstrip(".")
+    level = len(name) - len(rest)
+    if level == 0:
+        return name
+    package = file.module_id.split(".")
+    if not file.is_init:
+        package = package[:-1]
+    package = package[: len(package) - (level - 1)]
+    return ".".join([*package, rest] if rest else package)
+
+
 def _probe(facts: list[FileFacts]) -> tuple[str, int, int] | None:
     """레포 안 모듈을 가져오는 첫 import 지점."""
     modules = {f.file.module_id for f in facts}
@@ -100,58 +144,328 @@ def _probe(facts: list[FileFacts]) -> tuple[str, int, int] | None:
 
 
 async def _request_all(
-    session: Session, sites: list[Site], timeout: float = REQUEST_TIMEOUT
+    session: Session, sites: list[Site], timeout: float = REQUEST_TIMEOUT, asked: Callable[[], None] | None = None
 ) -> tuple[dict[int, list[Location]], int]:
     """동적이지 않고 내장 이름으로 판정하지 않은 지점마다 정의 위치를 묻는다.
 
     지점 번호별 응답과, 끝까지 응답이 없는 지점 수를 돌려준다. 시간 제한에 걸린 지점은 한 번 다시 묻는다.
+    지점 하나를 다 물을 때마다 `asked`를 부른다.
     """
     found: dict[int, list[Location]] = {}
     limit = asyncio.Semaphore(CONCURRENCY)
 
+    async def answered(i: int) -> bool:
+        site = sites[i]
+        for _ in range(2):
+            try:
+                found[i] = await session.definition(site.path, site.request_line, site.request_col, timeout)
+            except asyncio.TimeoutError:
+                continue
+            except Exception:
+                logger.debug("definition failed: %s:%s", site.path, site.request_line, exc_info=True)
+            return True
+        return False
+
     async def one(i: int) -> bool:
         """지점 하나를 물어 `found`에 응답을 담는다. 두 번 모두 시간 제한에 걸리면 참이다."""
-        site = sites[i]
         found[i] = []
         async with limit:
-            for _ in range(2):
-                try:
-                    found[i] = await session.definition(site.path, site.request_line, site.request_col, timeout)
-                except asyncio.TimeoutError:
-                    continue
-                except Exception:
-                    logger.debug("definition failed: %s:%s", site.path, site.request_line, exc_info=True)
-                return False
-        return True
+            late = not await answered(i)
+        if asked is not None:
+            asked()
+        return late
 
     late = await asyncio.gather(*(one(i) for i, s in enumerate(sites) if not (s.dynamic or s.builtin)))
     return found, sum(late)
 
 
-async def analyze_async(repo: RepoFiles, session: Session) -> Analyzed:
-    """띄워 둔 세션에 레포 파일을 열고 분석한다. 세션은 닫지 않는다."""
-    started = time.monotonic()
-    facts = extract_repo(repo)
-    stamps = {f.path: _stamp(repo.abs_path(f.path)) for f in repo.files}
-    texts = {f.path: read_source(repo, f) for f in repo.files}
-    probe = _probe(facts)
-    session.open_files(texts)
-    await session.wait_ready(probe)
-    locations, timed_out = await _request_all(session, [s for f in facts for s in f.sites])
-    index = Index(repo.root, facts)
-    analysis = build(repo, facts, resolve(facts, locations, index), texts)
-    analysis.stats["timed_out"] = timed_out
-    analysis.stats["elapsed_ms"] = round((time.monotonic() - started) * 1000)
-    unused = candidates(analysis, facts, texts, config_texts(repo.root))
-    return Analyzed(analysis, repo, index, texts, stamps, probe, unused)
-
-
-def analyze(repo: str | Path, python: str | None = None) -> Analyzed:
-    python = require_python(repo, python)
+def _read(repo: str | Path) -> tuple[RepoFiles, dict[str, str], dict[str, tuple[int, int] | None]]:
+    """분석할 파일을 모아 본문을 읽는다. (파일 목록, 경로별 본문, 경로별 수정 시각과 크기)를 돌려준다."""
     files = collect(repo)
+    stamps = {f.path: _stamp(files.abs_path(f.path)) for f in files.files}
+    texts = {f.path: read_source(files, f) for f in files.files}
+    return files, texts, stamps
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _extracted(
+    files: RepoFiles,
+    texts: dict[str, str],
+    previous: Analyzed | None,
+    cache: Cache | None,
+    report: Callable[[Progress], None],
+    halt: threading.Event,
+) -> tuple[dict[str, Stored], set[str]]:
+    """파일마다 추출 결과를 정한다. (경로별 추출 결과, 이번에 새로 추출한 경로)를 돌려준다.
+
+    본문 해시가 같은 추출 결과를 앞의 분석 결과와 캐시에서 찾고, 없거나 `known`이 달라졌으면 다시 추출한다. `known`은
+    레포 전체의 정의 이름 가운데 그 본문에 식별자로 나오는 이름의 해시다. `extract`가 정의 이름 집합에서 쓰는 것이
+    그 이름뿐이므로, 다른 파일이 정의를 더하거나 지워 이 값이 달라진 파일만 다시 추출한다.
+    """
+    found: dict[str, Stored | None] = {}
+    names: dict[str, list[str]] = {}
+    hashes = {path: _digest(text) for path, text in texts.items()}
+    for f in files.files:
+        kept = previous.stored.get(f.path) if previous is not None else None
+        if kept is None or kept.text_hash != hashes[f.path]:
+            kept = cache.facts(f.path, hashes[f.path]) if cache is not None else None
+        # 소스 루트가 바뀌면 본문이 같아도 모듈 id가 달라진다.
+        found[f.path] = kept if kept is not None and kept.facts.file == f else None
+        names[f.path] = found[f.path].names if found[f.path] is not None else defined_names(texts[f.path])
+    repo_names = frozenset(name for defined in names.values() for name in defined)
+    stored: dict[str, Stored] = {}
+    fresh: set[str] = set()
+    for done, f in enumerate(files.files):
+        if halt.is_set():
+            break
+        text = texts[f.path]
+        used = sorted(repo_names.intersection(_IDENTIFIER.findall(text)))
+        known = hashlib.sha256("\n".join(used).encode()).hexdigest()
+        kept = found[f.path]
+        if kept is None or kept.known != known:
+            kept = Stored(hashes[f.path], known, extract(f, text, repo_names), names[f.path])
+            fresh.add(f.path)
+        stored[f.path] = kept
+        report(Progress("extract", done + 1, len(files.files)))
+    return stored, fresh
+
+
+class _Judging:
+    """파일마다 지점의 판정을 모으고 다시 물을 지점을 고른다.
+
+    `base`의 판정이 지금 추출 결과에서 나온 파일은 판정을 그대로 쓰고 아래 세 가지 지점만 다시 묻는다. 그 밖의 파일은
+    바뀐 파일이고 모든 지점을 묻는다.
+
+    1. 판정의 대상이 바뀐 파일이나 없어진 파일의 노드인 지점
+    2. 바뀐 파일이나 없어진 파일을 import로 따라 들여오는 파일의 지점 가운데 판정이 레포 안이거나 미확인인 지점
+    3. 파일이 새로 생겼을 때, 판정이 미확인인 import 지점
+
+    판정이 내장·외부인 지점은 환경 지문이 같은 동안 다시 묻지 않는다.
+    """
+
+    def __init__(self, files: RepoFiles, stored: dict[str, Stored], base: dict[str, Answers]):
+        self.facts = {f.path: stored[f.path].facts for f in files.files}
+        self.index = Index(files.root, list(self.facts.values()))
+        self.owner = {node.id: path for path, facts in self.facts.items() for node in facts.nodes}
+        self.paths = {facts.file.module_id: path for path, facts in self.facts.items()}
+        self.externals: dict[str, Node] = {}
+        self.sites: dict[str, list[ResolvedSite | None]] = {}  # 아직 묻지 않은 바뀐 파일의 지점은 None이다
+        self.changed: set[str] = set()
+        self.asked: set[tuple[str, int]] = set()  # 판정을 그대로 쓰는 파일에서 다시 물은 지점
+        self.gone = set(base) - set(self.facts)
+        self.added = bool(base) and not set(self.facts) <= set(base)
+        self._imported = {path: sorted(base[path].imports) if path in base else [] for path in self.facts}
+        for path, facts in self.facts.items():
+            kept = base.get(path)
+            if kept is not None and (kept.text_hash, kept.known) == (stored[path].text_hash, stored[path].known):
+                try:
+                    self.sites[path] = [
+                        restore(site, verdict, kept.origins, self.externals)
+                        for site, verdict in zip(facts.sites, kept.sites, strict=True)
+                    ]
+                    continue
+                except (KeyError, TypeError, ValueError):
+                    logger.warning("저장해 둔 판정이 추출 결과와 맞지 않아 다시 묻는다: %s", path)
+            self.changed.add(path)
+            self._imported[path] = []
+            self.sites[path] = [
+                resolve_site(site, [], self.index, self.externals) if site.dynamic or site.builtin else None
+                for site in facts.sites
+            ]
+
+    def imports(self, path: str) -> set[str]:
+        """이 파일이 import하는 레포 파일. import 문이 적은 모듈의 파일과, import 지점의 판정 대상이 든 파일이다."""
+        facts = self.facts[path]
+        found: set[str] = set()
+        for site, judged in zip(facts.sites, self.sites[path]):
+            if site.kind != "import":
+                continue
+            found.add(self.paths.get(_named_module(site, facts.file), path))
+            if judged is not None and judged.status == "resolved":
+                found.add(self.owner.get(judged.target, path))
+        found.discard(path)
+        return found
+
+    def _importers(self) -> set[str]:
+        """바뀐 파일이나 없어진 파일을 import로 따라 들여오는 파일. 판정을 그대로 쓰는 파일은 저장해 둔 import 목록도 따른다."""
+        importers: dict[str, set[str]] = {}
+        for path in self.facts:
+            for imported in self.imports(path).union(self._imported[path]):
+                importers.setdefault(imported, set()).add(path)
+        reached: set[str] = set()
+        queue = [*self.changed, *self.gone]
+        while queue:
+            for path in importers.get(queue.pop(), ()):
+                if path not in reached:
+                    reached.add(path)
+                    queue.append(path)
+        return reached
+
+    def pending(self) -> list[tuple[str, int]]:
+        """다시 물을 지점 가운데 아직 묻지 않은 (경로, 지점 번호)."""
+        importers = self._importers() if self.changed or self.gone else set()
+        found: list[tuple[str, int]] = []
+        for path, judged in self.sites.items():
+            if path in self.changed:
+                found.extend((path, i) for i, site in enumerate(judged) if site is None)
+                continue
+            for i, site in enumerate(judged):
+                if site.dynamic or site.builtin or (path, i) in self.asked:
+                    continue
+                moved = site.status == "resolved" and self.owner.get(site.target, path) in self.changed
+                lost = site.status == "resolved" and site.target not in self.owner
+                followed = path in importers and site.status in ("resolved", "unresolved")
+                missing = self.added and site.kind == "import" and site.status == "unresolved"
+                if moved or lost or followed or missing:
+                    found.append((path, i))
+        return found
+
+    def settle(self, path: str, i: int, locations: list[Location]) -> None:
+        """물은 지점의 판정을 응답 위치로 정한다."""
+        self.sites[path][i] = resolve_site(self.facts[path].sites[i], locations, self.index, self.externals)
+        if path not in self.changed:
+            self.asked.add((path, i))
+
+    def resolution(self) -> Resolution:
+        """지금까지의 판정. 아직 묻지 않은 지점과, 대상 노드가 없어진 지점은 미확인으로 둔다."""
+        sites: list[ResolvedSite] = []
+        externals: dict[str, Node] = {}
+        for path, facts in self.facts.items():
+            for site, judged in zip(facts.sites, self.sites[path]):
+                if judged is None or (judged.status == "resolved" and judged.target not in self.owner):
+                    judged = restore(site, ("unresolved", None, None), {}, externals)
+                elif judged.status == "external":
+                    externals.setdefault(judged.target, self.externals[judged.target])
+                sites.append(judged)
+        return Resolution(sites, externals)
+
+    def answers(self, stored: dict[str, Stored]) -> dict[str, Answers]:
+        found: dict[str, Answers] = {}
+        for path, judged in self.sites.items():
+            found[path] = Answers(
+                stored[path].text_hash,
+                stored[path].known,
+                [(site.status, site.target, site.edge) for site in judged],
+                {site.target: self.externals[site.target].origin for site in judged if site.status == "external"},
+                sorted(self.imports(path)),
+            )
+        return found
+
+
+def _assembled(
+    files: RepoFiles, texts: dict[str, str], facts: list[FileFacts], resolution: Resolution
+) -> tuple[Analysis, Unused]:
+    """판정으로 그래프를 조립하고 미사용 후보를 판정한다. `build`가 노드를 고치므로 추출 결과의 노드는 복사해 넘긴다."""
+    copies = [replace(f, nodes=[replace(node) for node in f.nodes]) for f in facts]
+    analysis = build(files, copies, resolution, texts)
+    return analysis, candidates(analysis, copies, texts, config_texts(files.root))
+
+
+def open_cache(repo: str | Path) -> Cache | None:
+    """레포의 캐시. 열지 못하면 경고를 남기고 None을 돌려줘 캐시 없이 분석하게 한다."""
+    try:
+        return Cache(Path(repo))
+    except (OSError, sqlite3.Error):
+        logger.warning("분석 캐시를 열지 못해 캐시 없이 분석한다: %s", repo, exc_info=True)
+        return None
+
+
+async def refresh(
+    repo: str | Path,
+    python: str,
+    session: Session | Callable[[RepoFiles], Awaitable[Session]],
+    *,
+    previous: Analyzed | None = None,
+    cache: Cache | None = None,
+    rebuild: bool = False,
+    snapshot: str = "worktree",
+    report: Callable[[Progress], None] = lambda progress: None,
+    drafted: Callable[[Analyzed], None] | None = None,
+) -> Analyzed:
+    """레포를 분석한다. `previous`가 있으면 그 판정에서, 없으면 `cache`의 `snapshot` 시점에서 시작해 달라진 만큼만 다시 묻는다.
+
+    `session`은 띄워 둔 세션이거나 세션을 띄워 돌려주는 함수다. 다시 물을 지점이 없으면 세션을 쓰지 않고, 있으면 세션의
+    파일을 지금 본문에 맞춘 뒤 묻는다. 세션은 닫지 않는다. `rebuild`가 참이면 캐시를 읽지 않고 모든 지점을 물어 캐시를
+    덮어쓴다. 캐시의 판정으로 조립한 결과가 있고 다시 물을 지점이 남았으면 그 결과를 `drafted`로 먼저 낸다.
+    `report`는 단계가 바뀌거나 진행 수가 늘 때마다 불리고, 추출 단계에서는 다른 스레드에서 불린다.
+    """
+    started = time.monotonic()
+    halt = threading.Event()
+    try:
+        report(Progress("collect"))
+        files, texts, stamps = await asyncio.to_thread(_read, repo)
+        report(Progress("extract", 0, len(files.files)))
+        (stored, fresh), env = await asyncio.gather(
+            asyncio.to_thread(_extracted, files, texts, previous, None if rebuild else cache, report, halt),
+            asyncio.to_thread(environment, python, files),
+        )
+        if previous is not None:
+            base = previous.answers if previous.env == env else {}
+        else:
+            base = cache.answers(snapshot, env) if cache is not None and not rebuild else {}
+        judging = _Judging(files, stored, base)
+        facts = list(judging.facts.values())
+        probe = _probe(facts)
+
+        def analyzed(answers: dict[str, Answers], timed_out: int) -> Analyzed:
+            analysis, unused = _assembled(files, texts, facts, judging.resolution())
+            analysis.stats["timed_out"] = timed_out
+            analysis.stats["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+            return Analyzed(analysis, files, judging.index, texts, stamps, probe, unused, stored, answers, env)
+
+        todo = judging.pending()
+        done = timed_out = 0
+        if todo:
+            if drafted is not None and previous is None and len(judging.changed) < len(facts):
+                report(Progress("build"))
+                drafted(await asyncio.to_thread(analyzed, {}, 0))
+            live = await session(files) if callable(session) else session
+            live.sync_files(texts)
+            await live.wait_ready(probe)
+
+        def asked() -> None:
+            nonlocal done
+            done += 1
+            report(Progress("resolve", done, total))
+
+        while todo:
+            # import 지점의 답이 import로 따라 들여오는 파일의 범위를 바꾸므로 import 지점을 먼저 묻고 범위를 다시 구한다.
+            batch = [key for key in todo if judging.facts[key[0]].sites[key[1]].kind == "import"] or todo
+            total = done + len(todo)
+            report(Progress("resolve", done, total))
+            found, late = await _request_all(live, [judging.facts[path].sites[i] for path, i in batch], asked=asked)
+            for n, (path, i) in enumerate(batch):
+                judging.settle(path, i, found.get(n, []))
+            timed_out += late
+            todo = judging.pending()
+
+        report(Progress("build"))
+        result = await asyncio.to_thread(analyzed, judging.answers(stored), timed_out)
+        if cache is not None and (fresh or judging.changed or judging.gone):
+            await asyncio.to_thread(cache.save, snapshot, env, {path: stored[path] for path in fresh}, result.answers)
+        return result
+    finally:
+        halt.set()
+
+
+def analyze(repo: str | Path, python: str | None = None, *, cache: bool = True) -> Analyzed:
+    """세션을 띄워 `refresh`를 부른다. `cache`가 거짓이면 캐시를 읽지 않고 전체를 분석해 캐시를 덮어쓴다."""
+    python = require_python(repo, python)
 
     async def run() -> Analyzed:
-        async with Session(files.root, python, files.extra_paths) as session:
-            return await analyze_async(files, session)
+        store = open_cache(repo)
+        try:
+            async with AsyncExitStack() as opened:
+
+                async def started(files: RepoFiles) -> Session:
+                    return await opened.enter_async_context(Session(files.root, python, files.extra_paths))
+
+                return await refresh(repo, python, started, cache=store, rebuild=not cache)
+        finally:
+            if store is not None:
+                store.close()
 
     return asyncio.run(run())

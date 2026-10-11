@@ -16,6 +16,9 @@ from .model import to_dict
 from .summary import STYLE_GUIDE_ENV, find_style_guide
 
 
+NO_CACHE_HELP = "저장해 둔 분석 결과를 읽지 않고 레포 전체를 다시 분석해 덮어쓴다"
+
+
 def _python_or_exit(repo: str, python: str | None) -> str:
     try:
         return require_python(repo, python)
@@ -38,7 +41,7 @@ def _print_summary(analysis) -> None:
 
 
 def _analyze_command(args: argparse.Namespace) -> int:
-    analyzed = analyze(args.repo, _python_or_exit(args.repo, args.python))
+    analyzed = analyze(args.repo, _python_or_exit(args.repo, args.python), cache=not args.no_cache)
     if args.json:
         json.dump(to_dict(analyzed.analysis), sys.stdout, ensure_ascii=False)
         sys.stdout.write("\n")
@@ -74,7 +77,7 @@ def _serve_command(args: argparse.Namespace) -> int:
         else:
             threading.Timer(1.0, webbrowser.open, [url]).start()
 
-    app = create_app(args.repo, python, on_ready, find_style_guide(args.style_guide))
+    app = create_app(args.repo, python, on_ready, find_style_guide(args.style_guide), cache=not args.no_cache)
 
     class Server(uvicorn.Server):
         def handle_exit(self, sig, frame) -> None:
@@ -93,6 +96,7 @@ def _analyze_parser() -> argparse.ArgumentParser:
     p.add_argument("repo")
     p.add_argument("--python", help="대상 레포의 파이썬 인터프리터 경로")
     p.add_argument("--json", action="store_true", help="분석 결과 전체를 JSON으로 출력한다")
+    p.add_argument("--no-cache", action="store_true", help=NO_CACHE_HELP)
     return p
 
 
@@ -102,6 +106,7 @@ def _serve_parser() -> argparse.ArgumentParser:
     p.add_argument("--python", help="대상 레포의 파이썬 인터프리터 경로")
     p.add_argument("--port", type=int, default=PORT)
     p.add_argument("--no-open", action="store_true", help="브라우저를 열지 않는다")
+    p.add_argument("--no-cache", action="store_true", help=NO_CACHE_HELP)
     p.add_argument(
         "--style-guide",
         help=f"LLM 요약의 문체를 정하는 서술 규약 문서 경로. 주지 않으면 환경 변수 {STYLE_GUIDE_ENV}를 읽는다",

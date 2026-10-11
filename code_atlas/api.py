@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import changes
-from .analyze import Analyzed, analyze_async, require_python
+from .analyze import Analyzed, open_cache, refresh, require_python
 from .collect import RepoFiles, collect, collected, is_test_path
 from .lsp import Location, Session
 from .model import Analysis, to_dict
@@ -101,16 +101,22 @@ def create_app(
     python: str | None = None,
     on_ready: Callable[[Analysis], None] | None = None,
     style_guide: Path | None = None,
+    cache: bool = True,
 ) -> FastAPI:
     async def start() -> tuple[AsyncExitStack, Session, Analyzed]:
         """새 세션을 띄워 레포를 분석한다. 돌려준 묶음을 닫으면 그 세션이 닫힌다. 분석하지 못하면 세션을 닫고 예외를 낸다."""
         files = collect(repo)
-        async with AsyncExitStack() as opened:
-            session = await opened.enter_async_context(
-                Session(files.root, require_python(repo, python), files.extra_paths)
-            )
-            analyzed = await analyze_async(files, session)
-            return opened.pop_all(), session, analyzed
+        store = open_cache(repo)
+        try:
+            async with AsyncExitStack() as opened:
+                session = await opened.enter_async_context(
+                    Session(files.root, require_python(repo, python), files.extra_paths)
+                )
+                analyzed = await refresh(repo, session.python, session, cache=store, rebuild=not cache)
+                return opened.pop_all(), session, analyzed
+        finally:
+            if store is not None:
+                store.close()
 
     def install(sessions: AsyncExitStack, session: Session, analyzed: Analyzed) -> None:
         """분석 결과와 세션을 응답이 읽는 상태에 한꺼번에 넣는다. 응답이 쓰는 분석 결과는 이 함수만 바꾼다."""
@@ -180,7 +186,7 @@ def create_app(
                 session = await state.sessions.enter_async_context(
                     Session(analyzed.files.root, state.session.python, analyzed.files.extra_paths)
                 )
-                session.open_files(analyzed.texts)
+                session.sync_files(analyzed.texts)
                 await session.wait_ready(analyzed.probe)
                 state.session = session
         return state.session

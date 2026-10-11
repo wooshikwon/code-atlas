@@ -13,20 +13,25 @@ from conftest import group_ended
 from code_atlas import cli
 from code_atlas.analyze import PythonNotFound, require_python
 
-# 분석을 시작할 때 언어 서버의 pid를 출력한다. 인자가 "serve"가 아니면 분석을 끝내지 않고, "analyze"면 `code-atlas analyze`를 돌린다.
+# 언어 서버를 띄우면 그 pid를 출력한다. 인자가 "serve"가 아니면 분석을 끝내지 않고, "analyze"면 `code-atlas analyze`를 돌린다.
 SERVE = """
 import asyncio, sys
-from code_atlas import analyze, api, cli
+from code_atlas import cli
+from code_atlas.lsp import Session
 
-analyze_async = api.analyze_async
+entered, wait_ready = Session.__aenter__, Session.wait_ready
 
-async def hooked(files, session):
-    print("pid", session.client._server.pid, flush=True)
+async def started(self):
+    await entered(self)
+    print("pid", self.client._server.pid, flush=True)
+    return self
+
+async def ready(self, probe):
     if sys.argv[3] != "serve":
         await asyncio.Event().wait()
-    return await analyze_async(files, session)
+    await wait_ready(self, probe)
 
-api.analyze_async = analyze.analyze_async = hooked
+Session.__aenter__, Session.wait_ready = started, ready
 if sys.argv[3] == "analyze":
     sys.exit(cli.main(["analyze", sys.argv[1], "--python", sys.executable]))
 sys.exit(cli.main([sys.argv[1], "--no-open", "--port", sys.argv[2], "--python", sys.executable]))
@@ -89,8 +94,8 @@ def test_serve_parser_reads_style_guide_option():
 
 @pytest.mark.parametrize("command", ["analyze", "serve"])
 def test_missing_python_ends_before_the_analysis(sample_repo, capsys, monkeypatch, command):
-    monkeypatch.setattr(cli, "analyze", lambda *args: pytest.fail("분석을 시작했다"))
-    monkeypatch.setattr(cli, "create_app", lambda *args: pytest.fail("서버를 만들었다"))
+    monkeypatch.setattr(cli, "analyze", lambda *args, **options: pytest.fail("분석을 시작했다"))
+    monkeypatch.setattr(cli, "create_app", lambda *args, **options: pytest.fail("서버를 만들었다"))
     missing = str(sample_repo / "no" / "python")
     argv = ["analyze", str(sample_repo)] if command == "analyze" else [str(sample_repo), "--no-open", "--port", str(free_port())]
     with pytest.raises(SystemExit) as exit:
