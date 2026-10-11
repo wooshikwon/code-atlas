@@ -36,7 +36,7 @@ const TOOLS = ["필터", "화면 맞춤", "어두운 화면", "새로고침"];
 /** 좁은 창에서 상단 줄을 확인할 때 고르는 함수와 창 폭 */
 const NARROW = { owner: "parser.plan", id: "parser.plan:_parse_week_header", label: "_parse_week_header()", widths: [1700, 1440, 1280, 1160, 980, 900, 720] };
 /** 글자 요소가 그리는 글자와 배지. 이 요소의 가운데 점에서는 늘 그 노드가 눌린다. */
-const TEXTS = ".node-label, .loc, .change-mark, .badge, .node-aside, .node-below, .node-inflow, .node-field, .call-file";
+const TEXTS = ".node-label, .loc, .change-mark, .badge, .node-aside, .node-below, .node-field, .call-file";
 
 let url = "http://127.0.0.1:8766";
 /** 순환이 있는 고정 레포를 연 서버의 주소. 주지 않으면 순환 시나리오를 건너뛴다. */
@@ -132,7 +132,6 @@ const boxes = (page) =>
           width: rect.width / zoom,
           height: rect.height / zoom,
           open: root.classList.contains("node-module-open"),
-          inflow: text?.querySelector(".node-inflow")?.textContent ?? null,
           change: root.dataset.change ?? null,
           mark: text?.querySelector(".change-mark")?.textContent ?? null,
         };
@@ -194,7 +193,7 @@ const stageOf = (page) =>
 /** 그린 선마다 양 끝, 진하기, 불투명도, 선 색 */
 const edgesOf = (page) =>
   page.evaluate(() =>
-    [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].map((edge) => {
+    [...document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")].map((edge) => {
       const parts = edge.dataset.key.split("|");
       const [source, target] = parts[0] === "agg" ? [parts[1], parts[2]] : [parts[0], parts[1]];
       return {
@@ -208,15 +207,20 @@ const edgesOf = (page) =>
     }),
   );
 
-/** 선마다 경로의 시작점·끝점(그래프 좌표), 선 굵기, 층, 마우스를 올린 선인지 */
+/**
+ * 선마다 경로의 시작점·끝점(그래프 좌표), 선 굵기, 층, 마우스를 올린 선인지. 줄기는 세지 않는다. 줄기에 든 선은 가지만 그리므로
+ * 끝점은 그 줄기가 도착 노드에 닿는 점이다.
+ */
 const linesOf = (page) =>
   page.evaluate(() =>
-    [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].map((edge) => {
+    [...document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")].map((edge) => {
       const line = edge.querySelector(".edge-line");
       const total = line.getTotalLength();
-      const [start, end] = [line.getPointAtLength(0), line.getPointAtLength(total)];
+      const stem = edge.dataset.branch === undefined || edge.hasAttribute("data-whole") ? null : document.querySelector(`.edge-trunk[data-key="${CSS.escape(edge.dataset.branch)}"] .edge-line`);
+      const [start, end] = [line.getPointAtLength(0), stem === null ? line.getPointAtLength(total) : stem.getPointAtLength(stem.getTotalLength())];
       return {
         key: edge.dataset.key,
+        trunk: edge.dataset.branch ?? null,
         start: { x: start.x, y: start.y },
         end: { x: end.x, y: end.y },
         width: parseFloat(getComputedStyle(line).strokeWidth),
@@ -254,7 +258,7 @@ const flowBoxes = (page) =>
  */
 const edgePoint = (page, key) =>
   page.evaluate((want) => {
-    const edge = [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].find((e) => e.dataset.key === want);
+    const edge = [...document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")].find((e) => e.dataset.key === want);
     const line = edge?.querySelector(".edge-line");
     if (line == null) {
       return null;
@@ -523,8 +527,6 @@ async function open(t, page) {
     `__init__.py 위 ${init?.y.toFixed(0)}, 선반 이름 ${shelf?.text ?? "없음"} 위 ${shelf?.top.toFixed(0)}, 다른 상자 아래 끝 ${others.toFixed(0)}`,
   );
   t.check("범례 목록이 보이지 않는다", (await count(page, ".legend")) === 0 && (await count(page, ".legend-button")) === 1);
-  const badged = all.filter((b) => b.inflow !== null).map((b) => `${b.label} ${b.inflow}`);
-  t.check("편재 노드 배지가 붙은 파일 상자는 parser/common.py 하나다", badged.length === 1 && badged[0].startsWith("parser/common.py"), badged.join(", "));
   const edges = await edgesOf(page);
   const into = (id) => edges.filter((e) => e.key.startsWith("agg|") && e.target === id).length;
   t.check(
@@ -1081,6 +1083,8 @@ async function edge(t, page) {
   }
   const { at: where } = await hittable(page, (await linesOf(page)).filter((line) => line.key.startsWith("agg|")));
   const chosen = await selectedOf(page);
+  // 앞의 클릭과 같은 선의 같은 점일 수 있으므로 더블클릭으로 세지 않게 띄운다.
+  await page.waitForTimeout(600);
   await page.keyboard.down("Shift");
   await page.mouse.click(where.x, where.y);
   await page.keyboard.up("Shift");
@@ -1149,8 +1153,6 @@ async function badgeTip(t, page) {
   t.check("같은 상자의 이름표로 옮기면 말풍선이 그 파일의 이름과 종류로 바뀐다", name.endsWith(" · 파일") && !name.includes("확인하지"), name);
   const loc = await over(`${face(id)} .loc`);
   t.check("이름표 옆 숫자에 올리면 줄 수임을 적는다", /^줄 수 \d+줄 · 빈 줄을 뺀 수$/.test(loc), loc);
-  const inflow = await over(".node-face .node-inflow");
-  t.check("편재 노드 배지에 올리면 선을 숨긴 출발 노드 수를 적는다", /^편재 노드: 선을 숨긴 출발 노드 \d+개/.test(inflow), inflow.replaceAll("\n", " / "));
   const entry = await over(`${face(FILE)} .node-entry`);
   t.check("진입점 표시에 올리면 진입점임을 적는다", entry.startsWith("진입점"), entry);
   t.check("배지와 표시가 브라우저 기본 말풍선(title)을 쓰지 않는다", (await count(page, ".react-flow__node [title]")) === 0, `title 속성 ${await count(page, ".react-flow__node [title]")}개`);
@@ -1266,7 +1268,7 @@ async function region(t, page) {
   // 영역 위의 선은 영역이 없을 때처럼 눌린다.
   const crossing = await page.evaluate((sel) => {
     const around = document.querySelector(sel).getBoundingClientRect();
-    for (const edge of document.querySelectorAll(".react-flow__edge .edge[data-key]")) {
+    for (const edge of document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")) {
       const line = edge.querySelector(".edge-line");
       const matrix = line.getScreenCTM();
       for (let length = 0, total = line.getTotalLength(); length <= total; length += 8) {
@@ -1965,7 +1967,7 @@ async function holdSummaryPosts(page) {
 /** 요약을 만들지 않고 서버 대신 답해, 요약을 만드는 동안 다른 노드를 고르고 폴더를 접어도 요청이 끝까지 가는지 본다. */
 /**
  * id 노드가 단 도는 원이 shape 모양의 왼쪽 위 모서리에서 왼쪽과 위로 나간 폭(확대 비율로 나눈 값)과, 도는 원이 그 노드의
- * 이름표·편재 노드 배지와 겹치는지. 도는 원은 돌면서 화면 사각형이 바뀌므로 돌리기 전의 위치(offsetLeft, offsetTop)로 잰다.
+ * 이름표와 겹치는지. 도는 원은 돌면서 화면 사각형이 바뀌므로 돌리기 전의 위치(offsetLeft, offsetTop)로 잰다.
  */
 const busyAt = (page, id, shape) =>
   page.evaluate(
@@ -1979,7 +1981,7 @@ const busyAt = (page, id, shape) =>
       const [from, box] = [parent.getBoundingClientRect(), outline.getBoundingClientRect()];
       const scale = from.width / parent.offsetWidth;
       const [x, y, size] = [from.left + (parent.clientLeft + badge.offsetLeft) * scale, from.top + (parent.clientTop + badge.offsetTop) * scale, badge.offsetWidth * scale];
-      const covers = [...document.querySelectorAll(`${faceSel} :is(.node-label, .node-inflow)`)].some((element) => {
+      const covers = [...document.querySelectorAll(`${faceSel} .node-label`)].some((element) => {
         const rect = element.getBoundingClientRect();
         return rect.width > 0 && rect.left < x + size && x < rect.right && rect.top < y + size && y < rect.bottom;
       });
@@ -4395,7 +4397,7 @@ async function overlayDark(t, page) {
 /** 선마다 키, 순환 선 표시, 선 색, 불투명도, 화살촉 색 */
 const cycleLinesOf = (page) =>
   page.evaluate(() =>
-    [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].map((edge) => ({
+    [...document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")].map((edge) => ({
       key: edge.dataset.key,
       cycle: edge.hasAttribute("data-cycle"),
       stroke: getComputedStyle(edge.querySelector(".edge-line")).stroke,
@@ -4899,6 +4901,332 @@ async function nodeHover(t, page) {
   );
 }
 
+// ── 4단계: 선의 합류 ─────────────────────────────────────────────
+
+/** 줄기마다 키, 도착 노드, 적힌 수, 가지의 키, 합류점 수, 진하기, 도착 노드에 닿는 끝점(그래프 좌표), 누름 영역의 커서 */
+const trunksOf = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".react-flow__edge .edge-trunk")].map((trunk) => {
+      const line = trunk.querySelector(".edge-line");
+      const end = line.getPointAtLength(line.getTotalLength());
+      return {
+        key: trunk.dataset.key,
+        target: trunk.dataset.target,
+        count: Number(trunk.querySelector(".edge-trunk-count").textContent),
+        branches: [...document.querySelectorAll(`.edge[data-branch="${CSS.escape(trunk.dataset.key)}"]`)].map((edge) => edge.dataset.key),
+        joints: trunk.querySelectorAll(".edge-joint").length,
+        arrows: trunk.querySelectorAll(".edge-line[marker-end]").length,
+        tone: trunk.classList.contains("tone-strong") ? "strong" : "muted",
+        opacity: Number(getComputedStyle(trunk).opacity),
+        width: parseFloat(getComputedStyle(line).strokeWidth),
+        pointed: trunk.hasAttribute("data-pointed"),
+        step: trunk.hasAttribute("data-step"),
+        layer: getComputedStyle(trunk.closest("svg")).zIndex,
+        end: { x: end.x, y: end.y },
+        cursor: getComputedStyle(trunk.querySelector(".edge-hit")).cursor,
+      };
+    }),
+  );
+
+/** 줄기 위에서 맨 위 요소가 그 줄기인 화면 좌표. 도착 노드 쪽에서부터 4px마다 찾는다. 없으면 null이다. */
+const trunkPoint = (page, key) =>
+  page.evaluate((want) => {
+    const trunk = [...document.querySelectorAll(".react-flow__edge .edge-trunk")].find((e) => e.dataset.key === want);
+    const line = trunk?.querySelector(".edge-line");
+    if (line == null) {
+      return null;
+    }
+    const matrix = line.getScreenCTM();
+    const total = line.getTotalLength();
+    for (let back = 14; back <= total; back += 4) {
+      const at = line.getPointAtLength(total - back);
+      const point = new DOMPoint(at.x, at.y).matrixTransform(matrix);
+      if (document.elementFromPoint(point.x, point.y)?.closest(".edge") === trunk) {
+        return { x: point.x, y: point.y };
+      }
+    }
+    return null;
+  }, key);
+
+/** 선 키의 양 끝 노드 */
+const endsOfKey = (key) => {
+  const parts = key.split("|");
+  return parts[0] === "agg" || parts[0] === "step" ? [parts[1], parts[2]] : [parts[0], parts[1]];
+};
+
+/**
+ * 모든 폴더를 접은 화면에서 그리는 선. 선의 양 끝을 소스 루트 바로 아래의 상자로 올려, 올린 선이 하나라도 있는 쌍은 집계 선 하나,
+ * 그 밖의 쌍은 원래 선마다 하나다. 테스트 코드와 외부 노드에 닿는 선은 세지 않는다. deferred는 함수 안 import만 합친 선이다.
+ */
+function foldedLines(graph) {
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const top = (id) => {
+    let at = nodes.get(id);
+    while (at.parent !== null) {
+      at = nodes.get(at.parent);
+    }
+    return at.id;
+  };
+  const off = (id) => nodes.get(id).test || nodes.get(id).kind === "external";
+  const pairs = new Map();
+  for (const edge of graph.edges) {
+    if (off(edge.source) || off(edge.target)) {
+      continue;
+    }
+    const [source, target] = [top(edge.source), top(edge.target)];
+    if (source === target) {
+      continue;
+    }
+    const pair = pairs.get(`${source}|${target}`) ?? { source, target, edges: [], lifted: false };
+    pair.edges.push(edge);
+    pair.lifted ||= source !== edge.source || target !== edge.target;
+    pairs.set(`${source}|${target}`, pair);
+  }
+  return [...pairs.values()].flatMap(({ source, target, edges, lifted }) =>
+    lifted ? [{ source, target, deferred: edges.every((e) => e.deferred) }] : edges.map((e) => ({ source, target, deferred: e.deferred })),
+  );
+}
+
+/** 처음 화면과 폴더를 펼친 화면에서 줄기와 가지의 구성을 본다. */
+async function merge(t, page) {
+  const graph = await api("/api/graph");
+  const expected = foldedLines(graph);
+  const entries = new Set(graph.nodes.filter((n) => n.entry && n.kind === "module").map((n) => n.id));
+  await load(page, url, false);
+  const [lines, trunks] = [await linesOf(page), await trunksOf(page)];
+  t.check("편재 노드 배지가 없다", (await count(page, ".node-inflow")) === 0);
+  t.check(
+    `모든 폴더를 접은 화면이 /api/graph로 센 선 ${expected.length}개를 모두 그린다`,
+    lines.length === expected.length,
+    `그린 선 ${lines.length}개`,
+  );
+  const sound = (list, all) =>
+    list.every(
+      (trunk) =>
+        trunk.count === trunk.branches.length &&
+        trunk.count >= 2 &&
+        trunk.joints >= 1 &&
+        trunk.arrows === 1 &&
+        trunk.branches.every((key) => endsOfKey(key)[1] === trunk.target) &&
+        near(trunk.width, 1.5, 0.01) &&
+        all.filter((line) => line.trunk === trunk.key).every((line) => near(line.end.x, trunk.end.x) && near(line.end.y, trunk.end.y)),
+    );
+  t.check(
+    "줄기마다 화살촉이 하나이고 적힌 수가 가지의 수와 같으며, 가지는 모두 그 줄기의 도착 노드로 들어가고 굵기는 선 하나와 같다",
+    trunks.length > 0 && sound(trunks, lines),
+    trunks.map((trunk) => `${trunk.target} ${trunk.count}`).join(", "),
+  );
+  // 진입점 단위 사이의 선은 배치 밖 경로로 옆면에 따로 들어가므로, 진입점이 아닌 상자로 들어오는 선을 견준다.
+  const into = new Map();
+  for (const line of expected.filter((e) => !e.deferred && !entries.has(e.target))) {
+    into.set(line.target, (into.get(line.target) ?? 0) + 1);
+  }
+  const wanted = [...into].filter(([, n]) => n >= 2);
+  const missed = wanted.filter(([target, n]) => trunks.filter((trunk) => trunk.target === target && trunk.count === n).length !== 1);
+  t.check(
+    `들어오는 선이 둘 이상인 상자 ${wanted.length}개마다 줄기가 하나이고 그 수가 들어오는 선의 수와 같다`,
+    wanted.length > 0 && missed.length === 0,
+    wanted.map(([target, n]) => `${target} ${n}`).join(", ") + (missed.length > 0 ? ` / 어긋남 ${missed.map(([target]) => target).join(", ")}` : ""),
+  );
+  const alone = lines.filter((line) => line.trunk === null);
+  const arrows = await page.evaluate(() => [...document.querySelectorAll(".edge[data-branch]:not([data-whole]) .edge-line[marker-end]")].length);
+  t.check("줄기에 든 선은 가지를 화살촉 없이 그리고 줄기에 들지 않은 선은 화살촉을 단다", arrows === 0 && alone.length + lines.filter((line) => line.trunk !== null).length === lines.length, `줄기에 들지 않은 선 ${alone.length}개`);
+  await t.shot();
+
+  await openFolder(page, "parser");
+  const [openLines, openTrunks] = [await linesOf(page), await trunksOf(page)];
+  t.check(
+    "parser/를 펼친 화면에서도 줄기마다 수와 가지가 맞고, 자식을 그리는 폴더 영역으로 들어가는 줄기는 없다",
+    openTrunks.length > 0 && sound(openTrunks, openLines) && openTrunks.every((trunk) => trunk.target !== "parser"),
+    openTrunks.map((trunk) => `${trunk.target} ${trunk.count}`).join(", "),
+  );
+}
+
+/** 가지와 줄기에 마우스를 올린다. */
+async function mergeHover(t, page) {
+  await load(page, url, false);
+  const ink = (await colorOf(page, "--ink")).rgb;
+  const trunk = (await trunksOf(page)).sort((a, b) => b.count - a.count)[0];
+  const found = await hittable(page, (await linesOf(page)).filter((line) => line.trunk === trunk.key));
+  await page.mouse.move(found.at.x, found.at.y - 1);
+  await page.mouse.move(found.at.x, found.at.y);
+  await page.waitForSelector(".edge[data-pointed]", { timeout: 5_000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const lines = await linesOf(page);
+  const over = lines.find((line) => line.key === found.line.key);
+  const whole = await page.evaluate((key) => document.querySelector(`.edge[data-key="${CSS.escape(key)}"]`)?.hasAttribute("data-whole"), found.line.key);
+  const branchTip = await tipText(page);
+  t.check(
+    "가지에 올리면 그 선 하나가 출발부터 도착 노드까지 본문 잉크로 다른 선 위의 층에 그려지고 줄기와 다른 가지는 그대로다",
+    over.pointed && whole && over.stroke === ink && over.layer === "5" && near(over.end.x, trunk.end.x) && near(over.end.y, trunk.end.y) &&
+      lines.filter((line) => line.key !== over.key).every((line) => !line.pointed) && (await trunksOf(page)).every((each) => !each.pointed),
+    `올린 선 ${over.key}, 전체 경로 ${whole}, 층 ${over.layer}`,
+  );
+  t.check("가지의 말풍선은 그 선의 출발·도착과 분류, 지점 수다", /^.+ → .+ · .+ · \d+곳$/.test(branchTip) && !branchTip.startsWith("노드 "), branchTip);
+
+  const spot = await trunkPoint(page, trunk.key);
+  await page.mouse.move(spot.x, spot.y - 1);
+  await page.mouse.move(spot.x, spot.y);
+  await page.waitForSelector(".edge-trunk[data-pointed]", { timeout: 5_000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const pointed = (await trunksOf(page)).find((each) => each.key === trunk.key);
+  const members = (await linesOf(page)).filter((line) => line.trunk === trunk.key);
+  const trunkTipText = await tipText(page);
+  t.check(
+    `줄기에 올리면 줄기와 가지 ${trunk.count}개가 모두 본문 잉크로 다른 선 위의 층에 그려진다`,
+    pointed.pointed && pointed.tone === "strong" && pointed.opacity === 1 && pointed.layer === "5" && members.length === trunk.count && members.every((line) => line.pointed && line.stroke === ink),
+    `줄기 ${pointed.tone} ${pointed.opacity}, 본문 잉크 가지 ${members.filter((line) => line.pointed).length}개`,
+  );
+  const sources = new Set(trunk.branches.map((key) => endsOfKey(key)[0])).size;
+  t.check(
+    "줄기의 말풍선은 선을 내보내는 노드 수와 도착 노드, 지점 수 합이다",
+    new RegExp(`^노드 ${sources}개 → .+ · \\d+곳$`).test(trunkTipText),
+    trunkTipText,
+  );
+  await t.shot();
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(() => document.querySelector(".edge[data-pointed]") === null, null, { timeout: 5_000 }).catch(() => {});
+  t.check("마우스를 떼면 줄기와 가지가 돌아온다", (await count(page, ".edge[data-pointed]")) === 0 && (await count(page, ".edge[data-whole]")) === 0);
+}
+
+/** Shift를 누른 채 줄기를 누르고, 그냥 누른다. */
+async function mergeClick(t, page) {
+  await load(page, url, false);
+  const trunk = (await trunksOf(page)).filter((each) => each.target !== "parser").sort((a, b) => b.count - a.count)[0];
+  const spot = await trunkPoint(page, trunk.key);
+  await page.keyboard.down("Shift");
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.up("Shift");
+  await page.waitForSelector(".info-panel-sites", { timeout: 10_000 }).catch(() => {});
+  const head = await headOf(page);
+  const groups = await page.evaluate(() =>
+    [...document.querySelectorAll(".info-panel-sites > li")].map((group) => ({
+      name: group.querySelector(".info-panel-sites-name")?.textContent ?? "",
+      sites: group.querySelectorAll(".info-panel-site").length,
+    })),
+  );
+  const sources = new Set(trunk.branches.map((key) => endsOfKey(key)[0])).size;
+  t.check(
+    "Shift를 누른 채 줄기를 누르면 정보 패널이 들어오는 선 전체의 코드 줄 목록을 출발 노드마다 묶어 보이고 노드는 선택되지 않는다",
+    head.includes(`노드 ${sources}개 →`) && head.includes("합류") && groups.length === trunk.count && groups.every((group) => group.name !== "" && group.sites > 0) && (await selectedOf(page)) === null,
+    `${head.replaceAll("\n", " / ").slice(0, 80)} / 묶음 ${groups.map((group) => group.name.trim()).join(", ")}`,
+  );
+  const total = groups.reduce((sum, group) => sum + group.sites, 0);
+  t.check("머리 줄의 지점 수가 목록의 코드 줄 수와 같다", head.includes(`${total}곳`), `코드 줄 ${total}개`);
+  await t.shot();
+  await page.click(".info-panel-site");
+  await page.waitForSelector(".info-panel .monaco-editor .code-range", { timeout: 30_000 }).catch(() => {});
+  t.check("목록의 줄을 누르면 코드 뷰어가 그 줄을 칠해 보인다", (await count(page, ".info-panel .monaco-editor .code-range")) > 0);
+
+  await page.waitForTimeout(600);
+  await page.mouse.click(spot.x, spot.y);
+  await waitSelected(page, trunk.target).catch(() => {});
+  t.check("줄기를 누르면 도착 노드가 선택된다", (await selectedOf(page)) === trunk.target, `선택 ${await selectedOf(page)}`);
+}
+
+/** 함수를 골랐을 때 고른 노드에 닿는 선이 줄기 위에서 한 줄로 이어지는지 본다. */
+async function mergeSelect(t, page) {
+  await load(page);
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await rest(page);
+  const ink = (await colorOf(page, "--ink")).rgb;
+  const [lines, trunks, at] = [await linesOf(page), await trunksOf(page), await flowBoxes(page)];
+  const wholes = new Set(await page.evaluate(() => [...document.querySelectorAll(".edge[data-whole]")].map((edge) => edge.dataset.key)));
+  const strong = lines.filter((line) => line.tone === "strong");
+  const joined = strong.filter((line) => line.trunk !== null);
+  t.check(
+    `고른 함수에 닿는 선 ${strong.length}개 가운데 줄기에 든 ${joined.length}개가 줄기 위에 전체 경로를 본문 잉크로 그려 도착 노드까지 이어진다`,
+    joined.length > 0 && joined.every((line) => wholes.has(line.key) && line.stroke === ink && line.opacity === 1) &&
+      [...wholes].every((key) => strong.some((line) => line.key === key)),
+    `전체 경로를 그린 선 ${wholes.size}개`,
+  );
+  const reach = strong.filter((line) => {
+    const box = at[endsOfKey(line.key)[1]];
+    return box !== undefined && (near(line.end.x, box.x, 1.5) || near(line.end.x, box.x + box.width, 1.5) || near(line.end.y, box.y + box.height, 1.5));
+  });
+  t.check("고른 함수에 닿는 선의 끝이 모두 도착 노드의 변에 닿는다", reach.length === strong.length, `${reach.length}/${strong.length}`);
+  const dim = trunks.filter((trunk) => !trunk.branches.some((key) => strong.some((line) => line.key === key)));
+  t.check(
+    `고른 함수에 닿는 선이 없는 줄기 ${dim.length}개는 muted 잉크이고 가지 가운데 가장 진한 값을 쓴다`,
+    dim.length > 0 && dim.every((trunk) => trunk.tone === "muted" && trunk.opacity === Math.max(...lines.filter((line) => line.trunk === trunk.key).map((line) => line.opacity))) && dim.some((trunk) => trunk.opacity === DIM),
+    [...new Set(dim.map((trunk) => trunk.opacity))].join("·"),
+  );
+  const mixed = trunks.filter((trunk) => !dim.includes(trunk));
+  t.check(
+    "고른 함수에 닿는 선이 든 줄기는 따로 그린 그 선을 뺀 가지의 진하기를 쓴다",
+    mixed.every((trunk) => {
+      const others = lines.filter((line) => line.trunk === trunk.key && line.tone !== "strong");
+      return others.length === 0 ? trunk.tone === "strong" : trunk.tone === "muted" && trunk.opacity === Math.max(...others.map((line) => line.opacity));
+    }),
+    `줄기 ${mixed.length}개`,
+  );
+}
+
+/** 경로 고정과 순환 덮개가 줄기 위에서 그리는 선을 본다. */
+async function mergePin(t, page) {
+  await load(page);
+  await pin(page);
+  const ink = (await colorOf(page, "--ink")).rgb;
+  const [steps, trunks] = [await routeLinesOf(page), await trunksOf(page)];
+  const stepKeys = new Set(steps.map((line) => line.key));
+  const joined = await page.evaluate(() =>
+    [...document.querySelectorAll(".edge[data-route][data-branch]")].map((edge) => ({ key: edge.dataset.key, whole: edge.hasAttribute("data-whole") })),
+  );
+  t.check(
+    `경로의 걸음 ${steps.length}개가 본문 잉크 3px이고, 줄기에 든 걸음 ${joined.length}개는 줄기 위에 전체 경로를 그린다`,
+    steps.length > 0 && steps.every((line) => line.stroke === ink && near(line.width, LINE.step, 0.01) && line.opacity === 1) && joined.every((line) => line.whole),
+    steps.map((line) => line.key).join(", "),
+  );
+  t.check(
+    "이음은 점선이고 줄기에 들지 않는다",
+    steps.filter((line) => line.key.startsWith("step|")).every((line) => line.dashed && !joined.some((each) => each.key === line.key)),
+    `이음 ${steps.filter((line) => line.key.startsWith("step|")).length}개`,
+  );
+  const offRoute = trunks.filter((trunk) => !trunk.branches.some((key) => stepKeys.has(key)));
+  t.check(
+    `걸음이 지나지 않는 줄기 ${offRoute.length}개는 누를 수 없음을 커서로 보이고 불투명도 ${DIM}이며, 걸음이 지나는 줄기만 눌린다`,
+    offRoute.length > 0 && offRoute.every((trunk) => trunk.cursor === "not-allowed" && !trunk.step && trunk.opacity === DIM) &&
+      trunks.filter((trunk) => !offRoute.includes(trunk)).every((trunk) => trunk.step && trunk.cursor === "pointer"),
+    `걸음이 지나는 줄기 ${trunks.length - offRoute.length}개`,
+  );
+  await watchFlashes(page);
+  const spot = await trunkPoint(page, offRoute[0].key);
+  const before = await page.evaluate(() => document.querySelector(".finder-step[aria-current='true']")?.dataset.node ?? null);
+  await page.mouse.click(spot.x, spot.y);
+  await rest(page);
+  t.check(
+    "걸음이 지나지 않는 줄기를 눌러도 고정과 보이는 노드가 그대로이고 안내 줄이 뒤집힌다",
+    (await pinnedOf(page)) && (await page.evaluate(() => document.querySelector(".finder-step[aria-current='true']")?.dataset.node ?? null)) === before && (await flashesOf(page)) === 1,
+    `뒤집힘 ${await flashesOf(page)}번`,
+  );
+  await t.shot();
+
+  if (cycleUrl === null) {
+    t.skip("순환 선이 줄기 구간에서도 critical 색이다", "--cycle-url을 주지 않았다");
+    return;
+  }
+  await load(page, cycleUrl);
+  await rest(page);
+  const critical = (await colorOf(page, "--critical")).rgb;
+  const cycles = await page.evaluate(() =>
+    [...document.querySelectorAll(".edge[data-cycle]")].map((edge) => {
+      const line = edge.querySelector(".edge-line");
+      return { key: edge.dataset.key, joined: edge.dataset.branch !== undefined, whole: edge.hasAttribute("data-whole"), stroke: getComputedStyle(line).stroke, arrow: line.hasAttribute("marker-end") };
+    }),
+  );
+  const inTrunk = cycles.filter((line) => line.joined);
+  t.check(
+    `순환 선 ${cycles.length}개 가운데 줄기에 든 ${inTrunk.length}개는 줄기 위에 전체 경로를 critical 색으로 화살촉과 함께 그린다`,
+    cycles.length > 0 && cycles.every((line) => line.stroke === critical && line.arrow) && inTrunk.every((line) => line.whole),
+    cycles.map((line) => line.key).join(", "),
+  );
+  const stems = await trunksOf(page);
+  const muted = (await colorOf(page, "--muted")).rgb;
+  const stemStrokes = await page.evaluate(() => [...document.querySelectorAll(".edge-trunk .edge-line")].map((line) => getComputedStyle(line).stroke));
+  t.check("줄기는 critical 색을 쓰지 않는다", stemStrokes.every((stroke) => stroke === muted), `줄기 ${stems.length}개`);
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -4953,12 +5281,17 @@ const SCENARIOS = [
   ["start", start],
   ["arranging", arranging],
   ["node-hover", nodeHover],
+  ["merge", merge],
+  ["merge-hover", mergeHover],
+  ["merge-click", mergeClick],
+  ["merge-select", mergeSelect],
+  ["merge-pin", mergePin],
 ];
 
 /** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
 const STAGE3 = new Set(SCENARIOS.slice(SCENARIOS.findIndex(([name]) => name === "finder-open")).map(([name]) => name));
 /** 4단계 시나리오. 스크린샷 이름이 s4-로 시작한다. */
-const STAGE4 = new Set(["start", "arranging", "node-hover"]);
+const STAGE4 = new Set(["start", "arranging", "node-hover", "merge", "merge-hover", "merge-click", "merge-select", "merge-pin"]);
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 

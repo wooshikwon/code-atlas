@@ -5,7 +5,8 @@ import { useMemo, useState, type CSSProperties, type PointerEvent as ReactPointe
 import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { flow } from "../graph/flow";
-import { degrees, drawn, neighbors, picked, type DrawnEdge } from "../graph/scope";
+import { EDGE_KIND_NAMES, nameOf } from "../graph/names";
+import { arriving, degrees, drawn, neighbors, picked, trunkTarget, type DrawnEdge } from "../graph/scope";
 import { hidden, nodeIndex, shown, unresolvedWithin, within } from "../graph/visible";
 import { focusOf } from "../state/history";
 import { chosenOf, litOf, useAtlas, type Selection } from "../state/store";
@@ -14,7 +15,7 @@ import { Header, type HeaderItem, type PickedEdge } from "./Header";
 import { useOpened } from "./opened";
 import { Overview } from "./Overview";
 import { divide, MIN_CODE, MIN_SUMMARY, type Dir } from "./rect";
-import { Sites } from "./Sites";
+import { Sites, type SiteGroup } from "./Sites";
 import { Summary } from "./Summary";
 import { usePanelRect } from "./usePanelRect";
 
@@ -93,8 +94,17 @@ export function InfoPanel() {
     return { flow: focused, lit, shown: shown(graph, { ...toggles, collapsed, flow: focused, lit }) };
   }, [graph, index, selection, showTests, showExternal, collapsed, depth, lit]);
 
+  /** 고른 줄기의 도착 노드와 그 노드로 들어오는 그린 선 */
+  const trunk = useMemo(() => {
+    const target = selection?.type === "edge" ? trunkTarget(selection.key) : null;
+    if (graph === null || scene === null || scene.lit !== null || target === null) {
+      return null;
+    }
+    return { target, edges: arriving(graph, scene.shown, scene.flow, target) };
+  }, [graph, scene, selection]);
+
   const edge = useMemo(() => {
-    if (graph === null || scene === null || scene.lit !== null || selection?.type !== "edge") {
+    if (graph === null || scene === null || scene.lit !== null || selection?.type !== "edge" || trunkTarget(selection.key) !== null) {
       return null;
     }
     const found = picked(graph, scene.shown, scene.flow, selection.key);
@@ -131,9 +141,39 @@ export function InfoPanel() {
     item = { type: "node", node, ...degree, external: null, unresolved: node.unresolved, ...box, functions };
   } else if (edge !== null) {
     item = { type: "edge", edge };
+  } else if (trunk !== null) {
+    const lines = trunk.edges;
+    item = {
+      type: "trunk",
+      target: trunk.target,
+      sources: new Set(lines.map((e) => e.source)).size,
+      lines: lines.length,
+      sites: lines.reduce((sum, e) => sum + e.weight, 0),
+    };
   } else if (repo !== null) {
     item = { type: "repo", name: repo.name };
   }
+
+  /** 지점 목록. 선 하나는 묶음 하나이고, 줄기는 출발 노드마다 묶음 하나다. 같은 노드에서 종류가 다른 선이 오면 종류를 함께 적는다. */
+  const groups = useMemo((): SiteGroup[] | null => {
+    if (index === null) {
+      return null;
+    }
+    if (edge !== null) {
+      return [{ name: null, sites: edge.sites }];
+    }
+    if (trunk === null) {
+      return null;
+    }
+    const name = (id: string) => {
+      const found = index.nodes.get(id);
+      return found === undefined ? id : nameOf(index.nodes, found);
+    };
+    return trunk.edges.map((e) => {
+      const kind = e.key.startsWith("agg|") || trunk.edges.filter((other) => other.source === e.source).length === 1 ? "" : ` · ${EDGE_KIND_NAMES[e.edges[0].kind]}`;
+      return { name: name(e.source) + kind, sites: e.edges.flatMap((line) => line.sites) };
+    });
+  }, [index, edge, trunk]);
 
   const siteRange = graph !== null && site !== null ? rangeAround(graph, site) : null;
   /** 코드 뷰어에 열 파일과 문법 색으로 그릴 범위. 폴더를 골랐거나 선의 지점을 누르지 않았으면 null이다. 연 파일과 고른 파일은 범위가 파일 전체다. */
@@ -202,7 +242,7 @@ export function InfoPanel() {
           {summarized && code !== null && (
             <div className="info-panel-divide" onPointerDown={part} onDoubleClick={() => setSplit(null)} title="끌어서 요약 칸과 코드의 높이를 바꾸고, 더블클릭하면 기본 높이로 돌아간다" />
           )}
-          {file === null && edge !== null && <Sites sites={edge.sites} opened={site} open={(picked) => setOpened({ selection, site: picked })} />}
+          {file === null && groups !== null && <Sites groups={groups} opened={site} open={(picked) => setOpened({ selection, site: picked })} />}
           {code !== null && <CodeView {...code} />}
         </>
       )}

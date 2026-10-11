@@ -19,7 +19,44 @@ export type EdgeView = {
   sites: number;
   /** 강조하는 경로의 걸음을 그리는 선이면 그 걸음의 종류 */
   route: StepKind | null;
+  /** 도착이 같은 선과 합류하는 선인지. 함수 안 import 선, 한쪽이 다른 쪽을 품은 선, 실행 선이 없는 이음은 합류하지 않는다. */
+  joins: boolean;
+  /** 경로에서 줄기에 들어가기 전까지. 줄기에 들지 않은 선은 경로 전체다. */
+  branch: Point[];
+  /** 이 선이 든 줄기의 키. 줄기에 들지 않았으면 null이다. */
+  trunk: EdgeKey | null;
 };
+
+/**
+ * 같은 노드로 들어가는 선 둘 이상이 도착 노드 앞에서 함께 지나는 구간. 한 줄기의 가지는 모두 target으로 들어간다.
+ * 줄기는 선 하나로 한 번 그리고 화살촉도 하나다.
+ */
+export type TrunkView = {
+  key: EdgeKey;
+  target: string;
+  /** 줄기를 이루는 선분 묶음. 첫 묶음이 도착 노드에 닿고 나머지는 앞 묶음의 중간에 붙는다. */
+  pieces: Point[][];
+  /** 합류점. 가지가 줄기에 붙는 점과 줄기의 묶음이 다른 묶음에 붙는 점이다. */
+  joints: Point[];
+  /** 줄기에 든 선 */
+  keys: EdgeKey[];
+  /** 줄기에 든 선을 내보내는 노드 수 */
+  sources: number;
+  /** 줄기에 든 선의 sites 수 합 */
+  sites: number;
+  /** 합친 선의 수를 적는 점 */
+  at: Point;
+  /** 줄기에 든 선의 분류 가운데 집계 규칙의 순서(실행, 사용, 계승)로 가장 앞선 것 */
+  group: EdgeGroup;
+  /** 줄기에 든 선 가운데 강조하는 경로의 걸음이 있다 */
+  route: boolean;
+};
+
+/** 그릴 선과 그 선이 모여 만든 줄기 */
+export interface Lines {
+  views: EdgeView[];
+  trunks: TrunkView[];
+}
 
 /** 부모가 자식보다 앞에 오는 순서. 같은 층의 바탕 요소는 이 순서로 그리므로 부모 위에 자식이 놓인다. */
 export function parentFirst(graph: Graph, visible: Set<string>): AtlasNode[] {
@@ -72,29 +109,31 @@ function alongRoute(trunk: Point[], source: Box | null, target: Box | null): Poi
 }
 
 /**
- * 그릴 선마다 경로를 정한다. 배치가 낸 경로를 먼저 쓴다. 없으면 함수 안 import만 합친 선은 `belowRoute`로,
+ * 그릴 선마다 경로를 정하고 도착이 같은 선을 줄기로 묶는다(`trunkViews`). 집계 선의 숫자는 가지 구간에 적는다. 배치가 낸 경로를 먼저 쓴다. 없으면 함수 안 import만 합친 선은 `belowRoute`로,
  * 한쪽이 다른 쪽을 품은 두 노드를 잇는 선은 `insideRoute`로, 형제가 아닌 두 노드를 잇는 선은 두 노드를 형제로 올린
  * 상자 사이의 배치 경로를 따라가는 경로로 만들고, 따라갈 경로가 없으면 `sideRoute`로 만든다. 오버라이드 이음은 오버라이드 선을
  * 거꾸로 가므로 올린 상자 사이에 반대 방향 배치 경로만 있으면 그 경로를 뒤집어 따라간다. 배치에 양 끝 상자가 없는 선은 뺀다.
  */
-export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string, AtlasNode>): EdgeView[] {
-  const route = (edge: DrawnEdge, source: Box, target: Box): Point[] => {
+export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string, AtlasNode>): Lines {
+  /** 선의 경로와 그 경로가 도착이 같은 선과 합류하는 경로인지 */
+  const route = (edge: DrawnEdge, source: Box, target: Box): { points: Point[]; joins: boolean } => {
+    const joins = edge.edges.length > 0;
     const found = layout.routes.get(edge.key);
     if (found !== undefined) {
-      return found;
+      return { points: found, joins };
     }
     if (edge.deferred) {
-      return belowRoute(source, target);
+      return { points: belowRoute(source, target), joins: false };
     }
     const ends = siblings(nodes, edge.source, edge.target);
     if (ends === null) {
-      return insideRoute(source, target);
+      return { points: insideRoute(source, target), joins: false };
     }
     const back = edge.route === "overridden" ? layout.routes.get(aggKey(ends[1], ends[0])) : undefined;
     const trunk = layout.routes.get(aggKey(ends[0], ends[1])) ?? (back === undefined ? undefined : [...back].reverse());
     const along =
       trunk === undefined ? null : alongRoute(trunk, ends[0] === edge.source ? null : source, ends[1] === edge.target ? null : target);
-    return along ?? sideRoute(source, target);
+    return { points: along ?? sideRoute(source, target), joins };
   };
 
   const lettered = letteredBoxes(layout, nodes);
@@ -105,7 +144,7 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
     if (source === undefined || target === undefined) {
       continue;
     }
-    const points = route(edge, source, target);
+    const { points, joins } = route(edge, source, target);
     const counted = edge.key.startsWith("agg|") && edge.weight >= 2;
     views.push({
       key: edge.key,
@@ -115,12 +154,166 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       points,
       tone: edge.tone,
       opacity: edge.opacity,
-      weight: counted ? { count: edge.weight, at: weightPoint(points, String(edge.weight).length, lettered) } : null,
+      weight: counted ? { count: edge.weight, at: points[0] } : null,
       sites: edge.weight,
       route: edge.route,
+      joins,
+      branch: points,
+      trunk: null,
     });
   }
-  return views;
+  const lines = trunkViews(views);
+  for (const view of lines.views) {
+    if (view.weight !== null) {
+      view.weight.at = weightPoint(view.branch, String(view.weight.count).length, lettered);
+    }
+  }
+  return lines;
+}
+
+/** 줄기 위에 출발부터 도착까지의 경로를 한 번 더 그리는 선: 마우스를 올린 선, 순환 선, 경로의 걸음, 고른 노드에 닿는 선 */
+export function emphasized(view: EdgeView, marks: { pointed: boolean; cycle: boolean }): boolean {
+  return marks.pointed || marks.cycle || view.route !== null || view.tone === "strong";
+}
+
+export function trunkKey(target: string, index: number): EdgeKey {
+  return `trunk|${target}|${index}`;
+}
+
+/** 좌표가 같은 점으로 보는 거리. ELK가 낸 좌표의 소수 오차보다 크고 선 굵기보다 작다. */
+const SAME = 0.5;
+
+function samePoint(a: Point, b: Point): boolean {
+  return Math.abs(a.x - b.x) < SAME && Math.abs(a.y - b.y) < SAME;
+}
+
+/** 두 경로가 끝점에서부터 거슬러 함께 지나는 길이 */
+function shared(a: Point[], b: Point[]): number {
+  let length = 0;
+  let [i, j] = [a.length - 1, b.length - 1];
+  if (!samePoint(a[i], b[j])) {
+    return 0;
+  }
+  while (i > 0 && j > 0) {
+    const [la, lb] = [distance(a[i], a[i - 1]), distance(b[j], b[j - 1])];
+    const short = Math.min(la, lb);
+    if (short > 0 && !samePoint(toward(a[i], a[i - 1], short), toward(b[j], b[j - 1], short))) {
+      break;
+    }
+    length += short;
+    if (Math.abs(la - lb) >= SAME) {
+      break;
+    }
+    i--;
+    j--;
+  }
+  return length;
+}
+
+/** 경로의 끝점에서 거슬러 from만큼 간 점부터 to만큼 간 점까지(from > to). 도착 쪽이 뒤에 온다. */
+function stretch(points: Point[], from: number, to: number): Point[] {
+  const total = lengthOf(points);
+  const result = [along(points, total - from)];
+  let walked = 0;
+  for (let i = 1; i < points.length; i++) {
+    walked += distance(points[i - 1], points[i]);
+    if (walked > total - from + SAME && walked < total - to - SAME) {
+      result.push(points[i]);
+    }
+  }
+  result.push(along(points, total - to));
+  return result;
+}
+
+/** 진하기의 순서. 본문 잉크가 muted 잉크보다, 높은 불투명도가 낮은 불투명도보다 진하다. */
+function darkness(view: Pick<EdgeView, "tone" | "opacity">): number {
+  return (view.tone === "strong" ? 2 : 0) + view.opacity;
+}
+
+/**
+ * 줄기의 진하기. 줄기 위에 전체 경로를 따로 그리는 선(apart)을 뺀 가지 가운데 가장 진한 값이고, 모든 가지를 따로 그리면
+ * 가지 전체에서 고른다. members는 줄기에 든 선이다.
+ */
+export function trunkShade(members: EdgeView[], apart: (view: EdgeView) => boolean): Pick<EdgeView, "tone" | "opacity"> {
+  const rest = members.filter((view) => !apart(view));
+  const { tone, opacity } = (rest.length > 0 ? rest : members).reduce((a, b) => (darkness(b) > darkness(a) ? b : a));
+  return { tone, opacity };
+}
+
+const GROUP_ORDER: EdgeGroup[] = ["run", "use", "derive"];
+/** 합친 선의 수를 줄기 위로 띄우는 높이와 도착 노드에서 띄우는 폭. 화살촉의 길이 9px와 숫자 높이의 절반을 비운다. */
+const COUNT_LIFT = 8;
+const COUNT_BACK = 12;
+
+/**
+ * 도착 노드가 같은 선을 묶어, 경로의 끝에서부터 다른 선과 함께 지나는 구간을 줄기로 떼고 선마다 줄기 앞까지의 가지를 남긴다.
+ * ELK가 같은 포트로 합친 경로와 ELK 밖에서 정한 경로(`alongRoute`, `sideRoute`)를 같은 방법으로 다룬다. `joins`가 거짓인 선은 묶지 않고,
+ * 다른 선과 함께 지나는 구간이 없는 선은 줄기에 들지 않는다. 한 노드로 들어오는 선이 서로 다른 변에서 따로 모이면 줄기도 따로 낸다.
+ */
+export function trunkViews(views: EdgeView[]): Lines {
+  const groups = new Map<string, EdgeView[]>();
+  for (const view of views) {
+    if (view.joins && view.points.length >= 2) {
+      groups.set(view.target, [...(groups.get(view.target) ?? []), view]);
+    }
+  }
+  const joined = new Map<EdgeKey, { branch: Point[]; trunk: EdgeKey }>();
+  const trunks: TrunkView[] = [];
+  for (const [target, group] of groups) {
+    /** 선마다 다른 선과 함께 지나는 가장 긴 길이 */
+    const reach = group.map((view) => Math.max(0, ...group.filter((other) => other !== view).map((other) => shared(view.points, other.points))));
+    const members = group.map((view, i) => ({ view, reach: reach[i] })).filter((m) => m.reach >= SAME);
+    members.sort((a, b) => b.reach - a.reach);
+    /** 끝점이 같은 선끼리 줄기 하나다. */
+    const trees: (typeof members)[] = [];
+    for (const member of members) {
+      const tree = trees.find((t) => samePoint(t[0].view.points.at(-1)!, member.view.points.at(-1)!));
+      if (tree === undefined) {
+        trees.push([member]);
+      } else {
+        tree.push(member);
+      }
+    }
+    trees.forEach((tree, index) => {
+      const key = trunkKey(target, index);
+      const pieces: Point[][] = [];
+      const joints: Point[] = [];
+      const joint = (at: Point) => {
+        if (!joints.some((p) => samePoint(p, at))) {
+          joints.push(at);
+        }
+      };
+      tree.forEach(({ view, reach }, i) => {
+        const total = lengthOf(view.points);
+        const covered = Math.max(0, ...tree.slice(0, i).map((m) => shared(view.points, m.view.points)));
+        if (reach - covered >= SAME) {
+          pieces.push(stretch(view.points, reach, covered));
+          if (covered > 0) {
+            joint(along(view.points, total - covered));
+          }
+        }
+        if (total - reach >= SAME) {
+          joint(along(view.points, total - reach));
+        }
+        joined.set(view.key, { branch: stretch(view.points, total, reach), trunk: key });
+      });
+      const [before, end] = pieces[0].slice(-2);
+      const back = toward(end, before, Math.min(COUNT_BACK, distance(end, before)));
+      trunks.push({
+        key,
+        target,
+        pieces,
+        joints,
+        keys: tree.map((m) => m.view.key),
+        sources: new Set(tree.map((m) => m.view.source)).size,
+        sites: tree.reduce((sum, m) => sum + m.view.sites, 0),
+        at: before.y === end.y ? { x: back.x, y: back.y - COUNT_LIFT } : { x: back.x + COUNT_LIFT, y: back.y },
+        group: tree.map((m) => m.view.group).reduce((a, b) => (GROUP_ORDER.indexOf(b) < GROUP_ORDER.indexOf(a) ? b : a)),
+        route: tree.some((m) => m.view.route !== null),
+      });
+    });
+  }
+  return { views: views.map((view) => ({ ...view, ...joined.get(view.key) })), trunks };
 }
 
 /** 꺾이는 점마다 반지름 radius 원호를 넣은 SVG 경로. 선분이 짧으면 반지름을 선분 절반으로 줄인다. */

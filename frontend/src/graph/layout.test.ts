@@ -62,10 +62,10 @@ function onBorder(p: Point, box: Box): boolean {
   );
 }
 
-/** 형제 묶음마다 열 순서(x가 같은 노드끼리 한 열)와 열 안 y 순서를 문자열로 만든다. */
+/** 형제 묶음마다 열 순서(x가 같은 노드끼리 한 열)와 열 안 y 순서를 문자열로 만든다. 열 없이 격자에 놓는 선반 단위 scratch는 뺀다. */
 function arrangement(result: Layout, ids: string[], index = nodes): string {
   const groups = new Map<string | null, string[]>();
-  for (const id of ids) {
+  for (const id of ids.filter((id) => id !== "scratch")) {
     const parent = index.get(id)!.parent;
     groups.set(parent, [...(groups.get(parent) ?? []), id]);
   }
@@ -117,6 +117,22 @@ describe("elkGraphs", () => {
     expect(find(root, "app")?.children?.map((c) => c.id)).toEqual(["app.__init__", "app.text", "app.web"]);
     expect(find(root, "app.text")?.layoutOptions?.["elk.partitioning.partition"]).toBe("1");
     expect(closed.shelf.map((n) => n.id)).toEqual(["scratch"]);
+  });
+
+  it("자식을 그리지 않는 노드는 왼쪽 변에 들어오는 포트 하나를 두고 그 노드로 가는 선은 포트에 닿는다. 자식을 그리는 노드에는 포트가 없다", () => {
+    const root = opened.components[0];
+    for (const id of ["main", "common", "pkg.util", "pkg.mod:parse", "pkg.mod:Store.load"]) {
+      const node = find(root, id)!;
+      expect(node.ports).toEqual([{ id: `${id}#in`, width: 0, height: 0, layoutOptions: { "elk.port.side": "WEST" } }]);
+      expect(node.layoutOptions?.["elk.portConstraints"]).toBe("FIXED_SIDE");
+    }
+    for (const id of ["pkg", "pkg.mod", "pkg.mod:Store", "app"]) {
+      expect(find(root, id)!.ports).toBeUndefined();
+    }
+    const targets = new Map(root.edges!.map((e) => [e.id, e.targets[0]]));
+    expect(targets.get("main|common|import")).toBe("common#in");
+    expect(targets.get("agg|main|pkg")).toBe("pkg");
+    expect(root.edges!.every((e) => !e.sources[0].endsWith("#in"))).toBe(true);
   });
 
   it("강조하는 경로의 출발 노드와 도착 노드는 표지의 폭만큼 넓고 그 밖의 노드는 크기가 같다", () => {
@@ -251,6 +267,15 @@ describe("arrange", async () => {
     expect(node.boxes.get("app.web:render")!.x).toBeGreaterThan(node.boxes.get("app.web:index")!.x);
   });
 
+  it("같은 노드로 들어가는 선은 그 노드의 왼쪽 변 가운데 한 점에 닿는다", () => {
+    const box = closed.boxes.get("common")!;
+    const into = [...closed.routes].filter(([key]) => key.split("|")[key.startsWith("agg|") ? 2 : 1] === "common");
+    expect(into.length).toBeGreaterThan(2);
+    for (const [, points] of into) {
+      expect(points.at(-1)).toEqual({ x: box.x, y: box.y + box.height / 2 });
+    }
+  });
+
   it("진입점 두 개가 서로 import해도 둘 다 가장 작은 x에 놓인다", () => {
     const least = Math.min(...units.map((id) => closed.boxes.get(id)!.x));
     expect(closed.boxes.get("main")!.x).toBe(least);
@@ -275,7 +300,7 @@ describe("arrange", async () => {
 
   it("형제마다 열과 열 안 순서가 고정한 값과 같다", async () => {
     const lanes = (result: Layout, index = nodes) => arrangement(result, [...result.boxes.keys()], index).split("\n").sort();
-    const top = "null: app,cli,main,scratch | pkg | common";
+    const top = "null: app,cli,main | pkg | common";
     const folders = ["app: app.web | app.__init__,app.text", "pkg: pkg.mod,pkg.util"];
     expect(lanes(closed)).toEqual([...folders, top].sort());
     expect(lanes(await arranged("pkg.mod"))).toEqual(

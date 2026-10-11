@@ -1,4 +1,4 @@
-// 보이는 노드 사이에 그릴 선과 편재 노드를 정한다. 배치와 독립이므로 선을 바꿔 그려도 layout을 다시 부르지 않는다.
+// 보이는 노드 사이에 그릴 선을 정한다. 배치와 독립이므로 선을 바꿔 그려도 layout을 다시 부르지 않는다.
 import type { AtlasEdge, AtlasNode, EdgeGroup, EdgeKind, Graph } from "../api/types";
 import type { Flow } from "./flow";
 import type { Lit, StepKind } from "./route";
@@ -52,34 +52,8 @@ export function stepKey(source: string, target: string): EdgeKey {
   return `step|${source}|${target}`;
 }
 
-/** 노드가 든 파일 상자를 화면에 보이는 가장 가까운 상자로 올린다. */
-function boxOf(nodes: Map<string, AtlasNode>, shown: Shown, id: string): string | null {
-  return lift(nodes, shown, unitOf(nodes, id));
-}
-
 function related(nodes: Map<string, AtlasNode>, a: string, b: string): boolean {
   return within(nodes, a, b) || within(nodes, b, a);
-}
-
-/**
- * 그리는 범위 규칙 3의 편재 노드와 그 노드로 선을 보내는 상자 수. 선의 양 끝을 보이는 상자로 올려 세고,
- * 상자 수의 절반 이상에서 선이 들어오는 상자를 고른다. 파일 상자를 펼쳐도 결과가 같다.
- */
-export function ubiquitous(graph: Graph, shown: Shown): Map<string, number> {
-  const nodes = nodeIndex(graph);
-  const sources = new Map<string, Set<string>>();
-  for (const edge of graph.edges) {
-    const source = boxOf(nodes, shown, edge.source);
-    const target = boxOf(nodes, shown, edge.target);
-    if (source === null || target === null || related(nodes, source, target)) {
-      continue;
-    }
-    sources.set(target, (sources.get(target) ?? new Set()).add(source));
-  }
-  const boxes = [...shown.nodes].map((id) => nodes.get(id)!).filter((n) => BOX_KINDS.has(n.kind));
-  const expanded = new Set(boxes.map((n) => n.parent));
-  const count = boxes.filter((n) => !expanded.has(n.id)).length;
-  return new Map([...sources].filter(([, from]) => from.size * 2 >= count).map(([id, from]) => [id, from.size]));
 }
 
 /** 노드에 닿는 선 수. 외부 노드로 가는 선도 센다. */
@@ -96,26 +70,6 @@ export function degrees(graph: Graph): Map<string, { incoming: number; outgoing:
   for (const edge of graph.edges) {
     entry(edge.source).outgoing++;
     entry(edge.target).incoming++;
-  }
-  return result;
-}
-
-/**
- * 지금 들어오는 선을 숨기는 편재 노드와 숨긴 선의 출발 노드 수. 초점이 없으면 편재 노드 전체이고,
- * 고른 노드를 품었거나 고른 노드가 쓰는 편재 노드는 숨긴 선을 다시 그리므로 뺀다.
- */
-export function concealed(graph: Graph, shown: Shown, flow: Flow | null): Map<string, number> {
-  const result = ubiquitous(graph, shown);
-  if (flow === null) {
-    return result;
-  }
-  const nodes = nodeIndex(graph);
-  const used = graph.edges.filter((e) => flow.seeds.has(e.source)).map((e) => e.target);
-  for (const id of [...flow.seeds, ...used]) {
-    const box = boxOf(nodes, shown, id);
-    if (box !== null) {
-      result.delete(box);
-    }
   }
   return result;
 }
@@ -174,7 +128,6 @@ function strides(graph: Graph, lit: Lit): DrawnEdge[] {
  * 2. 고른 노드가 있으면 고른 노드가 든 파일 상자 안의 선, 흐름에 든 노드 사이의 선, 고른 노드로 들어오는 선,
  *    접힌 상자 사이의 선을 그린다. 파일 상자를 골랐으면 그 파일 상자의 경계를 넘는 선을 파일 상자에서 잇는다.
  *    마우스를 올린 노드에 닿는 선은 모두 그린다.
- * 3. 편재 노드로 들어오는 접힌 상자 사이의 선은 뺀다. 편재 노드나 편재 노드를 쓰는 노드를 고르면 다시 넣는다.
  * 올린 양 끝이 같은 선은 집계 규칙으로 합치고, 올린 양 끝이 같거나 한쪽이 다른 쪽의 조상인 선은 버린다.
  * 선의 진하기는 다섯 단계이고 경로 고정이 가장 앞선다. 강조하는 경로 lit이 있으면 흐름과 hover를 보지 않고,
  * 경로의 걸음마다 선 하나를 strong에 불투명도 1로, 접힌 상자 사이의 선을 muted에 불투명도 0.2로 그린다.
@@ -192,17 +145,15 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
   const member = (id: string) =>
     flow !== null && (flow.seeds.has(id) || flow.out.has(flow.unit === "file" ? unitOf(nodes, id) : id));
 
-  const off = concealed(graph, shown, flow);
-
   const shade = (edges: AtlasEdge[]): Shade =>
     lit === null ? shadeOf(edges, flow, member) : { tone: "muted", opacity: EDGE_OPACITY.rest, route: null };
 
   const inScope = (edge: AtlasEdge, source: string, target: string): boolean => {
     if (lit !== null) {
-      return closed(source) && closed(target) && !off.has(target);
+      return closed(source) && closed(target);
     }
     if (flow === null) {
-      return !off.has(target);
+      return true;
     }
     if (local(nodes, flow, edge.source) && local(nodes, flow, edge.target)) {
       return true;
@@ -210,7 +161,7 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
     if (flow.seeds.has(edge.target) || (member(edge.source) && member(edge.target))) {
       return true;
     }
-    return closed(source) && closed(target) && !off.has(target);
+    return closed(source) && closed(target);
   };
 
   const pairs = new Map<string, { source: string; target: string; edges: AtlasEdge[]; lifted: boolean }>();
@@ -283,4 +234,15 @@ export function picked(graph: Graph, shown: Shown, flow: Flow | null, key: EdgeK
     }
   }
   return null;
+}
+
+/** 줄기 키 `trunk|도착 노드|번호`의 도착 노드. 줄기 키가 아니면 null이다. */
+export function trunkTarget(key: EdgeKey): string | null {
+  const [tag, target] = key.split("|");
+  return tag === "trunk" ? target : null;
+}
+
+/** 노드 target으로 들어오는 그린 선. 함수 안 import만 합친 선은 줄기에 들지 않으므로 뺀다. */
+export function arriving(graph: Graph, shown: Shown, flow: Flow | null, target: string): DrawnEdge[] {
+  return drawn(graph, shown, flow, null, null).filter((edge) => edge.target === target && !edge.deferred);
 }

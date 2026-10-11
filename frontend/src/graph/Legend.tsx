@@ -1,4 +1,4 @@
-// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개와 찾은 경로의 선,
+// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개와 합류, 찾은 경로의 선,
 // 변경 표시 두 색을 보여 주고, 분석 덮개를 켜면 그 덮개의 표시를 끝에 덧붙인다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
@@ -15,7 +15,6 @@ const SHAPES = [
   { key: "function", name: "함수·메서드" },
   { key: "external", name: "외부 노드" },
   { key: "entry", name: "진입점" },
-  { key: "inflow", name: "편재 노드: 숨긴 선의 출발 노드 수" },
   { key: "loc", name: "이름표 옆 숫자: 줄 수" },
 ];
 
@@ -50,12 +49,6 @@ function Shape({ kind }: { kind: string }) {
       return (
         <text x={11} y={12} textAnchor="middle" className="legend-entry">
           ▶
-        </text>
-      );
-    case "inflow":
-      return (
-        <text x={11} y={12} textAnchor="middle" className="legend-inflow">
-          ←8
         </text>
       );
     default:
@@ -120,6 +113,16 @@ export function Legend() {
             {GROUP_NAMES[group]}
           </li>
         ))}
+        <li>
+          <svg width={30} height={16}>
+            <path d="M2,3 L10,3 L10,9 M2,14 L10,14 L10,9 L27,9" className="legend-edge tone-muted" markerEnd="url(#arrow-run-muted)" />
+            <circle cx={10} cy={9} r={2.5} className="edge-joint tone-muted" />
+            <text x={19} y={5} textAnchor="middle" className="edge-trunk-count tone-muted">
+              2
+            </text>
+          </svg>
+          합류: 같은 노드로 들어가는 선과 그 수
+        </li>
         <li>
           <svg width={30} height={16}>
             <path d="M2,8 L27,8" className="legend-edge legend-route tone-strong" />

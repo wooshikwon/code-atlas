@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture } from "./fixture";
-import { busyTip, cycleTip, globalTip, inflowTip, locTip, nodeTip, unresolvedTip } from "./tips";
+import { busyTip, cycleTip, globalTip, locTip, nodeTip, trunkTip, unresolvedTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
@@ -20,11 +20,14 @@ describe("배지 말풍선", () => {
     expect(globalTip({ ...fn, writes: [] })).toBe("모듈 변수 변경: global 문으로 모듈 변수를 바꾼다");
   });
 
-  it("도는 원, 편재 노드, 줄 수는 수를 함께 적는다", () => {
+  it("도는 원, 줄 수는 수를 함께 적는다", () => {
     expect(busyTip(fn, 1)).toBe("LLM 요약을 만드는 중 1개");
     expect(busyTip(folder, 2)).toBe("LLM 요약을 만드는 중 2개 · 이 상자와 안에 든 노드");
-    expect(inflowTip(8).split("\n")[0]).toBe("편재 노드: 선을 숨긴 출발 노드 8개");
     expect(locTip({ ...fn, loc: 131 })).toBe("줄 수 131줄 · 빈 줄을 뺀 수");
+  });
+
+  it("줄기는 선을 내보내는 노드 수, 도착 노드, 지점 수를 적는다", () => {
+    expect(trunkTip(12, "parser/common.py", 144)).toBe("노드 12개 → parser/common.py · 144곳");
   });
 
   it("순환 아이콘은 묶음의 파일 수와 이름을 적고 여섯 개부터는 줄인다", () => {

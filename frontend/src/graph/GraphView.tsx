@@ -23,7 +23,7 @@ import { Arranging, keepLayout, watchLayout } from "./arranging";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
-import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
+import { edgeTypes, flowEdges, isTrunk, Markers, type FlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, layout, titleOf, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
@@ -34,10 +34,10 @@ import { flowNodes, parts, pointing, pressable, type AtlasFlowNode, type AtlasNo
 import { nodeType, nodeTypes } from "./nodes";
 import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
-import { concealed, drawn, type EdgeKey } from "./scope";
-import { nodeTip, tipOf } from "./tips";
+import { drawn, type EdgeKey } from "./scope";
+import { nodeTip, tipOf, trunkTip } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
-import { edgeViews, parentFirst } from "./view";
+import { edgeViews, parentFirst, type Lines } from "./view";
 import { boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, lift, local, nodeIndex, shown, unresolvedWithin, type Shown } from "./visible";
 
@@ -92,7 +92,6 @@ function itemsOf(
   const parents = new Set(order.map((n) => n.parent));
   const dim = opacities(scene.graph, scene.flow, scene.lit);
   const ends = endsOf(scene.lit);
-  const marks = concealed(scene.graph, scene.shown, scene.flow);
   const unresolved = unresolvedWithin(scene.graph, scene.shown.hidden);
   /** 화면에 보이는 노드마다, 그 노드로 올린 노드 가운데 요약을 만드는 중인 노드 수 */
   const busy = new Map<string | null, number>();
@@ -111,7 +110,6 @@ function itemsOf(
       selected: node.id === selected,
       flow: (scene.flow !== null || scene.lit !== null) && opacity > 0.2,
       local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
-      inflow: marks.get(node.id) ?? null,
       unresolved: node.kind !== "module" && node.kind !== "package" ? node.unresolved : expanded ? 0 : (unresolved.get(node.id) ?? 0),
       busy: busy.get(node.id) ?? 0,
       route,
@@ -335,10 +333,21 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     return overlay === "cycles" ? cycleLines(scene.graph, scene.shown, scene.flow, scene.lit, edges, loops) : { edges, keys: new Set<EdgeKey>() };
   }, [scene, loops, overlay, hovered]);
   const views = useMemo(
-    () => (scene === null || index === null ? [] : edgeViews(lines.edges, scene.layout, index.nodes)),
+    (): Lines => (scene === null || index === null ? { views: [], trunks: [] } : edgeViews(lines.edges, scene.layout, index.nodes)),
     [scene, index, lines],
   );
-  const edges = useMemo(() => flowEdges(views, pointed, lines.keys), [views, pointed, lines]);
+  /**
+   * 마우스를 올린 선으로 그리는 선. 줄기에 올리면 그 줄기와 가지 전체이고, 경로 고정 중에는 가지 가운데 경로의 걸음만이다.
+   */
+  const aimedLines = useMemo(() => {
+    const trunk = views.trunks.find((t) => t.key === pointed);
+    if (trunk === undefined) {
+      return new Set(pointed === null ? [] : [pointed]);
+    }
+    const members = views.views.filter((v) => v.trunk === trunk.key && (scene?.lit == null || v.route !== null));
+    return new Set([trunk.key, ...members.map((v) => v.key)]);
+  }, [views, pointed, scene]);
+  const edges = useMemo(() => flowEdges(views, aimedLines, lines.keys), [views, aimedLines, lines]);
   const drawnNodes = useMemo(() => pointing(nodes, aimedNode), [nodes, aimedNode]);
 
   /**
@@ -393,8 +402,11 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
   };
   const chosen = chosenOf({ finder, selection });
-  /** 선을 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 선을 골라 정보 패널에 지점 목록을 연다. */
-  const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
+  /**
+   * 선이나 줄기를 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 그 선을 골라 정보 패널에 지점 목록을 열고,
+   * 줄기면 줄기에 든 선 전체의 지점 목록을 연다.
+   */
+  const onEdgeClick: EdgeMouseHandler<FlowEdge> = (event, edge) => {
     tip.current?.hide();
     setPointed(null);
     if (repeated(event)) {
@@ -422,15 +434,22 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     setHover(node.data.node.id);
     onNodeOver(event, node);
   };
-  /** 경로 고정 중에는 경로의 걸음만 마우스를 올린 선으로 강조하고, 그 밖의 선은 말풍선만 띄운다. */
-  const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
-    if (lit === null || edge.data?.route != null) {
+  /** 경로 고정 중에는 경로의 걸음과 걸음이 지나는 줄기만 마우스를 올린 선으로 강조하고, 그 밖의 선은 말풍선만 띄운다. */
+  const onEdgeEnter: EdgeMouseHandler<FlowEdge> = (event, edge) => {
+    const step = isTrunk(edge) ? edge.data?.route === true : edge.data?.route != null;
+    if (lit === null || step) {
       setPointed(edge.id);
     }
     const name = (id: string) => {
       const node = index?.nodes.get(id);
       return node === undefined ? id : titleOf(node);
     };
+    if (isTrunk(edge)) {
+      if (edge.data !== undefined) {
+        tip.current?.show(trunkTip(edge.data.sources, name(edge.data.target), edge.data.sites), event.clientX, event.clientY);
+      }
+      return;
+    }
     if (edge.data !== undefined) {
       const { source, target, group, sites, route } = edge.data;
       const kind = sites === 0 && route !== null ? STEP_NAMES[route] : `${GROUP_NAMES[group]} · ${sites}곳`;

@@ -26,7 +26,9 @@ export type HeaderItem =
    * 그 밖의 노드는 그 노드에 닿는 선 수와 그 노드의 미확인 호출 수다.
    */
   | { type: "node"; node: AtlasNode; incoming: number; outgoing: number; external: number | null; unresolved: number; functions: number }
-  | { type: "edge"; edge: PickedEdge };
+  | { type: "edge"; edge: PickedEdge }
+  /** 고른 줄기. target으로 들어오는 선 lines개가 sources개 노드에서 오고 지점이 모두 sites곳이다. */
+  | { type: "trunk"; target: string; sources: number; lines: number; sites: number };
 
 interface HeaderProps {
   item: HeaderItem;
@@ -75,6 +77,11 @@ export function Header({ item, nodes }: HeaderProps) {
       node.kind === "module" ? `함수 ${item.functions}개` : null,
       item.unresolved > 0 ? `미확인 호출 ${item.unresolved}` : null,
     ];
+  } else if (item.type === "trunk") {
+    const target = nodes.get(item.target);
+    name = `노드 ${item.sources}개 → ${target === undefined ? item.target : nameOf(nodes, target)}`;
+    chip = "합류";
+    facts = [`들어오는 선 ${item.lines}`, `${item.sites}곳`];
   } else {
     const { edge } = item;
     const end = (id: string) => {

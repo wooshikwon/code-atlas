@@ -2,7 +2,7 @@ import type { NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { useChange } from "../../state/changes";
 import { moduleHeader } from "../layout";
-import { Badges, Below, Handles, Inflow, Label, Loc, Mark, nodeProps, sameNode, type AtlasFlowNode } from "./common";
+import { Badges, Below, Handles, Label, Loc, Mark, nodeProps, sameNode, type AtlasFlowNode } from "./common";
 
 /**
  * 접힌 파일 상자는 320×40 상자에 이름표와 줄 수를 적고 상자 아래에 함수 수와 미사용 덮개를 켰을 때의 미사용 후보 수를 적는다.
@@ -26,7 +26,6 @@ export const ModuleNode = memo(function ModuleNode({ data }: NodeProps<AtlasFlow
               <Mark change={change} />
               {count !== "" && <span className="node-aside">{count}</span>}
             </div>
-            <Inflow data={data} />
             <Badges data={data} />
           </>
         )}
@@ -44,7 +43,6 @@ export const ModuleNode = memo(function ModuleNode({ data }: NodeProps<AtlasFlow
             <Mark change={change} />
           </div>
           <Below data={data} />
-          <Inflow data={data} />
           <Badges data={data} />
         </>
       )}

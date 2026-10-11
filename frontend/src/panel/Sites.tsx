@@ -1,10 +1,16 @@
-// 고른 선의 관계가 일어난 지점 목록. 줄을 누르면 코드 뷰어가 그 줄을 연다.
+// 고른 선의 관계가 일어난 지점 목록. 줄기를 골랐으면 출발 노드마다 묶어 보인다. 줄을 누르면 코드 뷰어가 그 줄을 연다.
 import { useEffect, useState } from "react";
 import { getFile } from "../api/client";
 import type { SiteRef } from "../api/types";
 
-interface SitesProps {
+/** 지점 묶음. name이 있으면 묶음 앞에 그 이름을 적는다. */
+export interface SiteGroup {
+  name: string | null;
   sites: SiteRef[];
+}
+
+interface SitesProps {
+  groups: SiteGroup[];
   /** 코드 뷰어에 연 지점 */
   opened: SiteRef | null;
   open: (site: SiteRef) => void;
@@ -34,18 +40,29 @@ function useLines(sites: SiteRef[]): Map<string, string> {
   return lines;
 }
 
-export function Sites({ sites, opened, open }: SitesProps) {
-  const lines = useLines(sites);
+export function Sites({ groups, opened, open }: SitesProps) {
+  const lines = useLines(groups.flatMap((group) => group.sites));
   return (
     <ul className="info-panel-sites">
-      {sites.map((site, i) => (
-        <li key={i}>
-          <button className="info-panel-site" aria-current={site === opened} onClick={() => open(site)}>
-            <span className="info-panel-hint">
-              {site.path}:{site.line}
-            </span>{" "}
-            <code>{lines.get(`${site.path}:${site.line}`) ?? ""}</code>
-          </button>
+      {groups.map((group, g) => (
+        <li key={g}>
+          {group.name !== null && (
+            <div className="info-panel-sites-name">
+              {group.name} <span className="info-panel-hint">{group.sites.length}곳</span>
+            </div>
+          )}
+          <ul>
+            {group.sites.map((site, i) => (
+              <li key={i}>
+                <button className="info-panel-site" aria-current={site === opened} onClick={() => open(site)}>
+                  <span className="info-panel-hint">
+                    {site.path}:{site.line}
+                  </span>{" "}
+                  <code>{lines.get(`${site.path}:${site.line}`) ?? ""}</code>
+                </button>
+              </li>
+            ))}
+          </ul>
         </li>
       ))}
     </ul>

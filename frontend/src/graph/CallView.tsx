@@ -16,14 +16,14 @@ import { useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { Arranging, watchLayout } from "./arranging";
 import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
-import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
+import { edgeTypes, flowEdges, isTrunk, Markers, type FlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { flowNodes, parts, pointing, type Drawn } from "./nodes/common";
 import { UNUSED_OPACITY } from "./overlay";
-import { nodeTip, tipOf } from "./tips";
+import { nodeTip, tipOf, trunkTip } from "./tips";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
 import { GROUP_NAMES, KIND_NAMES } from "./names";
 import type { EdgeKey } from "./scope";
@@ -58,7 +58,6 @@ function itemsOf(
       selected: id === selected,
       flow: false,
       local: false,
-      inflow: null,
       unresolved: node.unresolved,
       busy: making.includes(id) ? 1 : 0,
       cycle: null,
@@ -164,12 +163,15 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     );
   }, [scene, index, selected, making, unused, setViewport]);
 
-  const edges = useMemo((): AtlasFlowEdge[] => {
-    if (scene === null) {
+  const lines = useMemo(() => (scene === null ? null : callEdges(scene.calls, scene.center, scene.layout)), [scene]);
+  const edges = useMemo((): FlowEdge[] => {
+    if (lines === null) {
       return [];
     }
-    return flowEdges(callEdges(scene.calls, scene.center, scene.layout), pointed, NO_CYCLES);
-  }, [scene, pointed]);
+    /** 줄기에 올리면 그 줄기와 가지 전체를 마우스를 올린 선으로 그린다. */
+    const members = lines.views.filter((view) => view.trunk === pointed).map((view) => view.key);
+    return flowEdges(lines, new Set(pointed === null ? [] : [pointed, ...members]), NO_CYCLES);
+  }, [lines, pointed]);
 
   const drawnNodes = useMemo(() => pointing(nodes, aimedNode), [nodes, aimedNode]);
 
@@ -208,8 +210,11 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     clicked.current = null;
     select(null);
   };
-  /** 선을 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 선을 골라 정보 패널에 지점 목록을 연다. */
-  const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
+  /**
+   * 선이나 줄기를 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 그 선을 골라 정보 패널에 지점 목록을 열고,
+   * 줄기면 줄기에 든 선 전체의 지점 목록을 연다.
+   */
+  const onEdgeClick: EdgeMouseHandler<FlowEdge> = (event, edge) => {
     tip.current?.hide();
     setPointed(null);
     if (repeated(event)) {
@@ -229,12 +234,18 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
     tip.current?.show(tipOf(event.target) ?? nodeTip(title, KIND_NAMES[node.data.node.kind], node.data.unused), event.clientX, event.clientY);
   };
-  const onEdgeEnter: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
+  const onEdgeEnter: EdgeMouseHandler<FlowEdge> = (event, edge) => {
     setPointed(edge.id);
     const name = (id: string) => {
       const node = index?.get(id);
       return node === undefined || index === null ? id : callTitle(index, node);
     };
+    if (isTrunk(edge)) {
+      if (edge.data !== undefined) {
+        tip.current?.show(trunkTip(edge.data.sources, name(edge.data.target), edge.data.sites), event.clientX, event.clientY);
+      }
+      return;
+    }
     if (edge.data !== undefined) {
       const { source, target, group, sites } = edge.data;
       tip.current?.show(`${name(source)} → ${name(target)} · ${GROUP_NAMES[group]} · ${sites}곳`, event.clientX, event.clientY);

@@ -779,7 +779,7 @@ ul {
 }
 
 /* 글자 요소는 글자와 배지, 펼친 파일 상자의 머리 줄만 마우스를 받는다. */
-.node-face :is(.node-label, .loc, .change-mark, .badge, .node-aside, .node-below, .node-inflow, .node-field, .node-module-head, .node-region-head, .call-file, .call-more) {
+.node-face :is(.node-label, .loc, .change-mark, .badge, .node-aside, .node-below, .node-field, .node-module-head, .node-region-head, .call-file, .call-more) {
   pointer-events: auto;
 }
 
@@ -814,7 +814,6 @@ ul {
 
 .node-aside,
 .node-below,
-.node-inflow,
 .shelf-name,
 .call-file {
   color: var(--muted);
@@ -941,13 +940,6 @@ ul {
   line-height: 1;
 }
 
-.node-inflow {
-  position: absolute;
-  top: 50%;
-  right: calc(100% + 4px);
-  transform: translateY(-50%);
-  line-height: 1;
-}
 
 .shelf-name {
   position: absolute;
@@ -1338,6 +1330,28 @@ ul {
   font-weight: 700;
 }
 
+/* 줄기. 합류점의 점과 합친 선의 수는 줄기와 같은 색으로 그리고 줄기의 불투명도를 함께 받는다. 수는 도착 노드 앞 줄기 위에 적는다. */
+.edge-joint {
+  fill: var(--tone);
+}
+
+.edge-trunk-count {
+  fill: var(--tone);
+  stroke: var(--surface);
+  stroke-width: 3px;
+  paint-order: stroke;
+  font-size: 11px;
+}
+
+/* 줄기 위에 한 번 더 그린 전체 경로는 마우스를 받지 않는다. 가지 구간은 그 선의 누름 영역이, 줄기 구간은 줄기의 누름 영역이 받는다. */
+.edge[data-whole] .edge-line {
+  pointer-events: none;
+}
+
+.edge-trunk[data-pointed] .edge-trunk-count {
+  font-weight: 700;
+}
+
 /* 그래프 위에 띄우는 칸 */
 
 .info-panel {
@@ -1552,10 +1566,6 @@ ul {
   font-size: 11px;
 }
 
-.legend-inflow {
-  fill: var(--muted);
-  font-size: 11px;
-}
 
 .legend-loc {
   fill: var(--loc);
@@ -1849,6 +1859,12 @@ ol.summary-list {
   overflow: auto;
 }
 
+/* 줄기를 골랐을 때 출발 노드마다 묶은 지점 목록의 묶음 이름 */
+.info-panel-sites-name {
+  padding: 4px 4px 1px;
+  font-weight: 600;
+}
+
 .info-panel-sites:has(+ .code) {
   max-height: 40%;
 }
@@ -1961,11 +1977,11 @@ ol.summary-list {
   white-space: nowrap;
 }
 
-/* 경로 고정 중에는 경로 위 노드([data-route])와 걸음만 누를 수 있다. 그 밖의 노드·선·파일 상자 머리 줄·폴더 영역 머리 줄은
+/* 경로 고정 중에는 경로 위 노드([data-route])와 걸음, 걸음이 지나는 줄기([data-step])만 누를 수 있다. 그 밖의 노드·선·파일 상자 머리 줄·폴더 영역 머리 줄은
    누를 수 없음을 커서로 보이고 마우스를 올려도 바탕을 바꾸지 않는다. */
 .graph[data-pinned] :is(.node-package, .node-module, .node-class, .node-dataclass, .node-function, .node-external):not([data-route], .node-module-open),
 .graph[data-pinned] :not([data-route]) > :is(.node-module-head, .node-region-head),
-.graph[data-pinned] .edge:not([data-route]) :is(.edge-hit, .edge-line, .edge-weight) {
+.graph[data-pinned] .edge:not([data-route], [data-step]) :is(.edge-hit, .edge-line, .edge-weight) {
   cursor: not-allowed;
 }
 

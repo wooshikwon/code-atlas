@@ -38,11 +38,6 @@ export function busyTip(node: AtlasNode, count: number): string {
   return `LLM 요약을 만드는 중 ${count}개${inside}`;
 }
 
-/** 편재 노드 배지 `←N` */
-export function inflowTip(count: number): string {
-  return [`편재 노드: 선을 숨긴 출발 노드 ${count}개`, "화면에 보이는 상자의 절반 이상이 이 노드를 써서 들어오는 선을 숨겼다", "이 노드를 고르면 숨긴 선을 다시 그린다"].join("\n");
-}
-
 /** 이름표 옆 줄 수 숫자 */
 export function locTip(node: AtlasNode): string {
   return `줄 수 ${node.loc}줄 · 빈 줄을 뺀 수`;
@@ -77,6 +72,11 @@ export function candidatesTip(node: AtlasNode, count: number): string {
 /** 노드의 말풍선. 이름과 종류를 적고, 미사용 덮개가 표시한 후보면 둘째 줄에 그 뜻을 적는다. */
 export function nodeTip(title: string, kind: string, unused: boolean): string {
   return unused ? `${title} · ${kind}\n${UNUSED_TIP}` : `${title} · ${kind}`;
+}
+
+/** 줄기의 말풍선. 줄기에 든 선을 내보내는 노드 수, 도착 노드의 이름, 줄기에 든 선의 sites 수 합을 적는다. */
+export function trunkTip(sources: number, target: string, sites: number): string {
+  return `노드 ${sources}개 → ${target} · ${sites}곳`;
 }
 
 /** 마우스 아래 요소나 그 조상이 담은 말풍선 글. 없으면 null이다. */

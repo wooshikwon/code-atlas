@@ -3,7 +3,7 @@ import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { repoFixture, routeFixture } from "./fixture";
 import { flow } from "./flow";
 import { lit, route } from "./route";
-import { concealed, degrees, drawn, neighbors, picked, ubiquitous, type DrawnEdge } from "./scope";
+import { arriving, degrees, drawn, neighbors, picked, trunkTarget, type DrawnEdge } from "./scope";
 import { hidden, nodeIndex, shown, unitOf } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
@@ -15,41 +15,6 @@ function draw(selection: string | null, collapsed: string[] = [], hover: string 
   const visible = shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), flow: focus, lit: null });
   return new Map(drawn(repoFixture, visible, focus, hover, null).map((e) => [e.key, e]));
 }
-
-describe("ubiquitous", () => {
-  const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
-
-  it("상자 수의 절반 이상에서 선이 들어오는 상자와 선을 보내는 상자 수를 낸다", () => {
-    expect([...ubiquitous(repoFixture, closed)]).toEqual([["common", 5]]);
-  });
-
-  it("파일 상자를 펼쳐도 결과가 같다", () => {
-    const focus = flow(repoFixture, "cli:main", 2, off);
-    const visible = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus, lit: null });
-    expect([...ubiquitous(repoFixture, visible)]).toEqual([["common", 5]]);
-  });
-});
-
-describe("concealed", () => {
-  const scene = (selection: string | null) => {
-    const focus = selection === null ? null : flow(repoFixture, selection, 2, off);
-    return [shown(repoFixture, { ...toggles, collapsed: new Set(), flow: focus, lit: null }), focus] as const;
-  };
-
-  it("초점이 없으면 편재 노드마다 숨긴 선의 출발 노드 수를 낸다", () => {
-    expect([...concealed(repoFixture, ...scene(null))]).toEqual([["common", 5]]);
-  });
-
-  it("편재 노드를 쓰는 노드나 편재 노드 안의 노드를 고르면 뺀다", () => {
-    for (const selection of ["cli:main", "common:log", "common"]) {
-      expect(concealed(repoFixture, ...scene(selection)).size).toBe(0);
-    }
-  });
-
-  it("편재 노드와 관계없는 노드를 고르면 남긴다", () => {
-    expect([...concealed(repoFixture, ...scene("app.text:pad"))]).toEqual([["common", 5]]);
-  });
-});
 
 describe("degrees", () => {
   it("노드마다 들어오는 선과 나가는 선을 센다", () => {
@@ -96,10 +61,15 @@ describe("drawn", () => {
     expect([...edges.keys()].sort()).toEqual(
       [
         "agg|app.web|app.text",
+        "agg|cli|common",
         "agg|cli|main",
         "agg|main|pkg.mod",
         "agg|pkg.mod|main",
+        "app.__init__|common|import",
+        "app.web|common|import",
         "main|cli|import",
+        "main|common|import",
+        "pkg.mod|common|import",
         "pkg.mod|pkg.util|import",
       ].sort(),
     );
@@ -201,20 +171,22 @@ describe("drawn", () => {
     ]);
   });
 
-  it("규칙 3: 편재 노드로 들어오는 선을 숨기고, 편재 노드와 무관한 노드를 골라도 숨긴다", () => {
-    for (const selection of [null, "scratch", "app.text:pad"]) {
-      expect([...draw(selection).values()].some((e) => e.target === "common")).toBe(false);
-    }
+  it("숨기는 선이 없다: 여러 상자가 쓰는 상자로 들어오는 선도 모두 그리고, 무관한 노드를 골라도 접힌 상자 사이의 선은 남는다", () => {
+    const into = (selection: string | null) => [...draw(selection).values()].filter((e) => e.target === "common").map((e) => e.key).sort();
+    const all = ["agg|cli|common", "app.__init__|common|import", "app.web|common|import", "main|common|import", "pkg.mod|common|import"];
+    expect(into(null)).toEqual(all);
+    expect(into("scratch")).toEqual(all);
+    expect([...draw("scratch").values()].filter((e) => e.target === "common").every((e) => e.opacity === 0.2)).toBe(true);
   });
 
-  it("규칙 3: 편재 노드를 고르면 들어오는 선을 다시 그린다", () => {
+  it("여러 상자가 쓰는 상자를 고르면 들어오는 선이 고른 노드에 닿는 선이다", () => {
     const edges = draw("common");
     expect(edges.get("main|common|import")?.tone).toBe("strong");
     expect(edges.get("agg|cli|common")).toMatchObject({ weight: 2, tone: "strong" });
     expect(edges.has("app.web|common|import")).toBe(true);
   });
 
-  it("규칙 3: 편재 노드를 쓰는 노드를 고르면 숨긴 선을 모두 다시 그린다", () => {
+  it("여러 상자가 쓰는 상자를 쓰는 노드를 고르면 그 선만 고른 노드에 닿는 선이다", () => {
     const edges = draw("cli");
     expect(edges.get("agg|cli|common")).toMatchObject({ weight: 2, tone: "strong", opacity: 1 });
     expect(edges.get("pkg.mod|common|import")).toMatchObject({ tone: "muted", opacity: 1 });
@@ -287,11 +259,10 @@ describe("picked", () => {
     expect(picked(graph, closed, null, "pkg.a:f|m:K.go|call")).toMatchObject({ source: "pkg.a:f", target: "m:K.go", weight: 2 });
   });
 
-  it("마우스를 올려야 그려지는 집계 선과 없는 키", () => {
+  it("집계 선의 키와 없는 키", () => {
     const off = hidden(repoFixture, toggles);
     const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
     expect(off.size).toBeGreaterThan(0);
-    expect(drawn(repoFixture, closed, null, null, null).some((e) => e.key === "agg|cli|common")).toBe(false);
     expect(picked(repoFixture, closed, null, "agg|cli|common")?.weight).toBe(2);
     expect(picked(repoFixture, closed, null, "agg|scratch|common")).toBeNull();
     expect(picked(repoFixture, closed, null, "x|y|call")).toBeNull();
@@ -359,5 +330,21 @@ describe("drawn: 강조하는 경로", () => {
   it("경로가 없으면 모든 선의 route가 null이다", () => {
     const visible = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
     expect(drawn(routeFixture, visible, null, null, null).every((e) => e.route === null)).toBe(true);
+  });
+});
+
+describe("trunkTarget, arriving", () => {
+  const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
+
+  it("줄기 키에서 도착 노드를 읽고 다른 키는 null이다", () => {
+    expect(trunkTarget("trunk|common|0")).toBe("common");
+    expect(trunkTarget("agg|cli|common")).toBeNull();
+    expect(trunkTarget("main|common|import")).toBeNull();
+  });
+
+  it("노드로 들어오는 그린 선을 모으고 함수 안 import만 합친 선은 뺀다", () => {
+    expect(arriving(repoFixture, closed, null, "common").map((e) => e.source).sort()).toEqual(["app.__init__", "app.web", "cli", "main", "pkg.mod"]);
+    expect(drawn(repoFixture, closed, null, null, null).some((e) => e.target === "pkg.util" && e.deferred)).toBe(true);
+    expect(arriving(repoFixture, closed, null, "pkg.util").some((e) => e.deferred)).toBe(false);
   });
 });

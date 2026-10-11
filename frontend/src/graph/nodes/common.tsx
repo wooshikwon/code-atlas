@@ -6,7 +6,7 @@ import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
 import { BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, ENTRY_MARK, labelOf, type Box, type RouteEnd } from "../layout";
-import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, inflowTip, locTip, unresolvedTip } from "../tips";
+import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, locTip, unresolvedTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
@@ -21,8 +21,6 @@ export interface AtlasNodeData extends Record<string, unknown> {
   flow: boolean;
   /** 선택한 노드가 든 파일 상자 안의 노드다 */
   local: boolean;
-  /** 편재 노드면 숨긴 선의 출발 노드 수 */
-  inflow: number | null;
   /** 배지에 적는 미확인 호출 수. 접힌 파일 상자와 접힌 폴더 상자는 안에 든 노드의 수를 합친 값이고 펼친 파일 상자는 0이다. */
   unresolved: number;
   /** 이 노드와 이 노드로 올린 안쪽 노드 가운데 LLM 요약을 만드는 중인 노드 수 */
@@ -245,15 +243,6 @@ export function Below({ data }: { data: AtlasNodeData }) {
   return text === "" ? null : (
     <span className="node-below" data-tip={data.candidates > 0 ? candidatesTip(data.node, data.candidates) : undefined}>
       {text}
-    </span>
-  );
-}
-
-/** 편재 노드 배지. 노드 왼쪽에 숨긴 선의 출발 노드 수를 적는다. */
-export function Inflow({ data }: { data: AtlasNodeData }) {
-  return data.inflow === null ? null : (
-    <span className="node-inflow" data-tip={inflowTip(data.inflow)}>
-      ←{data.inflow}
     </span>
   );
 }

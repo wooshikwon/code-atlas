@@ -4,7 +4,7 @@ import { flow } from "./flow";
 import { lit, route } from "./route";
 import { sideRoute, type Layout } from "./layout";
 import { drawn } from "./scope";
-import { edgeViews, letteredBoxes, midpoint, parentFirst, roundedPath, weightPoint, type EdgeView } from "./view";
+import { edgeViews, emphasized, letteredBoxes, midpoint, parentFirst, roundedPath, trunkShade, trunkViews, weightPoint, type EdgeView } from "./view";
 import { hidden, nodeIndex, shown, type Shown } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
@@ -33,7 +33,7 @@ function lineLayout(visible: Shown): Layout {
 
 function views(selection: string | null): Map<string, EdgeView> {
   const { flow: picked, shown: visible } = scene(selection);
-  return new Map(edgeViews(drawn(repoFixture, visible, picked, null, null), lineLayout(visible), nodes).map((v) => [v.key, v]));
+  return new Map(edgeViews(drawn(repoFixture, visible, picked, null, null), lineLayout(visible), nodes).views.map((v) => [v.key, v]));
 }
 
 describe("parentFirst", () => {
@@ -71,7 +71,7 @@ describe("edgeViews", () => {
       { x: 120, y: 30 },
       { x: 200, y: 30 },
     ]);
-    const view = edgeViews(drawn(repoFixture, visible, picked, null, null), layout, nodes).find(
+    const view = edgeViews(drawn(repoFixture, visible, picked, null, null), layout, nodes).views.find(
       (v) => v.key === "pkg.mod:Store.save|main:helper|call",
     )!;
     expect(view.points).toEqual([
@@ -85,7 +85,7 @@ describe("edgeViews", () => {
       { x: 40, y: 10 },
       { x: 200, y: 10 },
     ]);
-    const straight = edgeViews(drawn(repoFixture, visible, picked, null, null), layout, nodes).find(
+    const straight = edgeViews(drawn(repoFixture, visible, picked, null, null), layout, nodes).views.find(
       (v) => v.key === "pkg.mod:Store.save|main:helper|call",
     )!;
     expect(straight.points).toEqual([
@@ -99,7 +99,7 @@ describe("edgeViews", () => {
   it("진입점 단위 사이 선은 보이는 양 끝 상자의 위치로 정한 경로를 받는다", () => {
     const { shown: visible } = scene(null);
     const layout = lineLayout(visible);
-    const view = edgeViews(drawn(repoFixture, visible, null, null, null), layout, nodes).find((v) => v.key === "agg|cli|main")!;
+    const view = edgeViews(drawn(repoFixture, visible, null, null, null), layout, nodes).views.find((v) => v.key === "agg|cli|main")!;
     expect(view.points).toEqual(sideRoute(layout.boxes.get("cli")!, layout.boxes.get("main")!));
   });
 
@@ -128,7 +128,7 @@ describe("edgeViews", () => {
     const { shown: visible } = scene(null);
     const layout = lineLayout(visible);
     layout.boxes.delete("main");
-    const keys = edgeViews(drawn(repoFixture, visible, null, null, null), layout, nodes).map((v) => v.key);
+    const keys = edgeViews(drawn(repoFixture, visible, null, null, null), layout, nodes).views.map((v) => v.key);
     expect(keys).not.toContain("agg|main|pkg.mod");
     expect(keys).toContain("pkg.mod|pkg.util|import");
   });
@@ -194,7 +194,7 @@ describe("edgeViews: 강조하는 경로", () => {
 
   it("걸음의 종류를 선에 그대로 담는다", () => {
     const { visible, edges } = scene("flow.build:make", "flow.sink:tune");
-    const views = edgeViews(edges, { ...lineLayout(visible), routes: new Map() }, routeNodes);
+    const views = edgeViews(edges, { ...lineLayout(visible), routes: new Map() }, routeNodes).views;
     expect(views.filter((v) => v.route !== null).map((v) => v.route)).toEqual(["construct", "init", "call"]);
     expect(views.filter((v) => v.route === null).every((v) => v.opacity === 0.2)).toBe(true);
   });
@@ -205,7 +205,7 @@ describe("edgeViews: 강조하는 경로", () => {
       ["flow.build:Engine", box(100, 50, 200, 66)],
       ["flow.build:Engine.__init__", box(116, 82, 90, 18)],
     ]);
-    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes: new Map() }, routeNodes);
+    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes: new Map() }, routeNodes).views;
     expect(view.key).toBe("step|flow.build:Engine|flow.build:Engine.__init__");
     expect(view.points).toEqual([
       { x: 100, y: 91 },
@@ -226,7 +226,7 @@ describe("edgeViews: 강조하는 경로", () => {
       { x: 300, y: 60 },
     ];
     const routes = new Map([["agg|flow.build:Child|flow.build:Base", trunk]]);
-    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes }, routeNodes);
+    const [view] = edgeViews(edges, { positions: new Map(), sizes: new Map(), boxes, routes }, routeNodes).views;
     expect(view.route).toBe("overridden");
     expect(view.points).toEqual([
       { x: 316, y: 49 },
@@ -235,5 +235,83 @@ describe("edgeViews: 강조하는 경로", () => {
       { x: 76, y: 149 },
     ]);
     expect(trunk[0]).toEqual({ x: 100, y: 150 });
+  });
+});
+
+describe("trunkViews", () => {
+  const view = (key: string, target: string, points: [number, number][], more: Partial<EdgeView> = {}): EdgeView => {
+    const path = points.map(([x, y]) => ({ x, y }));
+    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, weight: null, sites: 1, route: null, joins: true, branch: path, trunk: null, ...more };
+  };
+  /** 세 선이 x=100의 세로선에 차례로 붙어 (120, 50)으로 들어간다. c는 아래에서 올라온다. */
+  const a = view("a", "t", [[0, 0], [100, 0], [100, 50], [120, 50]]);
+  const b = view("b", "t", [[0, 20], [100, 20], [100, 50], [120, 50]]);
+  const c = view("c", "t", [[0, 90], [100, 90], [100, 50], [120, 50]], { sites: 3, group: "use" });
+
+  it("도착이 같은 선이 끝에서부터 함께 지나는 구간을 줄기로 떼고 선마다 가지를 남긴다", () => {
+    const { views, trunks } = trunkViews([a, b, c]);
+    expect(trunks).toHaveLength(1);
+    const [trunk] = trunks;
+    expect(trunk).toMatchObject({ key: "trunk|t|0", target: "t", keys: ["a", "b", "c"], sources: 3, sites: 5, group: "run", route: false });
+    expect(trunk.pieces).toEqual([
+      [{ x: 100, y: 20 }, { x: 100, y: 50 }, { x: 120, y: 50 }],
+    ]);
+    expect(trunk.joints).toEqual([{ x: 100, y: 20 }, { x: 100, y: 50 }]);
+    const byKey = new Map(views.map((v) => [v.key, v]));
+    expect(byKey.get("a")).toMatchObject({ trunk: "trunk|t|0", branch: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 20 }] });
+    expect(byKey.get("b")!.branch).toEqual([{ x: 0, y: 20 }, { x: 100, y: 20 }]);
+    expect(byKey.get("c")!.branch).toEqual([{ x: 0, y: 90 }, { x: 100, y: 90 }, { x: 100, y: 50 }]);
+    expect(byKey.get("a")!.points).toEqual(a.points);
+  });
+
+  it("도착 노드 앞에서 만나기 전에 먼저 모인 선은 줄기에 붙는 묶음 하나가 된다", () => {
+    const d = view("d", "t", [[0, 80], [50, 80], [50, 90], [100, 90], [100, 50], [120, 50]]);
+    const { trunks } = trunkViews([a, c, d]);
+    expect(trunks[0].pieces).toEqual([
+      [{ x: 50, y: 90 }, { x: 100, y: 90 }, { x: 100, y: 50 }, { x: 120, y: 50 }],
+    ]);
+    const e = view("e", "t", [[0, 10], [100, 10], [100, 50], [120, 50]]);
+    expect(trunkViews([a, c, d, e]).trunks[0].pieces[1]).toEqual([{ x: 100, y: 10 }, { x: 100, y: 50 }]);
+    expect(trunks[0].joints).toContainEqual({ x: 50, y: 90 });
+    expect(trunks[0].joints).toContainEqual({ x: 100, y: 50 });
+  });
+
+  it("도착이 다른 선, 함께 지나는 구간이 없는 선, 합류하지 않는 선은 줄기에 들지 않는다", () => {
+    const other = view("o", "u", [[0, 0], [100, 0], [100, 50], [120, 50]]);
+    const apart = view("p", "t", [[300, 50], [200, 50]]);
+    const below = view("q", "t", [[0, 20], [100, 20], [100, 50], [120, 50]], { joins: false });
+    const { views, trunks } = trunkViews([a, other, apart, below]);
+    expect(trunks).toEqual([]);
+    expect(views.every((v) => v.trunk === null && v.branch === v.points)).toBe(true);
+  });
+
+  it("배치 밖에서 정한 경로가 마지막 가로 구간만 겹쳐도 같은 줄기에 든다", () => {
+    const side = view("s", "t", [[0, 200], [110, 200], [110, 50], [120, 50]]);
+    const { views, trunks } = trunkViews([a, side]);
+    expect(trunks[0].pieces).toEqual([[{ x: 110, y: 50 }, { x: 120, y: 50 }]]);
+    expect(views.find((v) => v.key === "a")!.branch.at(-1)).toEqual({ x: 110, y: 50 });
+  });
+
+  it("합친 선의 수는 도착 노드 앞 줄기 위에 적는다", () => {
+    expect(trunkViews([a, b]).trunks[0].at).toEqual({ x: 108, y: 42 });
+  });
+
+  it("줄기의 진하기는 따로 그리는 선을 뺀 가지 가운데 가장 진한 값이다", () => {
+    const strong = { ...a, tone: "strong" as const, opacity: 1 };
+    const rest = { ...b, opacity: 0.2 };
+    const flowed = { ...c, opacity: 1 };
+    const apart = (v: EdgeView) => emphasized(v, { pointed: false, cycle: false });
+    expect(trunkShade([strong, rest, flowed], apart)).toEqual({ tone: "muted", opacity: 1 });
+    expect(trunkShade([strong, rest], apart)).toEqual({ tone: "muted", opacity: 0.2 });
+    expect(trunkShade([strong], apart)).toEqual({ tone: "strong", opacity: 1 });
+  });
+
+  it("마우스를 올린 선, 순환 선, 경로의 걸음, 고른 노드에 닿는 선을 강조한다", () => {
+    const none = { pointed: false, cycle: false };
+    expect(emphasized(a, none)).toBe(false);
+    expect(emphasized(a, { pointed: true, cycle: false })).toBe(true);
+    expect(emphasized(a, { pointed: false, cycle: true })).toBe(true);
+    expect(emphasized({ ...a, route: "call" }, none)).toBe(true);
+    expect(emphasized({ ...a, tone: "strong" }, none)).toBe(true);
   });
 });

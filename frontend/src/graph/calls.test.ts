@@ -141,7 +141,7 @@ describe("배치", () => {
     expect(column.length).toBeGreaterThan(1);
     expect([...column].sort((a, b) => layout.boxes.get(a)!.y - layout.boxes.get(b)!.y)).toEqual(column);
 
-    const views = callEdges(calls, load, layout);
+    const { views } = callEdges(calls, load, layout);
     expect(views).toHaveLength(calls.edges.length);
     const tone = (key: string) => views.find((view) => view.key === key)!.tone;
     expect(tone(`main:run|${load}|call`)).toBe("strong");

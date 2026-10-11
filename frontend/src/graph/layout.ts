@@ -114,6 +114,24 @@ export function ordered(children: ElkNode[]): ElkNode[] {
   return children.map((child, i) => ({ ...child, layoutOptions: { ...child.layoutOptions, "elk.position": `(0,${i})` } }));
 }
 
+/** 자식을 그리지 않는 노드가 들어오는 선을 받는 포트의 id */
+export function inPort(id: string): string {
+  return `${id}#in`;
+}
+
+/**
+ * 자식을 그리지 않는 노드는 왼쪽 변에 들어오는 포트 하나를 둔다. ELK의 직각 경로 계산이 같은 포트로 가는 선을 도착 노드 앞에서
+ * 한 줄기로 합친다. 나가는 쪽에는 포트를 두지 않으므로 나가는 선은 합치지 않는다. 자식을 그리는 노드(폴더 영역, 펼친 파일 상자)에는
+ * 포트를 두지 않는다. 구조 뷰와 함수 시점 뷰의 ELK 입력이 함께 쓴다.
+ */
+export function joined(node: ElkNode): ElkNode {
+  return {
+    ...node,
+    ports: [{ id: inPort(node.id), width: 0, height: 0, layoutOptions: { "elk.port.side": "WEST" } }],
+    layoutOptions: { ...node.layoutOptions, "elk.portConstraints": "FIXED_SIDE" },
+  };
+}
+
 /** 열은 partition으로, 열 안 순서는 children 배열 순서로 고정한다. */
 const ELK_OPTIONS = {
   "elk.algorithm": "layered",
@@ -327,7 +345,7 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
 
 /**
  * 보이는 노드를 연결 묶음마다 parent 사슬로 중첩한 ELK 입력. 자식을 그리는 노드마다 따로 배치하므로 선은 형제 사이로
- * 올려 그 부모에 선언한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣어 그 순서를 `ordered`로 적는다.
+ * 올려 그 부모에 선언하고, 자식을 그리지 않는 노드로 가는 선은 그 노드의 포트(`joined`)에 닿게 한다. 노드마다 `columns`의 열 번호를 partition으로 주고 children을 열 안 순서로 넣어 그 순서를 `ordered`로 적는다.
  * ends는 강조하는 경로의 출발 노드와 도착 노드이고, 그 노드의 크기에 표지의 폭을 더한다.
  * 순환 아이콘을 다는 상자는 아이콘의 폭을 크기에 더한다. 접힌 파일 상자와 접힌 폴더 상자는 아래 글자의 줄을 상자 아래에 잡아 둔다.
  */
@@ -347,7 +365,7 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
   const edgesOf = (parent: string | null, members?: Set<string>): ElkExtendedEdge[] =>
     (inside.get(parent) ?? [])
       .filter((link) => members === undefined || members.has(link.source))
-      .map((link) => ({ id: link.key, sources: [link.source], targets: [link.target] }));
+      .map((link) => ({ id: link.key, sources: [link.source], targets: [children.has(link.target) ? link.target : inPort(link.target)] }));
 
   const functions = functionCounts(graph);
   const marked = cycleMarks(graph, cycles(graph, shown.hidden), shown);
@@ -367,15 +385,15 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
       };
     }
     if (node.kind !== "module" && node.kind !== "package") {
-      return { id: node.id, ...leafSize(node, measure, marksOf(node.id)), layoutOptions: options };
+      return joined({ id: node.id, ...leafSize(node, measure, marksOf(node.id)), layoutOptions: options });
     }
     const caption = node.kind === "module" ? moduleHeader(node, functions.get(node.id) ?? 0) : FOLDER_CAPTION;
-    return {
+    return joined({
       id: node.id,
       ...leafSize(node, measure, marksOf(node.id)),
       labels: [{ text: caption, width: measure(caption), height: CAPTION_HEIGHT }],
       layoutOptions: { ...options, "elk.nodeLabels.placement": "OUTSIDE V_BOTTOM H_LEFT" },
-    };
+    });
   };
 
   return {

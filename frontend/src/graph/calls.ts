@@ -6,6 +6,8 @@ import {
   CIRCLE,
   CIRCLE_GAP,
   ENTRY_MARK,
+  inPort,
+  joined,
   labelOf,
   LEAF_HEIGHT,
   LOC_GAP,
@@ -16,7 +18,7 @@ import {
   type Size,
 } from "./layout";
 import { EDGE_OPACITY, edgeKey } from "./scope";
-import type { EdgeView } from "./view";
+import { trunkViews, type EdgeView, type Lines } from "./view";
 import { unitOf } from "./visible";
 
 export type Side = "caller" | "center" | "callee";
@@ -144,18 +146,21 @@ export function callSize(calls: Calls, nodes: Map<string, AtlasNode>, node: Atla
   };
 }
 
-/** 모든 노드와 실행 선을 한 번에 배치하는 ELK 입력. 열은 ELK가 선으로 정하고, 열 안에서는 `Calls.nodes`의 순서대로 놓는다. */
+/**
+ * 모든 노드와 실행 선을 한 번에 배치하는 ELK 입력. 열은 ELK가 선으로 정하고, 열 안에서는 `Calls.nodes`의 순서대로 놓는다.
+ * 선은 도착 노드의 포트에 닿아 도착 노드 앞에서 합류한다.
+ */
 export function callElk(calls: Calls, size: (id: string) => Size): ElkNode {
   return {
     id: "calls",
     layoutOptions: CALL_OPTIONS,
-    children: ordered(calls.nodes.map((id) => ({ id, ...size(id) }))),
-    edges: calls.edges.map((edge) => ({ id: edgeKey(edge), sources: [edge.source], targets: [edge.target] })),
+    children: ordered(calls.nodes.map((id) => joined({ id, ...size(id) }))),
+    edges: calls.edges.map((edge) => ({ id: edgeKey(edge), sources: [edge.source], targets: [inPort(edge.target)] })),
   };
 }
 
-/** 실행 선마다 배치가 낸 경로와 색을 정한다. center에 닿는 선만 본문 잉크로 그린다. */
-export function callEdges(calls: Calls, center: string, layout: Layout): EdgeView[] {
+/** 실행 선마다 배치가 낸 경로와 색을 정하고 도착이 같은 선을 줄기로 묶는다. center에 닿는 선만 본문 잉크로 그린다. */
+export function callEdges(calls: Calls, center: string, layout: Layout): Lines {
   const views: EdgeView[] = [];
   for (const edge of calls.edges) {
     const key = edgeKey(edge);
@@ -174,7 +179,10 @@ export function callEdges(calls: Calls, center: string, layout: Layout): EdgeVie
       weight: null,
       sites: edge.sites.length,
       route: null,
+      joins: true,
+      branch: points,
+      trunk: null,
     });
   }
-  return views;
+  return trunkViews(views);
 }
