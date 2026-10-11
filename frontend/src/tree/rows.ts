@@ -128,6 +128,7 @@ function grown(entries: TreeEntry[], fresh: ChangedFile[]): TreeEntry[] {
 
 /**
  * 펼친 폴더, 파일, 고른 노드가 든 파일의 클래스·함수 목록을 위에서 아래로 그리는 순서로 낸다.
+ * 고른 노드를 품은 폴더는 접은 폴더여도 펼친 것으로 그린다.
  * 레포를 열어 분석한 뒤 생긴 파일은 그래프에 노드가 없는 행으로 넣는다. 파일 행은 모듈 노드만 가리키므로
  * 모듈 노드가 없는 `__init__.py` 행은 node 없이 file에 경로를 담는다.
  */
@@ -135,6 +136,10 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
   const nodes = nodeIndex(graph);
   const inner = symbols(graph, nodes);
   const chosen = fileOf(nodes, state.selected);
+  const held = new Set<string>();
+  for (let at = nodes.get(state.selected ?? "")?.parent; at != null; at = nodes.get(at)?.parent) {
+    held.add(at);
+  }
   const changed = new Map<string, Change>();
   for (const file of state.changes?.files ?? []) {
     if (file.status === "modified" || file.status === "added") {
@@ -153,7 +158,7 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
       }
       const base = { key: entry.path, level, title: entry.path };
       if (entry.kind === "dir") {
-        const expanded = entry.node === null || !state.collapsed.has(entry.node);
+        const expanded = entry.node === null || !state.collapsed.has(entry.node) || held.has(entry.node);
         const change = !expanded && within(entry.path) ? "modified" : null;
         const selected = entry.node !== null && entry.node === state.selected;
         const icon = expanded ? "folder-open" : "folder";

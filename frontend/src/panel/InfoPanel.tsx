@@ -8,7 +8,7 @@ import { flow } from "../graph/flow";
 import { degrees, drawn, neighbors, picked, type DrawnEdge } from "../graph/scope";
 import { hidden, nodeIndex, shown, unresolvedWithin, within } from "../graph/visible";
 import { focusOf } from "../state/history";
-import { litOf, useAtlas, type Selection } from "../state/store";
+import { chosenOf, litOf, useAtlas, type Selection } from "../state/store";
 import { drag } from "./drag";
 import { Header, type HeaderItem, type PickedEdge } from "./Header";
 import { useOpened } from "./opened";
@@ -101,8 +101,7 @@ export function InfoPanel() {
     return found === null ? null : pickedEdge(found);
   }, [graph, scene, selection]);
 
-  /** 정보 패널이 보이는 노드. 경로 고정 중에는 경로 위에서 누른 노드다. */
-  const chosen = lit !== null ? finder.focus : selection?.type === "node" ? selection.id : null;
+  const chosen = chosenOf({ finder, selection });
   const node = file === null && chosen !== null ? index?.nodes.get(chosen) : undefined;
 
   /** 고른 파일 상자나 폴더 상자의 머리 줄 수치. 화면에 그린 선과 배지가 세는 범위에서 센다. */

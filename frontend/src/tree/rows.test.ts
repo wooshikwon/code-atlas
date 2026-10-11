@@ -102,6 +102,14 @@ describe("rows", () => {
     expect(list[1].expanded).toBe(false);
   });
 
+  it("고른 노드를 품은 폴더는 접은 폴더여도 펼치고, 고른 폴더는 접은 채로 둔다", () => {
+    const list = rows(tree, graph, state({ collapsed: new Set(["parser"]), selected: "parser.plan:parse_plan" }));
+    expect(list.find((row) => row.key === "src/parser")).toMatchObject({ expanded: true });
+    expect(list.find((row) => row.key === "parser.plan:parse_plan")).toMatchObject({ selected: true });
+    const folded = rows(tree, graph, state({ collapsed: new Set(["parser"]), selected: "parser" }));
+    expect(folded.find((row) => row.key === "src/parser")).toMatchObject({ expanded: false, selected: true });
+  });
+
   it("패키지 노드가 없는 폴더는 늘 펼친다", () => {
     const list = rows(tree, graph, state({ collapsed: new Set(["src"]) }));
     expect(list[0]).toMatchObject({ key: "src", node: null, expanded: true });

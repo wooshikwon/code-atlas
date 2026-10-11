@@ -172,6 +172,14 @@ export function litOf(finder: Finder): Lit | null {
   return finder.route === null ? null : lit(finder.route, finder.pick);
 }
 
+/** 정보 패널·탐색 경로 표시·파일트리가 보이는 노드. 경로 고정 중에는 finder.focus이고 그 밖에는 고른 노드다. */
+export function chosenOf(state: Pick<AtlasStore, "finder" | "selection">): string | null {
+  if (pinned(state.finder)) {
+    return state.finder.focus;
+  }
+  return state.selection?.type === "node" ? state.selection.id : null;
+}
+
 /**
  * 경로 고정 중이면 막힌 횟수를 늘리고 경로 탐색 창을 편 뒤 참을 돌려준다. 고정 중에 막는 진입은 모두 이 함수로 판정한다.
  */

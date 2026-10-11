@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useOpened } from "../panel/opened";
 import { useChanges } from "../state/changes";
-import { useAtlas } from "../state/store";
+import { chosenOf, useAtlas } from "../state/store";
 import { build } from "../search/index";
 import { parentOf, results, rows, type Result, type Row } from "./rows";
 import { TreeNode } from "./TreeNode";
@@ -14,7 +14,6 @@ export function FileTree() {
   const tree = useAtlas((s) => s.tree);
   const graph = useAtlas((s) => s.graph);
   const error = useAtlas((s) => s.error);
-  const selection = useAtlas((s) => s.selection);
   const collapsed = useAtlas((s) => s.collapsed);
   const showTests = useAtlas((s) => s.showTests);
   const structure = useAtlas((s) => s.view.kind === "structure");
@@ -24,7 +23,7 @@ export function FileTree() {
   const changes = useChanges((s) => s.changes);
   const opened = useOpened((s) => s.path);
   const toggleOpened = useOpened((s) => s.toggle);
-  const selected = selection?.type === "node" ? selection.id : null;
+  const selected = useAtlas(chosenOf);
   const list = useMemo(
     () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, opened, showTests, changes })),
     [tree, graph, collapsed, selected, opened, showTests, changes],

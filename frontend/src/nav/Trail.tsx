@@ -5,7 +5,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type { AtlasNode } from "../api/types";
 import { labelOf, titleOf } from "../graph/layout";
 import { nodeIndex } from "../graph/visible";
-import { pinned, useAtlas } from "../state/store";
+import { chosenOf, useAtlas } from "../state/store";
 import type { Fit } from "./fit";
 
 /** 한 단계의 이름. 폴더와 파일은 경로의 마지막 마디만 적는다. */
@@ -29,13 +29,7 @@ export function Trail({ fit }: { fit: Fit }) {
   const show = useAtlas((s) => s.show);
   const nodes = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
 
-  const target = pinned(finder)
-    ? finder.focus
-    : view.kind === "function"
-      ? view.center
-      : selection?.type === "node"
-        ? selection.id
-        : null;
+  const target = view.kind === "function" ? view.center : chosenOf({ finder, selection });
   const steps: AtlasNode[] = [];
   for (let node = target === null ? undefined : nodes?.get(target); node !== undefined; ) {
     steps.unshift(node);

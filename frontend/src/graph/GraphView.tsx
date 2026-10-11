@@ -17,7 +17,7 @@ import type { AtlasNode, Graph } from "../api/types";
 import { useOpened } from "../panel/opened";
 import { focusOf, type History } from "../state/history";
 import { useOverlay } from "../state/overlay";
-import { litOf, useAtlas } from "../state/store";
+import { chosenOf, litOf, useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
@@ -368,8 +368,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       select(null);
     }
   };
-  /** 정보 패널이 보이는 노드. 경로 고정 중에는 경로 위에서 누른 노드다. */
-  const chosen = lit !== null ? pinFocus : selection?.type === "node" ? selection.id : null;
+  const chosen = chosenOf({ finder, selection });
   /** 선을 누르면 도착 노드를 고른다. 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 선을 골라 정보 패널에 지점 목록을 연다. */
   const onEdgeClick: EdgeMouseHandler<AtlasFlowEdge> = (event, edge) => {
     tip.current?.hide();
