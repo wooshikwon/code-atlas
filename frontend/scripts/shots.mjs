@@ -1617,6 +1617,148 @@ async function summaryBusy(t, page) {
   );
 }
 
+/**
+ * 코드 범위 설명의 세 엔드포인트에 서버 대신 답한다. 만든 설명은 saved에 두어 페이지를 새로 열어도 남고,
+ * POST는 held에 붙잡아 두었다가 answer를 부르면 답한다.
+ */
+async function answerExplanations(page) {
+  const state = { saved: [], held: [] };
+  const same = (a, b) => a.path === b.path && a.start === b.start && a.end === b.end;
+  await page.route(
+    (at) => at.pathname === "/api/explanations" || at.pathname === "/api/explanation",
+    (route) => {
+      const request = route.request();
+      const query = new URL(request.url()).searchParams;
+      const span = { path: query.get("path"), start: Number(query.get("start")), end: Number(query.get("end")) };
+      if (request.method() === "GET") {
+        return route.fulfill({ json: { explanations: state.saved.filter((e) => e.path === span.path).map(({ path, ...rest }) => rest) } });
+      }
+      if (request.method() === "DELETE") {
+        state.saved = state.saved.filter((e) => !same(e, span));
+        return route.fulfill({ json: { deleted: true } });
+      }
+      state.held.push({
+        ...span,
+        answer: (text) => {
+          state.saved = [...state.saved.filter((e) => !same(e, span)), { ...span, text, stale: false }];
+          return route.fulfill({ json: { start: span.start, end: span.end, text, stale: false } });
+        },
+      });
+    },
+  );
+  return state;
+}
+
+/** 코드 뷰어의 n번째 줄(1부터)의 화면 사각형 */
+const codeLine = (page, n) =>
+  page.evaluate((index) => {
+    const lines = [...document.querySelectorAll(".info-panel .monaco-editor .view-line")].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+    const rect = lines[index - 1]?.getBoundingClientRect();
+    return rect === undefined ? null : { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  }, n);
+
+/** 설명을 만들지 않고 서버 대신 답해, 고른 코드 범위의 설명 창과 말풍선 표지를 본다. */
+async function explain(t, page) {
+  const notes = await answerExplanations(page);
+  const text = "오늘 날짜의 할 일을 `note_common.py::extract_today_items`로 모은다.\n모은 항목을 줄마다 하나씩 적는다.";
+  const open = async () => {
+    await pickInTree(page, { id: FUNCTION, owner: FILE });
+    await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 });
+    await page.waitForFunction(() => document.querySelectorAll(".info-panel .monaco-editor .view-line").length > 8);
+  };
+  await load(page);
+  await open();
+  const from = spanOf(await api("/api/graph"), FUNCTION).from;
+  t.check("범위를 고르기 전에는 버튼, 창, 표지가 없다", (await count(page, ".code-explain, .code-note-window, .code-note-glyph")) === 0);
+
+  // 코드 뷰어의 3번째 줄 머리부터 5번째 줄 끝까지 끌어 고른다.
+  const [third, fifth] = [await codeLine(page, 3), await codeLine(page, 5)];
+  await page.mouse.move(third.x + 2, third.y + third.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(fifth.x + 200, fifth.y + fifth.height / 2, { steps: 6 });
+  t.check("끄는 동안에는 버튼이 뜨지 않는다", (await count(page, ".code-explain")) === 0);
+  await page.mouse.up();
+  await page.waitForSelector(".code-explain", { timeout: 5_000 }).catch(() => {});
+  const button = await rectOf(page, ".code-explain");
+  t.check(
+    '범위를 끌어 고르면 고른 끝 아래에 "요약 생성" 버튼이 뜬다',
+    button !== null && (await page.textContent(".code-explain")) === "요약 생성" && button.y >= fifth.y + fifth.height - 2 && button.y < fifth.y + 3 * fifth.height,
+    button === null ? "버튼 없음" : `버튼 위 ${button.y.toFixed(0)}, 5번째 줄 아래 ${(fifth.y + fifth.height).toFixed(0)}`,
+  );
+  await page.click(".code-explain");
+  await page.waitForSelector(".code-note-window", { timeout: 5_000 }).catch(() => {});
+  await page.waitForSelector(".code-note-glyph", { timeout: 5_000 }).catch(() => {});
+  const asked = notes.held[0];
+  t.check(
+    `버튼을 누르면 ${from + 2}~${from + 4}줄의 POST를 한 번 보내고 범위 아래 창에 "설명을 만드는 중"을 보이며 버튼은 사라진다`,
+    notes.held.length === 1 && asked.start === from + 2 && asked.end === from + 4 &&
+      (await page.textContent(".code-note-window .info-panel-hint")) === "설명을 만드는 중" &&
+      (await page.textContent(".code-note-window .info-panel-label")).replace(/\s/g, "") === `${from + 2}~${from + 4}줄설명` &&
+      (await count(page, ".code-explain")) === 0 && (await count(page, ".code-note-glyph.code-note-making")) === 1,
+    `POST ${notes.held.map((h) => `${h.start}~${h.end}`).join(", ")}`,
+  );
+  const [box, code] = [await rectOf(page, ".code-note-window"), await rectOf(page, ".info-panel .code")];
+  t.check(
+    "창이 고른 범위의 끝 줄 아래에 뜨고 코드 뷰어 안에 든다",
+    box.y >= fifth.y + fifth.height - 2 && box.x >= code.x && box.x + box.width <= code.x + code.width && box.y + box.height <= code.y + code.height,
+    `창 ${rectText(box)}, 코드 뷰어 ${rectText(code)}`,
+  );
+
+  // 다른 함수로 나갔다 와도 요청은 이어진다.
+  await pickInTree(page, { id: "arbiter:_html_report", owner: FILE });
+  await asked.answer(text);
+  await open();
+  await page.waitForSelector(".code-note-glyph:not(.code-note-making)", { timeout: 5_000 }).catch(() => {});
+  t.check(
+    "다른 함수를 골랐다 돌아오면 창은 접혀 있고 범위 시작 줄에 말풍선 표지가 있다",
+    (await count(page, ".code-note-window")) === 0 && (await count(page, ".code-note-glyph")) === 1 && notes.held.length === 1,
+    `표지 ${await count(page, ".code-note-glyph")}개`,
+  );
+  const glyph = await rectOf(page, ".code-note-glyph");
+  const startLine = await codeLine(page, 3);
+  await page.mouse.click(glyph.x + glyph.width / 2, glyph.y + glyph.height / 2);
+  await page.waitForSelector(".code-note-window .summary-text", { timeout: 5_000 }).catch(() => {});
+  const shownText = await page.evaluate(() => [...document.querySelectorAll(".code-note-window .summary-text p")].map((p) => p.textContent).join("\n"));
+  t.check(
+    "표지가 범위 시작 줄에 있고, 누르면 만든 설명이 문단 둘로 뜨며 정의 표기는 누를 수 있다",
+    near(glyph.y + glyph.height / 2, startLine.y + startLine.height / 2, 3) && shownText === text.replaceAll("`", "") &&
+      (await count(page, '.code-note-window .summary-ref[data-node="note_common:extract_today_items"]')) === 1,
+    shownText.replaceAll("\n", " / "),
+  );
+  await t.shot();
+  await page.click(".code-note-fold");
+  const folded = (await count(page, ".code-note-window")) === 0 && (await count(page, ".code-note-glyph")) === 1;
+  await page.mouse.click(glyph.x + glyph.width / 2, glyph.y + glyph.height / 2);
+  await page.waitForSelector(".code-note-window .summary-text", { timeout: 5_000 }).catch(() => {});
+  t.check("접기를 누르면 창이 표지로 접히고, 표지를 다시 누르면 같은 설명이 뜬다", folded && (await page.evaluate(() => document.querySelector(".code-note-window .summary-text")?.textContent ?? "")).includes("모은 항목"));
+
+  // 새로 연 뒤에도 표지가 남고, 코드가 바뀐 범위는 흐리게 보인다.
+  notes.saved = notes.saved.map((e) => ({ ...e, stale: true }));
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  await open();
+  await page.waitForSelector(".code-note-glyph", { timeout: 5_000 }).catch(() => {});
+  const kept = await rectOf(page, ".code-note-glyph");
+  const dim = kept === null ? null : await page.evaluate(() => Number(getComputedStyle(document.querySelector(".code-note-glyph")).opacity));
+  if (kept !== null) {
+    await page.mouse.click(kept.x + kept.width / 2, kept.y + kept.height / 2);
+    await page.waitForSelector(".code-note-window .stale-note", { timeout: 5_000 }).catch(() => {});
+  }
+  const stale = await page.evaluate(() => ({
+    note: document.querySelector(".code-note-window .stale-note")?.textContent ?? "",
+    opacity: Number(getComputedStyle(document.querySelector(".code-note-window .summary-text") ?? document.body).opacity),
+  }));
+  t.check(
+    "페이지를 새로 열어도 표지가 남고, 코드가 바뀐 범위는 표지와 본문을 흐리게 그리고 그 사실을 적는다",
+    kept !== null && dim < 1 && stale.note === "코드가 바뀌기 전에 만든 설명" && stale.opacity < 1 && notes.held.length === 1,
+    `표지 불투명도 ${dim}, 문구 "${stale.note}", 본문 불투명도 ${stale.opacity}`,
+  );
+  await page.click(".code-note-window .summary-action:text('지우기')");
+  await page.waitForFunction(() => document.querySelector(".code-note-glyph") === null, null, { timeout: 5_000 }).catch(() => {});
+  t.check("지우기를 누르면 창과 표지가 사라지고 저장한 설명도 지워진다", (await count(page, ".code-note-window, .code-note-glyph")) === 0 && notes.saved.length === 0, `저장된 설명 ${notes.saved.length}개`);
+}
+
 /** 요약을 실제로 만들지 않고 "요약 생성" 버튼과 "자동 요약" 토글이 POST를 언제 보내는지만 본다. 보낸 POST는 붙잡혀 서버에 닿지 않는다. */
 async function summaryAsk(t, page) {
   const { found, available, reason } = await uncached(2);
@@ -2053,6 +2195,7 @@ const SCENARIOS = [
   ["zoom-keep", zoomKeep],
   ["summary-panel", summaryPanel],
   ["summary-busy", summaryBusy],
+  ["explain", explain],
   ["summary-ask", summaryAsk],
   ["summary-ref", summaryRef],
   ["summary", summary],

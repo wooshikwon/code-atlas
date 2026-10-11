@@ -21,7 +21,7 @@ from .collect import RepoFiles, collect, collected, is_test_path
 from .lsp import Location, Session
 from .model import Analysis, to_dict
 from .resolve import EXTERNAL_PREFIX, Index, external_of
-from .summary import Summaries, SummaryError, prompt_of
+from .summary import Subject, Summaries, SummaryError, digest_of, prompt_of, range_code, range_prompt_of
 
 HOST = "127.0.0.1"
 PORT = 8766
@@ -222,21 +222,64 @@ def create_app(
         reason = await summaries.unavailable()
         return {"summary": summaries.cached(prompt), "available": reason is None, "reason": reason}
 
-    @app.post("/api/summary")
-    async def make_summary(request: Request, node: str, refresh: bool = False) -> dict:
-        making = asyncio.ensure_future(app.state.summaries.make(summarized(node), refresh))
+    async def made(request: Request, making: Awaitable[str]) -> str:
+        """설명을 다 만들 때까지 기다린다. 호출자가 먼저 연결을 끊으면 기다리기를 그만둔다."""
+        task = asyncio.ensure_future(making)
         gone = asyncio.ensure_future(_disconnected(request))
         try:
-            done, _ = await asyncio.wait({making, gone}, return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait({task, gone}, return_when=asyncio.FIRST_COMPLETED)
         finally:
             gone.cancel()
-            making.cancel()
-        if making not in done:
+            task.cancel()
+        if task not in done:
             raise HTTPException(status_code=499, detail="호출자가 연결을 끊었다")
         try:
-            return {"summary": making.result()}
+            return task.result()
         except SummaryError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/summary")
+    async def make_summary(request: Request, node: str, refresh: bool = False) -> dict:
+        return {"summary": await made(request, app.state.summaries.make(summarized(node), refresh))}
+
+    def explained(path: str, start: int, end: int) -> tuple[str, Subject]:
+        """파일의 줄 범위를 설명을 만들 프롬프트와, 그 설명을 남길 대상으로 바꾼다."""
+        analyzed: Analyzed = app.state.analyzed
+        code = range_code(analyzed.texts, path, start, end)
+        prompt = range_prompt_of(app.state.nodes, analyzed.analysis.edges, analyzed.texts, path, start, end)
+        if code is None or prompt is None:
+            raise HTTPException(status_code=404, detail=f"설명할 코드 범위가 아니다: {path} {start}~{end}줄")
+        return prompt, Subject(app.state.repo["root"], "range", f"{path}:{start}-{end}", digest_of(code))
+
+    @app.get("/api/explanations")
+    def get_explanations(path: str) -> dict:
+        """파일에 남겨 둔 코드 범위 설명. 설명을 만든 뒤 그 줄 범위의 코드가 달라졌으면 `stale`이 참이다."""
+        analyzed: Analyzed = app.state.analyzed
+        if path not in analyzed.texts:
+            raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
+        found = []
+        for kept in app.state.summaries.latest.listed(app.state.repo["root"], "range"):
+            file, _, span = kept.name.rpartition(":")
+            if file != path:
+                continue
+            start, end = (int(n) for n in span.split("-"))
+            code = range_code(analyzed.texts, path, start, end)
+            stale = code is None or digest_of(code) != kept.digest
+            found.append({"start": start, "end": end, "text": kept.text, "stale": stale, "created": kept.created})
+        return {"explanations": sorted(found, key=lambda e: (e["start"], e["end"]))}
+
+    @app.post("/api/explanation")
+    async def make_explanation(
+        request: Request, path: str, start: int = Query(ge=1), end: int = Query(ge=1), refresh: bool = False
+    ) -> dict:
+        prompt, subject = explained(path, start, end)
+        text = await made(request, app.state.summaries.make(prompt, refresh, "range", subject))
+        return {"start": start, "end": end, "text": text, "stale": False}
+
+    @app.delete("/api/explanation")
+    def delete_explanation(path: str, start: int = Query(ge=1), end: int = Query(ge=1)) -> dict:
+        app.state.summaries.latest.delete(app.state.repo["root"], "range", f"{path}:{start}-{end}")
+        return {"deleted": True}
 
     @app.get("/api/changes")
     def get_changes() -> dict:

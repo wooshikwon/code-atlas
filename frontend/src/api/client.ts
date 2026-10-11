@@ -3,6 +3,8 @@ import type {
   ApiErrorBody,
   Changes,
   Definition,
+  Explanation,
+  Explanations,
   FileText,
   Graph,
   Hover,
@@ -80,6 +82,24 @@ export function getSummary(node: string): Promise<SummaryStatus> {
 /** 캐시에 없으면 요약을 만들게 한다. refresh면 캐시에 있어도 다시 만든다. */
 export function makeSummary(node: string, refresh: boolean): Promise<MadeSummary> {
   return request(`/api/summary?node=${encodeURIComponent(node)}${refresh ? "&refresh=true" : ""}`, undefined, "POST");
+}
+
+function span(path: string, start: number, end: number): string {
+  return `path=${encodeURIComponent(path)}&start=${start}&end=${end}`;
+}
+
+/** 파일에 저장해 둔 코드 범위 설명 */
+export function getExplanations(path: string): Promise<Explanations> {
+  return request(`/api/explanations?path=${encodeURIComponent(path)}`);
+}
+
+/** 캐시에 없으면 코드 범위의 설명을 만들어 저장하게 한다. refresh면 캐시에 있어도 다시 만든다. */
+export function makeExplanation(path: string, start: number, end: number, refresh: boolean): Promise<Explanation> {
+  return request(`/api/explanation?${span(path, start, end)}${refresh ? "&refresh=true" : ""}`, undefined, "POST");
+}
+
+export function deleteExplanation(path: string, start: number, end: number): Promise<{ deleted: boolean }> {
+  return request(`/api/explanation?${span(path, start, end)}`, undefined, "DELETE");
 }
 
 /** 마지막 커밋 뒤에 바뀐 파일과 노드 */

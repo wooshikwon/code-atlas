@@ -643,6 +643,112 @@ ul {
   background: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
+/* 코드 범위 설명. 고른 끝의 "요약 생성" 버튼, 범위 아래에 뜨는 창, 범위 시작 줄 왼쪽의 말풍선 표지다. */
+.code-notes {
+  position: absolute;
+  z-index: var(--z-menu);
+  inset: 0;
+  pointer-events: none;
+}
+
+.code-notes > * {
+  pointer-events: auto;
+}
+
+.code-explain {
+  position: absolute;
+  margin: 2px 0 0;
+  background: var(--panel-bg);
+  white-space: nowrap;
+}
+
+.code-note-window {
+  position: absolute;
+  right: 12px;
+  left: 56px;
+  display: flex;
+  flex-direction: column;
+  max-height: 45%;
+  border: 1px solid var(--muted);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
+  line-height: 1.6;
+}
+
+.code-note-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px 4px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.code-note-head .info-panel-label {
+  flex: 1;
+}
+
+.code-note-fold {
+  min-width: 22px;
+  font-weight: 600;
+}
+
+.code-note-body {
+  min-height: 0;
+  padding: 7px 10px;
+  overflow-y: auto;
+}
+
+.code-note-body code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.code-note-body .summary-text p:last-child {
+  margin-bottom: 0;
+}
+
+/* 대상이 바뀌기 전에 만든 설명. 문구를 위에 적고 본문을 흐리게 그린다. LLM 요약 칸과 코드 범위 설명 창이 함께 쓴다. */
+.stale-note {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.stale-text {
+  opacity: 0.55;
+}
+
+.code-note-glyph {
+  background: var(--muted);
+  cursor: pointer;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H8l-3.2 2.6V11.5H3A1.5 1.5 0 0 1 1.5 10V4A1.5 1.5 0 0 1 3 2.5z'/%3E%3C/svg%3E") center / 14px 14px no-repeat;
+}
+
+.code-note-glyph:hover {
+  background: var(--ink);
+}
+
+.code-note-stale {
+  opacity: 0.4;
+}
+
+.code-note-making {
+  animation: note-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes note-pulse {
+  to {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-note-making {
+    animation: none;
+  }
+}
+
 /* Mod를 누른 채 올린 이름 가운데 정의로 이동할 수 있는 이름 */
 .code-link {
   text-decoration: underline;

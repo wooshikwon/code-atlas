@@ -577,3 +577,93 @@ async def test_summaries_asks_login_until_available(fake_cli, tmp_path):
     assert await summaries.unavailable() is None
     fake_cli(LOGGED_OUT)
     assert await summaries.unavailable() is None
+
+
+def test_system_prompt_of_range_holds_range_rules_and_shares_notation_rules():
+    system = summary.system_prompt_of(None, "range")
+    assert system.startswith(summary.RANGE_INTRO) and system.endswith(summary.RANGE_RULES)
+    assert summary.NOTATION_RULES in system and summary.NOTATION_RULES in summary.system_prompt_of(None)
+    assert "하는 일\n{문단 하나에서 셋}" not in system
+
+
+def test_enclosing_picks_the_innermost_definition_or_the_file():
+    assert summary.enclosing(NODES, "src/core.py", 22, 23).id == "core:Engine.start"
+    assert summary.enclosing(NODES, "src/core.py", 20, 23).id == "core:Engine"
+    assert summary.enclosing(NODES, "src/core.py", 3, 5).id == "core"
+    assert summary.enclosing(NODES, "src/missing.py", 1, 1) is None
+
+
+def test_range_prompt_of_holds_range_code_numbered_definition_and_flow():
+    prompt = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 30, 31)
+    found = sections(prompt)
+    assert found["대상"] == (
+        "종류: 코드 범위\n위치: src/core.py 30~31줄\n범위가 든 정의: core.py::run_engine (함수, 29~32줄)"
+    )
+    assert found["고른 범위의 코드"] == "    engine = Engine(config)\n    engine.start(config)"
+    assert found["범위가 든 정의의 시그니처"] == "def run_engine(config: Config) -> Engine:"
+    assert found["범위가 든 정의의 전체 코드"] == (
+        "29: def run_engine(config: Config) -> Engine:\n30>     engine = Engine(config)\n"
+        "31>     engine.start(config)\n32:     return engine"
+    )
+    assert "- cli.py::main · 호출" in found["대상을 호출하는 쪽"]
+    assert "- core.py::Engine.start\n    def start(self, label):" in found["대상이 호출하는 쪽"]
+    assert prompt.endswith(summary.RANGE_TAIL)
+
+
+def test_range_prompt_of_top_level_code_has_no_flow_and_bad_ranges_are_none():
+    found = sections(summary.range_prompt_of(NODES, EDGES, TEXTS, "src/cli.py", 9, 10))
+    assert found["대상"].endswith("범위가 든 정의: src/cli.py의 최상위 코드")
+    assert "범위가 든 정의의 시그니처" not in found and "대상을 호출하는 쪽" not in found
+    assert found["범위가 든 정의의 전체 코드"].endswith("10> run_engine(None)")
+    for path, start, end in [("src/core.py", 31, 30), ("src/core.py", 30, 99), ("src/none.py", 1, 1), ("src/core.py", 27, 28)]:
+        assert summary.range_prompt_of(NODES, EDGES, TEXTS, path, start, end) is None
+
+
+def test_range_prompt_of_cuts_a_long_definition_around_the_range():
+    lines = ["def big():", *(f"    x{n} = {'1' * 40}" for n in range(2, 2001))]
+    texts = {**TEXTS, "src/big.py": "\n".join(lines)}
+    nodes = {**NODES, "big": node("big", "module", "src/big.py", (1, 2000)), "big:big": node("big:big", "function", "src/big.py", (1, 2000))}
+    whole = sections(summary.range_prompt_of(nodes, EDGES, texts, "src/big.py", 1000, 1001))["범위가 든 정의의 전체 코드"].splitlines()
+    assert whole[0] == "(앞 줄 생략)" and whole[-1] == "(뒤 줄 생략)"
+    assert whole[1].startswith("940: ") and whole[-2].startswith("1061: ") and "1000>     x1000" in "\n".join(whole)
+
+
+def test_plain_joins_paragraph_lines_and_rejects_empty_text():
+    assert summary.plain("\n 첫 문단이다. \n\n\n둘째 문단이다.\n") == "첫 문단이다.\n둘째 문단이다."
+    with pytest.raises(SummaryError):
+        summary.plain(" \n ")
+
+
+def test_latest_keeps_one_text_per_subject(tmp_path):
+    latest = summary.Latest(tmp_path / "deep" / "summaries.db")
+    first = summary.Subject("/repo", "range", "src/core.py:30-31", "d1")
+    assert latest.get("/repo", "range", first.name) is None
+    latest.put(first, "설명 1")
+    latest.put(summary.Subject("/repo", "range", "src/cli.py:1-2", "d2"), "설명 2")
+    latest.put(summary.Subject("/other", "range", first.name, "d3"), "다른 레포")
+    kept = summary.Latest(tmp_path / "deep" / "summaries.db").get("/repo", "range", first.name)
+    assert (kept.text, kept.digest) == ("설명 1", "d1") and kept.created
+    latest.put(summary.Subject("/repo", "range", first.name, "d4"), "설명 3")
+    assert sorted((k.name, k.text, k.digest) for k in latest.listed("/repo", "range")) == [
+        ("src/cli.py:1-2", "설명 2", "d2"),
+        ("src/core.py:30-31", "설명 3", "d4"),
+    ]
+    latest.delete("/repo", "range", first.name)
+    assert [k.name for k in latest.listed("/repo", "range")] == ["src/cli.py:1-2"]
+    assert latest.get("/other", "range", first.name).text == "다른 레포"
+
+
+@pytest.mark.asyncio
+async def test_make_of_range_uses_range_system_prompt_plain_text_and_keeps_latest(fake_cli, tmp_path):
+    record = fake_cli(OK.replace("**하는 일**", "둘째 문단이다.").replace("## 앞뒤 흐름", ""))
+    summaries = Summaries(tmp_path / "summaries.db")
+    subject = summary.Subject("/repo", "range", "src/core.py:30-31", "d1")
+    text = await summaries.make("[대상]\n종류: 코드 범위", kind="range", subject=subject)
+    assert text == "설정을 받아 엔진을 만들고 시작한다.\n둘째 문단이다.\n엔진을 만든다.\n`main`이 호출한다."
+    assert summary.system_prompt_of(None, "range") in (record / "args").read_text()
+    assert summaries.latest.get("/repo", "range", subject.name).text == text
+
+    moved = summary.Subject("/repo", "range", "src/core.py:40-41", "d1")
+    assert await summaries.make("[대상]\n종류: 코드 범위", kind="range", subject=moved) == text
+    assert (record / "runs").read_text().count("run") == 1
+    assert summaries.latest.get("/repo", "range", moved.name).text == text

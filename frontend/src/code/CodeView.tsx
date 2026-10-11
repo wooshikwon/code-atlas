@@ -5,6 +5,7 @@ import type { FileText } from "../api/types";
 import { useAtlas } from "../state/store";
 import { modelPath } from "./hover";
 import { keepModel, monacoTheme } from "./monaco";
+import { RangeNotes } from "./RangeNotes";
 
 type CodeEditor = Parameters<OnMount>[0];
 
@@ -156,11 +157,13 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
             // LSP 세션이 없는 서버에서는 밑줄을 긋지 않는다.
           });
       }),
-      editor.onMouseLeave(clear),
-      editor.onKeyUp((event) => !(event.metaKey || event.ctrlKey) && clear()),
     ];
+    // 밑줄은 Mod를 뗄 때 지운다. 포커스가 코드 뷰어 밖에 있어도 지우도록 window에서 듣는다.
+    const onKeyUp = (event: KeyboardEvent) => !(event.metaKey || event.ctrlKey) && clear();
+    window.addEventListener("keyup", onKeyUp);
     return () => {
       listeners.forEach((listener) => listener.dispose());
+      window.removeEventListener("keyup", onKeyUp);
       links.clear();
     };
   }, [editor, path, start]);
@@ -178,6 +181,7 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
       readOnly: true,
       domReadOnly: true,
       minimap: { enabled: false },
+      glyphMargin: true,
       scrollBeyondLastLine: false,
       fontSize: 13,
       renderLineHighlight: "none" as const,
@@ -201,6 +205,7 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
           options={options}
         />
       )}
+      {editor !== null && code !== undefined && <RangeNotes key={model} editor={editor} path={path} first={start} />}
       {note !== null && (
         <div className="code-note" style={{ left: note.x, top: note.y }}>
           {note.text}

@@ -125,6 +125,20 @@ export interface MadeSummary {
   summary: string;
 }
 
+/** 코드 범위 하나의 설명. start와 end는 1부터 세는 파일 줄 번호다. */
+export interface Explanation {
+  start: number;
+  end: number;
+  /** 문단마다 한 줄 */
+  text: string;
+  /** 설명을 만든 뒤 그 줄 범위의 코드가 바뀌었다 */
+  stale: boolean;
+}
+
+export interface Explanations {
+  explanations: Explanation[];
+}
+
 export type Change = "modified" | "added";
 
 export interface ChangedFile {

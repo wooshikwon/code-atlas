@@ -1,4 +1,4 @@
-"""Claude Code CLI로 노드의 설명(요지, 하는 일, 앞뒤 흐름)을 만들고 캐시한다.
+"""Claude Code CLI로 노드의 설명(요지, 하는 일, 앞뒤 흐름)과 코드 범위의 설명을 만들고 캐시한다.
 
 설명은 그 컴퓨터에 로그인한 Claude Code 구독 계정으로 `claude -p`를 불러 만든다.
 실행 파일 찾기, 앞뒤 흐름 자료, 프롬프트, 호출, 캐시는 이 모듈만 한다.
@@ -73,7 +73,23 @@ BUILTIN_STYLE_GUIDE = """- 한 문장에 한 가지 내용만 담고, 주어와 
 - 원인은 "~때문에", "~므로"로, 조건은 "~면"으로 밝힌다.
 """
 
-PROMPT_RULES = """# 출력 형식
+# 설명에 식별자와 레포 안의 정의를 적는 표기. 노드 설명과 코드 범위 설명이 함께 쓴다.
+NOTATION_RULES = """- 코드에 있는 식별자(함수·클래스·변수·필드 이름, 파일 이름)와 코드에 적힌 짧은 문자열 값은 백틱으로 감싼다. 인자를 붙인 호출식, 괄호를 붙인 함수 이름, 여러 식별자를 이은 코드 조각은 백틱에 넣지 않는다.
+- 레포 안의 함수·메서드·클래스·데이터 클래스를 가리킬 때는 늘 `파일 경로::정의 이름` 표기를 백틱으로 감싸 적는다. 표기는 사용자 메시지의 `[대상]`과 앞뒤 흐름 자료에 적힌 글자를 그대로 옮긴다. 함수는 `arbiter.py::arbiter_sync`, 메서드는 `note_common.py::ExtractedTodo.to_note_line`, 클래스는 `parser/plan.py::Plan`처럼 적고 괄호를 붙이지 않는다. 같은 정의를 다시 가리킬 때, 파일 경로를 앞에 적은 문장에서 그 파일의 정의를 가리킬 때, 대상 자신을 이름으로 부를 때도 표기 전체를 적고 이름만 따로 적지 않는다. "`parser/plan.py`에서 `Plan`을 받는다"가 아니라 "`parser/plan.py::Plan`을 받는다"로 쓴다. 여러 클래스에 있는 같은 이름의 메서드를 함께 말할 때도 메서드마다 표기를 적는다.
+- 자료에 이 표기로 적히지 않은 정의에는 `::`를 붙이지 않는다. 매개변수, 지역 변수, 필드, 모듈 변수, 외부 라이브러리의 함수(`re.sub`, `Path.glob`)는 이름만 백틱으로 감싼다. 파일은 경로만 적는다.
+"""
+
+# 설명하는 법 가운데 노드 설명과 코드 범위 설명이 함께 쓰는 항목
+LISTING_RULE = """- 식별자를 나열하지 않는다. 식별자를 처음 적을 때 그 값이 무엇이고 왜 필요한지를 함께 풀어 쓴다. 호출하는 함수가 많으면 하는 일이 같은 함수를 묶어 그 일을 적고, 대표가 되는 이름만 든다.
+"""
+FACT_RULES = """- 코드와 자료에 있는 사실만 쓴다. 코드에 없는 동작과 목적, 자료에 없는 호출 관계를 추측해 적지 않는다. 시그니처와 문서 문자열만 주어진 함수는 그 둘이 말하는 범위까지만 적는다.
+- 설명에는 코드가 하는 일만 적는다. "자료에 없다", "제공된 자료", "코드만으로는 확인하지 못한다"처럼 받은 자료를 말하는 문장을 쓰지 않고, 확인하지 못한 내용은 적지 않는다.
+"""
+LANGUAGE_RULE = """- 코드의 주석과 문서 문자열이 영어여도 설명은 한국어로 쓴다. 모든 문장은 "~한다"체로 끝낸다.
+"""
+
+PROMPT_RULES = (
+    """# 출력 형식
 
 아래 구성을 그대로 지킨다. 요지 앞과 마지막 문단 뒤에 다른 글을 붙이지 않는다.
 
@@ -90,21 +106,58 @@ PROMPT_RULES = """# 출력 형식
 - 하는 일: 입력을 받아 결과를 내기까지의 과정을 코드가 실행되는 순서대로 풀어 쓴다. 문단은 셋까지, 문단 하나는 네 문장까지 쓴다. 열 줄이 안 되는 코드는 문단 하나로 쓴다. 긴 코드는 실행 단계를 둘이나 셋으로 묶어 묶음마다 문단 하나를 쓰고, 분기를 하나씩 옮겨 적지 않고 그 단계가 무엇을 판정해 무엇을 만들거나 바꾸는지를 쓴다. 결과를 바꾸는 조건과 예외 처리는 어떤 경우에 무엇이 달라지는지를 적는다. 대상이 파일이면 정의를 맡은 일에 따라 둘이나 셋으로 묶어 묶음마다 문단 하나를 쓰고, 문단을 "첫째", "둘째"로 시작하지 않고 그 묶음이 맡은 일로 시작한다.
 - 앞뒤 흐름: 문단 둘로 쓰고, 문단 하나는 세 문장까지 쓴다. 앞 문단에는 누가 어떤 상황에서 대상을 부르는지, 어떤 값을 넘기고 돌려받은 값을 어디에 쓰는지를 호출하는 코드 줄을 읽어 적는다. 뒤 문단에는 대상이 무엇을 불러 어떤 값을 넘겨받는지를 적는다. 대상이 파일이면 앞 문단에 어느 파일이 이 파일의 무엇을 가져다 쓰는지를, 뒤 문단에 이 파일이 어느 파일의 무엇을 가져다 쓰는지를 적는다.
 - 문단은 줄을 바꿔 나누고 문단 안에서는 줄을 바꾸지 않는다. 표지 줄에는 `하는 일`, `앞뒤 흐름` 글자만 쓴다. 제목 기호, 굵은 글씨, 목록 기호, 번호, 코드 울타리, 표를 쓰지 않는다.
-- 코드에 있는 식별자(함수·클래스·변수·필드 이름, 파일 이름)와 코드에 적힌 짧은 문자열 값은 백틱으로 감싼다. 인자를 붙인 호출식, 괄호를 붙인 함수 이름, 여러 식별자를 이은 코드 조각은 백틱에 넣지 않는다.
-- 레포 안의 함수·메서드·클래스·데이터 클래스를 가리킬 때는 늘 `파일 경로::정의 이름` 표기를 백틱으로 감싸 적는다. 표기는 사용자 메시지의 `[대상]`과 앞뒤 흐름 자료에 적힌 글자를 그대로 옮긴다. 함수는 `arbiter.py::arbiter_sync`, 메서드는 `note_common.py::ExtractedTodo.to_note_line`, 클래스는 `parser/plan.py::Plan`처럼 적고 괄호를 붙이지 않는다. 같은 정의를 다시 가리킬 때, 파일 경로를 앞에 적은 문장에서 그 파일의 정의를 가리킬 때, 대상 자신을 이름으로 부를 때도 표기 전체를 적고 이름만 따로 적지 않는다. "`parser/plan.py`에서 `Plan`을 받는다"가 아니라 "`parser/plan.py::Plan`을 받는다"로 쓴다. 여러 클래스에 있는 같은 이름의 메서드를 함께 말할 때도 메서드마다 표기를 적는다.
-- 자료에 이 표기로 적히지 않은 정의에는 `::`를 붙이지 않는다. 매개변수, 지역 변수, 필드, 모듈 변수, 외부 라이브러리의 함수(`re.sub`, `Path.glob`)는 이름만 백틱으로 감싼다. 파일은 경로만 적는다.
-
+"""
+    + NOTATION_RULES
+    + """
 # 설명하는 법
 
-- 식별자를 나열하지 않는다. 식별자를 처음 적을 때 그 값이 무엇이고 왜 필요한지를 함께 풀어 쓴다. 호출하는 함수가 많으면 하는 일이 같은 함수를 묶어 그 일을 적고, 대표가 되는 이름만 든다.
-- 대상을 문장의 주어로 쓰지 않는다. 대상의 이름, "이 함수는", "이 메서드는", "이 클래스는", "이 파일은"으로 문장을 시작하지 않고 주어를 생략한다. "이 함수는 `date_engine.py::today`로 날짜를 구한다"가 아니라 "`date_engine.py::today`로 오늘 날짜를 구한다"로, "`util.py::f`는 다른 함수를 호출하지 않는다"가 아니라 "다른 함수를 호출하지 않는다"로 쓴다. 주어가 필요한 문장에는 그 문장에서 실제로 동작하거나 바뀌는 값의 이름을 쓴다.
-- 코드와 자료에 있는 사실만 쓴다. 코드에 없는 동작과 목적, 자료에 없는 호출 관계를 추측해 적지 않는다. 시그니처와 문서 문자열만 주어진 함수는 그 둘이 말하는 범위까지만 적는다.
-- 설명에는 코드가 하는 일만 적는다. "자료에 없다", "제공된 자료", "코드만으로는 확인하지 못한다"처럼 받은 자료를 말하는 문장을 쓰지 않고, 확인하지 못한 내용은 적지 않는다.
-- 호출하는 쪽 자료가 "없음"이면 정적 분석에서 호출하는 곳을 찾지 못했다고 적는다. 자료에 진입점이라고 적혀 있으면 명령이나 요청으로 바깥에서 실행하는 코드라고 적는다. 테스트 코드만 대상을 호출하면 그렇게 적는다. 대상이 호출하는 쪽 자료가 "없음"이면 뒤 문단에 다른 함수를 호출하지 않는다고 적는다.
-- 코드의 주석과 문서 문자열이 영어여도 설명은 한국어로 쓴다. 모든 문장은 "~한다"체로 끝낸다.
+"""
+    + LISTING_RULE
+    + """- 대상을 문장의 주어로 쓰지 않는다. 대상의 이름, "이 함수는", "이 메서드는", "이 클래스는", "이 파일은"으로 문장을 시작하지 않고 주어를 생략한다. "이 함수는 `date_engine.py::today`로 날짜를 구한다"가 아니라 "`date_engine.py::today`로 오늘 날짜를 구한다"로, "`util.py::f`는 다른 함수를 호출하지 않는다"가 아니라 "다른 함수를 호출하지 않는다"로 쓴다. 주어가 필요한 문장에는 그 문장에서 실제로 동작하거나 바뀌는 값의 이름을 쓴다.
+"""
+    + FACT_RULES
+    + """- 호출하는 쪽 자료가 "없음"이면 정적 분석에서 호출하는 곳을 찾지 못했다고 적는다. 자료에 진입점이라고 적혀 있으면 명령이나 요청으로 바깥에서 실행하는 코드라고 적는다. 테스트 코드만 대상을 호출하면 그렇게 적는다. 대상이 호출하는 쪽 자료가 "없음"이면 뒤 문단에 다른 함수를 호출하지 않는다고 적는다.
+"""
+    + LANGUAGE_RULE
+)
+
+RANGE_INTRO = """\
+파이썬 코드베이스를 처음 보는 개발자에게, 그 개발자가 코드 뷰어에서 끌어 고른 코드 범위를 설명하는 글을 쓴다. 독자는 파이썬 문법은 알지만 이 코드베이스의 함수 이름, 자료 구조, 업무 용어는 모른다.
+
+사용자 메시지에는 고른 범위의 위치와 코드, 그 범위가 든 정의의 이름·시그니처·전체 코드, 정적 분석기가 모은 그 정의의 앞뒤 흐름 자료가 구획별로 들어 있다. 범위가 든 정의의 전체 코드는 줄마다 줄 번호가 붙어 있고 고른 범위의 줄은 줄 번호 뒤에 `>`가 있다. 자료는 레포 안의 함수·메서드·클래스를 `파일 경로::정의 이름` 표기로 적는다.
 """
 
+RANGE_RULES = (
+    """# 출력 형식
+
+- 문단 하나에서 넷으로 쓰고 문단 하나는 네 문장까지 쓴다. 문단은 줄을 바꿔 나누고 문단 안에서는 줄을 바꾸지 않는다. 첫 문단 앞과 마지막 문단 뒤에 다른 글을 붙이지 않는다.
+- 첫 문장에는 고른 범위가 어떤 값을 받아 무엇을 만들거나 바꾸는지를 쓰고 동사로 끝낸다.
+- 이어서 범위의 코드가 실행되는 순서대로, 어떤 값을 읽어 무엇을 판정하고 어떤 값을 만들거나 바꾸는지를 풀어 쓴다. 조건문과 반복문은 어떤 경우에 어느 동작을 하는지를, 예외 처리는 어떤 오류를 받아 무엇을 하는지를 적는다.
+- 범위 밖의 코드는 범위를 읽는 데 필요한 만큼만 적는다. 범위가 쓰는 값이 범위 앞에서 어떻게 정해졌는지, 범위가 만든 값을 범위 뒤에서 어디에 쓰는지를 범위가 든 정의의 전체 코드에서 읽어 적는다.
+- 제목 기호, 굵은 글씨, 목록 기호, 번호, 코드 울타리, 표를 쓰지 않는다. 줄 번호는 적지 않는다.
+"""
+    + NOTATION_RULES
+    + """
+# 설명하는 법
+
+"""
+    + LISTING_RULE
+    + """- 고른 범위를 문장의 주어로 쓰지 않는다. "이 범위는", "이 코드는", "이 부분은"으로 문장을 시작하지 않고 주어를 생략한다. 주어가 필요한 문장에는 그 문장에서 실제로 동작하거나 바뀌는 값의 이름을 쓴다.
+"""
+    + FACT_RULES
+    + LANGUAGE_RULE
+)
+
 # 프롬프트 끝에 붙이는 확인 목록. 규칙은 `PROMPT_RULES`에 있고 여기에는 글을 내기 직전에 다시 볼 항목만 적는다.
+RANGE_TAIL = """[내기 전에 확인]
+- 첫 문장이 고른 범위가 받는 값과 만들거나 바꾸는 값을 적고 동사로 끝나는가.
+- "이 범위는", "이 코드는"이 주어인 문장이 있으면 주어를 뺀다.
+- 문단이 넷, 문단마다 네 문장을 넘으면 단계로 묶어 줄인다.
+- 백틱 안에 호출식이나 코드 조각이 있으면 식별자만 남긴다.
+- 레포 안의 함수·메서드·클래스를 가리킨 곳이 모두 자료에 적힌 `파일 경로::정의 이름` 표기인가. 자료에 없는 표기와 변수·필드·외부 함수에 붙인 `::`는 지운다.
+- "~에 대해", "~를 통해", "~에 의해", 행위자가 있는 피동, "첫째·둘째", 줄표가 있으면 고친다.
+"""
+
 PROMPT_TAIL = """[내기 전에 확인]
 - 요지가 동사로 끝나는가. "함수다", "클래스다", "모듈이다"로 끝나면 고친다.
 - 대상의 이름, "이 함수는", "이 클래스는", "이 파일은"이 주어인 문장이 있으면 주어를 뺀다.
@@ -147,10 +200,18 @@ def find_style_guide(option: str | None) -> Path | None:
     return Path(chosen).expanduser() if chosen else None
 
 
-def system_prompt_of(style_guide: Path | None) -> str:
-    """시스템 프롬프트. 역할, 서술 규약, 출력 형식과 설명하는 법의 순서다. 서술 규약 문서를 읽어 전문을 넣고, 경로가 None이면 내장 지침을 넣는다."""
+# 설명의 종류마다 시스템 프롬프트의 역할 문단과 출력 형식·설명하는 법
+SYSTEM_PARTS = {"node": (PROMPT_INTRO, PROMPT_RULES), "range": (RANGE_INTRO, RANGE_RULES)}
+
+
+def system_prompt_of(style_guide: Path | None, kind: str = "node") -> str:
+    """시스템 프롬프트. 역할, 서술 규약, 출력 형식과 설명하는 법의 순서다. 서술 규약 문서를 읽어 전문을 넣고, 경로가 None이면 내장 지침을 넣는다.
+
+    `kind`는 노드 설명("node")인지 코드 범위 설명("range")인지다.
+    """
+    intro, rules = SYSTEM_PARTS[kind]
     if style_guide is None:
-        return f"{PROMPT_INTRO}\n{STYLE_GUIDE_HEAD}\n{BUILTIN_STYLE_GUIDE}\n{PROMPT_RULES}"
+        return f"{intro}\n{STYLE_GUIDE_HEAD}\n{BUILTIN_STYLE_GUIDE}\n{rules}"
     try:
         text = style_guide.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -159,12 +220,17 @@ def system_prompt_of(style_guide: Path | None) -> str:
         raise SummaryError(f"서술 규약 문서가 비어 있다: {style_guide}")
     if len(text.encode()) > MAX_STYLE_GUIDE:
         raise SummaryError(f"서술 규약 문서가 {MAX_STYLE_GUIDE // 1000}KB를 넘는다: {style_guide}")
-    return f"{PROMPT_INTRO}\n{STYLE_GUIDE_HEAD}\n<서술 규약 문서>\n{text.strip()}\n</서술 규약 문서>\n\n{PROMPT_RULES}"
+    return f"{intro}\n{STYLE_GUIDE_HEAD}\n<서술 규약 문서>\n{text.strip()}\n</서술 규약 문서>\n\n{rules}"
 
 
 def key_of(system: str, prompt: str) -> str:
     """캐시 키. 프롬프트 판 번호, 모델, 시스템 프롬프트(서술 규약 문서 포함), 프롬프트(코드와 앞뒤 흐름 자료)가 같으면 같은 설명을 쓴다."""
     return hashlib.sha256(f"{PROMPT_VERSION}\n{MODEL}\n{system}\n\0\n{prompt}".encode()).hexdigest()
+
+
+def digest_of(code: str) -> str:
+    """코드 범위의 지문. 설명을 만든 뒤 그 줄 범위의 코드가 달라졌는지를 이 값으로 가린다."""
+    return hashlib.sha256(code.encode()).hexdigest()
 
 
 # 앞뒤 흐름 자료
@@ -514,6 +580,86 @@ def prompt_of(nodes: Mapping[str, Node], edges: Iterable[Edge], texts: Mapping[s
     return head + code + tail
 
 
+# 범위가 든 정의의 전체 코드가 `MAX_CODE`를 넘으면 고른 범위의 앞뒤로 이 줄 수만 적는다.
+RANGE_AROUND = 60
+
+
+def enclosing(nodes: Mapping[str, Node], path: str, start: int, end: int) -> Node | None:
+    """파일의 줄 범위를 품은 가장 안쪽 노드. 어느 정의에도 들지 않으면 그 파일의 모듈 노드다."""
+    found: Node | None = None
+    for node in nodes.values():
+        if node.path != path or node.kind not in KIND_NAMES or node.range is None:
+            continue
+        if node.range[0] <= start and end <= node.range[1]:
+            if found is None or node.range[1] - node.range[0] < found.range[1] - found.range[0]:
+                found = node
+    return found
+
+
+def range_code(texts: Mapping[str, str], path: str, start: int, end: int) -> str | None:
+    """파일의 `start`줄부터 `end`줄까지의 코드. 분석 대상 파일이 아니거나 줄 범위가 파일을 벗어나면 None이다."""
+    text = texts.get(path)
+    if text is None:
+        return None
+    lines = text.splitlines()
+    return "\n".join(lines[start - 1 : end]) if 1 <= start <= end <= len(lines) else None
+
+
+def range_prompt_of(
+    nodes: Mapping[str, Node], edges: Iterable[Edge], texts: Mapping[str, str], path: str, start: int, end: int
+) -> str | None:
+    """고른 범위의 위치와 코드, 범위가 든 정의의 시그니처·전체 코드·앞뒤 흐름 자료, 확인 목록을 구획으로 나눈 프롬프트.
+
+    설명할 수 없는 범위면 None이다. 범위가 든 정의의 전체 코드는 줄 번호를 붙이고 고른 범위의 줄에 `>`를 단다.
+    범위가 어느 정의에도 들지 않으면 파일의 최상위 코드로 보고 앞뒤 흐름 자료를 넣지 않는다.
+    """
+    code = range_code(texts, path, start, end)
+    owner = enclosing(nodes, path, start, end)
+    if code is None or owner is None or not code.strip():
+        return None
+    lines = texts[path].splitlines()
+    first, last = owner.range
+    if owner.kind == "module":
+        inside, signature = f"{path}의 최상위 코드", None
+    else:
+        inside = f"{_title(owner, file_labels(nodes))} ({KIND_NAMES[owner.kind]}, {first}~{last}줄)"
+        signature = _head_of(lines, owner.range)[0]
+    numbered = [f"{n}{'>' if start <= n <= end else ':'} {lines[n - 1].rstrip()}" for n in range(first, last + 1)]
+    if sum(len(line) + 1 for line in numbered) > MAX_CODE:
+        low, high = max(first, start - RANGE_AROUND), min(last, end + RANGE_AROUND)
+        numbered = [
+            *(["(앞 줄 생략)"] if low > first else []),
+            *numbered[low - first : high - first + 1],
+            *(["(뒤 줄 생략)"] if high < last else []),
+        ]
+    code = code[:MAX_CODE] + ("\n(이하 생략)" if len(code) > MAX_CODE else "")
+    whole = "\n".join(numbered)[: 2 * MAX_CODE]
+    head = "\n\n".join(
+        [
+            f"[대상]\n종류: 코드 범위\n위치: {path} {start}~{end}줄\n범위가 든 정의: {inside}",
+            f"[고른 범위의 코드]\n{code}",
+            *([f"[범위가 든 정의의 시그니처]\n{signature}"] if signature else []),
+            f"[범위가 든 정의의 전체 코드]\n{whole}",
+        ]
+    )
+    if owner.kind == "module":
+        return f"{head}\n\n{RANGE_TAIL}"
+    flow = flow_of(nodes, list(edges), texts, owner)
+    for detail in DETAILS[1:]:
+        prompt = f"{head}\n\n{_flow_text(flow, owner, texts, detail)}\n\n{RANGE_TAIL}"
+        if len(prompt) <= MAX_PROMPT:
+            return prompt
+    return f"{head}\n\n{RANGE_TAIL}"
+
+
+def plain(result: str) -> str:
+    """CLI가 낸 코드 범위 설명을 문단마다 한 줄로 맞춘다. 글이 비었으면 `SummaryError`를 낸다."""
+    paragraphs = [line.strip() for line in result.strip().splitlines() if line.strip()]
+    if not paragraphs:
+        raise SummaryError("Claude Code CLI가 낸 설명이 비어 있다")
+    return "\n".join(paragraphs)
+
+
 def shaped(result: str) -> str:
     """CLI가 낸 글을 `요지`, 빈 줄, `하는 일` 표지와 문단, 빈 줄, `앞뒤 흐름` 표지와 문단으로 맞춘다. 세 부분 가운데 하나라도 없으면 `SummaryError`를 낸다."""
     parts: list[list[str]] = [[]]
@@ -566,8 +712,8 @@ async def unavailable() -> str | None:
     return "Claude Code에 로그인돼 있지 않다" if logged_in is False else None
 
 
-async def generate(system: str, prompt: str) -> str:
-    """`claude -p`에 시스템 프롬프트를 인자로, 프롬프트를 표준 입력으로 넘겨 설명을 받는다."""
+async def _ask(system: str, prompt: str) -> str:
+    """`claude -p`에 시스템 프롬프트를 인자로, 프롬프트를 표준 입력으로 넘겨 CLI가 낸 글을 받는다."""
     cli = find_cli()
     if cli is None:
         raise SummaryError("Claude Code CLI를 찾지 못했다")
@@ -587,7 +733,17 @@ async def generate(system: str, prompt: str) -> str:
         if "Not logged in" in detail:
             raise SummaryError("Claude Code에 로그인돼 있지 않다")
         raise SummaryError(f"Claude Code CLI가 설명을 내지 못했다(종료 코드 {returncode}): {detail}")
-    return shaped(result)
+    return result
+
+
+async def generate(system: str, prompt: str) -> str:
+    """노드 설명을 만들어 요지, 하는 일, 앞뒤 흐름 세 부분으로 맞춘다."""
+    return shaped(await _ask(system, prompt))
+
+
+async def explain(system: str, prompt: str) -> str:
+    """코드 범위 설명을 만들어 문단마다 한 줄로 맞춘다."""
+    return plain(await _ask(system, prompt))
 
 
 class Cache:
@@ -615,6 +771,67 @@ class Cache:
         )
 
 
+@dataclass(frozen=True)
+class Subject:
+    """설명 하나가 가리키는 레포 안의 대상과 그 설명을 만든 때의 지문."""
+
+    repo: str
+    kind: str  # node·range
+    name: str  # 노드 id, 또는 `파일 경로:시작 줄-끝 줄`
+    digest: str
+
+
+@dataclass(frozen=True)
+class Kept:
+    """대상에 남겨 둔 가장 최근 설명."""
+
+    name: str
+    text: str
+    digest: str
+    created: str
+
+
+class Latest:
+    """레포 안의 대상마다 가장 최근에 만든 설명과 만든 때의 지문을 담는 SQLite 표 하나.
+
+    `Cache`는 같은 입력으로 다시 만들지 않으려고 입력의 해시로 찾고, 이 표는 대상으로 찾는다. 지문이 지금 값과 다르면
+    설명을 만든 뒤에 대상이 바뀐 것이다.
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._execute(
+            "CREATE TABLE IF NOT EXISTS latest (repo TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, "
+            "digest TEXT NOT NULL, text TEXT NOT NULL, created TEXT NOT NULL, PRIMARY KEY (repo, kind, name))"
+        )
+
+    def _execute(self, sql: str, args: tuple = ()) -> list[tuple]:
+        with closing(sqlite3.connect(self.path, timeout=5)) as db, db:
+            return db.execute(sql, args).fetchall()
+
+    def get(self, repo: str, kind: str, name: str) -> Kept | None:
+        rows = self._execute(
+            "SELECT name, text, digest, created FROM latest WHERE repo = ? AND kind = ? AND name = ?", (repo, kind, name)
+        )
+        return Kept(*rows[0]) if rows else None
+
+    def listed(self, repo: str, kind: str) -> list[Kept]:
+        rows = self._execute("SELECT name, text, digest, created FROM latest WHERE repo = ? AND kind = ?", (repo, kind))
+        return [Kept(*row) for row in rows]
+
+    def put(self, subject: Subject, text: str) -> Kept:
+        kept = Kept(subject.name, text, subject.digest, time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+        self._execute(
+            "INSERT OR REPLACE INTO latest (repo, kind, name, digest, text, created) VALUES (?, ?, ?, ?, ?, ?)",
+            (subject.repo, subject.kind, subject.name, kept.digest, kept.text, kept.created),
+        )
+        return kept
+
+    def delete(self, repo: str, kind: str, name: str) -> None:
+        self._execute("DELETE FROM latest WHERE repo = ? AND kind = ? AND name = ?", (repo, kind, name))
+
+
 @dataclass
 class _Making:
     """만드는 중인 설명 하나."""
@@ -629,6 +846,7 @@ class Summaries:
 
     def __init__(self, path: Path | None = None, style_guide: Path | None = None):
         self.cache = Cache(path or CACHE_PATH)
+        self.latest = Latest(path or CACHE_PATH)
         self.style_guide = style_guide
         self._slots = asyncio.Semaphore(MAX_PROCESSES)
         self._making: dict[str, _Making] = {}
@@ -658,20 +876,23 @@ class Summaries:
         except SummaryError:
             return None
 
-    async def make(self, prompt: str, refresh: bool = False) -> str:
+    async def make(self, prompt: str, refresh: bool = False, kind: str = "node", subject: Subject | None = None) -> str:
         """캐시에 있으면 그 설명을, 없거나 `refresh`면 새로 만든 설명을 돌려준다. 같은 프롬프트의 요청이 겹치면 한 번만 만든다.
 
         서술 규약 문서는 부를 때마다 읽는다. 기다리는 호출자가 모두 취소되면 동시 실행 자리를 기다리는 설명은 만들지 않고,
-        프로세스를 띄운 설명은 끝까지 만들어 캐시에 넣는다.
+        프로세스를 띄운 설명은 끝까지 만들어 캐시에 넣는다. `kind`는 노드 설명인지 코드 범위 설명인지이고,
+        `subject`를 주면 돌려주는 설명을 그 대상의 가장 최근 설명으로 남긴다.
         """
-        system = system_prompt_of(self.style_guide)
+        system = system_prompt_of(self.style_guide, kind)
         key = key_of(system, prompt)
         making = self._making.get(key)
         if making is None:
             cached = None if refresh else self.cache.get(key)
             if cached is not None:
+                if subject is not None:
+                    self.latest.put(subject, cached)
                 return cached
-            making = _Making(asyncio.create_task(self._generate(key, system, prompt)))
+            making = _Making(asyncio.create_task(self._generate(key, system, prompt, kind, subject)))
             self._making[key] = making
             making.task.add_done_callback(lambda task: self._made(key, task))
         making.waiting += 1
@@ -691,11 +912,13 @@ class Summaries:
         if not task.cancelled():
             task.exception()
 
-    async def _generate(self, key: str, system: str, prompt: str) -> str:
+    async def _generate(self, key: str, system: str, prompt: str, kind: str, subject: Subject | None) -> str:
         async with self._slots:
             self._making[key].started = True
             started = time.monotonic()
-            summary = await generate(system, prompt)
+            summary = await (generate if kind == "node" else explain)(system, prompt)
             logger.info("summary %s made in %.1fs", key[:12], time.monotonic() - started)
         self.cache.put(key, summary)
+        if subject is not None:
+            self.latest.put(subject, summary)
         return summary

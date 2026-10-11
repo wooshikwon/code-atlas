@@ -44,7 +44,12 @@ def generated(client, tmp_path, monkeypatch):
     async def unavailable():
         return None
 
+    async def explain(system, prompt):
+        calls.append((system, prompt))
+        return f"{prompt.split(chr(10) + '위치: ', 1)[1].split(chr(10), 1)[0]} 설명 {len(calls)}"
+
     monkeypatch.setattr(summary, "generate", generate)
+    monkeypatch.setattr(summary, "explain", explain)
     monkeypatch.setattr(summary, "unavailable", unavailable)
     monkeypatch.setattr(client.app.state, "summaries", Summaries(tmp_path / "summaries.db"))
     return calls
@@ -354,6 +359,66 @@ def test_summary_is_made_on_post_and_read_from_cache(client, generated):
 
     assert client.post("/api/summary", params={**node, "refresh": "true"}).json() == {"summary": "app/core.py::run_engine 요약 2"}
     assert client.get("/api/summary", params=node).json()["summary"] == "app/core.py::run_engine 요약 2"
+
+
+def test_explanation_is_made_listed_and_deleted(client, generated):
+    path = "src/app/core.py"
+    span = {"path": path, "start": 32, "end": 33}
+    assert client.get("/api/explanations", params={"path": path}).json() == {"explanations": []}
+
+    made = client.post("/api/explanation", params=span).json()
+    assert made == {"start": 32, "end": 33, "text": "src/app/core.py 32~33줄 설명 1", "stale": False}
+    system, prompt = generated[0]
+    assert system == summary.system_prompt_of(None, "range")
+    assert "범위가 든 정의: app/core.py::run_engine (함수, 31~35줄)" in prompt
+    assert "[고른 범위의 코드]\n    engine = Engine(config)\n    engine.start(config)\n" in prompt
+    assert "32>     engine = Engine(config)" in prompt and "- app/core.py::Engine.start" in prompt
+
+    client.post("/api/explanation", params={"path": path, "start": 10, "end": 11})
+    client.post("/api/explanation", params={"path": "src/app/cli.py", "start": 9, "end": 10})
+    listed = client.get("/api/explanations", params={"path": path}).json()["explanations"]
+    assert [(e["start"], e["end"], e["text"], e["stale"]) for e in listed] == [
+        (10, 11, "src/app/core.py 10~11줄 설명 2", False),
+        (32, 33, "src/app/core.py 32~33줄 설명 1", False),
+    ]
+    assert all(e["created"] for e in listed)
+
+    assert client.post("/api/explanation", params=span).json()["text"] == "src/app/core.py 32~33줄 설명 1"
+    assert len(generated) == 3
+    assert client.post("/api/explanation", params={**span, "refresh": "true"}).json()["text"] == "src/app/core.py 32~33줄 설명 4"
+
+    assert client.delete("/api/explanation", params=span).json() == {"deleted": True}
+    assert [e["start"] for e in client.get("/api/explanations", params={"path": path}).json()["explanations"]] == [10]
+
+
+def test_explanation_is_stale_after_the_range_code_changes(client, generated):
+    path = "src/app/core.py"
+    client.post("/api/explanation", params={"path": path, "start": 32, "end": 33})
+    texts = client.app.state.analyzed.texts
+    before = texts[path]
+    texts[path] = before.replace("    engine.start(config)\n", "    engine.start(None)\n")
+    try:
+        (listed,) = client.get("/api/explanations", params={"path": path}).json()["explanations"]
+    finally:
+        texts[path] = before
+    assert listed["stale"] is True and listed["text"] == "src/app/core.py 32~33줄 설명 1"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"path": "src/app/none.py", "start": 1, "end": 2},
+        {"path": "src/app/core.py", "start": 33, "end": 32},
+        {"path": "src/app/core.py", "start": 30, "end": 999},
+    ],
+)
+def test_explanation_of_unknown_range_is_not_found(client, generated, params):
+    assert client.post("/api/explanation", params=params).status_code == 404
+    assert generated == []
+
+
+def test_explanations_of_unknown_file_is_not_found(client):
+    assert client.get("/api/explanations", params={"path": "src/app/none.py"}).status_code == 404
 
 
 def test_summary_of_method_and_file(client, generated):
