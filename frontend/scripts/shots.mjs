@@ -23,6 +23,8 @@ const NAMED_ZOOM = 0.8;
 /** 큰 상자를 패널을 뺀 영역의 시작 끝에서 띄우는 폭 */
 const INSET = 20;
 const DARK = { surface: "#1a1a19", ink: "#ffffff" };
+/** 좁은 창에서 상단 줄을 확인할 때 고르는 함수와 창 폭 */
+const NARROW = { owner: "parser.plan", id: "parser.plan:_parse_week_header", label: "_parse_week_header()", widths: [1440, 1280] };
 
 let url = "http://127.0.0.1:8766";
 let only = null;
@@ -295,6 +297,16 @@ async function open(t, page) {
   );
   const [panel, head] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-head")];
   t.check("정보 패널 높이가 머리 줄 높이에 테두리 2px를 더한 값이다", near(panel.height, head.height + 2), `패널 ${panel.height}, 머리 줄 ${head.height}`);
+  const graph = await api("/api/graph");
+  const unresolved = graph.nodes.filter((n) => !n.test).reduce((sum, n) => sum + n.unresolved, 0);
+  const badges = await page.evaluate(() =>
+    [...document.querySelectorAll(".react-flow__node .badge-unresolved")].map((badge) => Number(badge.textContent.slice(1))),
+  );
+  t.check(
+    "접힌 파일 상자의 미확인 호출 배지를 합치면 테스트 코드를 뺀 미확인 호출 수다",
+    badges.length > 0 && unresolved > 0 && badges.reduce((sum, n) => sum + n, 0) === unresolved,
+    `배지 ${badges.length}개의 합 ${badges.reduce((sum, n) => sum + n, 0)}, 그래프 ${unresolved}`,
+  );
 }
 
 async function file(t, page) {
@@ -325,6 +337,27 @@ async function file(t, page) {
       edges.every((e) => touching.includes(e) || e.tone === "muted") &&
       edges.filter((e) => e.source.startsWith(`${FILE}:`) && e.target.startsWith(`${FILE}:`)).every((e) => e.opacity === 1),
     `그린 선 ${edges.length}개: ${levels}`,
+  );
+  const title = await headOf(page);
+  const [uses, users] = [new Set(touching.filter((e) => e.source === FILE).map((e) => e.target)), new Set(touching.filter((e) => e.target === FILE).map((e) => e.source))];
+  t.check(
+    "머리 줄의 상대 상자 수가 arbiter.py 상자에 닿는 집계 선의 수와 같다",
+    title.includes(`쓰는 파일 ${uses.size} · 이 파일을 쓰는 파일 ${users.size}`),
+    title.replaceAll("\n", " / "),
+  );
+  const graph = await api("/api/graph");
+  const unresolved = graph.nodes.filter((n) => n.path === `src/${FILE}.py`).reduce((sum, n) => sum + n.unresolved, 0);
+  const badges = await page.evaluate((sel) => {
+    const numbers = (list) => [...list].map((badge) => Number(badge.textContent.slice(1)));
+    return {
+      box: document.querySelectorAll(`${sel} > .node-module > .badge-unresolved`).length,
+      inner: numbers(document.querySelectorAll(".react-flow__node .node-function .badge-unresolved")),
+    };
+  }, node(FILE));
+  t.check(
+    "펼친 arbiter.py 상자는 미확인 호출 배지가 없고, 안의 함수 배지의 합과 머리 줄의 미확인 호출 수가 같다",
+    unresolved > 0 && badges.box === 0 && badges.inner.reduce((sum, n) => sum + n, 0) === unresolved && title.includes(`미확인 호출 ${unresolved}`),
+    `함수 배지 ${badges.inner.length}개의 합 ${badges.inner.reduce((sum, n) => sum + n, 0)}, 그래프 ${unresolved}`,
   );
   const { free } = await stageOf(page);
   const box = await rectOf(page, node(FILE));
@@ -846,6 +879,18 @@ function summaryPosts(page) {
   return posts;
 }
 
+/** 이 페이지가 끊은 POST /api/summary의 노드 id를 차례로 담는 배열 */
+function summaryAborts(page) {
+  const aborted = [];
+  page.on("requestfailed", (request) => {
+    const at = new URL(request.url());
+    if (at.pathname === "/api/summary" && request.method() === "POST") {
+      aborted.push(at.searchParams.get("node"));
+    }
+  });
+  return aborted;
+}
+
 /** 파일트리에서 파일을 펼친 뒤 그 안의 함수 행을 눌러 고른다. */
 async function pickInTree(page, target) {
   await page.click(`.tree-row.tree-file[data-node="${target.owner}"]`);
@@ -865,6 +910,7 @@ async function summaryAsk(t, page) {
   }
   const [first, second] = found;
   const posts = summaryPosts(page);
+  const aborted = summaryAborts(page);
   await load(page);
   t.check('상단 줄의 "자동 요약" 토글이 꺼진 채로 열린다', !(await page.getByLabel("자동 요약").isChecked()));
   await pickInTree(page, first);
@@ -893,6 +939,15 @@ async function summaryAsk(t, page) {
     same(posts, [first.id, second.id]),
     `POST ${posts.join(", ") || "없음"}`,
   );
+  t.check(`${first.id}를 떠나면 만들고 있던 그 함수의 POST를 끊는다`, same(aborted, [first.id]), `끊은 POST ${aborted.join(", ") || "없음"}`);
+  await page.getByLabel("자동 요약").uncheck();
+  await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 5_000 }).catch(() => {});
+  t.check(
+    '"자동 요약"을 끄면 그 토글이 보낸 POST를 끊고 "요약 생성" 버튼을 다시 보인다',
+    same(aborted, [first.id, second.id]) && (await count(page, ".info-panel-summary .summary-make")) === 1,
+    `끊은 POST ${aborted.join(", ") || "없음"}`,
+  );
+  await page.getByLabel("자동 요약").check();
   await page.reload();
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
   t.check('새로고침 뒤에도 "자동 요약" 토글이 켜져 있다', await page.getByLabel("자동 요약").isChecked());
@@ -974,6 +1029,11 @@ async function folderSelect(t, page) {
   );
   const head = await headOf(page);
   t.check("정보 패널 머리 줄이 parser/ 폴더를 적는다", head.includes("parser/") && head.includes("폴더"), head.replaceAll("\n", " / "));
+  t.check(
+    "머리 줄의 상대 상자 수가 본문 잉크 집계 선의 수와 같다",
+    head.includes(`쓰는 파일 ${used.length} · 이 폴더를 쓰는 파일 ${users.length}`),
+    head.replaceAll("\n", " / "),
+  );
 }
 
 /** 파일트리에서 그래프 노드가 없는 __init__.py 행을 누른다. */
@@ -1011,9 +1071,51 @@ async function initFile(t, page) {
   await page.click(`.tree-row.tree-symbol[data-node="${FUNCTION}"]`);
   await waitSelected(page, FUNCTION);
   t.check("그래프에서 다른 노드를 고르면 연 파일이 닫히고 그 노드의 코드를 보인다", (await headOf(page)).includes("src/arbiter.py:1058-1199"), (await headOf(page)).replaceAll("\n", " / "));
+
+  // 선택 없이 연 파일은 그래프 바탕을 누르거나 그 파일이 든 폴더를 접으면 닫힌다.
+  await page.keyboard.press("Escape");
+  await settle(page);
+  const blank = async () => {
+    const { free } = await stageOf(page);
+    return page.evaluate(
+      ({ x, y, width, height }) => {
+        for (let dy = 8; dy < height; dy += 16) {
+          for (let dx = 8; dx < width; dx += 16) {
+            if (document.elementFromPoint(x + dx, y + dy)?.classList.contains("react-flow__pane")) {
+              return { x: x + dx, y: y + dy };
+            }
+          }
+        }
+        return null;
+      },
+      free,
+    );
+  };
+  await page.click(row);
+  await page.waitForSelector(".info-panel .code", { timeout: 10_000 }).catch(() => {});
+  const opened = (await count(page, ".info-panel .code")) === 1 && (await selectedOf(page)) === null;
+  const at = await blank();
+  await page.mouse.click(at.x, at.y);
+  await page.waitForSelector(".info-panel .code", { state: "detached", timeout: 5_000 }).catch(() => {});
+  t.check("선택 없이 연 파일은 그래프 바탕을 누르면 닫힌다", opened && (await count(page, ".info-panel .code")) === 0, (await headOf(page)).replaceAll("\n", " / "));
+  await page.click(row);
+  await page.waitForSelector(".info-panel .code", { timeout: 10_000 }).catch(() => {});
+  await page.click('.tree-row.tree-dir[data-node="parser"]');
+  await page.waitForSelector(".info-panel .code", { state: "detached", timeout: 5_000 }).catch(() => {});
+  t.check("연 파일이 든 폴더를 접으면 닫힌다", (await count(page, row)) === 0 && (await count(page, ".info-panel .code")) === 0, (await headOf(page)).replaceAll("\n", " / "));
+
+  // 소스 루트의 __init__.py는 모듈 노드가 있으므로 그 행이 그래프의 상자를 고른다.
+  const root = '.tree-row.tree-file[title="src/__init__.py"]';
+  await page.click(root);
+  await waitSelected(page, "__init__").catch(() => {});
+  t.check(
+    "소스 루트의 __init__.py 행을 누르면 그래프의 __init__.py 상자가 선택되고 그 행이 고른 행이 된다",
+    (await selectedOf(page)) === "__init__" && (await page.evaluate((sel) => document.querySelector(sel)?.classList.contains("active") === true, root)),
+    `선택 ${await selectedOf(page)}`,
+  );
 }
 
-/** 상단 줄의 진입점 목록과 git 브랜치 이름 */
+/** 상단 줄의 진입점 목록과 git 브랜치 이름, 좁은 창 폭의 상단 줄 */
 async function toolbar(t, page) {
   const [graph, reply] = [await api("/api/graph"), await api("/api/changes")];
   const entries = graph.nodes.filter((n) => n.entry && !n.test).map((n) => n.id);
@@ -1038,6 +1140,71 @@ async function toolbar(t, page) {
     return bar.scrollWidth <= bar.clientWidth;
   });
   t.check("상단 줄의 요소가 줄 폭 안에 들어간다", fits);
+
+  // 목록이 접힌 뒤에는 포커스가 진입점 버튼에 남아 있어도 Esc가 선택을 푼다.
+  await page.click(".toolbar-entries > .toolbar-button");
+  await page.waitForSelector(".toolbar-menu", { timeout: 5_000 }).catch(() => {});
+  await page.keyboard.press("Escape");
+  const folded = (await count(page, ".toolbar-menu")) === 0 && (await selectedOf(page)) === entries.at(-1);
+  const focused = await page.evaluate(() => document.activeElement?.closest(".toolbar-entries") !== null);
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.querySelector(".react-flow__node .node-selected") === null, null, { timeout: 5_000 }).catch(() => {});
+  t.check(
+    "Esc 한 번에 진입점 목록만 접히고, 포커스가 진입점 버튼에 남은 채 한 번 더 누르면 선택이 풀린다",
+    folded && focused && (await selectedOf(page)) === null,
+    `목록 접힘 ${folded}, 버튼 포커스 ${focused}, 선택 ${await selectedOf(page)}`,
+  );
+
+  // 좁은 창에서도 통계 문구, 탐색 경로의 마지막 단계, 버튼이 겹치거나 사라지지 않는다.
+  await page.click(`.tree-row.tree-file[data-node="${NARROW.owner}"]`);
+  await page.waitForSelector(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`, { timeout: 10_000 });
+  await page.click(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`);
+  await waitSelected(page, NARROW.id);
+  for (const width of NARROW.widths) {
+    await page.setViewportSize({ width, height: 900 });
+    await settle(page);
+    const bar = await page.evaluate(() => {
+      const shown = (element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      const toolbar = document.querySelector(".toolbar");
+      const area = toolbar.getBoundingClientRect();
+      const parts = [...toolbar.children].filter(shown).map((element) => element.getBoundingClientRect());
+      const last = document.querySelector(".trail-last");
+      const stats = [...document.querySelectorAll(".toolbar-stats > span")].find(shown);
+      return {
+        apart: parts.every((rect, i) => rect.left >= area.left && rect.right <= area.right && (i === 0 || rect.left >= parts[i - 1].right)),
+        buttons: [...toolbar.querySelectorAll(":scope > .toolbar-button")].filter(shown).map((button) => button.textContent.trim()),
+        last: last === null ? null : { text: last.textContent, whole: shown(last) && last.scrollWidth <= last.clientWidth },
+        cut: document.querySelector(".trail-cut")?.title ?? null,
+        stats: stats === undefined ? null : { text: stats.textContent, whole: stats.parentElement.scrollWidth <= stats.parentElement.clientWidth },
+        toggles: [...toolbar.querySelectorAll(".toolbar-toggles-list .toolbar-toggle")].filter(shown).length,
+        menu: shown(toolbar.querySelector(".toolbar-toggles-button")),
+      };
+    });
+    t.check(
+      `창 폭 ${width}px: 상단 줄의 요소가 겹치지 않고 통계 문구와 탐색 경로의 마지막 단계가 잘리지 않으며 뒤로·앞으로 버튼이 보인다`,
+      bar.apart &&
+        bar.stats?.whole === true &&
+        bar.stats.text.includes("호출 확인") &&
+        bar.last?.whole === true &&
+        bar.last.text === NARROW.label &&
+        ["←", "→", "화면 맞춤"].every((name) => bar.buttons.includes(name)),
+      `통계 문구 "${bar.stats?.text}", 마지막 단계 "${bar.last?.text}", 줄인 단계 "${bar.cut ?? "없음"}", 버튼 ${bar.buttons.join("·")}`,
+    );
+    await page.click(".toolbar-toggles-button");
+    const listed = await page.evaluate(() =>
+      [...document.querySelectorAll(".toolbar-toggles-list[data-open] .toolbar-toggle")].map((label) => label.textContent.trim()),
+    );
+    await page.screenshot({ path: join(OUT, `s2-toolbar-${width}.png`) });
+    await page.keyboard.press("Escape");
+    t.check(
+      `창 폭 ${width}px: 토글 세 개가 "설정" 버튼 아래 목록에 있고 Esc에 목록만 접힌다`,
+      bar.menu && bar.toggles === 0 && same(listed, ["테스트 코드", "외부 노드", "자동 요약"]) && (await count(page, ".toolbar-toggles-list[data-open]")) === 0 && (await selectedOf(page)) === NARROW.id,
+      `목록 ${listed.join("·") || "없음"}, 선택 ${await selectedOf(page)}`,
+    );
+  }
 }
 
 const SCENARIOS = [
