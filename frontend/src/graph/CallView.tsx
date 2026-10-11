@@ -15,7 +15,7 @@ import { useAtlas } from "../state/store";
 import { callEdges, callElk, callLabel, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
 import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { fromElk, measureText, runElk, type Layout } from "./layout";
-import { Legend } from "./Legend";
+import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { flowNodes, parts, type Drawn } from "./nodes/common";
@@ -255,7 +255,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
         maxZoom={ZOOM_MAX}
         proOptions={{ hideAttribution: true }}
       />
-      <Legend />
+      <Dock />
       <Tooltip ref={tip} />
     </div>
   );

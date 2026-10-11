@@ -37,6 +37,7 @@ export interface AtlasStore {
   /** 정보 패널의 사각형. null이면 기본 위치(오른쪽 위)다. */
   panel: Rect | null;
   legendOpen: boolean;
+  minimapOpen: boolean;
   paletteOpen: boolean;
 
   /** 저장해 둔 화면 설정을 되살리고 레포·그래프·파일트리를 받는다. */
@@ -71,10 +72,11 @@ export interface AtlasStore {
   setTheme(theme: Theme): void;
   setPanel(rect: Rect | null): void;
   toggleLegend(): void;
+  toggleMinimap(): void;
   setPalette(open: boolean): void;
 }
 
-type Ui = Pick<AtlasStore, "panel" | "legendOpen" | "theme" | "depth" | "autoSummary">;
+type Ui = Pick<AtlasStore, "panel" | "legendOpen" | "minimapOpen" | "theme" | "depth" | "autoSummary">;
 
 const UI_KEY = "code-atlas:ui:v1";
 
@@ -102,6 +104,7 @@ export function parseUi(raw: string | null, theme: Theme): Ui {
       ? { x: saved.panel.x, y: saved.panel.y, width: saved.panel.width, height: saved.panel.height }
       : null,
     legendOpen: saved.legendOpen === true,
+    minimapOpen: saved.minimapOpen !== false,
     theme: saved.theme === "light" || saved.theme === "dark" ? saved.theme : theme,
     depth: saved.depth === 1 || saved.depth === 2 || saved.depth === 3 ? saved.depth : 2,
     autoSummary: saved.autoSummary === true,
@@ -135,8 +138,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
   /** 화면 설정을 바꾸고 localStorage에 쓴다. */
   const keep = (change: Partial<Ui>) => {
     set(change);
-    const { panel, legendOpen, theme, depth, autoSummary } = get();
-    localStorage.setItem(UI_KEY, JSON.stringify({ panel, legendOpen, theme, depth, autoSummary }));
+    const { panel, legendOpen, minimapOpen, theme, depth, autoSummary } = get();
+    localStorage.setItem(UI_KEY, JSON.stringify({ panel, legendOpen, minimapOpen, theme, depth, autoSummary }));
   };
 
   const kindOf = (id: string) => get().graph?.nodes.find((n) => n.id === id)?.kind;
@@ -189,6 +192,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     history: { entries: [placeOf(START)], index: 0 },
     panel: null,
     legendOpen: false,
+    minimapOpen: true,
     paletteOpen: false,
 
     load: () => {
@@ -261,6 +265,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     },
     setPanel: (rect) => keep({ panel: rect }),
     toggleLegend: () => keep({ legendOpen: !get().legendOpen }),
+    toggleMinimap: () => keep({ minimapOpen: !get().minimapOpen }),
     setPalette: (open) => set({ paletteOpen: open }),
   };
 });

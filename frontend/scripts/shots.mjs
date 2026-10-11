@@ -825,6 +825,82 @@ async function edge(t, page) {
   );
 }
 
+async function minimap(t, page) {
+  await load(page);
+  const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+  const files = (await boxes(page)).length;
+  const drawn = () => page.evaluate(() => [...document.querySelectorAll(".react-flow__minimap-node")].filter((n) => getComputedStyle(n).display !== "none").length);
+  t.check(
+    "레포를 열면 왼쪽 아래에 미니맵이 펼쳐져 있고 파일 상자마다 사각형 하나와 화면 영역 사각형을 그린다",
+    (await count(page, ".graph-minimap")) === 1 && (await drawn()) === files && (await count(page, ".react-flow__minimap-mask")) === 1,
+    `미니맵 노드 ${await drawn()}개, 파일 상자 ${files}개`,
+  );
+  await page.click(".legend-button");
+  const [map, legend, buttons] = [await rectOf(page, ".graph-minimap"), await rectOf(page, ".legend"), await rectOf(page, ".dock-buttons")];
+  const apart = (a, b) => a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y;
+  const { panel } = await stageOf(page);
+  t.check(
+    "미니맵, 범례, 버튼 줄, 정보 패널이 서로 겹치지 않는다",
+    apart(map, legend) && apart(map, buttons) && apart(legend, buttons) && apart(map, panel) && apart(legend, panel),
+    `미니맵 ${rectText(map)}, 범례 ${rectText(legend)}, 버튼 줄 ${rectText(buttons)}`,
+  );
+  await page.click(".legend-button");
+
+  await pick(page, FILE);
+  const tones = await page.evaluate(() => {
+    const of = (name) => document.querySelectorAll(`.react-flow__minimap-node.minimap-${name}`).length;
+    return { selected: of("selected"), full: of("full"), half: of("half"), dim: of("dim") };
+  });
+  const dims = await page.evaluate(
+    (dim) => [...document.querySelectorAll(".react-flow__node")].filter((w) => !w.dataset.id.endsWith("#face") && Number(getComputedStyle(w).opacity) <= dim).length,
+    DIM,
+  );
+  t.check(
+    "파일을 고르면 미니맵이 고른 노드 하나를 본문 잉크로, 흐린 노드를 연하게 그린다",
+    tones.selected === 1 && tones.dim === dims && tones.dim > 0 && tones.full > 0,
+    `고른 노드 ${tones.selected}개, 진한 노드 ${tones.full}개, 절반 ${tones.half}개, 연한 노드 ${tones.dim}개(구조 뷰의 흐린 노드 ${dims}개)`,
+  );
+  await t.shot();
+
+  const [zoom, before] = [await zoomOf(page), await viewport()];
+  const area = await rectOf(page, ".graph-minimap");
+  await page.mouse.click(area.x + area.width * 0.8, area.y + area.height * 0.5);
+  await page.waitForTimeout(700);
+  await settle(page);
+  t.check(
+    "미니맵을 누르면 확대 비율은 그대로 두고 화면이 그 위치로 옮겨 간다",
+    (await viewport()) !== before && near(await zoomOf(page), zoom, 0.001) && (await selectedOf(page)) === FILE,
+    `${before} → ${await viewport()}`,
+  );
+  const moved = await viewport();
+  await drag(page, { x: area.x + area.width * 0.5, y: area.y + area.height * 0.5 }, -30, 10);
+  await settle(page);
+  t.check("미니맵을 끌면 확대 비율은 그대로 두고 화면이 옮겨 간다", (await viewport()) !== moved && near(await zoomOf(page), zoom, 0.001), `${moved} → ${await viewport()}`);
+
+  await page.click(".minimap-button");
+  const closed = (await count(page, ".graph-minimap")) === 0 && (await page.getAttribute(".minimap-button", "aria-expanded")) === "false";
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  const kept = (await count(page, ".graph-minimap")) === 0;
+  await page.click(".minimap-button");
+  t.check(
+    "미니맵 버튼으로 접고 펴며, 접은 상태를 다시 열어도 유지한다",
+    closed && kept && (await count(page, ".graph-minimap")) === 1,
+    `접음 ${closed}, 새로 연 뒤 접힘 ${kept}`,
+  );
+
+  await pick(page, FILE);
+  await clickNode(page, FUNCTION, 2);
+  await page.waitForSelector(".node-call", { timeout: 30_000 });
+  await settle(page);
+  t.check(
+    "함수 시점 뷰에도 미니맵이 있고 가운데 함수와 양옆 함수를 그린다",
+    (await count(page, ".graph-minimap")) === 1 && (await drawn()) === (await count(page, ".react-flow__node > .node-body.node-call")),
+    `미니맵 노드 ${await drawn()}개, 함수 노드 ${await count(page, ".react-flow__node > .node-body.node-call")}개`,
+  );
+}
+
 async function folder(t, page) {
   await load(page);
   const inside = (id) => id === "parser" || id.startsWith("parser.");
@@ -1683,6 +1759,7 @@ const SCENARIOS = [
   ["panel", panel],
   ["hover", hover],
   ["edge", edge],
+  ["minimap", minimap],
   ["folder", folder],
   ["folder-select", folderSelect],
   ["init-file", initFile],

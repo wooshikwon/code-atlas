@@ -1192,29 +1192,60 @@ ul {
 
 /* 그래프 위에 띄우는 칸 */
 
-.legend,
 .info-panel {
   position: absolute;
   z-index: var(--z-overlay);
+}
+
+.legend,
+.graph-minimap,
+.info-panel {
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--panel-bg);
   font-size: 12px;
 }
 
-.legend {
-  bottom: 54px;
+/* 왼쪽 아래 칸. 아랫줄에 둥근 버튼을, 그 위에 펼친 미니맵과 범례를 나란히 둔다. 폭이 모자라면 범례가 미니맵 위로 올라간다.
+   칸의 빈 곳은 마우스를 받지 않아 그래프를 가리지 않는다. */
+.dock {
+  position: absolute;
+  z-index: var(--z-overlay);
+  bottom: 12px;
   left: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  pointer-events: none;
+}
+
+.dock-panels,
+.dock-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.dock-panels {
+  flex-wrap: wrap-reverse;
+  align-items: flex-end;
+}
+
+.dock-panels > *,
+.dock-button {
+  pointer-events: auto;
+}
+
+.legend {
   display: flex;
   gap: 16px;
   padding: 8px 12px;
 }
 
-.legend-button {
-  position: absolute;
-  z-index: var(--z-overlay);
-  bottom: 12px;
-  left: 12px;
+.dock-button {
+  display: grid;
+  place-items: center;
   width: 34px;
   height: 34px;
   border: 1px solid var(--line);
@@ -1224,9 +1255,63 @@ ul {
   font-weight: 600;
 }
 
-.legend-button:hover,
-.legend-button[aria-expanded="true"] {
+.dock-button:hover,
+.dock-button[aria-expanded="true"] {
   color: var(--ink);
+}
+
+.minimap-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+/* 미니맵. 노드는 무채색 진하기 세 단계와 고른 노드의 본문 잉크로만 그린다. 화면에 보이는 영역 밖을 화면 바탕색으로 덮고
+   영역의 테두리를 본문 잉크로 그린다. */
+.graph-minimap.react-flow__panel {
+  position: static;
+  margin: 0;
+  overflow: hidden;
+  cursor: pointer;
+  --xy-minimap-background-color: var(--panel-bg);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--surface) 40%, transparent);
+  --xy-minimap-mask-stroke-color: var(--ink);
+  --xy-minimap-mask-stroke-width: 1.5;
+}
+
+.react-flow__minimap-mask,
+.react-flow__minimap-node {
+  vector-effect: non-scaling-stroke;
+}
+
+.react-flow__minimap-node {
+  fill: color-mix(in srgb, var(--ink) 55%, var(--surface));
+  stroke: none;
+}
+
+.react-flow__minimap-node.minimap-none {
+  display: none;
+}
+
+.react-flow__minimap-node.minimap-half {
+  fill: color-mix(in srgb, var(--ink) 35%, var(--surface));
+}
+
+.react-flow__minimap-node.minimap-dim {
+  fill: color-mix(in srgb, var(--ink) 18%, var(--surface));
+}
+
+.react-flow__minimap-node.minimap-selected {
+  fill: var(--ink);
+}
+
+.react-flow__minimap-node.minimap-open {
+  fill: color-mix(in srgb, var(--ink) 6%, var(--surface));
+  stroke: var(--muted);
+}
+
+.react-flow__minimap-node.minimap-open.minimap-selected {
+  stroke: var(--ink);
 }
 
 .legend-list li {

@@ -21,7 +21,7 @@ import { columns, type Columns } from "./columns";
 import { edgeTypes, flowEdges, Markers, type AtlasFlowEdge } from "./edges/OrthogonalEdge";
 import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, layout, titleOf, type Layout, type Point } from "./layout";
-import { Legend } from "./Legend";
+import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { GROUP_NAMES, KIND_NAMES } from "./names";
 import { LAYER } from "./layers";
@@ -352,7 +352,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
           </ViewportPortal>
         )}
       </ReactFlow>
-      <Legend />
+      <Dock />
       <Tooltip ref={tip} />
     </div>
   );

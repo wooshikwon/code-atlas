@@ -1,4 +1,4 @@
-// 그래프 왼쪽 아래의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개, 변경 표시 두 색을 보여 준다.
+// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시, 선 모양 세 개, 변경 표시 두 색을 보여 준다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
 import { useAtlas } from "../state/store";
@@ -66,55 +66,64 @@ function Shape({ kind }: { kind: string }) {
 
 export function Legend() {
   const open = useAtlas((s) => s.legendOpen);
+  if (!open) {
+    return null;
+  }
+  return (
+    <div className="legend" id="legend">
+      <ul className="legend-list">
+        {SHAPES.map((s) => (
+          <li key={s.key}>
+            <svg width={22} height={16}>
+              <Shape kind={s.key} />
+            </svg>
+            {s.name}
+          </li>
+        ))}
+      </ul>
+      <ul className="legend-list">
+        {GROUPS.map((group) => (
+          <li key={group}>
+            <svg width={30} height={16}>
+              <path
+                d="M2,8 L27,8"
+                className={`legend-edge edge-${group} tone-muted`}
+                markerEnd={`url(#arrow-${group}-muted)`}
+              />
+            </svg>
+            {GROUP_NAMES[group]}
+          </li>
+        ))}
+        {CHANGES.map(({ change, name }) => (
+          <li key={change} data-change={change}>
+            <svg width={30} height={16}>
+              <rect x={1} y={2} width={3} height={12} className="legend-change-bar" />
+              <circle cx={11} cy={8} r={4.5} className="legend-change-ring" />
+              <text x={24} y={12} textAnchor="middle" className="legend-change-letter">
+                {CHANGE_LETTERS[change]}
+              </text>
+            </svg>
+            {name}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function LegendButton() {
+  const open = useAtlas((s) => s.legendOpen);
   const toggleLegend = useAtlas((s) => s.toggleLegend);
   return (
-    <>
-      {open && (
-        <div className="legend" id="legend">
-          <ul className="legend-list">
-            {SHAPES.map((s) => (
-              <li key={s.key}>
-                <svg width={22} height={16}>
-                  <Shape kind={s.key} />
-                </svg>
-                {s.name}
-              </li>
-            ))}
-          </ul>
-          <ul className="legend-list">
-            {GROUPS.map((group) => (
-              <li key={group}>
-                <svg width={30} height={16}>
-                  <path d="M2,8 L27,8" className={`legend-edge edge-${group} tone-muted`} markerEnd={`url(#arrow-${group}-muted)`} />
-                </svg>
-                {GROUP_NAMES[group]}
-              </li>
-            ))}
-            {CHANGES.map(({ change, name }) => (
-              <li key={change} data-change={change}>
-                <svg width={30} height={16}>
-                  <rect x={1} y={2} width={3} height={12} className="legend-change-bar" />
-                  <circle cx={11} cy={8} r={4.5} className="legend-change-ring" />
-                  <text x={24} y={12} textAnchor="middle" className="legend-change-letter">
-                    {CHANGE_LETTERS[change]}
-                  </text>
-                </svg>
-                {name}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <button
-        className="legend-button"
-        onClick={toggleLegend}
-        title="범례"
-        aria-label="범례"
-        aria-expanded={open}
-        aria-controls="legend"
-      >
-        ?
-      </button>
-    </>
+    <button
+      className="dock-button legend-button"
+      onClick={toggleLegend}
+      title="범례"
+      aria-label="범례"
+      aria-expanded={open}
+      aria-controls="legend"
+    >
+      ?
+    </button>
   );
 }
