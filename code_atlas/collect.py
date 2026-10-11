@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import fcntl
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +33,27 @@ class RepoFiles:
 
     def abs_path(self, path: str) -> Path:
         return self.root / path
+
+
+def disk_path(path: str | Path) -> Path:
+    """심볼릭 링크를 풀고 폴더·파일 이름을 디스크에 적힌 대소문자로 맞춘 절대 경로.
+
+    대소문자를 구분하지 않는 파일 시스템은 대소문자가 다른 경로로 같은 파일을 열므로, 레포 루트와 언어 서버가 돌려준
+    경로를 이 함수로 바꾼 뒤 비교한다. 운영체제가 연 파일의 경로를 알려 주지 않거나 파일이 없으면 심볼릭 링크만 푼다.
+    """
+    resolved = Path(path).resolve()
+    if not hasattr(fcntl, "F_GETPATH"):
+        return resolved
+    try:
+        fd = os.open(resolved, os.O_RDONLY)
+    except OSError:
+        return resolved
+    try:
+        return Path(os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).rstrip(b"\0")))
+    except OSError:
+        return resolved
+    finally:
+        os.close(fd)
 
 
 def is_test_path(path: str) -> bool:
@@ -115,7 +138,7 @@ def collected(root: Path, paths: list[str]) -> set[str]:
 
 
 def collect(repo: str | Path) -> RepoFiles:
-    root = Path(repo).resolve()
+    root = disk_path(repo)
     paths = _walk(root, _load_gitignore(root))
     source_root = find_source_root(paths)
     files = [

@@ -81,5 +81,27 @@ def test_unresolved_builtin_dynamic_external(index):
     assert (r.target, r.edge) == ("ext:enum", "inherit")
 
 
+def test_locations_under_a_symlinked_root_resolve(sample_repo, tmp_path):
+    link = tmp_path / "link"
+    link.symlink_to(sample_repo)
+    idx = Index(link, extract_repo(collect(link)))
+    pos = _name_pos(idx, "app.core:run_engine")
+    for root in (link, sample_repo):
+        r = resolve_site(site("call"), [Location(str(root / "src/app/core.py"), *pos)], idx, {})
+        assert (r.status, r.target) == ("resolved", "app.core:run_engine")
+    assert idx.relative(str(tmp_path / "elsewhere.py")) is None
+
+
+def test_locations_spelled_in_another_case_resolve_only_where_they_name_the_same_file(sample_repo, tmp_path):
+    shouted = tmp_path / "SAMPLE_REPO"
+    same_file = shouted.exists()
+    idx = Index(shouted if same_file else sample_repo, extract_repo(collect(sample_repo)))
+    pos = _name_pos(idx, "app.core:run_engine")
+    exact = resolve_site(site("call"), [Location(str(sample_repo / "src/app/core.py"), *pos)], idx, {})
+    assert (exact.status, exact.target) == ("resolved", "app.core:run_engine")
+    other = resolve_site(site("call"), [Location(str(shouted / "SRC/APP/CORE.py"), *pos)], idx, {})
+    assert other.status == ("resolved" if same_file else "unresolved")
+
+
 def _name_pos(idx, node_id):
     return next((line, col) for (path, line, col), nid in idx.names.items() if nid == node_id)

@@ -10,6 +10,7 @@ import pytest
 from conftest import group_ended
 
 from code_atlas import cli
+from code_atlas.analyze import PythonNotFound, require_python
 
 # 분석을 시작할 때 언어 서버의 pid를 출력한다. 인자가 "serve"가 아니면 분석을 끝내지 않고, "analyze"면 `code-atlas analyze`를 돌린다.
 SERVE = """
@@ -72,3 +73,22 @@ def test_sigint_ends_the_server_and_the_language_server(sample_repo, tmp_path, m
 def test_serve_parser_reads_style_guide_option():
     assert cli._serve_parser().parse_args(["repo", "--style-guide", "guide.md"]).style_guide == "guide.md"
     assert cli._serve_parser().parse_args(["repo"]).style_guide is None
+
+
+@pytest.mark.parametrize("command", ["analyze", "serve"])
+def test_missing_python_ends_before_the_analysis(sample_repo, capsys, monkeypatch, command):
+    monkeypatch.setattr(cli, "analyze", lambda *args: pytest.fail("분석을 시작했다"))
+    monkeypatch.setattr(cli, "create_app", lambda *args: pytest.fail("서버를 만들었다"))
+    missing = str(sample_repo / "no" / "python")
+    argv = ["analyze", str(sample_repo)] if command == "analyze" else [str(sample_repo), "--no-open", "--port", str(free_port())]
+    with pytest.raises(SystemExit) as exit:
+        cli.main([*argv, "--python", missing])
+    assert exit.value.code == 2
+    assert missing in capsys.readouterr().err
+
+
+def test_require_python_accepts_an_executable_and_rejects_other_paths(sample_repo):
+    assert require_python(sample_repo, sys.executable) == sys.executable
+    for path in (str(sample_repo / "pyproject.toml"), str(sample_repo), "no-such-python-command"):
+        with pytest.raises(PythonNotFound):
+            require_python(sample_repo, path)

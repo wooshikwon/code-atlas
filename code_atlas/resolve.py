@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .collect import disk_path
 from .extract import FileFacts
 from .lsp import Location
 from .model import Node, Site
@@ -47,7 +48,7 @@ class Index:
     """레포 안 위치를 노드 id로 찾는 표."""
 
     def __init__(self, root: Path, facts: list[FileFacts]):
-        self.root = Path(root).resolve()
+        self.root = disk_path(root)
         self.modules: dict[str, str] = {}  # 레포 루트 기준 경로 → 그 파일의 노드 id
         self.names: dict[tuple[str, int, int], str] = {}  # (경로, 줄, 열) → 노드 id
         self.kinds: dict[str, str] = {}
@@ -61,8 +62,9 @@ class Index:
                 self.names[(f.file.path, info.name_line, info.name_col)] = info.node_id
 
     def relative(self, path: str) -> str | None:
+        """레포 루트 기준 경로. 레포 밖이면 None이다."""
         try:
-            return Path(path).resolve().relative_to(self.root).as_posix()
+            return disk_path(path).relative_to(self.root).as_posix()
         except ValueError:
             return None
 

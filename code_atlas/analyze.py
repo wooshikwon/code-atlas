@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,9 +67,13 @@ def _stamp(file: Path) -> tuple[int, int] | None:
 
 
 def require_python(repo: str | Path, python: str | None) -> str:
-    python = python or venv.find(repo)
+    """분석에 쓸 인터프리터. `python`을 주지 않으면 레포의 가상환경에서 찾고, 준 경로를 실행할 수 없으면 분석하지 않는다."""
     if python is None:
-        raise PythonNotFound(f"{repo}에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.")
+        python = venv.find(repo)
+        if python is None:
+            raise PythonNotFound(f"{repo}에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.")
+    elif shutil.which(python) is None:
+        raise PythonNotFound(f"--python에 준 경로를 실행할 수 없다: {python}. 인터프리터의 실행 파일 경로를 지정한다.")
     return python
 
 
