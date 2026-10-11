@@ -1,6 +1,8 @@
-// 2단계 화면을 시나리오마다 조작해 확인 항목의 통과 여부를 한 줄씩 출력하고 스크린샷을 남긴다.
-// 사용: node scripts/shots.mjs [주소] [--only 이름,이름] [--with-summary]
-// 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름은 sync-engine을 연 서버가 기준이고 노드 수·선 수·줄 범위는 서버 응답에서 읽는다.
+// 화면을 시나리오마다 조작해 확인 항목의 통과 여부를 한 줄씩 출력하고 스크린샷을 남긴다.
+// 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--only 이름,이름] [--with-summary]
+// 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름은 sync-engine을 연 서버가 기준이고 노드 수·선 수·줄 범위,
+// 경로와 미사용 후보는 서버 응답에서 읽는다. 순환 시나리오(cycles, cycles-change, cycles-pin)는 tests/fixtures/cycle_repo를 연 서버의 주소를
+// --cycle-url로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
 // 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 "건너뜀"으로 출력하고 실패로 세지 않는다.
 // summary 시나리오는 Claude Code 구독 사용량을 쓰므로 --only로 지정하거나 --with-summary를 줬을 때만 돈다.
@@ -31,12 +33,16 @@ const NARROW = { owner: "parser.plan", id: "parser.plan:_parse_week_header", lab
 const TEXTS = ".node-label, .loc, .change-mark, .badge, .node-aside, .node-below, .node-inflow, .node-field, .call-file";
 
 let url = "http://127.0.0.1:8766";
+/** 순환이 있는 고정 레포를 연 서버의 주소. 주지 않으면 순환 시나리오를 건너뛴다. */
+let cycleUrl = null;
 let only = null;
 let withSummary = false;
 for (let i = 2; i < process.argv.length; i += 1) {
   const arg = process.argv[i];
   if (arg === "--only") {
     only = (process.argv[++i] ?? "").split(",").filter((name) => name !== "");
+  } else if (arg === "--cycle-url") {
+    cycleUrl = process.argv[++i] ?? null;
   } else if (arg === "--with-summary") {
     withSummary = true;
   } else {
@@ -50,7 +56,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const node = (id) => `.react-flow__node[data-id="${id}"]`;
 /** 노드의 글자 요소(이름표·줄 수 숫자·배지·선택 고리)를 감싼 React Flow 노드 */
 const face = (id) => `.react-flow__node[data-id="${id}#face"]`;
-const api = async (path) => (await fetch(new URL(path, url))).json();
+const api = async (path, base = url) => (await fetch(new URL(path, base))).json();
 
 // ── 서버 응답에서 읽는 기대값 ─────────────────────────────────────
 
@@ -137,25 +143,42 @@ function columnsOf(list, skip = () => false) {
   return columns.map((column) => column.ids);
 }
 
-/** 관계 그래프 영역, 정보 패널, 패널을 뺀 네 사각형 가운데 가장 넓은 사각형(frontend/src/graph/viewport.ts의 freeRect와 같은 계산) */
+/**
+ * 관계 그래프 영역 area, 정보 패널 panel, 패널이 가리지 않는 가장 넓은 사각형 free, 패널과 왼쪽 아래 칸(펼친 칸과 버튼 줄)이
+ * 모두 가리지 않는 가장 넓은 사각형 clear(frontend/src/graph/viewport.ts의 freeRect와 같은 계산)
+ */
 const stageOf = (page) =>
   page.evaluate(() => {
     const plain = (r) => ({ x: r.left, y: r.top, width: r.width, height: r.height });
     const area = plain(document.querySelector(".graph").getBoundingClientRect());
     const panel = plain(document.querySelector(".info-panel").getBoundingClientRect());
-    const clampX = (x) => Math.max(area.x, Math.min(x, area.x + area.width));
-    const clampY = (y) => Math.max(area.y, Math.min(y, area.y + area.height));
-    const [left, right, top, bottom] = [clampX(panel.x), clampX(panel.x + panel.width), clampY(panel.y), clampY(panel.y + panel.height)];
-    let free = area;
-    if (left < right && top < bottom) {
-      free = [
-        { ...area, width: left - area.x },
-        { ...area, x: right, width: area.x + area.width - right },
-        { ...area, height: top - area.y },
-        { ...area, y: bottom, height: area.y + area.height - bottom },
-      ].reduce((best, side) => (side.width * side.height > best.width * best.height ? side : best));
-    }
-    return { area, panel, free };
+    const dock = [...document.querySelectorAll(".dock-panels > *, .dock-buttons")].map((element) => plain(element.getBoundingClientRect()));
+    const [right, bottom] = [area.x + area.width, area.y + area.height];
+    const clampX = (x) => Math.max(area.x, Math.min(x, right));
+    const clampY = (y) => Math.max(area.y, Math.min(y, bottom));
+    const freeRect = (covers) => {
+      const inside = covers
+        .map((c) => ({ left: clampX(c.x), right: clampX(c.x + c.width), top: clampY(c.y), bottom: clampY(c.y + c.height) }))
+        .filter((c) => c.left < c.right && c.top < c.bottom);
+      const cuts = (values) => [...new Set(values)].sort((a, b) => a - b);
+      const xs = cuts([area.x, right, ...inside.flatMap((c) => [c.left, c.right])]);
+      const ys = cuts([area.y, bottom, ...inside.flatMap((c) => [c.top, c.bottom])]);
+      let best = inside.length === 0 ? area : null;
+      for (const [i, x] of xs.entries()) {
+        for (const far of xs.slice(i + 1)) {
+          for (const [j, y] of ys.entries()) {
+            for (const low of ys.slice(j + 1)) {
+              const size = (far - x) * (low - y);
+              if ((best === null || size > best.width * best.height) && inside.every((c) => c.right <= x || c.left >= far || c.bottom <= y || c.top >= low)) {
+                best = { x, y, width: far - x, height: low - y };
+              }
+            }
+          }
+        }
+      }
+      return best ?? area;
+    };
+    return { area, panel, free: freeRect([panel]), clear: freeRect([panel, ...dock]) };
   });
 
 /** 그린 선마다 양 끝, 진하기, 불투명도, 선 색 */
@@ -295,8 +318,8 @@ async function settle(page, quiet = 500) {
   );
 }
 
-async function load(page) {
-  await page.goto(url);
+async function load(page, at = url) {
+  await page.goto(at);
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
   await settle(page);
 }
@@ -395,6 +418,21 @@ async function drag(page, from, dx, dy) {
 const center = (rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
 const sameRect = (a, b) => near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height);
 const rectText = (r) => `(${r.x.toFixed(0)}, ${r.y.toFixed(0)}) ${r.width.toFixed(0)}×${r.height.toFixed(0)}`;
+/** 두 사각형이 겹치지 않는지, inner가 outer 안에 있는지 */
+const apart = (a, b) => a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y;
+const within = (inner, outer) =>
+  inner.x >= outer.x - 0.5 && inner.y >= outer.y - 0.5 && inner.x + inner.width <= outer.x + outer.width + 0.5 && inner.y + inner.height <= outer.y + outer.height + 0.5;
+
+const tipText = (page) => page.evaluate(() => document.querySelector(".tooltip")?.textContent ?? "");
+
+/** 요소 가운데에 마우스를 올리고 말풍선 글을 읽는다. */
+async function tipOver(page, selector) {
+  const rect = await rectOf(page, selector);
+  await page.mouse.move(rect.x + rect.width / 2 - 1, rect.y + rect.height / 2);
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+  return tipText(page);
+}
 
 // ── 시나리오 ──────────────────────────────────────────────────────
 
@@ -512,14 +550,14 @@ async function file(t, page) {
     unresolved > 0 && badges.box === 0 && badges.inner.reduce((sum, n) => sum + n, 0) === unresolved && title.includes(`미확인 호출 ${unresolved}`),
     `함수 배지 ${badges.inner.length}개의 합 ${badges.inner.reduce((sum, n) => sum + n, 0)}, 그래프 ${unresolved}`,
   );
-  const { free } = await stageOf(page);
+  const { clear } = await stageOf(page);
   const box = await rectOf(page, node(FILE));
   const placed = (start, length, from, room) =>
     length > room ? near(start, from + INSET) : near(start + length / 2, from + room / 2);
   t.check(
-    "arbiter.py 상자의 중심이 패널을 뺀 영역의 중심에 있거나, 상자가 영역보다 긴 축에서는 시작 끝이 20px 안쪽에 있다",
-    placed(box.x, box.width, free.x, free.width) && placed(box.y, box.height, free.y, free.height),
-    `상자 (${box.x.toFixed(1)}, ${box.y.toFixed(1)}) ${box.width.toFixed(0)}×${box.height.toFixed(0)}, 영역 (${free.x.toFixed(1)}, ${free.y.toFixed(1)}) ${free.width.toFixed(0)}×${free.height.toFixed(0)}`,
+    "arbiter.py 상자의 중심이 패널과 왼쪽 아래 칸을 뺀 영역의 중심에 있거나, 상자가 영역보다 긴 축에서는 시작 끝이 20px 안쪽에 있다",
+    placed(box.x, box.width, clear.x, clear.width) && placed(box.y, box.height, clear.y, clear.height),
+    `상자 (${box.x.toFixed(1)}, ${box.y.toFixed(1)}) ${box.width.toFixed(0)}×${box.height.toFixed(0)}, 영역 (${clear.x.toFixed(1)}, ${clear.y.toFixed(1)}) ${clear.width.toFixed(0)}×${clear.height.toFixed(0)}`,
   );
 }
 
@@ -529,6 +567,10 @@ async function focused(t, page) {
   await pick(page, FILE);
   const before = await zoomOf(page);
   await pick(page, FUNCTION);
+  // 화면이 옮겨져 마우스 아래에 온 선이 굵어지지 않도록 마우스를 그래프 밖에 두고 선의 불투명도가 돌아오기를 기다린다.
+  await page.mouse.move(5, 5);
+  await settle(page);
+  await page.waitForTimeout(300);
   await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
   const [panel, summary, code] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-summary"), await rectOf(page, ".info-panel .code")];
   t.check(
@@ -564,10 +606,10 @@ async function focused(t, page) {
   });
   t.check(`코드 뷰어 첫 줄 번호가 ${span.from}이다`, first === String(span.from), `${first}`);
   const zoom = await zoomOf(page);
-  const { free } = await stageOf(page);
-  const [at, middle] = [center(await rectOf(page, node(FUNCTION))), center(free)];
+  const { clear } = await stageOf(page);
+  const [at, middle] = [center(await rectOf(page, node(FUNCTION))), center(clear)];
   t.check(
-    "확대 비율이 누르기 전과 같고 고른 함수의 중심이 패널을 뺀 영역의 중심에서 1px 안에 있다",
+    "확대 비율이 누르기 전과 같고 고른 함수의 중심이 패널과 왼쪽 아래 칸을 뺀 영역의 중심에서 1px 안에 있다",
     near(zoom, before, 0.001) && near(at.x, middle.x) && near(at.y, middle.y),
     `확대 비율 ${before.toFixed(3)} → ${zoom.toFixed(3)}, 중심 차이 (${(at.x - middle.x).toFixed(1)}, ${(at.y - middle.y).toFixed(1)})`,
   );
@@ -994,15 +1036,7 @@ async function edge(t, page) {
 
 async function badgeTip(t, page) {
   await load(page);
-  const tipText = () => page.evaluate(() => document.querySelector(".tooltip")?.textContent ?? "");
-  /** 요소 가운데에 마우스를 올리고 말풍선 글을 읽는다. */
-  const over = async (selector) => {
-    const rect = await rectOf(page, selector);
-    await page.mouse.move(rect.x + rect.width / 2 - 1, rect.y + rect.height / 2);
-    await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
-    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
-    return tipText();
-  };
+  const over = (selector) => tipOver(page, selector);
   const counted = await page.evaluate(() => {
     const badge = document.querySelector(".node-face.node-module .badge-unresolved");
     return { id: badge.closest(".react-flow__node").dataset.id, count: badge.textContent.slice(1) };
@@ -1041,7 +1075,6 @@ async function minimap(t, page) {
   );
   await page.click(".legend-button");
   const [map, legend, buttons] = [await rectOf(page, ".graph-minimap"), await rectOf(page, ".legend"), await rectOf(page, ".dock-buttons")];
-  const apart = (a, b) => a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y;
   const { panel } = await stageOf(page);
   t.check(
     "미니맵, 범례, 버튼 줄, 정보 패널이 서로 겹치지 않는다",
@@ -2478,7 +2511,11 @@ async function toolbar(t, page) {
       `패널 위 ${bar.gaps[0]}, 아래 ${bar.gaps[1]}, 상단 줄과 영역 사이 ${bar.gaps[2]}`,
     );
     if (width === NARROW.widths[0]) {
-      t.check(`${name}: 통계 문구 전체와 토글 세 개를 한 줄에 그린다`, bar.fit === "full" && bar.height < 40 && !menu, `단계 ${bar.fit}`);
+      t.check(
+        `${name}: 통계 문구와 덮개 버튼, 토글 세 개를 한 줄에 그린다`,
+        (bar.fit === "full" || bar.fit === "brief") && bar.height < 40 && !menu && bar.controls.some((title) => title.startsWith("덮개")),
+        `단계 ${bar.fit}`,
+      );
     }
     if (menu) {
       await page.click(".toolbar-toggles-button");
@@ -2503,6 +2540,1435 @@ async function toolbar(t, page) {
       await page.screenshot({ path: join(OUT, `s2-toolbar-${width}.png`) });
     }
   }
+}
+
+// ── 3단계: 경로와 순환 묶음의 기대값 ─────────────────────────────
+
+/** 경로 시나리오가 고르는 출발과 도착. text는 검색 칸에 넣는 글자다. */
+const TRIP = {
+  from: { id: "arbiter:arbiter_batch", text: "arbiter_batch" },
+  to: { id: "date_engine:parse_plan_date", text: "parse_plan_date" },
+};
+/** 경로 탐색 창이 나열하는 경로 수 */
+const PATH_LIMIT = 5;
+/** 경로의 걸음과 그 밖의 선의 굵기(px), 마우스를 올린 걸음의 굵기 */
+const LINE = { step: 3, rest: 1.5, pointed: 4 };
+/** 미사용 덮개가 표시하는 후보의 불투명도 상한 */
+const UNUSED_OPACITY = 0.4;
+
+const byId = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+/** 토글이 꺼진 화면에서 숨긴 노드. 테스트 코드와 외부 노드다. */
+const hiddenOf = (graph) => new Set(graph.nodes.filter((n) => n.kind === "external" || n.test).map((n) => n.id));
+
+/** 노드마다 나가는 걸음의 도착 노드와 종류(frontend/src/graph/route.ts의 steps와 같은 규칙) */
+function stepsOf(graph, hidden) {
+  const order = ["call", "construct", "init", "overridden"];
+  const out = new Map();
+  const add = (source, target, kind) => {
+    if (source === target || hidden.has(source) || hidden.has(target)) {
+      return;
+    }
+    const targets = out.get(source) ?? new Map();
+    const before = targets.get(target);
+    if (before === undefined || order.indexOf(kind) < order.indexOf(before)) {
+      targets.set(target, kind);
+    }
+    out.set(source, targets);
+  };
+  const kinds = new Map(graph.nodes.map((n) => [n.id, n.kind]));
+  for (const edge of graph.edges) {
+    if (edge.kind === "call" || edge.kind === "construct") {
+      add(edge.source, edge.target, edge.kind);
+    } else if (edge.kind === "override") {
+      add(edge.target, edge.source, "overridden");
+    }
+  }
+  for (const n of graph.nodes) {
+    if (n.kind === "method" && n.parent !== null && ["__init__", "__post_init__", "__new__"].includes(n.name) && ["class", "dataclass"].includes(kinds.get(n.parent))) {
+      add(n.parent, n.id, "init");
+    }
+  }
+  return out;
+}
+
+/** 끝점 노드와 안에 든 노드 */
+function endpointsOf(graph, id, hidden) {
+  const found = new Set(hidden.has(id) ? [] : [id]);
+  for (const at of found) {
+    graph.nodes.filter((n) => n.parent === at && !hidden.has(n.id)).forEach((n) => found.add(n.id));
+  }
+  return found;
+}
+
+/**
+ * 출발 끝점에서 도착 끝점까지 같은 노드를 두 번 지나지 않는 경로를 길이, 노드 id 배열 순서로 limit개까지 낸다.
+ * 가장 짧은 길이에서 시작해 길이 상한을 하나씩 늘리며 상한 안의 경로를 모두 모은다.
+ */
+function simplePaths(out, sources, targets, limit) {
+  const next = (id) => (targets.has(id) ? [] : [...(out.get(id)?.keys() ?? [])].filter((target) => !sources.has(target)).sort(byId));
+  const into = new Map();
+  for (const id of out.keys()) {
+    next(id).forEach((target) => into.set(target, [...(into.get(target) ?? []), id]));
+  }
+  /** 노드마다 도착 끝점까지 남은 걸음 수 */
+  const left = new Map([...targets].map((id) => [id, 0]));
+  for (const id of left.keys()) {
+    (into.get(id) ?? []).filter((source) => !left.has(source)).forEach((source) => left.set(source, left.get(id) + 1));
+  }
+  const starts = [...sources].filter((id) => left.has(id)).sort(byId);
+  if (starts.length === 0) {
+    return [];
+  }
+  const shortest = Math.min(...starts.map((id) => left.get(id)));
+  let found = [];
+  for (let bound = shortest; bound <= shortest + 8 && found.length < limit; bound += 1) {
+    found = [];
+    const walk = (path) => {
+      const at = path.at(-1);
+      if (targets.has(at)) {
+        found.push([...path]);
+        return;
+      }
+      for (const target of next(at)) {
+        if (!path.includes(target) && left.has(target) && path.length + left.get(target) <= bound) {
+          path.push(target);
+          walk(path);
+          path.pop();
+        }
+      }
+    };
+    starts.forEach((id) => walk([id]));
+  }
+  const order = (a, b) => a.length - b.length || byId(a.join("\u0001"), b.join("\u0001"));
+  return found.sort(order).slice(0, limit);
+}
+
+/**
+ * 출발 from에서 도착 to로 가는 경로와 경로 탐색 창이 적는 값(frontend/src/graph/route.ts의 route와 같은 규칙).
+ * paths는 PATH_LIMIT개까지, more는 그다음 경로가 있는지, reach와 unresolved는 출발에서 닿는 함수·메서드 수와 그 안의 미확인 호출 수다.
+ */
+function routeOf(graph, from, to) {
+  const hidden = hiddenOf(graph);
+  const out = stepsOf(graph, hidden);
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const [sources, targets] = [endpointsOf(graph, from, hidden), endpointsOf(graph, to, hidden)];
+  const reached = new Set(sources);
+  for (const id of reached) {
+    [...(out.get(id)?.keys() ?? [])].forEach((target) => reached.add(target));
+  }
+  const callable = [...reached].map((id) => nodes.get(id)).filter((n) => n.kind === "function" || n.kind === "method");
+  const overlap = [...sources].some((id) => targets.has(id));
+  const found = overlap ? [] : simplePaths(out, sources, targets, PATH_LIMIT + 1);
+  return {
+    paths: found.slice(0, PATH_LIMIT),
+    more: found.length > PATH_LIMIT,
+    reach: callable.length,
+    unresolved: callable.reduce((sum, n) => sum + n.unresolved, 0),
+    kindOf: (source, target) => out.get(source)?.get(target),
+    /** 경로가 거치는 파일 수 */
+    files: (path) => new Set(path.map((id) => nodes.get(id).path)).size,
+  };
+}
+
+/** 순환 묶음(frontend/src/graph/cycles.ts의 cycles와 같은 규칙). 묶음마다 든 모듈 id와, 양 끝이 같은 묶음에 든 import 선 수를 낸다. */
+function cyclesOf(graph, hidden) {
+  const units = new Set(graph.nodes.filter((n) => (n.kind === "module" || n.kind === "package") && !hidden.has(n.id)).map((n) => n.id));
+  const imports = graph.edges.filter((e) => e.kind === "import" && !e.deferred && e.source !== e.target && units.has(e.source) && units.has(e.target));
+  const reach = new Map([...units].map((id) => [id, new Set([id])]));
+  for (const [id, seen] of reach) {
+    for (const at of seen) {
+      imports.filter((e) => e.source === at).forEach((e) => seen.add(e.target));
+    }
+    reach.set(id, seen);
+  }
+  const groups = [];
+  const member = new Map();
+  for (const id of [...units].sort(byId)) {
+    if (member.has(id)) {
+      continue;
+    }
+    const group = [...reach.get(id)].filter((other) => reach.get(other).has(id)).sort(byId);
+    if (group.length > 1) {
+      group.forEach((each) => member.set(each, groups.length));
+      groups.push(group);
+    }
+  }
+  const lines = imports.filter((e) => member.has(e.source) && member.get(e.source) === member.get(e.target));
+  return { groups, member, lines: new Set(lines.map((e) => `${e.source}|${e.target}`)) };
+}
+
+// ── 3단계: 화면에서 읽는 값과 조작 ────────────────────────────────
+
+/** 경로의 걸음을 그린 선마다 키, 걸음 종류, 굵기, 색, 점선인지, 불투명도 */
+const routeLinesOf = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".react-flow__edge .edge[data-route]")].map((edge) => {
+      const style = getComputedStyle(edge.querySelector(".edge-line"));
+      return {
+        key: edge.dataset.key,
+        kind: edge.dataset.route,
+        width: parseFloat(style.strokeWidth),
+        stroke: style.stroke,
+        dashed: style.strokeDasharray !== "none",
+        opacity: Number(getComputedStyle(edge).opacity),
+      };
+    }),
+  );
+
+/** 노드마다 바탕 요소의 불투명도 */
+const opacitiesOf = (page) =>
+  page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll(".react-flow__node")]
+        .filter((wrapper) => !wrapper.dataset.id.endsWith("#face"))
+        .map((wrapper) => [wrapper.dataset.id, Number(getComputedStyle(wrapper).opacity)]),
+    ),
+  );
+
+const pinnedOf = (page) => page.evaluate(() => document.querySelector(".graph").hasAttribute("data-pinned"));
+
+/** 경로 탐색 창의 숫자 버튼마다 숫자, 아래 글자, 말풍선 글, 눌린 상태 */
+const picksOf = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".finder-pick")].map((button) => ({
+      number: button.querySelector("b").textContent,
+      steps: button.querySelector("span").textContent,
+      tip: button.title,
+      pressed: button.getAttribute("aria-pressed") === "true",
+    })),
+  );
+
+/** 단계 목록의 행마다 노드 id와 이음 표시 */
+const stepsShown = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".finder-step")].map((row) => ({ id: row.dataset.node, mark: row.querySelector(".finder-step-mark")?.textContent ?? null })),
+  );
+
+/** 화면 좌표 point의 맨 위 요소가 받는 커서 */
+const cursorAt = (page, point) => page.evaluate(({ x, y }) => getComputedStyle(document.elementFromPoint(x, y)).cursor, point);
+
+/** 노드의 이름표가 패널과 왼쪽 아래 칸이 가리지 않는 영역 안에 있고 가운데 점에서 그 노드가 눌리는지 */
+async function reachable(page, id) {
+  const { clear } = await stageOf(page);
+  return page.evaluate(
+    ([text, body, free]) => {
+      const label = document.querySelector(`${text} .node-label`);
+      if (label === null) {
+        return { ok: false, at: "없음" };
+      }
+      const rect = label.getBoundingClientRect();
+      const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
+      const inside = x >= free.x && x <= free.x + free.width && y >= free.y && y <= free.y + free.height;
+      const hit = document.elementFromPoint(x, y);
+      const own = hit !== null && [text, body].some((selector) => document.querySelector(selector)?.contains(hit) === true);
+      return { ok: inside && own, at: `(${Math.round(x)}, ${Math.round(y)})` };
+    },
+    [face(id), node(id), clear],
+  );
+}
+
+/** 선택자가 고른 요소마다 가운데 점에서 그 요소가 눌리는지. 눌리지 않는 요소의 글자를 낸다. */
+const unhittable = (page, selector) =>
+  page.evaluate((sel) => {
+    const missed = [];
+    for (const element of document.querySelectorAll(sel)) {
+      const rect = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      if (rect.width === 0 || hit === null || !element.contains(hit)) {
+        missed.push(element.textContent.trim());
+      }
+    }
+    return missed;
+  }, selector);
+
+async function openFinder(page) {
+  if ((await page.getAttribute(".finder-button", "aria-expanded")) !== "true") {
+    await page.click(".finder-button");
+  }
+  await page.waitForSelector(".finder", { timeout: 5_000 });
+}
+
+/** 경로 탐색 창의 칸에 text를 넣고 결과 행에서 id를 고른다. */
+async function fillEnd(page, end, { id, text }) {
+  const field = `.finder-field[data-end="${end}"]`;
+  if ((await count(page, `${field} .finder-input`)) === 0) {
+    await page.click(`${field} .finder-value`);
+  }
+  await page.click(`${field} .finder-input`);
+  await page.keyboard.type(text);
+  await page.waitForSelector(`.finder-hit[data-node="${id}"]`, { timeout: 5_000 });
+  await page.click(`.finder-hit[data-node="${id}"]`);
+}
+
+/** 선의 불투명도와 노드의 불투명도가 바뀌는 200ms를 더 기다린다. */
+async function rest(page) {
+  await settle(page);
+  await page.waitForTimeout(300);
+}
+
+/** 창을 펴고 출발과 도착을 골라 경로 고정에 들어간다. */
+async function pin(page, from = TRIP.from, to = TRIP.to) {
+  await openFinder(page);
+  await fillEnd(page, "from", from);
+  await fillEnd(page, "to", to);
+  await page.waitForSelector(".graph[data-pinned]", { timeout: 10_000 });
+  await page.waitForSelector(".edge[data-route]", { state: "attached", timeout: 10_000 });
+  await rest(page);
+}
+
+/** 숫자 버튼 index(0부터)를 누르고 새 배치로 옮겨 가는 움직임이 시작됐다가 끝나 걸음 steps개가 그려질 때까지 기다린다. */
+async function pickPath(page, index, steps) {
+  await page.click(`.finder-pick >> nth=${index}`);
+  await page.waitForSelector(".graph[data-moving]", { timeout: 1_500 }).catch(() => {});
+  await page.waitForFunction((want) => document.querySelectorAll(".edge[data-route]").length === want, steps, { timeout: 10_000 }).catch(() => {});
+  await rest(page);
+}
+
+/** 고정 안내 줄이 뒤집힌 횟수를 세기 시작한다. 뒤집히지 않은 줄이 뒤집힌 줄로 바뀔 때마다 하나를 센다. */
+const watchFlashes = (page) =>
+  page.evaluate(() => {
+    window.__shotsFlashes = 0;
+    let on = false;
+    new MutationObserver(() => {
+      const now = document.querySelector(".finder-pinned[data-flash]") !== null;
+      if (now && !on) {
+        window.__shotsFlashes += 1;
+      }
+      on = now;
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-flash"] });
+  });
+
+const flashesOf = (page) => page.evaluate(() => window.__shotsFlashes);
+
+/** 덮개 메뉴에서 kind("none"·"cycles"·"unused")를 고른다. 상단 줄이 덮개 버튼을 접었으면 "설정" 목록에서 고른다. */
+async function setOverlay(page, kind) {
+  const direct = await page.evaluate(() => {
+    const rect = document.querySelector(".overlay-button")?.getBoundingClientRect();
+    return rect !== undefined && rect.width > 0;
+  });
+  await page.click(direct ? ".overlay-button" : ".toolbar-toggles-button");
+  await page.click(`.overlay-option[data-kind="${kind}"] >> visible=true`);
+  if ((await count(page, ".toolbar-toggles-list[data-open]")) > 0) {
+    await page.keyboard.press("Escape");
+  }
+  await page.waitForFunction((want) => (document.querySelector(".graph").dataset.overlay ?? "none") === want, kind, { timeout: 5_000 });
+  await rest(page);
+}
+
+
+// ── 3단계 시나리오: 경로 찾기와 경로 고정 ─────────────────────────
+
+async function finderOpen(t, page) {
+  await load(page);
+  t.check("경로 탐색 창이 접힌 채로 열리고 왼쪽 아래 버튼 줄이 미니맵, 범례, 경로 찾기 순서다", (await count(page, ".finder")) === 0 &&
+    same(await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label") ?? b.title)), ["미니맵", "범례", "경로 찾기"]),
+    (await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label") ?? b.title))).join("·"));
+  await page.click(".finder-button");
+  await page.waitForSelector(".finder", { timeout: 5_000 });
+  await page.click(".legend-button");
+  await page.waitForSelector(".legend", { timeout: 5_000 });
+  /** 펼친 세 칸의 사각형이 서로 겹치지 않고 관계 그래프 영역 안에 있는지 */
+  const laid = async () => {
+    const [map, legend, finder, buttons] = [await rectOf(page, ".graph-minimap"), await rectOf(page, ".legend"), await rectOf(page, ".finder"), await rectOf(page, ".dock-buttons")];
+    const { area } = await stageOf(page);
+    const boxes = [map, legend, finder, buttons];
+    const separate = boxes.every((a, i) => boxes.slice(i + 1).every((b) => apart(a, b)));
+    return { map, legend, finder, buttons, area, ok: separate && boxes.every((box) => within(box, area)) };
+  };
+  const wide = await laid();
+  t.check(
+    "경로 찾기 버튼을 누르면 창이 버튼 줄 위에 펼쳐지고 미니맵·범례·창이 왼쪽부터 아래 끝을 맞춰 놓이며 서로 겹치지 않고 관계 그래프 영역 안에 있다",
+    wide.ok &&
+      wide.finder.y > wide.area.y + wide.area.height / 2 &&
+      near(wide.finder.y + wide.finder.height, wide.map.y + wide.map.height) &&
+      near(wide.legend.y + wide.legend.height, wide.map.y + wide.map.height) &&
+      wide.map.x < wide.legend.x &&
+      wide.legend.x < wide.finder.x &&
+      wide.finder.y + wide.finder.height < wide.buttons.y,
+    `미니맵 ${rectText(wide.map)}, 범례 ${rectText(wide.legend)}, 창 ${rectText(wide.finder)}`,
+  );
+  const empty = await page.evaluate(() => ({
+    fields: [...document.querySelectorAll(".finder-field .finder-input")].map((input) => input.placeholder),
+    picks: document.querySelectorAll(".finder-pick").length,
+    clear: document.querySelectorAll(".finder-clear").length,
+  }));
+  t.check(
+    "빈 창은 출발 칸과 도착 칸, 맞바꾸기 버튼만 그리고 숫자 버튼과 끄기 버튼은 그리지 않는다",
+    empty.fields.length === 2 && empty.fields[0].startsWith("출발") && empty.fields[1].startsWith("도착") && empty.picks === 0 && empty.clear === 0 && (await count(page, ".finder-swap")) === 1,
+    empty.fields.join(" / "),
+  );
+  await t.shot();
+  await page.click(".finder-button");
+  t.check("버튼을 다시 누르면 창이 접힌다", (await count(page, ".finder")) === 0 && (await page.getAttribute(".finder-button", "aria-expanded")) === "false");
+
+  // 창 폭마다 세 칸을 모두 펴고 경로를 고정해 숫자 버튼과 끄기 버튼이 눌리는지 본다.
+  for (const width of [1700, 1280, 980, 720]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+    await settle(page);
+    await page.click(".legend-button");
+    await pin(page);
+    const at = await laid();
+    const missed = [...(await unhittable(page, ".finder-pick")), ...(await unhittable(page, ".finder-clear")), ...(await unhittable(page, ".finder-button"))];
+    t.check(
+      `창 폭 ${width}px: 펼친 세 칸이 서로 겹치지 않고 영역 안에 있으며, 경로 고정 중에 숫자 버튼 ${PATH_LIMIT}개와 끄기 버튼, 경로 찾기 버튼이 가운데 점에서 눌린다`,
+      at.ok && (await count(page, ".finder-pick")) === PATH_LIMIT && missed.length === 0,
+      `창 ${rectText(at.finder)}, 영역 ${rectText(at.area)}, 눌리지 않는 버튼 ${missed.join("·") || "없음"}`,
+    );
+    await page.screenshot({ path: join(OUT, `s3-finder-open-${width}.png`) });
+    await pickPath(page, 1, 3);
+    const second = (await picksOf(page))[1]?.pressed === true;
+    await page.click(".finder-clear");
+    await rest(page);
+    t.check(
+      `창 폭 ${width}px: 2번 버튼을 누르면 2번 경로가 눌린 상태가 되고 끄기를 누르면 고정이 풀린다`,
+      second && !(await pinnedOf(page)) && (await count(page, ".edge[data-route]")) === 0,
+      `2번 눌림 ${second}, 고정 ${await pinnedOf(page)}`,
+    );
+  }
+}
+
+async function finderSearch(t, page) {
+  const graph = await api("/api/graph");
+  const route = routeOf(graph, TRIP.from.id, TRIP.to.id);
+  await load(page);
+  await openFinder(page);
+  const typed = async (end, { id, text }) => {
+    await page.click(`.finder-field[data-end="${end}"] .finder-input`);
+    await page.keyboard.type(text);
+    await page.waitForSelector(".finder-hit", { timeout: 5_000 });
+    const hits = await page.evaluate(() => [...document.querySelectorAll(".finder-hit")].map((row) => ({ id: row.dataset.node, text: row.innerText.replaceAll("\n", " ") })));
+    if (end === "from") {
+      await t.shot();
+    }
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(`.finder-field[data-end="${end}"] .finder-value`, { timeout: 5_000 }).catch(() => {});
+    const value = await page.evaluate((sel) => document.querySelector(sel)?.innerText.replaceAll("\n", " ") ?? "", `.finder-field[data-end="${end}"] .finder-value`);
+    return { first: hits[0], count: hits.length, value, ok: hits[0]?.id === id && value.includes(`${text}()`) };
+  };
+  const from = await typed("from", TRIP.from);
+  t.check(`출발 칸에 ${TRIP.from.text}를 넣으면 결과 행이 나오고 Enter로 그 이름이 칸에 적힌다`, from.ok, `첫 결과 "${from.first?.text}", 칸 "${from.value}"`);
+  t.check("출발만 고른 동안에는 경로 고정이 아니고 숫자 버튼이 없다", !(await pinnedOf(page)) && (await count(page, ".finder-pick")) === 0);
+  const to = await typed("to", TRIP.to);
+  t.check(`도착 칸에 ${TRIP.to.text}를 넣으면 결과 행이 나오고 Enter로 그 이름이 칸에 적힌다`, to.ok, `첫 결과 "${to.first?.text}", 칸 "${to.value}"`);
+  await page.waitForSelector(".graph[data-pinned]", { timeout: 10_000 }).catch(() => {});
+  await rest(page);
+  const picks = await picksOf(page);
+  const lengths = route.paths.map((path) => path.length - 1);
+  t.check(
+    `두 칸이 차면 숫자 버튼 ${route.paths.length}개가 1부터 차례로 나오고 1번이 눌린 상태다`,
+    route.paths.length === PATH_LIMIT && same(picks.map((p) => p.number), route.paths.map((_, i) => String(i + 1))) && same(picks.map((p) => p.pressed), route.paths.map((_, i) => i === 0)),
+    picks.map((p) => `${p.number}${p.pressed ? "(눌림)" : ""}`).join(" "),
+  );
+  t.check(
+    `숫자 아래 단계 수가 /api/graph로 계산한 ${lengths.join("·")}이고 말풍선이 단계 수와 거치는 파일 수를 적는다`,
+    same(picks.map((p) => p.steps), lengths.map((n) => `${n}단계`)) && same(picks.map((p) => p.tip), route.paths.map((path) => `${path.length - 1}단계 · 파일 ${route.files(path)}개`)),
+    picks.map((p) => `${p.steps}(${p.tip})`).join(", "),
+  );
+  const more = await page.evaluate(() => document.querySelector(".finder-more")?.textContent ?? "");
+  t.check('여섯째 경로가 있으면 "경로가 더 있다"를 적는다', route.more === more.includes("경로가 더 있다") && route.more, more);
+  const notice = await page.evaluate(() => document.querySelector(".finder-pinned")?.innerText.replaceAll("\n", " ") ?? "");
+  t.check('결과 아래에 "경로 고정 중 · 경로 밖은 눌리지 않는다"와 끄기 버튼이 있다', notice.includes("경로 고정 중 · 경로 밖은 눌리지 않는다") && notice.includes("끄기"), notice);
+  await page.screenshot({ path: join(OUT, "s3-finder-search-result.png") });
+
+  // 칸 안의 Esc는 입력만 닫고 창과 고정을 그대로 둔다.
+  await page.click('.finder-field[data-end="to"] .finder-value');
+  await page.keyboard.type("parse");
+  await page.waitForSelector(".finder-hit", { timeout: 5_000 }).catch(() => {});
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  t.check(
+    "검색 칸 안의 Esc는 입력만 닫고 창과 경로 고정을 그대로 둔다",
+    (await count(page, ".finder-hit")) === 0 && (await count(page, ".finder")) === 1 && (await pinnedOf(page)) && (await count(page, ".finder-pick")) === PATH_LIMIT,
+    `결과 행 ${await count(page, ".finder-hit")}개, 고정 ${await pinnedOf(page)}`,
+  );
+}
+
+async function finderPath(t, page) {
+  const graph = await api("/api/graph");
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const route = routeOf(graph, TRIP.from.id, TRIP.to.id);
+  const fileOf = (id) => graph.nodes.find((n) => n.kind === "module" && n.path === nodes.get(id).path).id;
+  await load(page);
+  // 뒤로 갈 단계가 있는 이력에서 고정에 들어가 번호를 바꿔도 이력이 그대로인지 본다.
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await pin(page);
+  const ink = await colorOf(page, "--ink");
+  const span = spanOf(graph, TRIP.to.id);
+  const zooms = [];
+  let shotAt = null;
+  for (const [index, path] of route.paths.entries()) {
+    if (index > 0) {
+      await pickPath(page, index, path.length - 1);
+    }
+    zooms.push(await zoomOf(page));
+    const lines = await routeLinesOf(page);
+    const keys = new Set(path.slice(1).map((id, i) => `${path[i]}|${id}`));
+    t.check(
+      `${index + 1}번: data-route 선이 그 경로의 걸음 ${path.length - 1}개이고 굵기 ${LINE.step}px, 색 --ink, 불투명도 1이다`,
+      lines.length === path.length - 1 &&
+        lines.every((line) => keys.has(line.key.split("|").slice(0, 2).join("|")) || line.key.startsWith("step|")) &&
+        lines.every((line) => near(line.width, LINE.step, 0.01) && line.stroke === ink.rgb && line.opacity === 1),
+      lines.map((line) => `${line.key} ${line.width}px`).join(", "),
+    );
+    const edges = await edgesOf(page);
+    const others = edges.filter((e) => !lines.some((line) => line.key === e.key));
+    t.check(
+      `${index + 1}번: 그 밖의 선은 모두 muted 잉크에 불투명도 ${DIM}이다`,
+      others.length > 0 && others.every((e) => e.tone === "muted" && e.opacity === DIM),
+      toneLevels(edges),
+    );
+    const opacity = await opacitiesOf(page);
+    const files = new Set(path.map(fileOf));
+    const boxed = (await boxes(page)).map((b) => b.id);
+    t.check(
+      `${index + 1}번: 경로 위 노드와 그 파일 상자는 불투명도 1, 그 밖의 파일 상자는 ${DIM}이다`,
+      path.every((id) => opacity[id] === 1) && boxed.every((id) => opacity[id] === (files.has(id) ? 1 : DIM)) && boxed.some((id) => !files.has(id)),
+      `경로 위 ${path.map((id) => opacity[id]).join("·")}, 파일 상자 ${boxed.filter((id) => opacity[id] === 1).join("·")}`,
+    );
+    const ends = await page.evaluate(() =>
+      [...document.querySelectorAll(".route-end")].map((mark) => `${mark.closest(".react-flow__node").dataset.id.replace(/#face$/, "")} ${mark.textContent}`),
+    );
+    const listed = (await stepsShown(page)).map((row) => row.id);
+    t.check(
+      `${index + 1}번: 출발·도착 표지가 하나씩 보이고 단계 목록이 경로의 노드 순서와 같다`,
+      same(ends.sort(), [`${path[0]} 출발`, `${path.at(-1)} 도착`].sort()) && same(listed, path),
+      `표지 ${ends.join(", ")}, 목록 ${listed.length}행`,
+    );
+    const seen = await reachable(page, path.at(-1));
+    t.check(
+      `${index + 1}번: 정보 패널이 도착 노드를 보이고, 도착 노드가 패널과 왼쪽 아래 칸이 가리지 않는 영역 안에서 눌린다`,
+      (await headOf(page)).includes(span.text) && (await selectedOf(page)) === path.at(-1) && seen.ok,
+      `선택 고리 ${await selectedOf(page)}, 이름표 ${seen.at}`,
+    );
+    if (path.includes("note_common:build_upcoming")) {
+      const inside = Object.keys(opacity).filter((id) => id.startsWith("note_common:"));
+      t.check(
+        `${index + 1}번: note_common.py가 펼쳐져 경로 위의 build_upcoming()만 보인다`,
+        (await boxes(page)).find((b) => b.id === "note_common")?.open === true && same(inside, ["note_common:build_upcoming"]),
+        inside.join(", "),
+      );
+      shotAt = index + 1;
+      await page.screenshot({ path: join(OUT, "s3-finder-path-via.png") });
+    }
+    if (index === 0) {
+      await t.shot();
+    }
+  }
+  t.check("경로 가운데 note_common.py의 build_upcoming()을 지나는 경로가 있다", shotAt !== null, `${shotAt}번`);
+  t.check(
+    `번호를 바꾸는 동안 확대 비율이 ${NAMED_ZOOM} 그대로다`,
+    zooms.every((zoom) => near(zoom, zooms[0], 0.001)) && zooms[0] >= NAMED_ZOOM - 0.001,
+    zooms.map((zoom) => zoom.toFixed(3)).join(" → "),
+  );
+
+  // 1번 경로로 돌아가 그래프 전체를 보이게 한 뒤 경로 밖 선을 본다.
+  await pickPath(page, 0, route.paths[0].length - 1);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.waitForTimeout(600);
+  await rest(page);
+  const first = { lines: (await routeLinesOf(page)).map((line) => line.key).sort(), opacity: await opacitiesOf(page) };
+  // 경로 밖 선은 올려도 강조되지 않고 눌러도 강조가 그대로다.
+  const aggregate = await hittable(page, (await linesOf(page)).filter((line) => line.key.startsWith("agg|")));
+  if (aggregate === null) {
+    t.skip("경로 밖 집계 선에 올리기와 클릭", "누를 수 있는 집계 선이 화면에 없다");
+  } else {
+    await watchFlashes(page);
+    await page.mouse.move(aggregate.at.x - 1, aggregate.at.y);
+    await page.mouse.move(aggregate.at.x, aggregate.at.y);
+    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+    const hovered = (await linesOf(page)).find((line) => line.key === aggregate.line.key);
+    t.check(
+      "경로 밖 집계 선에 올리면 선이 굵어지거나 진해지지 않고 말풍선만 뜨며 커서가 not-allowed다",
+      !hovered.pointed && near(hovered.width, LINE.rest, 0.01) && hovered.tone === "muted" && hovered.opacity === DIM && (await tipText(page)) !== "" && (await cursorAt(page, aggregate.at)) === "not-allowed",
+      `굵기 ${hovered.width}px, 불투명도 ${hovered.opacity}, 말풍선 "${(await tipText(page)).replaceAll("\n", " / ")}"`,
+    );
+    await page.mouse.click(aggregate.at.x, aggregate.at.y);
+    await page.waitForTimeout(250);
+    await page.mouse.move(5, 5);
+    await page.waitForSelector(".finder-pinned[data-flash]", { state: "detached", timeout: 3_000 }).catch(() => {});
+    await rest(page);
+    const after = (await routeLinesOf(page)).map((line) => line.key).sort();
+    t.check(
+      "경로 밖 집계 선을 누르면 강조와 보이는 노드가 그대로이고 안내 줄이 한 번 뒤집힌다",
+      same(after, first.lines) && (await selectedOf(page)) === route.paths[0].at(-1) && (await flashesOf(page)) === 1 && same(await opacitiesOf(page), first.opacity),
+      `걸음 ${after.length}개, 보이는 노드 ${await selectedOf(page)}, 뒤집힘 ${await flashesOf(page)}번`,
+    );
+  }
+  await page.click(".finder-clear");
+  await rest(page);
+  const back = await selectedOf(page);
+  await page.keyboard.press("Alt+ArrowLeft");
+  await waitSelected(page, FILE).catch(() => {});
+  t.check(
+    "끄면 고정 전에 고른 함수로 돌아오고, 뒤로 가기가 고정 전 이력의 직전 단계로 간다",
+    back === FUNCTION && (await selectedOf(page)) === FILE,
+    `끈 뒤 선택 ${back}, 뒤로 간 뒤 ${await selectedOf(page)}`,
+  );
+}
+
+async function finderFolder(t, page) {
+  const ends = { from: { id: "doc_update:execute_all_ready", text: "execute_all_ready" }, to: { id: "parser.plan:parse_plan", text: "parse_plan" } };
+  await load(page);
+  await page.click('.tree-row.tree-dir[data-node="parser"]');
+  await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 });
+  await settle(page);
+  const before = await flowBoxes(page);
+  await pin(page, ends.from, ends.to);
+  const during = await flowBoxes(page);
+  t.check(
+    "접은 parser/ 안의 도착 노드로 경로를 고정하면 parser/plan.py 상자가 보이고 parse_plan()이 그려진다",
+    during["parser.plan"] !== undefined && during[ends.to.id] !== undefined && (await count(page, `${node("parser")} > .node-package`)) === 0,
+    `parser/plan.py ${during["parser.plan"] !== undefined}, parse_plan() ${during[ends.to.id] !== undefined}`,
+  );
+  const treeFolded = (await page.getAttribute('.tree-row.tree-dir[data-node="parser"]', "aria-expanded")) === "false";
+  t.check("고정 중에도 파일트리의 parser/ 행은 접힌 채다", treeFolded);
+  await t.shot();
+  await page.click(".finder-clear");
+  await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 }).catch(() => {});
+  await rest(page);
+  const after = await flowBoxes(page);
+  t.check(
+    "끄면 parser/가 다시 접힌 상자 하나이고 모든 상자의 위치와 크기가 고정 전과 같다",
+    (await count(page, `${node("parser")} > .node-package`)) === 1 && same(Object.keys(after).sort(), Object.keys(before).sort()) && Object.keys(before).every((id) => sameRect(after[id], before[id])),
+    `상자 ${Object.keys(before).length}개 → ${Object.keys(after).length}개`,
+  );
+}
+
+async function finderStep(t, page) {
+  const graph = await api("/api/graph");
+  const route = routeOf(graph, TRIP.from.id, TRIP.to.id);
+  const index = route.paths.findIndex((path) => path.includes("note_batch:create_note") && path.length >= 4);
+  if (index < 0) {
+    t.check("create_note()를 지나는 세 단계 이상의 경로가 있다", false);
+    return;
+  }
+  const path = route.paths[index];
+  await load(page);
+  await pin(page);
+  await pickPath(page, index, path.length - 1);
+  const state = async () => ({ lines: (await routeLinesOf(page)).map((line) => line.key).sort(), opacity: await opacitiesOf(page) });
+  const before = await state();
+  /** 경로 위 노드 id가 정보 패널, 탐색 경로 표시, 선택 고리, 코드 뷰어에 보이고 강조가 그대로인지 */
+  const focusedOn = async (id) => {
+    const want = graph.nodes.find((n) => n.id === id);
+    await page.waitForFunction((text) => document.querySelector(".info-panel-head")?.innerText.includes(text), spanOf(graph, id).text, { timeout: 10_000 }).catch(() => {});
+    await page.waitForFunction((name) => document.querySelector(".info-panel .monaco-editor .view-lines")?.textContent.replaceAll(" ", " ").includes(`def ${name}`), want.name, { timeout: 10_000 }).catch(() => {});
+    await rest(page);
+    const now = await state();
+    const trail = await page.evaluate(() => document.querySelector(".trail-last")?.textContent ?? "");
+    const code = await page.evaluate(() => document.querySelector(".info-panel .monaco-editor .view-lines")?.textContent.replaceAll(" ", " ") ?? "");
+    const current = await page.evaluate(() => document.querySelector('.finder-step[aria-current="true"]')?.dataset.node ?? null);
+    return {
+      ok:
+        (await headOf(page)).includes(spanOf(graph, id).text) &&
+        trail === `${want.name}()` &&
+        code.includes(`def ${want.name}`) &&
+        (await selectedOf(page)) === id &&
+        current === id &&
+        same(now.lines, before.lines) &&
+        same(now.opacity, before.opacity),
+      text: `머리 줄 ${(await headOf(page)).split("\n")[0]}, 탐색 경로 ${trail}, 선택 고리 ${await selectedOf(page)}, 걸음 ${now.lines.length}개`,
+    };
+  };
+  await page.click(".finder-step >> nth=2");
+  const third = await focusedOn(path[2]);
+  const seen = await reachable(page, path[2]);
+  t.check(
+    `${index + 1}번 경로의 셋째 단계를 누르면 정보 패널·탐색 경로 표시·코드 뷰어·선택 고리가 그 노드로 바뀌고 강조는 그대로다`,
+    third.ok,
+    third.text,
+  );
+  t.check("단계를 누르면 그 노드가 패널과 왼쪽 아래 칸이 가리지 않는 영역 안으로 와서 눌린다", seen.ok, `이름표 ${seen.at}`);
+  await t.shot();
+  // 다른 단계를 보이는 화면 가운데 create_note()가 가리지 않는 영역에 있는 화면에서 그래프의 그 노드를 누른다.
+  for (const [at, id] of path.entries()) {
+    if (id !== "note_batch:create_note") {
+      await page.click(`.finder-step >> nth=${at}`);
+      await focusedOn(id);
+      if ((await reachable(page, "note_batch:create_note")).ok) {
+        break;
+      }
+    }
+  }
+  await clickNode(page, "note_batch:create_note");
+  const clicked = await focusedOn("note_batch:create_note");
+  t.check("그래프에서 경로 위 노드 create_note()를 누르면 그 노드가 정보 패널에 보이고 강조는 그대로다", clicked.ok, clicked.text);
+  const strong = (await edgesOf(page)).filter((e) => e.tone === "strong").map((e) => e.key).sort();
+  t.check("본문 잉크 선이 경로의 걸음뿐이다", same(strong, before.lines), `본문 잉크 ${strong.length}개, 걸음 ${before.lines.length}개`);
+  // 도착 노드가 지금 보이는 노드가 아닌 걸음을 누른다.
+  const steps = (await routeLinesOf(page)).filter((line) => line.key.split("|")[1] !== "note_batch:create_note");
+  const found = await hittable(page, steps);
+  if (found === null) {
+    t.check("경로 위의 선 가운데 누를 수 있는 선이 있다", false);
+    return;
+  }
+  const target = found.line.key.split("|")[1];
+  t.check("경로 위의 선에 올리면 커서가 pointer다", (await cursorAt(page, found.at)) === "pointer", await cursorAt(page, found.at));
+  await page.mouse.click(found.at.x, found.at.y);
+  await page.mouse.move(5, 5);
+  const lined = await focusedOn(target);
+  t.check("경로 위의 선을 누르면 그 선의 도착 노드가 정보 패널에 보이고 강조는 그대로다", lined.ok, lined.text);
+}
+
+async function finderNone(t, page) {
+  const graph = await api("/api/graph");
+  const route = routeOf(graph, TRIP.to.id, TRIP.from.id);
+  const reverse = routeOf(graph, TRIP.from.id, TRIP.to.id);
+  await load(page);
+  await openFinder(page);
+  await fillEnd(page, "from", TRIP.to);
+  await fillEnd(page, "to", TRIP.from);
+  await page.waitForSelector(".finder-empty", { timeout: 10_000 });
+  await rest(page);
+  const lines = await page.evaluate(() => [...document.querySelectorAll(".finder-empty p")].map((p) => p.textContent));
+  const reach = route.unresolved === 0
+    ? `출발에서 닿는 함수는 ${route.reach}개이고 그 안에 대상을 확인하지 못한 호출(?)은 없다`
+    : `출발에서 닿는 함수 ${route.reach}개 안에 대상을 확인하지 못한 호출(?)이 ${route.unresolved}곳 있다. 그 호출을 거쳐 실제로는 닿을 수 있다`;
+  t.check(
+    "경로가 없으면 그 사실과 출발에서 닿는 함수 수·미확인 호출 수, 반대 방향에 경로가 있음을 적는다",
+    route.paths.length === 0 && same(lines, ["실행 선으로 이어지는 경로가 없다", reach, "반대 방향에는 경로가 있다"]),
+    lines.join(" / "),
+  );
+  t.check(
+    "경로가 없으면 고정이 아니어서 data-route 선과 숫자 버튼, 끄기 버튼이 없다",
+    !(await pinnedOf(page)) && (await count(page, ".edge[data-route]")) === 0 && (await count(page, ".finder-pick")) === 0 && (await count(page, ".finder-clear")) === 0,
+  );
+  await pick(page, FILE);
+  t.check("경로가 없는 동안에는 노드를 눌러 고를 수 있다", (await selectedOf(page)) === FILE, `선택 ${await selectedOf(page)}`);
+  await t.shot();
+  await page.click(".finder-reverse");
+  await page.waitForSelector(".graph[data-pinned]", { timeout: 10_000 }).catch(() => {});
+  await rest(page);
+  t.check(
+    `맞바꾸기 버튼을 누르면 숫자 버튼 ${reverse.paths.length}개가 나오고 경로 고정에 들어간다`,
+    (await pinnedOf(page)) && (await count(page, ".finder-pick")) === reverse.paths.length && (await count(page, ".finder-empty")) === 0,
+    `숫자 버튼 ${await count(page, ".finder-pick")}개`,
+  );
+  // 출발과 도착이 같은 곳이면 한 줄만 적는다.
+  await fillEnd(page, "to", { id: "arbiter", text: "arbiter.py" });
+  await page.waitForSelector(".finder-empty", { timeout: 10_000 }).catch(() => {});
+  const inside = await page.evaluate(() => [...document.querySelectorAll(".finder-empty p")].map((p) => p.textContent));
+  t.check("도착이 출발을 품은 파일이면 \"출발과 도착이 같은 곳이다\"만 적는다", same(inside, ["출발과 도착이 같은 곳이다"]) && !(await pinnedOf(page)), inside.join(" / "));
+}
+
+async function finderPin(t, page) {
+  const graph = await api("/api/graph");
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const route = routeOf(graph, TRIP.from.id, TRIP.to.id);
+  const path = route.paths[0];
+  const fileOf = (id) => graph.nodes.find((n) => n.kind === "module" && n.path === nodes.get(id).path).id;
+  const onPath = new Set(path.map(fileOf));
+  /** 경로 밖 파일 상자, 경로 밖 함수, 요약에 적을 경로 밖 정의 표기 */
+  const outside = { file: "doc_update", ref: `${FILE}.py::${FUNCTION.split(":")[1]}` };
+  if (onPath.has(outside.file) || onPath.has("parser.plan") || path.includes(FUNCTION)) {
+    t.check("1번 경로가 doc_update.py, parser/, _rebuild_note_sections()를 지나지 않는다", false, path.join(" → "));
+    return;
+  }
+  // 도착 노드의 요약을 경로 밖 정의 표기를 담은 글로 대신 답한다.
+  const fake = `계획 날짜 문자열을 날짜로 바꾼다.\n\n하는 일\n\`${outside.ref}\`와 같은 형식을 읽는다.\n\n앞뒤 흐름\n계획 파서가 부른다.`;
+  await page.route(
+    (at) => at.pathname === "/api/summary" && at.searchParams.get("node") === TRIP.to.id,
+    (routed) => (routed.request().method() === "GET" ? routed.fulfill({ json: { summary: fake, stale: false, available: true, reason: null } }) : routed.fallback()),
+  );
+  await load(page);
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await page.click('.tree-row.tree-dir[data-node="parser"]');
+  await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 });
+  await settle(page);
+  const settings = async () => ({
+    tests: await page.getByLabel("테스트 코드").isChecked(),
+    external: await page.getByLabel("외부 노드").isChecked(),
+    depth: await page.locator('.toolbar input[type="range"]').inputValue(),
+  });
+  const free = await settings();
+  await pin(page);
+  await watchFlashes(page);
+
+  const state = async () => ({
+    lines: (await routeLinesOf(page)).map((line) => line.key).sort(),
+    open: (await boxes(page)).filter((b) => b.open).map((b) => b.id).sort(),
+    folded: await page.evaluate(() => [...document.querySelectorAll(".react-flow__node > .node-body.node-package")].map((e) => e.closest(".react-flow__node").dataset.id).sort()),
+    calls: await count(page, ".node-call"),
+    pinned: await pinnedOf(page),
+    focus: await selectedOf(page),
+    settings: await settings(),
+  });
+  const pinnedState = await state();
+  /** 조작 act 뒤에 강조와 펼친 상자, 뷰, 토글이 그대로이고 안내 줄이 flashes번 뒤집혔는지 본다. focus는 조작 뒤 정보 패널이 보일 노드다. */
+  const blocked = async (label, act, flashes = 1, focus = pinnedState.focus) => {
+    const seen = await flashesOf(page);
+    await act();
+    await page.waitForTimeout(250);
+    const added = (await flashesOf(page)) - seen;
+    await page.waitForSelector(".finder-pinned[data-flash]", { state: "detached", timeout: 3_000 }).catch(() => {});
+    await rest(page);
+    const now = await state();
+    t.check(
+      `${label}: 강조·펼친 상자·뷰·토글이 그대로이고 안내 줄이 ${flashes === 0 ? "뒤집히지 않는다" : "한 번 뒤집혔다 돌아온다"}`,
+      same({ ...now, focus: null }, { ...pinnedState, focus: null }) && now.focus === focus && added === flashes && (await count(page, ".finder-pinned[data-flash]")) === 0,
+      `걸음 ${now.lines.length}개, 펼친 상자 ${now.open.join("·")}, 보이는 노드 ${now.focus}, 뒤집힘 ${added}번`,
+    );
+  };
+
+  t.check(
+    "고정 중에 뒤로·앞으로 버튼, 흐름 단계 슬라이더, 테스트 코드·외부 노드 토글이 disabled이고 자동 요약 토글은 아니다",
+    (await page.getByRole("button", { name: "뒤로" }).isDisabled()) &&
+      (await page.getByRole("button", { name: "앞으로" }).isDisabled()) &&
+      (await page.locator('.toolbar input[type="range"]').isDisabled()) &&
+      (await page.getByLabel("테스트 코드").isDisabled()) &&
+      (await page.getByLabel("외부 노드").isDisabled()) &&
+      !(await page.getByLabel("자동 요약").isDisabled()),
+  );
+  // 고정 중에도 화면 맞춤은 동작한다. 그래프 전체를 보이게 한 뒤 경로 밖 요소를 누른다.
+  const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+  const fitted = await viewport();
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.waitForTimeout(600);
+  await rest(page);
+  t.check("고정 중에도 화면 맞춤이 화면을 옮기고 고정은 그대로다", (await viewport()) !== fitted && same((await state()).lines, pinnedState.lines), `${fitted} → ${await viewport()}`);
+  const boxAt = center(await rectOf(page, `${face(outside.file)} .node-label`));
+  const folderAt = center(await rectOf(page, `${face("parser")} .node-label`));
+  const stepAt = center(await rectOf(page, `${face(path[0])} .node-label`));
+  t.check(
+    "경로 밖 파일 상자와 접힌 폴더 상자의 커서가 not-allowed이고 경로 위 노드의 커서는 pointer다",
+    (await cursorAt(page, boxAt)) === "not-allowed" && (await cursorAt(page, folderAt)) === "not-allowed" && (await cursorAt(page, stepAt)) === "pointer",
+    `파일 상자 ${await cursorAt(page, boxAt)}, 폴더 상자 ${await cursorAt(page, folderAt)}, 경로 위 노드 ${await cursorAt(page, stepAt)}`,
+  );
+
+  await blocked("경로 밖 파일 상자 클릭", () => clickNode(page, outside.file));
+  await t.shot();
+  await blocked("접힌 폴더 상자 클릭", () => clickNode(page, "parser"));
+  const step = await hittable(page, (await linesOf(page)).filter((line) => pinnedState.lines.includes(line.key)));
+  if (step !== null) {
+    await page.mouse.move(step.at.x - 1, step.at.y);
+    await page.mouse.move(step.at.x, step.at.y);
+    await page.waitForTimeout(200);
+    const hovered = (await linesOf(page)).find((line) => line.key === step.line.key);
+    t.check(`경로의 걸음에 올리면 ${LINE.pointed}px로 굵어진다`, hovered.pointed && near(hovered.width, LINE.pointed, 0.01), `굵기 ${hovered.width}px`);
+    await page.mouse.move(5, 5);
+  }
+  const { clear } = await stageOf(page);
+  const blank = await page.evaluate(({ x, y, width, height }) => {
+    for (let dy = 8; dy < height; dy += 16) {
+      for (let dx = 8; dx < width; dx += 16) {
+        if (document.elementFromPoint(x + dx, y + dy)?.classList.contains("react-flow__pane")) {
+          return { x: x + dx, y: y + dy };
+        }
+      }
+    }
+    return null;
+  }, clear);
+  await blocked("그래프 바탕 클릭", () => page.mouse.click(blank.x, blank.y), 0);
+  await blocked("Esc 두 번", async () => {
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+  }, 0);
+  // 출발 노드를 가리지 않는 영역으로 옮긴 뒤 더블클릭한다. 첫 클릭은 이미 보이는 노드를 다시 고르고 둘째 클릭의 함수 시점 뷰 진입이 막힌다.
+  await page.click(".finder-step >> nth=0");
+  await rest(page);
+  await blocked("경로 위 함수 더블클릭", () => clickNode(page, path[0], 2), 1, path[0]);
+  await blocked("파일트리의 경로 밖 파일 클릭", () => page.click(`.tree-row.tree-file[data-node="${outside.file}"]`), 1, path[0]);
+  await blocked("파일트리의 접은 폴더 행 클릭", () => page.click('.tree-row.tree-dir[data-node="parser"]'), 1, path[0]);
+  await blocked("Mod+P로 경로 밖 함수 고르기", async () => {
+    await page.keyboard.press(`${MOD}+p`);
+    await page.waitForSelector(".palette-input", { timeout: 5_000 });
+    await page.keyboard.type("rns");
+    await page.waitForSelector(`.palette-option[data-node="${FUNCTION}"]`, { timeout: 5_000 });
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(".palette", { state: "detached", timeout: 3_000 }).catch(() => {});
+  }, 1, path[0]);
+  t.check("Mod+P 팔레트는 고른 뒤 닫힌다", (await count(page, ".palette")) === 0);
+
+  // 코드 뷰어가 보이는 경로 위 함수의 코드에서, 그 함수가 부르는 경로 밖 함수의 이름을 Mod+클릭한다.
+  await page.waitForFunction(() => document.querySelector(".info-panel .monaco-editor .view-lines") !== null, null, { timeout: 30_000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  const callees = graph.edges
+    .filter((e) => e.source === path[0] && e.kind === "call" && !path.includes(e.target))
+    .map((e) => nodes.get(e.target))
+    .filter((n) => n.kind === "function" && !n.test);
+  let word = null;
+  for (const callee of callees) {
+    const rect = await wordRect(page, callee.name);
+    const code = await rectOf(page, ".info-panel .code");
+    if (rect !== null && rect.y > code.y && rect.y + rect.height < code.y + code.height) {
+      word = { rect, name: callee.name };
+      break;
+    }
+  }
+  if (word === null) {
+    t.skip("코드 뷰어에서 경로 밖 이름 Mod+클릭", "코드 뷰어에 보이는 줄에 경로 밖 함수의 호출이 없다");
+  } else {
+    await blocked(`코드 뷰어에서 경로 밖 이름 ${word.name} Mod+클릭`, async () => {
+      const answered = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/definition", { timeout: 15_000 }).catch(() => null);
+      await page.keyboard.down(MOD);
+      await page.mouse.click(word.rect.x + word.rect.width / 2, word.rect.y + word.rect.height / 2);
+      await page.keyboard.up(MOD);
+      await answered;
+      await page.mouse.move(5, 5);
+    }, 1, path[0]);
+  }
+
+  // 도착 노드를 다시 보이게 한 뒤 요약의 경로 밖 정의 표기를 누른다.
+  await page.click(`.finder-step[data-node="${TRIP.to.id}"]`);
+  await page.waitForSelector(`.summary-text .summary-ref[data-node="${FUNCTION}"]`, { timeout: 10_000 }).catch(() => {});
+  await rest(page);
+  await blocked("요약의 경로 밖 정의 표기 클릭", () => page.click(`.summary-text .summary-ref[data-node="${FUNCTION}"]`));
+  await blocked("Alt+←", () => page.keyboard.press("Alt+ArrowLeft"));
+  await blocked("disabled인 테스트 코드 토글과 흐름 단계 슬라이더 누르기", async () => {
+    await page.getByLabel("테스트 코드").click({ force: true });
+    const slider = await rectOf(page, '.toolbar input[type="range"]');
+    await page.mouse.click(slider.x + 2, slider.y + slider.height / 2);
+  }, 0);
+
+  // 창을 접어도 고정은 유지되고, 접은 채 막힌 조작을 하면 창이 펴진다.
+  await page.click(".finder-button");
+  await page.waitForSelector(".finder", { state: "detached", timeout: 5_000 }).catch(() => {});
+  const button = await page.evaluate(() => {
+    const element = document.querySelector(".finder-button");
+    return { pinned: element.hasAttribute("data-pinned"), background: getComputedStyle(element).backgroundColor, title: element.title };
+  });
+  const ink = await colorOf(page, "--ink");
+  t.check(
+    "창을 접어도 강조가 남고 경로 찾기 버튼이 본문 잉크로 채워진다",
+    (await count(page, ".finder")) === 0 && same((await state()).lines, pinnedState.lines) && button.pinned && button.background === ink.rgb && button.title.includes("경로 고정 중"),
+    `창 ${await count(page, ".finder")}개, 버튼 바탕 ${button.background}, 말풍선 "${button.title}"`,
+  );
+  await page.screenshot({ path: join(OUT, "s3-finder-pin-folded.png") });
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.waitForTimeout(600);
+  await rest(page);
+  await blocked("창을 접은 채 경로 밖 파일 상자 클릭", () => clickNode(page, outside.file));
+  t.check("접은 채 막힌 조작을 하면 창이 펴진다", (await count(page, ".finder")) === 1);
+
+  await page.click(".finder-clear");
+  await rest(page);
+  const cleared = await state();
+  t.check(
+    "끄기를 누르면 data-route 선이 없고 고정 전에 고른 함수와 토글, 접은 parser/로 돌아온다",
+    !cleared.pinned && cleared.lines.length === 0 && cleared.focus === FUNCTION && same(cleared.settings, free) && cleared.folded.includes("parser") && (await count(page, ".finder-pick")) === 0,
+    `선택 ${cleared.focus}, 접힌 폴더 ${cleared.folded.join("·")}`,
+  );
+  await page.click(`.tree-row.tree-file[data-node="${outside.file}"]`);
+  await waitSelected(page, outside.file).catch(() => {});
+  const picked = (await selectedOf(page)) === outside.file && (await boxes(page)).find((b) => b.id === outside.file)?.open === true;
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.waitForTimeout(600);
+  await rest(page);
+  await clickNode(page, "parser");
+  await page.waitForSelector(`${node("parser")} > .node-package`, { state: "detached", timeout: 30_000 }).catch(() => {});
+  await settle(page);
+  const unfolded = (await count(page, `${node("parser")} > .node-package`)) === 0;
+  await page.keyboard.press("Alt+ArrowLeft");
+  await rest(page);
+  const stepped = (await count(page, `${node("parser")} > .node-package`)) === 1 || (await selectedOf(page)) !== outside.file;
+  await page.getByLabel("테스트 코드").check();
+  await rest(page);
+  t.check(
+    "끈 뒤에는 파일트리의 파일 클릭, 접힌 폴더 상자 클릭, Alt+←, 테스트 코드 토글이 평소대로 동작한다",
+    picked && unfolded && stepped && (await page.getByLabel("테스트 코드").isChecked()),
+    `파일 선택 ${picked}, 폴더 펼침 ${unfolded}, 뒤로 ${stepped}`,
+  );
+}
+
+async function finderEnds(t, page) {
+  const graph = await api("/api/graph");
+  const route = routeOf(graph, "arbiter", "date_engine");
+  await load(page);
+  await pick(page, FILE);
+  t.check("창을 펴기 전에는 정보 패널 머리 줄에 출발로·도착으로 버튼이 없다", (await count(page, ".info-panel-end")) === 0);
+  await openFinder(page);
+  await page.waitForSelector('.info-panel-end[data-end="from"]', { timeout: 5_000 }).catch(() => {});
+  await page.click('.info-panel-end[data-end="from"]');
+  await page.click('.tree-row.tree-file[data-node="date_engine"]');
+  await waitSelected(page, "date_engine");
+  await t.shot();
+  await page.click('.info-panel-end[data-end="to"]');
+  await page.waitForSelector(".graph[data-pinned]", { timeout: 10_000 }).catch(() => {});
+  await rest(page);
+  const values = await page.evaluate(() => [...document.querySelectorAll(".finder-field .finder-value")].map((value) => value.innerText.replaceAll("\n", " ")));
+  t.check(
+    "arbiter.py를 고르고 출발로, date_engine.py를 고르고 도착으로를 누르면 두 칸이 채워지고 경로 고정에 들어간다",
+    (await pinnedOf(page)) && values.length === 2 && values[0].includes("arbiter.py") && values[1].includes("date_engine.py") && (await count(page, ".finder-pick")) === route.paths.length,
+    `${values.join(" / ")}, 숫자 버튼 ${await count(page, ".finder-pick")}개`,
+  );
+  t.check(
+    "파일을 끝점으로 주면 그 파일의 어느 함수에서든 출발한 경로를 짧은 것부터 적는다",
+    same((await stepsShown(page)).map((row) => row.id), route.paths[0]) && same((await picksOf(page)).map((p) => p.steps), route.paths.map((p) => `${p.length - 1}단계`)),
+    (await stepsShown(page)).map((row) => row.id).join(" → "),
+  );
+  await pickPath(page, 1, route.paths[1].length - 1);
+  const lines = (await routeLinesOf(page)).map((line) => line.key.split("|").slice(0, 2).join("|")).sort();
+  const want = route.paths[1].slice(1).map((id, i) => `${route.paths[1][i]}|${id}`).sort();
+  t.check(
+    "2번 버튼을 누르면 고정이 유지된 채 강조가 2번 경로로 바뀐다",
+    (await pinnedOf(page)) && (await picksOf(page))[1].pressed && same(lines, want) && same((await stepsShown(page)).map((row) => row.id), route.paths[1]),
+    lines.join(", "),
+  );
+  await page.click(".finder-swap");
+  await page.waitForSelector(".finder-empty", { timeout: 10_000 }).catch(() => {});
+  await rest(page);
+  const swapped = routeOf(graph, "date_engine", "arbiter");
+  t.check(
+    "맞바꾸면 경로가 없어 고정이 풀리고 경로 없음 문구가 보인다",
+    swapped.paths.length === 0 && !(await pinnedOf(page)) && (await count(page, ".edge[data-route]")) === 0 && (await page.evaluate(() => document.querySelector(".finder-empty-title")?.textContent)) === "실행 선으로 이어지는 경로가 없다",
+    await page.evaluate(() => document.querySelector(".finder-empty")?.innerText.replaceAll("\n", " / ") ?? ""),
+  );
+  await page.click(".finder-button");
+  t.check("창을 접으면 출발로·도착으로 버튼이 없어진다", (await count(page, ".info-panel-end")) === 0);
+}
+
+// ── 3단계 시나리오: 분석 덮개 ─────────────────────────────────────
+
+/** 덮개 메뉴의 행마다 종류, 글자, 고른 상태. 화면에 보이는 행만 읽는다. */
+const overlayOptions = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".overlay-option")]
+      .filter((option) => option.getBoundingClientRect().width > 0)
+      .map((option) => ({
+        kind: option.dataset.kind,
+        text: option.innerText.replaceAll("\n", " "),
+        checked: option.getAttribute("aria-checked") === "true",
+        inSettings: option.closest(".toolbar-toggles-list") !== null,
+        inside: option.getBoundingClientRect().right <= window.innerWidth && option.getBoundingClientRect().left >= 0,
+      })),
+  );
+
+/** 테스트 코드를 뺀 미사용 후보 */
+function candidatesOf(graph, unused) {
+  const hidden = hiddenOf(graph);
+  return unused.candidates.filter((id) => !hidden.has(id));
+}
+
+async function overlayMenu(t, page) {
+  const [graph, unused] = [await api("/api/graph"), await api("/api/unused")];
+  const groups = cyclesOf(graph, hiddenOf(graph)).groups.length;
+  const candidates = candidatesOf(graph, unused);
+  for (const width of [1700, 1280, 980, 720]) {
+    await page.setViewportSize({ width, height: 900 });
+    await load(page);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+    await settle(page);
+    const fit = await page.evaluate(() => document.querySelector(".toolbar").dataset.fit);
+    const folded = fit === "menu" || fit === "rows";
+    if (width === 1700) {
+      t.check(
+        groups === 0 ? "순환 묶음이 없는 레포는 덮개 없이 열린다" : "순환 묶음이 있는 레포는 순환 덮개를 켠 채로 열린다",
+        (await page.evaluate(() => document.querySelector(".graph").dataset.overlay ?? "none")) === (groups === 0 ? "none" : "cycles"),
+        await page.evaluate(() => document.querySelector(".overlay-button").textContent),
+      );
+    }
+    const before = await flowBoxes(page);
+    await page.click(folded ? ".toolbar-toggles-button" : ".overlay-button");
+    await page.waitForFunction(() => [...document.querySelectorAll(".overlay-option")].some((option) => option.getBoundingClientRect().width > 0), null, { timeout: 5_000 }).catch(() => {});
+    const options = await overlayOptions(page);
+    t.check(
+      `창 폭 ${width}px: 덮개 목록이 없음, 순환 의존 묶음 ${groups}, 미사용 후보 ${candidates.length}개를 ${folded ? '"설정" 목록 안에' : "덮개 버튼 아래에"} 적고 창 안에 있다`,
+      same(options.map((o) => o.text), ["없음", `순환 의존 묶음 ${groups}`, `미사용 후보 ${candidates.length}개`]) && options.every((o) => o.inSettings === folded && o.inside),
+      `단계 ${fit}, ${options.map((o) => o.text).join(" / ")}`,
+    );
+    await page.screenshot({ path: join(OUT, `s3-overlay-menu-${width}.png`) });
+    await page.click('.overlay-option[data-kind="unused"] >> visible=true');
+    if ((await count(page, ".toolbar-toggles-list[data-open]")) > 0) {
+      await page.keyboard.press("Escape");
+    }
+    await rest(page);
+    const after = await flowBoxes(page);
+    t.check(
+      `창 폭 ${width}px: 미사용 후보를 고르면 덮개가 켜지고 목록이 접히며 상자의 위치와 크기가 그대로다`,
+      (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "unused" &&
+        (await overlayOptions(page)).length === 0 &&
+        Object.keys(before).every((id) => after[id] !== undefined && sameRect(after[id], before[id])),
+      `덮개 ${await page.evaluate(() => document.querySelector(".graph").dataset.overlay)}`,
+    );
+  }
+}
+
+/** 미사용 덮개가 표시한 노드마다 id, 테두리가 점선인지, 불투명도 */
+const unusedShown = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".react-flow__node > .node-body[data-unused]")].map((body) => {
+      const shape = body.querySelector(".node-circle, .node-hexagon polygon, .call-shape") ?? body;
+      const style = getComputedStyle(shape);
+      return {
+        id: body.closest(".react-flow__node").dataset.id,
+        dashed: style.borderStyle === "dashed" || (style.strokeDasharray !== "none" && style.strokeDasharray !== ""),
+        opacity: Number(getComputedStyle(body.closest(".react-flow__node")).opacity),
+      };
+    }),
+  );
+
+const belowOf = (page, id) => page.evaluate((sel) => document.querySelector(`${sel} .node-below`)?.textContent ?? "", face(id));
+
+async function unusedScenario(t, page) {
+  const [graph, unused] = [await api("/api/graph"), await api("/api/unused")];
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const candidates = candidatesOf(graph, unused);
+  const file = "date_engine";
+  const inFile = candidates.filter((id) => nodes.get(id).path === nodes.get(file).path);
+  if (inFile.length === 0) {
+    t.skip("date_engine.py의 미사용 후보 표시", "서버 응답에 date_engine.py의 미사용 후보가 없다");
+    return;
+  }
+  await load(page);
+  const plain = await belowOf(page, file);
+  await setOverlay(page, "unused");
+  const caption = await belowOf(page, file);
+  t.check(
+    `미사용 덮개를 켜면 접힌 date_engine.py 아래 글자가 "미사용 후보 ${inFile.length}"을 담고, 후보가 없는 arbiter.py 아래 글자는 그대로다`,
+    !plain.includes("미사용") && caption === `${plain} · 미사용 후보 ${inFile.length}` && !(await belowOf(page, FILE)).includes("미사용"),
+    `${plain} → ${caption}, arbiter.py "${await belowOf(page, FILE)}"`,
+  );
+  const tip = await tipOver(page, `${face(file)} .node-below`);
+  t.check("아래 글자에 올리면 미사용 후보 수와 뜻을 말풍선에 적는다", tip.startsWith(`미사용 후보 ${inFile.length}개 · 이 파일 안의 정의에서 합친 수`) && tip.includes("동적 호출이면 실제로는 쓰일 수 있다"), tip.replaceAll("\n", " / "));
+  await page.mouse.move(5, 5);
+  const overview = await page.evaluate(() => ({
+    count: document.querySelector(".overview .overview-count")?.textContent ?? "",
+    rows: [...document.querySelectorAll(".overview .overview-row")].map((row) => row.dataset.node),
+  }));
+  t.check(
+    `아무것도 고르지 않은 정보 패널이 미사용 후보 ${candidates.length}개를 /api/unused의 순서대로 적는다`,
+    overview.count === `미사용 후보 ${candidates.length}개 · 정의 ${unused.definitions}개 가운데` && same(overview.rows, candidates),
+    `${overview.count}, 행 ${overview.rows.length}개`,
+  );
+  const legend = async () => {
+    await page.click(".legend-button");
+    const text = await page.evaluate(() => document.querySelector(".legend-overlay")?.textContent ?? "");
+    await page.click(".legend-button");
+    return text;
+  };
+  t.check("범례 끝에 미사용 후보 줄이 붙는다", (await legend()).includes("미사용 후보"), await legend());
+  await page.screenshot({ path: join(OUT, "s3-unused-overview.png") });
+
+  await pick(page, file);
+  await page.mouse.move(5, 5);
+  await rest(page);
+  const shown = await unusedShown(page);
+  t.check(
+    `date_engine.py를 고르면 data-unused 노드가 그 파일의 후보 ${inFile.length}개이고 테두리가 점선, 불투명도가 ${UNUSED_OPACITY} 이하다`,
+    same(shown.map((n) => n.id).sort(), [...inFile].sort()) && shown.every((n) => n.dashed && n.opacity <= UNUSED_OPACITY + 0.001),
+    shown.map((n) => `${n.id} ${n.dashed ? "점선" : "실선"} ${n.opacity}`).join(", "),
+  );
+  const edges = await edgesOf(page);
+  const [ink, muted] = [await colorOf(page, "--ink"), await colorOf(page, "--muted")];
+  const borders = await page.evaluate(() => [...new Set([...document.querySelectorAll(".react-flow__node > .node-body[data-unused] .node-circle")].map((circle) => getComputedStyle(circle).borderTopColor))]);
+  t.check(
+    "선과 후보 테두리의 색이 --ink와 --muted 두 값뿐이다",
+    [...new Set(edges.map((e) => e.stroke))].every((stroke) => [ink.rgb, muted.rgb].includes(stroke)) && borders.every((color) => [ink.rgb, muted.rgb].includes(color)),
+    `선 ${[...new Set(edges.map((e) => e.stroke))].join(", ")}, 테두리 ${borders.join(", ")}`,
+  );
+  const hovered = await tipOver(page, `${face(inFile[0])} .node-label`);
+  t.check("후보 노드에 올리면 말풍선 둘째 줄에 미사용 후보의 뜻을 적는다", hovered.split("\n").length === 2 && hovered.split("\n")[1].startsWith("미사용 후보"), hovered.replaceAll("\n", " / "));
+  await t.shot();
+  await page.mouse.move(5, 5);
+
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".overview .overview-row", { timeout: 10_000 }).catch(() => {});
+  await rest(page);
+  const last = candidates.at(-1);
+  await page.click(`.overview-row[data-node="${last}"]`);
+  await waitSelected(page, last).catch(() => {});
+  t.check("선택을 풀면 목록이 다시 보이고 행을 누르면 그 노드가 선택된다", (await selectedOf(page)) === last, `선택 ${await selectedOf(page)}`);
+
+  // 함수 시점 뷰도 같은 노드 컴포넌트로 후보를 점선으로 그린다.
+  await clickNode(page, last, 2);
+  await page.waitForSelector(".node-call", { timeout: 30_000 }).catch(() => {});
+  await rest(page);
+  const calls = await unusedShown(page);
+  t.check("함수 시점 뷰에서도 후보의 테두리가 점선이다", calls.some((n) => n.id === last && n.dashed), calls.map((n) => `${n.id} ${n.dashed ? "점선" : "실선"}`).join(", "));
+  await page.keyboard.press("Alt+ArrowLeft");
+  await rest(page);
+
+  await setOverlay(page, "none");
+  t.check("덮개를 끄면 data-unused 노드와 아래 글자의 후보 수가 없다", (await count(page, "[data-unused]")) === 0 && !(await page.evaluate(() => [...document.querySelectorAll(".node-below")].some((below) => below.textContent.includes("미사용")))));
+}
+
+/** 경로 고정과 미사용 덮개가 함께 켜졌을 때 경로가 먼저 읽히는지 본다. */
+async function finderOverlay(t, page) {
+  const [graph, unused] = [await api("/api/graph"), await api("/api/unused")];
+  const ends = { from: { id: "date_engine:tomorrow", text: "tomorrow" }, to: { id: "date_engine:today", text: "today" } };
+  const candidates = candidatesOf(graph, unused);
+  const route = routeOf(graph, ends.from.id, ends.to.id);
+  if (!candidates.includes(ends.from.id) || route.paths.length === 0) {
+    t.skip("미사용 후보에서 출발하는 경로", "tomorrow()가 미사용 후보가 아니거나 today()로 가는 경로가 없다");
+    return;
+  }
+  const other = candidates.find((id) => !id.startsWith("date_engine:"));
+  await load(page);
+  await setOverlay(page, "unused");
+  await pin(page, ends.from, ends.to);
+  await watchFlashes(page);
+  const shown = await unusedShown(page);
+  const start = shown.find((n) => n.id === ends.from.id);
+  const lines = await routeLinesOf(page);
+  const ink = await colorOf(page, "--ink");
+  t.check(
+    "미사용 덮개를 켠 채 후보에서 출발하는 경로를 고정하면 출발 노드가 점선 테두리에 불투명도 1이고 걸음은 본문 잉크 3px다",
+    start !== undefined && start.dashed && start.opacity === 1 && lines.length === route.paths[0].length - 1 && lines.every((line) => near(line.width, LINE.step, 0.01) && line.stroke === ink.rgb),
+    `출발 ${start?.dashed ? "점선" : "실선"} ${start?.opacity}, 걸음 ${lines.length}개`,
+  );
+  t.check(
+    "경로 밖의 후보는 경로 밖 노드의 불투명도이고, 경로 밖 파일의 아래 글자는 후보 수를 그대로 적는다",
+    shown.filter((n) => !route.paths[0].includes(n.id)).every((n) => n.opacity === DIM) && (other === undefined || (await belowOf(page, other.split(":")[0])).includes("미사용 후보")),
+    shown.map((n) => `${n.id} ${n.opacity}`).join(", "),
+  );
+  await t.shot();
+  await setOverlay(page, "none");
+  const off = { pinned: await pinnedOf(page), lines: (await routeLinesOf(page)).length, unused: await count(page, "[data-unused]") };
+  await setOverlay(page, "unused");
+  t.check(
+    "고정 중에 덮개를 껐다 켜도 고정과 걸음이 그대로이고 안내 줄이 뒤집히지 않는다",
+    off.pinned && off.lines === lines.length && off.unused === 0 && (await pinnedOf(page)) && (await count(page, ".react-flow__node > .node-body[data-unused]")) === shown.length && (await flashesOf(page)) === 0,
+    `끈 동안 걸음 ${off.lines}개·표시 ${off.unused}개, 뒤집힘 ${await flashesOf(page)}번`,
+  );
+  await page.click(".finder-clear");
+  await rest(page);
+  t.check("끄기를 누르면 덮개만 남는다", !(await pinnedOf(page)) && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "unused");
+}
+
+async function overlayDark(t, page) {
+  const [graph, unused] = [await api("/api/graph"), await api("/api/unused")];
+  const route = routeOf(graph, TRIP.from.id, TRIP.to.id);
+  await load(page);
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  const [surface, ink] = [await colorOf(page, "--surface"), await colorOf(page, "--ink")];
+  await pin(page);
+  const lines = await routeLinesOf(page);
+  t.check(
+    "어두운 화면에서 경로의 걸음이 어두운 화면의 --ink 3px로 그려진다",
+    surface.value === DARK.surface && ink.value === DARK.ink && lines.length === route.paths[0].length - 1 && lines.every((line) => line.stroke === ink.rgb && near(line.width, LINE.step, 0.01)),
+    `--ink ${ink.value}, 걸음 ${lines.map((line) => line.stroke).join(", ")}`,
+  );
+  const pinned = await coveredTexts(page);
+  t.check("경로를 강조한 화면에서 덮인 글자가 없다", pinned.seen > 0 && pinned.covered.length === 0, `글자 ${pinned.seen}개, 덮인 글자 ${pinned.covered.slice(0, 3).join(", ") || "없음"}`);
+  const end = await page.evaluate(() => {
+    const mark = document.querySelector(".route-end");
+    return { color: getComputedStyle(mark).color, background: getComputedStyle(mark).backgroundColor };
+  });
+  t.check("출발·도착 표지가 본문 잉크 바탕에 바탕색 글자다", end.background === ink.rgb && end.color === surface.rgb, `바탕 ${end.background}, 글자 ${end.color}`);
+  await t.shot();
+  await page.click(".finder-clear");
+  await page.click(".finder-button");
+  await rest(page);
+
+  const candidates = candidatesOf(graph, unused).filter((id) => id.startsWith("date_engine:"));
+  if (candidates.length === 0) {
+    t.skip("어두운 화면의 미사용 후보", "서버 응답에 date_engine.py의 미사용 후보가 없다");
+    return;
+  }
+  await setOverlay(page, "unused");
+  await page.click('.tree-row.tree-file[data-node="date_engine"]');
+  await waitSelected(page, "date_engine");
+  await rest(page);
+  const shown = await unusedShown(page);
+  const muted = await colorOf(page, "--muted");
+  const strokes = [...new Set((await edgesOf(page)).map((e) => e.stroke))];
+  t.check(
+    "어두운 화면에서 미사용 후보가 점선 테두리이고 선의 색이 --ink와 --muted뿐이다",
+    same(shown.map((n) => n.id).sort(), [...candidates].sort()) && shown.every((n) => n.dashed) && strokes.every((stroke) => [ink.rgb, muted.rgb].includes(stroke)),
+    `${shown.length}개, 선 ${strokes.join(", ")}`,
+  );
+  const covered = await coveredTexts(page);
+  t.check("미사용 후보를 표시한 화면에서 덮인 글자가 없다", covered.seen > 0 && covered.covered.length === 0, `글자 ${covered.seen}개, 덮인 글자 ${covered.covered.slice(0, 3).join(", ") || "없음"}`);
+  await page.screenshot({ path: join(OUT, "s3-overlay-dark-unused.png") });
+}
+
+// ── 3단계 시나리오: 순환이 있는 고정 레포 ─────────────────────────
+
+/** 선마다 키, 순환 선 표시, 선 색, 불투명도, 화살촉 색 */
+const cycleLinesOf = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].map((edge) => ({
+      key: edge.dataset.key,
+      cycle: edge.hasAttribute("data-cycle"),
+      stroke: getComputedStyle(edge.querySelector(".edge-line")).stroke,
+      opacity: Number(getComputedStyle(edge).opacity),
+    })),
+  );
+
+const cycleMarksOf = (page) =>
+  page.evaluate(() => [...document.querySelectorAll(".react-flow__node .cycle-mark")].map((mark) => mark.closest(".react-flow__node").dataset.id.replace(/#face$/, "")).sort());
+
+async function cyclesScenario(t, page) {
+  const graph = await api("/api/graph", cycleUrl);
+  const found = cyclesOf(graph, hiddenOf(graph));
+  const members = [...found.member.keys()].sort();
+  await load(page, cycleUrl);
+  const critical = await colorOf(page, "--critical");
+  t.check(
+    `순환 묶음 ${found.groups.length}개가 있는 레포는 순환 덮개를 켠 채로 열린다`,
+    found.groups.length === 2 && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "cycles" && (await page.evaluate(() => document.querySelector(".overlay-button").textContent)).includes("순환 의존"),
+    await page.evaluate(() => document.querySelector(".overlay-button").textContent),
+  );
+  t.check("순환 아이콘은 묶음에 든 파일 상자에만 있다", same(await cycleMarksOf(page), members), (await cycleMarksOf(page)).join(", "));
+  const lines = await cycleLinesOf(page);
+  const marked = lines.filter((line) => line.cycle);
+  const pairs = marked.map((line) => (line.key.startsWith("agg|") ? line.key.split("|").slice(1, 3) : line.key.split("|").slice(0, 2)).join("|")).sort();
+  t.check(
+    `순환 선 ${found.lines.size}개만 --critical 색이고 불투명도가 1이다`,
+    same(pairs, [...found.lines].sort()) && marked.every((line) => line.stroke === critical.rgb && line.opacity === 1) && lines.filter((line) => !line.cycle).every((line) => line.stroke !== critical.rgb),
+    `순환 선 ${pairs.join(", ")}`,
+  );
+  const lazy = lines.filter((line) => line.key.includes("b.lazy") && line.key.includes("c.far"));
+  t.check("함수 안 import로만 돌아오는 b/lazy.py와 c/far.py 사이의 선은 순환 선이 아니다", lazy.length > 0 && lazy.every((line) => !line.cycle) && !members.includes("b.lazy"), lazy.map((line) => line.key).join(", "));
+  const placed = await flowBoxes(page);
+  const inside = (inner, outer) => placed[inner] !== undefined && placed[outer] !== undefined && within(placed[inner], placed[outer]);
+  t.check(
+    "폴더 두 개에 걸친 묶음의 파일이 제 폴더 영역 안에 있다",
+    inside("a.bridge", "a") && inside("b.gate", "b") && !inside("a.bridge", "b") && !inside("b.gate", "a"),
+    `a/bridge.py ${rectText(placed["a.bridge"])}, b/gate.py ${rectText(placed["b.gate"])}`,
+  );
+  const overview = await page.evaluate(() => ({
+    count: document.querySelector(".overview .overview-count")?.textContent ?? "",
+    rows: [...document.querySelectorAll(".overview .overview-row")].map((row) => row.dataset.node),
+  }));
+  t.check(
+    "정보 패널이 묶음 두 개와 그 안의 파일을 적는다",
+    overview.count === `순환 묶음 ${found.groups.length}개` && same(overview.rows, found.groups.flat()),
+    `${overview.count}: ${overview.rows.join(", ")}`,
+  );
+  const tip = await tipOver(page, `${face("a.one")} .cycle-mark`);
+  t.check("순환 아이콘에 올리면 묶음의 파일 수와 이름을 적는다", tip.startsWith("순환 묶음: 파일 3개가 서로를 import해 돌아온다") && tip.includes("one.py"), tip.replaceAll("\n", " / "));
+  await page.mouse.move(5, 5);
+  await page.click(".legend-button");
+  const legend = await page.evaluate(() => document.querySelector(".legend-overlay")?.textContent ?? "");
+  await page.click(".legend-button");
+  t.check("범례 끝에 순환 의존 줄이 붙는다", legend.includes("순환"), legend);
+  await t.shot();
+
+  // 덮개를 껐다 켜도 상자가 움직이지 않고, 끈 동안에는 critical 색이 없고 아이콘은 남는다.
+  await setOverlay(page, "none");
+  const off = await cycleLinesOf(page);
+  const offBoxes = await flowBoxes(page);
+  t.check(
+    "덮개를 끄면 critical 색 선이 없고 순환 아이콘은 남으며 모든 상자의 위치가 같다",
+    off.every((line) => !line.cycle && line.stroke !== critical.rgb) && same(await cycleMarksOf(page), members) && Object.keys(placed).every((id) => offBoxes[id] !== undefined && sameRect(offBoxes[id], placed[id])),
+    `선 ${off.length}개, 아이콘 ${(await cycleMarksOf(page)).length}개`,
+  );
+  await page.screenshot({ path: join(OUT, "s3-cycles-off.png") });
+  await setOverlay(page, "cycles");
+  const onBoxes = await flowBoxes(page);
+  t.check("다시 켜도 모든 상자의 위치가 같다", Object.keys(placed).every((id) => onBoxes[id] !== undefined && sameRect(onBoxes[id], placed[id])));
+
+  // a/를 접으면 폴더 상자가 아이콘을 받고 그 폴더로 가는 집계 선은 순환 선이 아니다.
+  await page.click('.tree-row.tree-dir[data-node="a"]');
+  await page.waitForSelector(`${node("a")} > .node-package`, { timeout: 30_000 });
+  await rest(page);
+  const folded = await cycleLinesOf(page);
+  const touching = folded.filter((line) => line.key.split("|").includes("a"));
+  t.check(
+    "a/를 접으면 접힌 폴더 상자와 b/gate.py에 순환 아이콘이 있고, 그 폴더로 가는 집계 선은 critical이 아니다",
+    same(await cycleMarksOf(page), ["a", "b.gate"]) && touching.length > 0 && folded.every((line) => !line.cycle && line.stroke !== critical.rgb),
+    `아이콘 ${(await cycleMarksOf(page)).join(", ")}, a/에 닿는 선 ${touching.length}개`,
+  );
+  const folderTip = await tipOver(page, `${face("a")} .cycle-mark`);
+  t.check("접힌 폴더의 순환 아이콘은 묶음 두 개를 한 줄씩 적는다", folderTip.startsWith("순환 묶음 2개 · 이 폴더 안의 파일이 든 묶음") && folderTip.split("\n").length === 3, folderTip.replaceAll("\n", " / "));
+  await page.screenshot({ path: join(OUT, "s3-cycles-folded.png") });
+}
+
+async function cyclesChange(t, page) {
+  const graph = await api("/api/graph", cycleUrl);
+  const changed = graph.nodes.find((n) => n.id === "a.one");
+  await page.route(
+    (at) => at.pathname === "/api/changes",
+    (routed) =>
+      routed.fulfill({
+        json: { git: true, branch: "main", files: [{ path: changed.path, status: "modified", stale: false, test: false }], nodes: { [changed.id]: "modified" } },
+      }),
+  );
+  await load(page, cycleUrl);
+  await page.waitForSelector(`${face("a.one")} .change-mark`, { timeout: 20_000 }).catch(() => {});
+  await rest(page);
+  const read = () =>
+    page.evaluate((sel) => {
+      const body = document.querySelector(`${sel.body} > .node-body`);
+      const style = getComputedStyle(body);
+      return { mark: document.querySelector(`${sel.face} .change-mark`)?.textContent ?? null, bar: style.boxShadow, border: style.borderLeftColor };
+    }, { body: node("a.one"), face: face("a.one") });
+  const [changedColor, muted, critical] = [await colorOf(page, "--changed"), await colorOf(page, "--muted"), await colorOf(page, "--critical")];
+  const on = await read();
+  t.check(
+    "순환 덮개를 켠 동안 수정한 파일 상자는 색 막대와 테두리 색이 없고 M 글자는 있다",
+    on.mark === "M" && on.bar === "none" && on.border === muted.rgb && (await cycleLinesOf(page)).some((line) => line.stroke === critical.rgb),
+    `글자 ${on.mark}, 막대 ${on.bar}, 왼쪽 테두리 ${on.border}`,
+  );
+  await t.shot();
+  await setOverlay(page, "none");
+  const off = await read();
+  t.check(
+    "덮개를 끄면 수정 표시의 색 막대와 테두리 색이 돌아온다",
+    off.mark === "M" && off.bar !== "none" && off.border !== muted.rgb && off.border !== on.border,
+    `글자 ${off.mark}, 막대 ${off.bar}, 왼쪽 테두리 ${off.border} (--changed ${changedColor.value})`,
+  );
+}
+
+/** 순환 덮개와 경로 고정이 함께 켜졌을 때와, 접힌 폴더 상자 아래의 미사용 후보 수를 본다. */
+async function cyclesPin(t, page) {
+  const [graph, unused] = [await api("/api/graph", cycleUrl), await api("/api/unused", cycleUrl)];
+  const ends = { from: { id: "main:run", text: "run" }, to: { id: "a.three:third", text: "third" } };
+  const route = routeOf(graph, ends.from.id, ends.to.id);
+  await load(page, cycleUrl);
+  const [critical, ink] = [await colorOf(page, "--critical"), await colorOf(page, "--ink")];
+  await pin(page, ends.from, ends.to);
+  await watchFlashes(page);
+  const steps = await routeLinesOf(page);
+  const lines = await cycleLinesOf(page);
+  const marked = lines.filter((line) => line.cycle);
+  t.check(
+    `순환 덮개를 켠 채 경로를 고정하면 걸음 ${route.paths[0].length - 1}개가 본문 잉크 3px, 불투명도 1이다`,
+    steps.length === route.paths[0].length - 1 && steps.every((line) => line.stroke === ink.rgb && near(line.width, LINE.step, 0.01) && line.opacity === 1),
+    steps.map((line) => line.key).join(", "),
+  );
+  t.check(
+    `고정 중의 순환 선은 critical 색을 남긴 채 경로 밖 선의 불투명도 ${DIM}이고 걸음과 겹치지 않는다`,
+    marked.length > 0 && marked.every((line) => line.stroke === critical.rgb && line.opacity === DIM && !steps.some((step) => step.key === line.key)),
+    marked.map((line) => `${line.key} ${line.opacity}`).join(", "),
+  );
+  await t.shot();
+  await setOverlay(page, "none");
+  const off = await cycleLinesOf(page);
+  t.check(
+    "고정 중에 덮개를 끄면 critical 색이 없고 걸음과 고정은 그대로이며 안내 줄이 뒤집히지 않는다",
+    off.every((line) => line.stroke !== critical.rgb) && (await routeLinesOf(page)).length === steps.length && (await pinnedOf(page)) && (await flashesOf(page)) === 0,
+    `걸음 ${(await routeLinesOf(page)).length}개, 뒤집힘 ${await flashesOf(page)}번`,
+  );
+  await page.click(".finder-clear");
+  await page.click(".finder-button");
+  await rest(page);
+
+  // 미사용 후보가 든 파일을 품은 폴더를 접으면 폴더 상자 아래에 후보 수를 적는다.
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const inFolder = candidatesOf(graph, unused).filter((id) => nodes.get(id).path.startsWith("a/"));
+  if (inFolder.length === 0) {
+    t.skip("접힌 폴더 상자 아래의 미사용 후보 수", "서버 응답에 a/ 안의 미사용 후보가 없다");
+    return;
+  }
+  await setOverlay(page, "unused");
+  const fileCaption = await belowOf(page, "a.two");
+  await page.click('.tree-row.tree-dir[data-node="a"]');
+  await page.waitForSelector(`${node("a")} > .node-package`, { timeout: 30_000 });
+  await rest(page);
+  const caption = await belowOf(page, "a");
+  t.check(
+    `미사용 덮개를 켜면 접힌 a/two.py 아래 글자와 접힌 a/ 폴더 상자 아래 글자가 안에 든 후보 수 ${inFolder.length}을 적는다`,
+    fileCaption.endsWith(`미사용 후보 ${inFolder.length}`) && caption === `미사용 후보 ${inFolder.length}` && (await belowOf(page, "b")) === "",
+    `a/two.py "${fileCaption}", a/ "${caption}"`,
+  );
+  const tip = await tipOver(page, `${face("a")} .node-below`);
+  t.check("폴더 상자 아래 글자에 올리면 폴더 안에서 합친 수임을 적는다", tip.startsWith(`미사용 후보 ${inFolder.length}개 · 이 폴더 안의 정의에서 합친 수`), tip.replaceAll("\n", " / "));
+  const covered = await coveredTexts(page);
+  t.check("아래 글자가 다른 상자나 선에 덮이지 않는다", covered.covered.length === 0, covered.covered.slice(0, 3).join(", ") || `글자 ${covered.seen}개`);
+  await page.screenshot({ path: join(OUT, "s3-cycles-pin-folder-unused.png") });
+  await page.mouse.move(5, 5);
+  await setOverlay(page, "none");
+  t.check("덮개를 끄면 폴더 상자 아래 글자가 없다", (await belowOf(page, "a")) === "");
 }
 
 const SCENARIOS = [
@@ -2539,11 +4005,35 @@ const SCENARIOS = [
   ["summary-ask", summaryAsk],
   ["summary-ref", summaryRef],
   ["summary", summary],
+  ["finder-open", finderOpen],
+  ["finder-search", finderSearch],
+  ["finder-path", finderPath],
+  ["finder-folder", finderFolder],
+  ["finder-step", finderStep],
+  ["finder-none", finderNone],
+  ["finder-pin", finderPin],
+  ["finder-ends", finderEnds],
+  ["overlay-menu", overlayMenu],
+  ["unused", unusedScenario],
+  ["finder-overlay", finderOverlay],
+  ["overlay-dark", overlayDark],
+  ["cycles", cyclesScenario],
+  ["cycles-change", cyclesChange],
+  ["cycles-pin", cyclesPin],
 ];
+
+/** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
+const STAGE3 = new Set(SCENARIOS.slice(SCENARIOS.findIndex(([name]) => name === "finder-open")).map(([name]) => name));
+/** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
+const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 
 // ── 실행 ─────────────────────────────────────────────────────────
 
 async function run(browser, name, scenario) {
+  if (CYCLE.has(name) && cycleUrl === null) {
+    console.log(`[${name}]\n  건너뜀  순환이 있는 고정 레포로 연 화면 — --cycle-url을 주지 않았다`);
+    return [{ label: name, ok: null, actual: "" }];
+  }
   const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 2, colorScheme: "light" });
   // 화면의 단축키 처리(window의 capture 단계)가 끝난 뒤에 keydown의 defaultPrevented를 적어 둔다.
   await context.addInitScript(() => {
@@ -2554,7 +4044,7 @@ async function run(browser, name, scenario) {
   });
   const results = [];
   const errors = [];
-  const path = join(OUT, `s2-${name}.png`);
+  const path = join(OUT, `${STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
   const page = await context.newPage();
   let shot = false;
   const t = {
