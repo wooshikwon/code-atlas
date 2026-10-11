@@ -146,6 +146,110 @@ def swap(repo: Path, path: str, old: str, new: str) -> None:
     file.write_text(text.replace(old, new))
 
 
+TABLES, LOOKUP = "src/app/tables.py", "src/app/lookup.py"
+
+
+def change_value(repo: Path) -> None:
+    swap(repo, TABLES, 'LIMITS = {"low": 1, "high": 9}', "LIMITS = dict(low=1, high=9)")
+
+
+def make_value_external(repo: Path) -> None:
+    swap(repo, TABLES, "SEEN = []", 'SEEN = re.findall("a", "b")')
+
+
+def add_variable(repo: Path) -> None:
+    swap(repo, TABLES, "def label(name):", 'EXTRA = {"k": Config("c")}\n\n\ndef extra():\n    return EXTRA\n\n\ndef label(name):')
+
+
+def remove_variable(repo: Path) -> None:
+    swap(repo, TABLES, 'LIMITS = {"low": 1, "high": 9}\n', "")
+
+
+def rename_variable(repo: Path) -> None:
+    swap(repo, TABLES, "total", "tally")
+
+
+def add_reader(repo: Path) -> None:
+    swap(repo, LOOKUP, "def reset():", "def unread():\n    return tables.UNREAD\n\n\ndef reset():")
+
+
+def remove_reader(repo: Path) -> None:
+    swap(repo, LOOKUP, 'def lowest():\n    return LIMITS["low"]\n', "")
+
+
+def start_importing(repo: Path) -> None:
+    shadow = repo / "src" / "app" / "shadow.py"
+    shadow.write_text("from app.tables import BANNER\n\n\n" + shadow.read_text() + "\n\ndef banner():\n    return BANNER\n")
+
+
+def stop_importing(repo: Path) -> None:
+    swap(repo, LOOKUP, "from app.tables import LIMITS\n", "LIMITS = {}\n")
+
+
+def add_global_writer(repo: Path) -> None:
+    swap(repo, TABLES, "def label(name):", "def raise_base():\n    global BASE\n    BASE += 1\n\n\ndef label(name):")
+
+
+def delete_variable_file(repo: Path) -> None:
+    (repo / TABLES).unlink()
+
+
+VARIABLE_EDITS = {
+    "변수의 값": change_value,
+    "값을 만든 호출이 외부": make_value_external,
+    "변수 추가": add_variable,
+    "변수 삭제": remove_variable,
+    "변수 이름": rename_variable,
+    "읽는 함수 추가": add_reader,
+    "읽는 함수 삭제": remove_reader,
+    "다른 파일이 from import로 읽기 시작": start_importing,
+    "다른 파일이 from import로 읽기를 그만둠": stop_importing,
+    "global로 바꾸는 함수 추가": add_global_writer,
+    "변수를 둔 파일 삭제": delete_variable_file,
+}
+
+
+def variables(analyzed) -> tuple[list, list]:
+    """변수 노드와, 변수 노드에서 나가거나 변수 노드로 들어가는 선."""
+    found = judged(analyzed)
+    nodes = [n for n in found["nodes"] if n["kind"] == "variable"]
+    ids = {n["id"] for n in nodes}
+    return nodes, [e for e in found["edges"] if e["source"] in ids or e["target"] in ids]
+
+
+@pytest.mark.parametrize("edit", VARIABLE_EDITS.values(), ids=VARIABLE_EDITS.keys())
+@pytest.mark.asyncio
+async def test_variable_nodes_and_edges_equal_a_full_analysis(sample_repo, tmp_path, edit):
+    store = Cache(sample_repo, tmp_path / "cache")
+    async with started() as live, started() as reopened, started() as full:
+        first = await refresh(sample_repo, sys.executable, live, cache=store)
+        asked_first = len(live.asked)
+        edit(sample_repo)
+        from_cache = await refresh(sample_repo, sys.executable, reopened, cache=store)
+        from_previous = await refresh(sample_repo, sys.executable, live, previous=first)
+        expected = await refresh(sample_repo, sys.executable, full)
+    store.close()
+    assert variables(expected) != variables(first)
+    assert judged(from_cache) == judged(expected)
+    assert judged(from_previous) == judged(expected)
+    assert len(reopened.asked) < len(full.asked)
+    assert len(live.asked) - asked_first < len(full.asked)
+
+
+@pytest.mark.asyncio
+async def test_variable_added_elsewhere_extracts_the_files_that_name_it_again(sample_repo):
+    session = FakeSession()
+    first = await refresh(sample_repo, sys.executable, session)
+    # `config`를 모듈 변수로 둔다. cli.py의 main이 같은 이름의 지역 변수를 쓰고 core.py의 run_engine이 매개변수로 받는다.
+    (sample_repo / "src" / "app" / "late.py").write_text("config = {}\nspare = 1\n")
+    again = await refresh(sample_repo, sys.executable, session, previous=first)
+    fresh = {path for path in first.stored if again.stored[path] is not first.stored[path]}
+    assert fresh == {"src/app/cli.py", "src/app/core.py"}
+    assert again.stored["src/app/late.py"].variables == ["config", "spare"]
+    read = [(s.path, s.text) for s in again.analysis.sites if s.kind == "read" and s.text in ("config", "spare")]
+    assert read == []  # 두 파일의 `config`는 지역 이름이고 `spare`는 함수 정의의 이름으로만 적혀 있다
+
+
 ENCODE = "\n    def encode(self, o):\n        return ''\n"
 
 
@@ -302,7 +406,7 @@ async def test_progress_counts_the_requests(sample_repo):
     resolve = [p for p in phases if p.phase == "resolve"]
     assert resolve[0].done == 0 and resolve[-1].done == resolve[-1].total == len(session.asked)
     extract = [p for p in phases if p.phase == "extract"]
-    assert extract[-1].done == extract[-1].total == 10
+    assert extract[-1].done == extract[-1].total == 13
 
 
 @pytest.mark.asyncio
@@ -357,7 +461,7 @@ async def test_rebuild_reads_nothing_from_the_cache_and_overwrites_it(sample_rep
     await refresh(sample_repo, sys.executable, second, cache=store, rebuild=True)
     assert second.asked == first.asked
     [(snapshot, _, facts, answers)] = saved
-    assert snapshot == "worktree" and len(facts) == len(answers) == 10
+    assert snapshot == "worktree" and len(facts) == len(answers) == 13
     store.close()
 
 
@@ -395,7 +499,7 @@ def test_broken_cache_file_and_unusable_cache_folder_still_analyze(sample_repo, 
     store.close()
     store.path.write_bytes(b"SQLite format 3\0" + b"\xff" * 200)
     first = analyze.analyze(sample_repo, sys.executable)
-    assert first.analysis.stats["files"] == 10
+    assert first.analysis.stats["files"] == 13
 
     blocked = tmp_path / "blocked"
     blocked.write_text("폴더가 아니다")

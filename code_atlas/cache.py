@@ -22,13 +22,13 @@ from importlib import metadata
 from pathlib import Path
 
 from .collect import RepoFiles, SourceFile, disk_path
-from .extract import DefInfo, FileFacts
+from .extract import DefInfo, FileFacts, VarInfo
 from .model import Node, Site
 
 logger = logging.getLogger(__name__)
 
-ANALYZER_VERSION = 1  # extract·resolve·graph의 판정이 달라지는 변경마다 올린다
-SCHEMA_VERSION = 2  # 표와 `body`의 모양이 달라지는 변경마다 올린다
+ANALYZER_VERSION = 2  # extract·resolve·graph의 판정이 달라지는 변경마다 올린다
+SCHEMA_VERSION = 3  # 표와 `body`의 모양이 달라지는 변경마다 올린다
 CACHE_DIR = Path.home() / ".cache" / "code-atlas"
 LOCK_TIMEOUT = 5.0
 PROBE_TIMEOUT = 5.0
@@ -48,13 +48,15 @@ _TABLES = {
 class Stored:
     """파일 하나의 추출 결과와 그 결과를 낸 입력의 해시.
 
-    `known`은 레포 전체의 정의 이름 가운데 이 파일 본문에 나오는 이름의 해시이고, `names`는 이 파일이 정의한 이름이다.
+    `known`은 레포 전체의 정의 이름과 모듈 변수 이름 가운데 이 파일 본문에 나오는 이름의 해시이고, `names`는 이 파일이
+    정의한 이름, `variables`는 이 파일이 모듈 수준에서 대입한 이름이다.
     """
 
     text_hash: str
     known: str
     facts: FileFacts
     names: list[str]
+    variables: list[str]
 
 
 @dataclass
@@ -122,7 +124,9 @@ def _body(stored: Stored) -> dict:
         "defs": {name: _plain(d, DefInfo) for name, d in facts.defs.items()},
         "sites": [_plain(s, Site) for s in facts.sites],
         "error": facts.error,
+        "variables": [_plain(v, VarInfo) for v in facts.variables],
         "names": stored.names,
+        "assigned": stored.variables,
     }
 
 
@@ -133,6 +137,15 @@ def _node(fields: dict) -> Node:
     return node
 
 
+def _variable(fields: dict) -> VarInfo:
+    var = VarInfo(**fields)
+    var.range = tuple(var.range)
+    var.targets = [tuple(target) for target in var.targets]
+    var.value = tuple(var.value) if var.value is not None else None
+    var.maker = tuple(var.maker) if var.maker is not None else None
+    return var
+
+
 def _facts(body: dict) -> FileFacts:
     return FileFacts(
         file=SourceFile(**body["file"]),
@@ -140,6 +153,7 @@ def _facts(body: dict) -> FileFacts:
         defs={name: DefInfo(**d) for name, d in body["defs"].items()},
         sites=[Site(**s) for s in body["sites"]],
         error=body["error"],
+        variables=[_variable(v) for v in body["variables"]],
     )
 
 
@@ -213,7 +227,7 @@ class Cache:
             if row is None:
                 return None
             body = _unpack(row[1])
-            return Stored(text_hash, row[0], _facts(body), body["names"])
+            return Stored(text_hash, row[0], _facts(body), body["names"], body["assigned"])
         except (sqlite3.Error, zlib.error, ValueError, KeyError, TypeError):
             logger.warning("캐시에서 추출 결과를 읽지 못했다: %s", path, exc_info=True)
             return None

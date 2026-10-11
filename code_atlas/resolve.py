@@ -18,14 +18,19 @@ STATUSES = ("resolved", "external", "builtin", "unresolved", "dynamic")
 EXTERNAL_PREFIX = "ext:"
 
 # 지점 종류마다 대상 노드 종류가 정하는 선 종류. 표에 없는 조합은 선을 만들지 않는다.
+# 호출·전달·데코레이터·타입 지점의 대상이 변수면 그 변수를 읽는 선이다.
 EDGE_KINDS: dict[str, dict[str, str]] = {
-    "call": {"function": "call", "method": "call", "class": "construct", "dataclass": "construct"},
-    "pass": {k: "pass" for k in ("function", "method", "class", "dataclass")},
-    "decorate": {k: "decorate" for k in ("function", "method", "class", "dataclass")},
-    "type": {k: "type" for k in ("class", "dataclass")},
+    "call": {"function": "call", "method": "call", "class": "construct", "dataclass": "construct", "variable": "read"},
+    "pass": {**{k: "pass" for k in ("function", "method", "class", "dataclass")}, "variable": "read"},
+    "decorate": {**{k: "decorate" for k in ("function", "method", "class", "dataclass")}, "variable": "read"},
+    "type": {**{k: "type" for k in ("class", "dataclass")}, "variable": "read"},
+    "read": {"variable": "read"},
+    "write": {"variable": "write"},
     "inherit": {k: "inherit" for k in ("class", "dataclass", "external")},
     "import": {k: "import" for k in ("module", "package", "external")},
 }
+
+ACCESS_KINDS = ("read", "write")
 
 _STUB_SUFFIX = re.compile(r"(-stubs)?(\.pyi?)?$")
 _STDLIB_DIR = re.compile(r"/lib/python3\.\d+/")
@@ -50,7 +55,7 @@ class Index:
     def __init__(self, root: Path, facts: list[FileFacts]):
         self.root = disk_path(root)
         self.modules: dict[str, str] = {}  # 레포 루트 기준 경로 → 그 파일의 노드 id
-        self.names: dict[tuple[str, int, int], str] = {}  # (경로, 줄, 열) → 노드 id
+        self.names: dict[tuple[str, int, int], str] = {}  # (경로, 줄, 열) → 노드 id나 변수 후보 id
         self.kinds: dict[str, str] = {}
         self.ranges: dict[str, list[tuple[int, int, str]]] = {}  # 레포 루트 기준 경로 → (시작 줄, 끝 줄, 노드 id)
         self._relative: dict[str, str | None] = {}  # 언어 서버가 돌려준 경로 → 레포 루트 기준 경로
@@ -61,6 +66,10 @@ class Index:
                 self.ranges.setdefault(f.file.path, []).append((*node.range, node.id))
             for info in f.defs.values():
                 self.names[(f.file.path, info.name_line, info.name_col)] = info.node_id
+            for var in f.variables:
+                self.kinds[var.node_id] = "variable"
+                for line, col in var.targets:
+                    self.names[(f.file.path, line, col)] = var.node_id
 
     def relative(self, path: str) -> str | None:
         """레포 루트 기준 경로. 레포 밖이면 None이다."""
@@ -136,17 +145,21 @@ def resolve_site(site: Site, locations: list[Location], index: Index, externals:
     if site.builtin:
         return ResolvedSite(**base, status="builtin")
     external: tuple[str, str] | None = None
+    held: ResolvedSite | None = None  # 호출·전달·데코레이터·타입 지점이 변수로 답한 판정. 정의나 외부로 답한 위치가 없을 때 쓴다
     for loc in locations:
         rel = index.relative(loc.path)
         if rel is not None and "/site-packages/" not in "/" + rel:
             target = _in_repo_target(site, loc, rel, index)
             edge = EDGE_KINDS[site.kind].get(index.kinds.get(target, ""))
             if edge is not None:
-                return ResolvedSite(**base, status="resolved", target=target, edge=edge)
+                found = ResolvedSite(**base, status="resolved", target=target, edge=edge)
+                if site.kind in ACCESS_KINDS or index.kinds[target] != "variable":
+                    return found
+                held = held or found
         elif external is None:
             external = external_of(loc.path)
     if external is None:
-        return ResolvedSite(**base, status="unresolved")
+        return held or ResolvedSite(**base, status="unresolved")
     name, origin = external
     if origin == "builtin":
         return ResolvedSite(**base, status="builtin")

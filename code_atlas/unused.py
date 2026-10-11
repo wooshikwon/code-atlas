@@ -127,11 +127,11 @@ RULES: list[Callable[[Node, Known], bool]] = [
 
 
 def _called_names(analysis: Analysis, texts: dict[str, str]) -> set[str]:
-    """대상을 확인하지 못한 호출·전달 지점마다 언어 서버에 물은 위치에서 시작하는 식별자."""
+    """대상을 확인하지 못한 호출·전달 지점마다 언어 서버에 물은 위치에서 시작하는 식별자. 변수로 답한 지점도 대상을 모른다."""
     lines = {path: [line.encode() for line in text.splitlines()] for path, text in texts.items()}
     names: set[str] = set()
     for site in analysis.sites:
-        if site.kind not in _NAMED_SITES or site.status != "unresolved":
+        if site.kind not in _NAMED_SITES or not (site.status == "unresolved" or site.edge == "read"):
             continue
         source = lines.get(site.path, [])
         if not 0 < site.request_line <= len(source):

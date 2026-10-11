@@ -35,7 +35,7 @@ repo, directory, tag = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 store = Cache(repo, directory)
 for round in range(40):
     text_hash = f"{tag}-{round}"
-    facts = {f.file.path: Stored(text_hash, tag, f, []) for f in extract_repo(collect(repo))}
+    facts = {f.file.path: Stored(text_hash, tag, f, [], []) for f in extract_repo(collect(repo))}
     answers = {path: Answers(text_hash, tag, [("unresolved", None, None)] * len(s.facts.sites), {}, [], []) for path, s in facts.items()}
     store.save("worktree", tag, facts, answers)
 store.close()
@@ -45,7 +45,7 @@ sys.exit(Count.seen)
 
 def stored_of(repo: Path, text_hash: str = "h1", known: str = "k1") -> dict[str, Stored]:
     """고정 레포의 추출 결과. 본문 해시와 `known`은 시험이 정한 값을 쓴다."""
-    return {f.file.path: Stored(text_hash, known, f, sorted(f.defs)) for f in extract_repo(collect(repo))}
+    return {f.file.path: Stored(text_hash, known, f, sorted(f.defs), [v.name for v in f.variables]) for f in extract_repo(collect(repo))}
 
 
 def answers_of(stored: dict[str, Stored]) -> dict[str, Answers]:
@@ -158,7 +158,7 @@ def test_unknown_snapshot_has_no_answers(saved):
 def test_save_drops_facts_no_answers_point_to(saved, sample_repo):
     store, stored, answers = saved
     path = "src/app/core.py"
-    edited = {path: Stored("h2", "k1", stored[path].facts, stored[path].names)}
+    edited = {path: Stored("h2", "k1", stored[path].facts, stored[path].names, stored[path].variables)}
     store.save("worktree", ENV, edited, {**answers, path: Answers("h2", "k1", answers[path].sites, {}, [], [])})
     assert store.facts(path, "h1") is None
     assert store.facts(path, "h2") == edited[path]
@@ -174,7 +174,7 @@ def test_snapshots_share_facts_and_keep_their_own_answers(saved):
     path = "src/app/core.py"
     commit = {p: a for p, a in answers.items() if p != "src/app/models.py"}
     store.save("0123abc", "env-commit", {}, commit)
-    edited = {path: Stored("h2", "k1", stored[path].facts, stored[path].names)}
+    edited = {path: Stored("h2", "k1", stored[path].facts, stored[path].names, stored[path].variables)}
     store.save("worktree", ENV, edited, {**answers, path: Answers("h2", "k1", [], {}, [], [])})
     assert store.facts(path, "h1") == stored[path]
     assert store.facts(path, "h2") == edited[path]

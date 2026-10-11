@@ -22,7 +22,7 @@ from pathlib import Path
 from . import venv
 from .cache import Answers, Cache, Stored, environment
 from .collect import RepoFiles, SourceFile, collect, config_texts, module_id
-from .extract import FileFacts, defined_names, extract, read_source
+from .extract import FileFacts, assigned_names, defined_names, extract, read_source
 from .graph import build
 from .lsp import REQUEST_TIMEOUT, Location, Session
 from .model import Analysis, Node, Site
@@ -204,11 +204,12 @@ def _extracted(
     """파일마다 추출 결과를 정한다. (경로별 추출 결과, 이번에 새로 추출한 경로)를 돌려준다.
 
     본문 해시가 같은 추출 결과를 앞의 분석 결과와 캐시에서 찾고, 없거나 `known`이 달라졌으면 다시 추출한다. `known`은
-    레포 전체의 정의 이름 가운데 그 본문에 식별자로 나오는 이름의 해시다. `extract`가 정의 이름 집합에서 쓰는 것이
-    그 이름뿐이므로, 다른 파일이 정의를 더하거나 지워 이 값이 달라진 파일만 다시 추출한다.
+    레포 전체의 정의 이름과 모듈 변수 이름 가운데 그 본문에 식별자로 나오는 이름의 해시다. `extract`가 두 이름 집합에서
+    쓰는 것이 그 이름뿐이므로, 다른 파일이 정의나 모듈 변수를 더하거나 지워 이 값이 달라진 파일만 다시 추출한다.
     """
     found: dict[str, Stored | None] = {}
     names: dict[str, list[str]] = {}
+    variables: dict[str, list[str]] = {}
     hashes = {path: _digest(text) for path, text in texts.items()}
     for f in files.files:
         kept = previous.stored.get(f.path) if previous is not None else None
@@ -216,19 +217,25 @@ def _extracted(
             kept = cache.facts(f.path, hashes[f.path]) if cache is not None else None
         # 소스 루트가 바뀌면 본문이 같아도 모듈 id가 달라진다.
         found[f.path] = kept if kept is not None and kept.facts.file == f else None
-        names[f.path] = found[f.path].names if found[f.path] is not None else defined_names(texts[f.path])
+        if found[f.path] is not None:
+            names[f.path], variables[f.path] = found[f.path].names, found[f.path].variables
+        else:
+            names[f.path], variables[f.path] = defined_names(texts[f.path]), assigned_names(texts[f.path])
     repo_names = frozenset(name for defined in names.values() for name in defined)
+    repo_variables = frozenset(name for assigned in variables.values() for name in assigned)
     stored: dict[str, Stored] = {}
     fresh: set[str] = set()
     for done, f in enumerate(files.files):
         if halt.is_set():
             break
         text = texts[f.path]
-        used = sorted(repo_names.intersection(_IDENTIFIER.findall(text)))
-        known = hashlib.sha256("\n".join(used).encode()).hexdigest()
+        written = set(_IDENTIFIER.findall(text))
+        used = [sorted(repo_names & written), sorted(repo_variables & written)]
+        known = hashlib.sha256("\n\n".join("\n".join(group) for group in used).encode()).hexdigest()
         kept = found[f.path]
         if kept is None or kept.known != known:
-            kept = Stored(hashes[f.path], known, extract(f, text, repo_names), names[f.path])
+            facts = extract(f, text, repo_names, repo_variables)
+            kept = Stored(hashes[f.path], known, facts, names[f.path], variables[f.path])
             fresh.add(f.path)
         stored[f.path] = kept
         report(Progress("extract", done + 1, len(files.files)))
@@ -244,7 +251,7 @@ class _Judging:
     1. 판정의 대상이 바뀐 파일이나 없어진 파일의 노드인 지점
     2. 바뀐 파일이나 없어진 파일을 import로 따라 들여오는 파일의 지점 가운데 판정이 레포 안이거나 미확인인 지점
     3. 2의 파일의 지점 가운데 판정이 외부·내장이고 레포 안 정의나 다른 외부 노드로 바뀔 수 있는 지점. 물을 위치의 이름이
-       바뀐 파일과 그 파일이 import로 따라 들여오는 파일이 정의한 이름, 바뀐 파일이 `from … import`로 가져오는 이름,
+       바뀐 파일과 그 파일이 import로 따라 들여오는 파일이 정의하거나 모듈 수준에서 대입한 이름, 바뀐 파일이 `from … import`로 가져오는 이름,
        `as`로 그 이름에 묶은 이름 가운데 하나인 지점과, 판정이 외부인 상속 지점, 레포 모듈이나 없어진 파일의 모듈에서
        가져오는데 판정이 외부인 import 지점이다
     4. 파일이 새로 생겼을 때, 판정이 미확인인 import 지점
@@ -254,10 +261,11 @@ class _Judging:
 
     def __init__(self, files: RepoFiles, texts: dict[str, str], stored: dict[str, Stored], base: dict[str, Answers]):
         self.texts = texts
-        self.names = {path: kept.names for path, kept in stored.items()}
+        self.names = {path: [*kept.names, *kept.variables] for path, kept in stored.items()}
         self.facts = {f.path: stored[f.path].facts for f in files.files}
         self.index = Index(files.root, list(self.facts.values()))
         self.owner = {node.id: path for path, facts in self.facts.items() for node in facts.nodes}
+        self.owner.update((var.node_id, path) for path, facts in self.facts.items() for var in facts.variables)
         self.paths = {facts.file.module_id: path for path, facts in self.facts.items()}
         self.externals: dict[str, Node] = {}
         self.sites: dict[str, list[ResolvedSite | None]] = {}  # 아직 묻지 않은 바뀐 파일의 지점은 None이다
@@ -326,7 +334,7 @@ class _Judging:
         return reached(self.changed | self.gone, importers), self.changed | reached(self.changed, imports)
 
     def _defined(self, paths: set[str]) -> set[str]:
-        """`paths`의 파일이 정의한 이름, 바뀐 파일이 `from … import`로 가져오는 이름, 레포 어느 파일에서든 `as`로 그 이름에 묶은 이름."""
+        """`paths`의 파일이 정의하거나 모듈 수준에서 대입한 이름, 바뀐 파일이 `from … import`로 가져오는 이름, 레포 어느 파일에서든 `as`로 그 이름에 묶은 이름."""
         names = {name for path in paths for name in self.names.get(path, ())}
         for path in self.changed:
             for site in self.facts[path].sites:

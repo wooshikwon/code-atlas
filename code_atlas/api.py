@@ -22,9 +22,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from . import changes
 from .analyze import Analyzed, Progress
 from .collect import RepoFiles, collected, is_test_path
-from .lsp import Location, Session
-from .model import Analysis, to_dict
-from .resolve import EXTERNAL_PREFIX, Index, external_of
+from .lsp import Location, Session, to_utf8
+from .model import Analysis, Node, to_dict
+from .resolve import EXTERNAL_PREFIX, external_of
 from .runner import Runner
 from .summary import Subject, Summaries, SummaryError, digest_of, prompt_of, range_code, range_prompt_of
 
@@ -81,11 +81,20 @@ def _entries(children: dict) -> list[dict]:
     return [{**e, "children": _entries(e["children"])} if e["kind"] == "dir" else e for e in ordered]
 
 
-def _target(loc: Location, index: Index) -> dict:
-    """정의 위치 하나를 응답 항목으로 바꾼다. 분석 대상 파일이면 노드 id를, 그 밖이면 외부 모듈 id를 넣는다."""
+def _target(loc: Location, analyzed: Analyzed, nodes: dict[str, Node]) -> dict:
+    """정의 위치 하나를 응답 항목으로 바꾼다. 분석 대상 파일이면 노드 id를, 그 밖이면 외부 모듈 id를 넣는다.
+
+    위치가 변수 노드의 대입 대상이면 그 변수 노드 id를, 그 밖의 위치는 그 위치를 품은 가장 안쪽 노드 id를 넣는다.
+    """
+    index = analyzed.index
     rel = index.relative(loc.path)
     node = index.enclosing(rel, loc.line, loc.col) if rel is not None else None
     if node is not None:
+        lines = analyzed.texts[rel].splitlines()
+        if loc.line <= len(lines):
+            named = index.names.get((rel, loc.line, to_utf8(lines[loc.line - 1], loc.col)))
+            if named in nodes and nodes[named].kind == "variable":
+                node = named
         return {"path": rel, "line": loc.line, "col": loc.col, "node": node, "external": None}
     external = external_of(loc.path)
     return {
@@ -274,7 +283,7 @@ def create_app(
     @app.get("/api/definition", dependencies=ready)
     async def get_definition(path: str, line: int = Query(ge=1), col: int = Query(ge=0)) -> dict:
         locations = await ask(path, lambda session: session.definition_at(path, line, col, LSP_TIMEOUT))
-        return {"targets": [_target(loc, app.state.analyzed.index) for loc in locations]}
+        return {"targets": [_target(loc, app.state.analyzed, app.state.nodes) for loc in locations]}
 
     def summarized(node_id: str) -> str:
         """노드 id를 설명을 만들 프롬프트로 바꾼다."""
