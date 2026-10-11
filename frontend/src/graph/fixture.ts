@@ -3,9 +3,10 @@
 // 여기에 서로 import하는 진입점 파일 cli, 선이 없는 파일 scratch, 파일 다섯 개가 import하는 common,
 // 함수 진입점 index에서 시작해 파일 경계를 넘는 세 단계 호출 사슬 index → render → wrap → pad,
 // 폴더 pkg 안의 테스트 코드 pkg.conftest, 폴더 app의 `__init__.py` 파일 app.__init__과 거기에 정의한 함수 app:version을 더한다.
+// routeFixture는 경로와 순환 묶음의 시험에 쓴다. 폴더 flow에 경로를, 폴더 ring·north·south·lazy에 import 순환을 담는다.
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 
-function node(id: string, kind: AtlasNode["kind"], parent: string | null, extra: Partial<AtlasNode> = {}): AtlasNode {
+export function node(id: string, kind: AtlasNode["kind"], parent: string | null, extra: Partial<AtlasNode> = {}): AtlasNode {
   const name = id.includes(":") ? id.split(":")[1].split(".").at(-1)! : id.split(".").at(-1)!;
   return {
     id,
@@ -28,7 +29,7 @@ function node(id: string, kind: AtlasNode["kind"], parent: string | null, extra:
   };
 }
 
-function edge(source: string, target: string, kind: AtlasEdge["kind"], extra: Partial<AtlasEdge> = {}): AtlasEdge {
+export function edge(source: string, target: string, kind: AtlasEdge["kind"], extra: Partial<AtlasEdge> = {}): AtlasEdge {
   const group = kind === "call" || kind === "construct" ? "run" : kind === "inherit" || kind === "override" ? "derive" : "use";
   return { group, kind, source, target, sites: [{ path: "x.py", line: 1, col: 0 }], deferred: false, ...extra };
 }
@@ -96,5 +97,79 @@ export const repoFixture: Graph = {
     edge("app.web:render", "app.text:wrap", "call"),
     edge("app.text:wrap", "app.text:pad", "call"),
     edge("pkg.conftest:setup", "main:helper", "call"),
+  ],
+};
+
+/**
+ * 경로: begin에서 finish까지 세 개(left, right를 거치는 2단계 두 개와 mid → left를 거치는 3단계 하나)이고 반대 방향에는 없다.
+ * make → Engine → Engine.__init__ → tune은 생성자 이음을, Base.run → Base.step → Child.step → emit은 오버라이드 이음을 지난다.
+ * probe에서 lone까지는 테스트 코드 tests.fakes:relay를 거쳐야만 이어진다.
+ * 순환: ring의 파일 세 개가 한 묶음, north.up과 south.down이 폴더 두 개에 걸친 한 묶음이다. lazy의 파일 두 개는
+ * 함수 안 import로만 돌아오고, 폴더 ring과 lazy는 폴더 단위로만 서로 돌아온다. flow.walk와 tests.fakes는 테스트 코드를 켰을 때만 묶음이다.
+ */
+export const routeFixture: Graph = {
+  nodes: [
+    node("flow", "package", null, { path: "flow" }),
+    node("flow.walk", "module", "flow", { path: "flow/walk.py", loc: 70 }),
+    node("flow.walk:begin", "function", "flow.walk", { path: "flow/walk.py", range: [1, 8], entry: true }),
+    node("flow.walk:left", "function", "flow.walk", { path: "flow/walk.py", range: [10, 18], unresolved: 1 }),
+    node("flow.walk:mid", "function", "flow.walk", { path: "flow/walk.py", range: [20, 28] }),
+    node("flow.walk:right", "function", "flow.walk", { path: "flow/walk.py", range: [30, 38] }),
+    node("flow.walk:finish", "function", "flow.walk", { path: "flow/walk.py", range: [40, 48], unresolved: 3 }),
+    node("flow.walk:probe", "function", "flow.walk", { path: "flow/walk.py", range: [50, 58] }),
+    node("flow.walk:lone", "function", "flow.walk", { path: "flow/walk.py", range: [60, 68] }),
+    node("flow.build", "module", "flow", { path: "flow/build.py", loc: 60 }),
+    node("flow.build:make", "function", "flow.build", { path: "flow/build.py", range: [1, 8] }),
+    node("flow.build:Engine", "class", "flow.build", { path: "flow/build.py", range: [10, 20] }),
+    node("flow.build:Engine.__init__", "method", "flow.build:Engine", { path: "flow/build.py", range: [11, 20] }),
+    node("flow.build:Base", "class", "flow.build", { path: "flow/build.py", range: [22, 40] }),
+    node("flow.build:Base.run", "method", "flow.build:Base", { path: "flow/build.py", range: [23, 30] }),
+    node("flow.build:Base.step", "method", "flow.build:Base", { path: "flow/build.py", range: [32, 40], unresolved: 1 }),
+    node("flow.build:Child", "class", "flow.build", { path: "flow/build.py", range: [42, 55] }),
+    node("flow.build:Child.step", "method", "flow.build:Child", { path: "flow/build.py", range: [43, 55] }),
+    node("flow.sink", "module", "flow", { path: "flow/sink.py", loc: 20 }),
+    node("flow.sink:tune", "function", "flow.sink", { path: "flow/sink.py", range: [1, 8], unresolved: 2 }),
+    node("flow.sink:emit", "function", "flow.sink", { path: "flow/sink.py", range: [10, 18] }),
+    node("tests.fakes", "module", null, { path: "tests/fakes.py", test: true }),
+    node("tests.fakes:relay", "function", "tests.fakes", { path: "tests/fakes.py", test: true, range: [1, 5] }),
+    node("ring", "package", null, { path: "ring" }),
+    node("ring.a", "module", "ring", { path: "ring/a.py" }),
+    node("ring.b", "module", "ring", { path: "ring/b.py" }),
+    node("ring.c", "module", "ring", { path: "ring/c.py" }),
+    node("north", "package", null, { path: "north" }),
+    node("north.up", "module", "north", { path: "north/up.py" }),
+    node("south", "package", null, { path: "south" }),
+    node("south.down", "module", "south", { path: "south/down.py" }),
+    node("lazy", "package", null, { path: "lazy" }),
+    node("lazy.one", "module", "lazy", { path: "lazy/one.py" }),
+    node("lazy.two", "module", "lazy", { path: "lazy/two.py" }),
+  ],
+  edges: [
+    edge("flow.walk:begin", "flow.walk:left", "call"),
+    edge("flow.walk:begin", "flow.walk:right", "call"),
+    edge("flow.walk:begin", "flow.walk:mid", "call"),
+    edge("flow.walk:mid", "flow.walk:left", "call"),
+    edge("flow.walk:left", "flow.walk:finish", "call"),
+    edge("flow.walk:right", "flow.walk:finish", "call"),
+    edge("flow.walk:probe", "tests.fakes:relay", "call"),
+    edge("tests.fakes:relay", "flow.walk:lone", "call"),
+    edge("flow.build:make", "flow.build:Engine", "construct"),
+    edge("flow.build:Engine.__init__", "flow.sink:tune", "call"),
+    edge("flow.build:Child", "flow.build:Base", "inherit"),
+    edge("flow.build:Child.step", "flow.build:Base.step", "override"),
+    edge("flow.build:Base.run", "flow.build:Base.step", "call"),
+    edge("flow.build:Child.step", "flow.sink:emit", "call"),
+    edge("flow.build", "flow.sink", "import"),
+    edge("flow.walk", "tests.fakes", "import"),
+    edge("tests.fakes", "flow.walk", "import"),
+    edge("ring.a", "ring.b", "import"),
+    edge("ring.b", "ring.c", "import"),
+    edge("ring.c", "ring.a", "import"),
+    edge("north.up", "south.down", "import"),
+    edge("south.down", "north.up", "import"),
+    edge("lazy.one", "lazy.two", "import"),
+    edge("lazy.two", "lazy.one", "import", { deferred: true }),
+    edge("ring.a", "lazy.two", "import"),
+    edge("lazy.one", "ring.b", "import"),
   ],
 };
