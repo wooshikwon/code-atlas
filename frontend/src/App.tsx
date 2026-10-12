@@ -1,5 +1,6 @@
-import { ReactFlowProvider } from "@xyflow/react";
-import { useEffect } from "react";
+import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
+import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { usePick } from "./graph/aim";
 import { useFlight } from "./graph/flight";
@@ -7,22 +8,27 @@ import { GraphView } from "./graph/GraphView";
 import { Progress } from "./graph/Progress";
 import { SummaryQueue } from "./graph/SummaryQueue";
 import { Tooltip } from "./graph/Tooltip";
+import { autoView, fitIn, stageOf } from "./graph/viewport";
 import { Entries } from "./nav/Entries";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
 import { bind, dismiss } from "./nav/keys";
+import { judge } from "./nav/layout";
+import { LayoutButton } from "./nav/LayoutButton";
 import { NodeMenu, SummaryNotice } from "./nav/NodeMenu";
 import { Trail } from "./nav/Trail";
-import { InfoPanel } from "./panel/InfoPanel";
+import { Docked } from "./panel/Docked";
+import { Floating } from "./panel/Floating";
 import { useOpened } from "./panel/opened";
+import { MIN_HEIGHT, MIN_WIDTH } from "./panel/rect";
 import { Palette } from "./search/Palette";
 import { watch } from "./state/changes";
 import { useCompare } from "./state/compare";
 import { busy, reload } from "./state/reload";
-import { litOf, pinned, useAtlas } from "./state/store";
+import { litOf, pinned, useAtlas, type Mode } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
-function Toolbar() {
+function Toolbar({ mode }: { mode: Mode }) {
   const canBack = useAtlas((s) => s.history.index > 0);
   const canForward = useAtlas((s) => s.history.index < s.history.entries.length - 1);
   /** 경로 고정 중에는 뒤로·앞으로 버튼을 누를 수 없다. */
@@ -32,7 +38,8 @@ function Toolbar() {
   const forward = useAtlas((s) => s.forward);
   const setTheme = useAtlas((s) => s.setTheme);
   const resetView = useAtlas((s) => s.resetView);
-  const { fit } = useFlight();
+  const { fit, fly } = useFlight();
+  const { getNodes, getNodesBounds } = useReactFlow();
 
   /**
    * 정보 패널이 가리지 않는 영역에 그래프 전체를 맞추고 확대 비율을 100%보다 키우지 않는다.
@@ -49,6 +56,30 @@ function Toolbar() {
       }
     }
   };
+
+  // 모드를 바꾸면 관계 그래프 영역의 크기가 바뀐다. 전체 맞춤 상태였으면 새 영역에서 코드가 스스로 맞추는 화면(`autoView`)으로 다시 맞춘다.
+  // 새 칸 묶음이 영역의 크기를 정한 뒤(ResizeObserver), 그 크기를 받은 정보 패널이 다시 그려진 다음 프레임에 영역을 읽는다.
+  useEffect(() => {
+    const graph = document.querySelector(".graph");
+    const { fitted, view } = useAtlas.getState();
+    if (graph === null || !fitted || view.kind !== "structure") {
+      return;
+    }
+    let frame = 0;
+    const sized = new ResizeObserver(() => {
+      sized.disconnect();
+      frame = requestAnimationFrame(() => {
+        const { free } = stageOf(graph);
+        const bounds = getNodesBounds(getNodes());
+        fly(autoView(fitIn(bounds, free), bounds, free), free);
+      });
+    });
+    sized.observe(graph);
+    return () => {
+      sized.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [mode, fly, getNodes, getNodesBounds]);
 
   return (
     <div className="toolbar">
@@ -71,6 +102,7 @@ function Toolbar() {
         <button className="toolbar-button" aria-label="화면 초기화" onClick={resetView} disabled={pin}>
           <span className="toolbar-wide">화면 </span>초기화
         </button>
+        <LayoutButton mode={mode} />
         <button className="toolbar-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
           {theme === "light" ? "어두운 화면" : "밝은 화면"}
         </button>
@@ -79,10 +111,32 @@ function Toolbar() {
   );
 }
 
+/** 창의 크기 */
+const windowSize = () => ({ width: window.innerWidth, height: window.innerHeight });
+
 export function App() {
   const main = useDefaultLayout({ id: "main-v2", storage: localStorage });
+  const rows = useDefaultLayout({ id: "portrait-v1", storage: localStorage });
+  const bottom = useDefaultLayout({ id: "portrait-bottom-v1", storage: localStorage });
   const opened = useAtlas((s) => s.repo !== null);
   const epoch = useAtlas((s) => s.epoch);
+  const layout = useAtlas((s) => s.layout);
+  /** 창의 크기로 판정한 모드. 창 크기가 바뀔 때마다 다시 판정한다. */
+  const [judged, setJudged] = useState(() => judge(windowSize()));
+  const mode = layout ?? judged;
+  /**
+   * 작업 영역(상단 줄, 관계 그래프 영역, 팔레트)을 그리는 DOM 요소. 모드를 바꾸면 칸 묶음을 새로 그리므로, 작업 영역은 이 요소에 그려 두고
+   * 요소를 새 칸으로 옮겨 붙인다. 관계 그래프와 그 화면 위치, 배치가 모드를 바꿔도 그대로 남는다.
+   */
+  const [workspace] = useState(() => Object.assign(document.createElement("div"), { className: "workspace" }));
+  /** 작업 영역의 칸에 넣는 ref. `Panel`은 내용을 칸 요소 안의 요소 하나에 그리므로 그 요소에 붙인다. */
+  const seat = useCallback((panel: HTMLDivElement | null) => void panel?.firstElementChild?.appendChild(workspace), [workspace]);
+
+  useEffect(() => {
+    const read = () => setJudged(judge(windowSize()));
+    window.addEventListener("resize", read);
+    return () => window.removeEventListener("resize", read);
+  }, []);
 
   useEffect(() => (opened ? watch() : undefined), [opened]);
 
@@ -130,32 +184,51 @@ export function App() {
 
   return (
     <>
-      <Group
-        id="main"
-        className="app"
-        orientation="horizontal"
-        defaultLayout={main.defaultLayout}
-        onLayoutChanged={main.onLayoutChanged}
-      >
-        <Panel id="explorer" defaultSize={208} minSize={160} maxSize="40">
-          <FileTree />
-        </Panel>
-        <Separator className="separator" />
-        <Panel id="workspace" minSize="30">
-          <ReactFlowProvider>
-            <div className="workspace">
-              <Toolbar />
-              <div className="stage">
-                {opened ? <GraphView /> : <Progress />}
-                {opened && <InfoPanel key={epoch} />}
-                <SummaryNotice />
-                <SummaryQueue />
-              </div>
-              <Palette />
-            </div>
-          </ReactFlowProvider>
-        </Panel>
-      </Group>
+      {mode === "landscape" ? (
+        <Group
+          key="main"
+          id="main"
+          className="app"
+          orientation="horizontal"
+          defaultLayout={main.defaultLayout}
+          onLayoutChanged={main.onLayoutChanged}
+        >
+          <Panel id="explorer" defaultSize={208} minSize={160} maxSize="40">
+            <FileTree />
+          </Panel>
+          <Separator className="separator" />
+          <Panel id="workspace" minSize="30" elementRef={seat} />
+        </Group>
+      ) : (
+        <Group key="portrait" id="portrait" className="app" orientation="vertical" defaultLayout={rows.defaultLayout} onLayoutChanged={rows.onLayoutChanged}>
+          <Panel id="workspace" defaultSize="60" minSize="30" elementRef={seat} />
+          <Separator className="separator" />
+          <Panel id="lower" defaultSize="40" minSize={MIN_HEIGHT}>
+            <Group id="portrait-bottom" orientation="horizontal" defaultLayout={bottom.defaultLayout} onLayoutChanged={bottom.onLayoutChanged}>
+              <Panel id="explorer" defaultSize={208} minSize={160} maxSize="40">
+                <FileTree />
+              </Panel>
+              <Separator className="separator" />
+              <Panel id="info" minSize={MIN_WIDTH}>
+                {opened && <Docked key={epoch} />}
+              </Panel>
+            </Group>
+          </Panel>
+        </Group>
+      )}
+      {createPortal(
+        <ReactFlowProvider>
+          <Toolbar mode={mode} />
+          <div className="stage">
+            {opened ? <GraphView /> : <Progress />}
+            {opened && mode === "landscape" && <Floating key={epoch} />}
+            <SummaryNotice />
+            <SummaryQueue />
+          </div>
+          <Palette />
+        </ReactFlowProvider>,
+        workspace,
+      )}
       <NodeMenu />
       <Tooltip />
     </>

@@ -1025,12 +1025,13 @@ describe("경로 고정", () => {
 });
 
 describe("화면 설정", () => {
-  it("흐름 단계·화면 색·패널·패널 구역의 접힘·범례·미니맵·자동 요약을 code-atlas:ui:v3에 쓴다", () => {
+  it("흐름 단계·화면 색·고른 모드·패널·패널 구역의 접힘·범례·미니맵·자동 요약을 code-atlas:ui:v3에 쓴다", () => {
     const saved = new Map<string, string>();
     vi.stubGlobal("localStorage", { setItem: (key: string, value: string) => saved.set(key, value) });
     vi.stubGlobal("document", { documentElement: { style: { setProperty: () => undefined }, dataset: {} } });
     store().setDepth(3);
     store().setTheme("dark");
+    store().setLayout("portrait");
     store().setPanel({ x: 0.25, y: 0.05, width: 0.5, height: 0.75 });
     store().setSplit(0.4);
     store().toggleFacts();
@@ -1047,16 +1048,17 @@ describe("화면 설정", () => {
       legendOpen: true,
       minimapOpen: false,
       theme: "dark",
+      layout: "portrait",
       depth: 3,
       autoSummary: true,
     });
   });
 
   it("형태가 맞지 않는 값은 기본값으로 둔다", () => {
-    const defaults = { panel: null, split: null, factsOpen: true, summaryOpen: true, legendOpen: false, minimapOpen: true, theme: "dark", depth: 2, autoSummary: false };
+    const defaults = { panel: null, split: null, factsOpen: true, summaryOpen: true, legendOpen: false, minimapOpen: true, theme: "dark", layout: null, depth: 2, autoSummary: false };
     expect(parseUi(null, "dark")).toEqual(defaults);
     expect(parseUi("{", "dark")).toEqual(defaults);
-    expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, split: 1.5, legendOpen: "yes", minimapOpen: 0, theme: "blue", depth: 4, autoSummary: 1 }), "dark")).toEqual(
+    expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, split: 1.5, legendOpen: "yes", minimapOpen: 0, theme: "blue", layout: "tall", depth: 4, autoSummary: 1 }), "dark")).toEqual(
       defaults,
     );
   });

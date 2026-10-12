@@ -15,6 +15,8 @@ import { useOverlay } from "./overlay";
 export type { Place, Selection, View } from "./history";
 
 export type Depth = 1 | 2 | 3;
+/** 칸 묶음의 배치. 가로창 모드는 파일트리 옆에 작업 영역을 두고, 세로창 모드는 작업 영역 아래에 파일트리와 정보 패널을 둔다. */
+export type Mode = "landscape" | "portrait";
 
 export interface Rect {
   x: number;
@@ -69,6 +71,8 @@ export interface AtlasStore {
   /** 노드를 고르면 캐시에 없는 LLM 요약을 만든다 */
   autoSummary: boolean;
   theme: Theme;
+  /** 사용자가 상단 줄의 버튼으로 고른 모드. null이면 창의 크기로 판정한 모드를 쓴다(`nav/layout.ts`의 `judge`). */
+  layout: Mode | null;
   history: History;
   finder: Finder;
   /**
@@ -188,6 +192,7 @@ export interface AtlasStore {
   clearFinder(): void;
   toggleAutoSummary(): void;
   setTheme(theme: Theme): void;
+  setLayout(layout: Mode): void;
   setPanel(rect: Rect | null): void;
   setSplit(split: number | null): void;
   /** 정보 패널의 "정보" 구역과 "LLM 요약" 구역을 접거나 편다. */
@@ -198,7 +203,7 @@ export interface AtlasStore {
   setPalette(open: boolean): void;
 }
 
-type Ui = Pick<AtlasStore, "panel" | "split" | "factsOpen" | "summaryOpen" | "legendOpen" | "minimapOpen" | "theme" | "depth" | "autoSummary">;
+type Ui = Pick<AtlasStore, "panel" | "split" | "factsOpen" | "summaryOpen" | "legendOpen" | "minimapOpen" | "theme" | "layout" | "depth" | "autoSummary">;
 
 const UI_KEY = "code-atlas:ui:v3";
 
@@ -231,6 +236,7 @@ export function parseUi(raw: string | null, theme: Theme): Ui {
     legendOpen: saved.legendOpen === true,
     minimapOpen: saved.minimapOpen !== false,
     theme: saved.theme === "light" || saved.theme === "dark" ? saved.theme : theme,
+    layout: saved.layout === "landscape" || saved.layout === "portrait" ? saved.layout : null,
     depth: saved.depth === 1 || saved.depth === 2 || saved.depth === 3 ? saved.depth : 2,
     autoSummary: saved.autoSummary === true,
   };
@@ -402,8 +408,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
   /** 화면 설정을 바꾸고 localStorage에 쓴다. */
   const keep = (change: Partial<Ui>) => {
     set(change);
-    const { panel, split, factsOpen, summaryOpen, legendOpen, minimapOpen, theme, depth, autoSummary } = get();
-    localStorage.setItem(UI_KEY, JSON.stringify({ panel, split, factsOpen, summaryOpen, legendOpen, minimapOpen, theme, depth, autoSummary }));
+    const { panel, split, factsOpen, summaryOpen, legendOpen, minimapOpen, theme, layout, depth, autoSummary } = get();
+    localStorage.setItem(UI_KEY, JSON.stringify({ panel, split, factsOpen, summaryOpen, legendOpen, minimapOpen, theme, layout, depth, autoSummary }));
   };
 
   /** 경로 고정 중에는 액션을 실행하지 않는다. */
@@ -488,6 +494,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     showExternal: false,
     autoSummary: false,
     theme: "light",
+    layout: null,
     history: { entries: [placeOf(START)], index: 0 },
     finder: FINDER,
     panel: null,
@@ -688,6 +695,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       keep({ theme });
       applyTheme(theme);
     },
+    setLayout: (layout) => keep({ layout }),
     setPanel: (rect) => keep({ panel: rect }),
     setSplit: (split) => keep({ split }),
     toggleFacts: () => keep({ factsOpen: !get().factsOpen }),
