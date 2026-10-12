@@ -4,9 +4,14 @@ import { postReload } from "../api/client";
 import { running, useStatus } from "./status";
 import { useAtlas } from "./store";
 
-/** 새로고침하는 중이거나 서버가 분석하는 중에 부르면 아무것도 하지 않는다. */
+/** 새로고침하는 중이거나 서버가 분석하는 중인지. 그동안에는 새로고침을 시작하지 않는다. */
+export function busy(): boolean {
+  return useAtlas.getState().reloading || running(useStatus.getState().status);
+}
+
+/** busy()이면 아무것도 하지 않는다. */
 export async function reload(): Promise<void> {
-  if (useAtlas.getState().reloading || running(useStatus.getState().status)) {
+  if (busy()) {
     return;
   }
   useAtlas.setState({ reloading: true, reloadError: null });

@@ -2,7 +2,7 @@
 // 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wide-url 주소] [--only 이름,이름] [--with-summary]
 // 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름은 sync-engine을 연 서버가 기준이고 노드 수·선 수·줄 범위,
 // 경로와 미사용 후보는 서버 응답에서 읽는다. 순환 시나리오(cycles, cycles-change, cycles-pin)는 tests/fixtures/cycle_repo를 연 서버의 주소를
-// --cycle-url로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다. 새로고침 시나리오(reload, stale)는 대상 레포의 파일을 고쳤다가 되돌리므로
+// --cycle-url로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다. 새로고침 시나리오(reload, reload-key, stale)는 대상 레포의 파일을 고쳤다가 되돌리므로
 // tests/fixtures/sample_repo를 임시 폴더로 복사해 연 서버의 주소를 --reload-url로 받았을 때만 돈다.
 // lanes 시나리오는 폴더가 여러 겹인 레포(modern-deeplearning-pipeline)를 연 서버의 주소를 --wide-url로 받으면 그 화면도 본다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
@@ -3953,6 +3953,118 @@ async function reloadScenario(t, page) {
     writeFileSync(core, source);
     await fetch(new URL("/api/reload", reloadUrl), { method: "POST" }).catch(() => {});
   }
+}
+
+/**
+ * 새로고침 단축키. 고정 레포의 임시 복사본에서 그래프, 코드 뷰어, 파일트리 검색 칸에 초점을 둔 채 Mod+R을 눌러 다시 분석하는 요청과
+ * 페이지 다시 읽기를 본다. 페이지를 다시 읽었는지는 page의 load 이벤트 수와 window에 심은 표식으로 본다.
+ */
+async function reloadKey(t, page) {
+  const [file, target] = ["app.core", "app.core:helper"];
+  /** 다시 분석하는 요청. 붙잡아 두었다가 서버로 보낸다. */
+  const posts = [];
+  await page.route((at) => at.pathname === "/api/reload", (route) => void posts.push(route));
+  let loads = 0;
+  await load(page, reloadUrl);
+  page.on("load", () => void loads++);
+  await page.evaluate(() => void (window.__shotsKept = true));
+  const busy = () => page.evaluate(() => document.querySelector(".reload-button").getAttribute("aria-busy"));
+  const waitBusy = (value) => page.waitForFunction((want) => document.querySelector(".reload-button").getAttribute("aria-busy") === want, value, { timeout: value === "true" ? 5_000 : 120_000 }).catch(() => {});
+  /** Mod+R을 누르고 요청 수, 버튼, 페이지를 다시 읽었는지를 읽은 뒤 붙잡은 요청을 보내 분석을 끝낸다. during은 분석하는 동안 부른다. */
+  const press = async (during = async () => {}) => {
+    const before = posts.length;
+    await page.evaluate(() => void (window.__shotsKeys.length = 0));
+    await page.keyboard.press(`${MOD}+r`);
+    await waitBusy("true");
+    await page.waitForTimeout(300);
+    const key = await page.evaluate(() => window.__shotsKeys.find((each) => each.key.toLowerCase() === "r"));
+    const state = { sent: posts.length - before, busy: await busy(), prevented: key?.prevented ?? null, kept: await page.evaluate(() => window.__shotsKept === true), loads };
+    const extra = await during();
+    await posts.at(-1)?.continue();
+    await waitBusy("false");
+    await page.waitForSelector(".react-flow__node", { timeout: 60_000 });
+    await settle(page);
+    return { ...state, ...extra };
+  };
+  const once = (state) => state.sent === 1 && state.busy === "true" && state.prevented === true && state.kept && state.loads === 0;
+
+  const tip = await (async () => {
+    await page.hover(".reload-button");
+    await page.waitForSelector(".tooltip", { timeout: 5_000 }).catch(() => {});
+    return page.evaluate(() => ({ lines: document.querySelector(".tooltip")?.textContent.split("\n") ?? [], title: document.querySelector(".reload-button").hasAttribute("title") }));
+  })();
+  t.check(
+    "새로고침 버튼의 말풍선이 첫 줄에 단축키를 적는다",
+    tip.lines[0] === `새로고침 (${MOD === "Meta" ? "⌘R" : "Ctrl+R"}) · 레포를 다시 분석한다` && !tip.title,
+    tip.lines[0],
+  );
+
+  await page.mouse.click(600, 500);
+  const onGraph = await press(async () => {
+    const before = posts.length;
+    await page.keyboard.press(`${MOD}+r`);
+    await page.waitForTimeout(300);
+    return { again: posts.length - before };
+  });
+  t.check(
+    "그래프에 초점이 있을 때 Mod+R을 누르면 다시 분석하는 요청을 한 번 보내고 페이지를 다시 읽지 않는다",
+    once(onGraph),
+    JSON.stringify(onGraph),
+  );
+  t.check("분석하는 동안 Mod+R을 다시 눌러도 요청을 더 보내지 않는다", onGraph.again === 0, `더 보낸 요청 ${onGraph.again}번`);
+
+  await pickInTree(page, { id: target, owner: file });
+  await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 });
+  await settle(page);
+  await page.click(".info-panel .monaco-editor .view-line");
+  await page.waitForTimeout(200);
+  const inCode = await page.evaluate(() => document.activeElement?.closest(".monaco-editor") != null);
+  const onCode = await press();
+  t.check("코드 뷰어에 커서가 있을 때 Mod+R을 누르면 요청을 한 번 보내고 페이지를 다시 읽지 않는다", inCode && once(onCode), `포커스가 코드 뷰어에 있음 ${inCode}, ${JSON.stringify(onCode)}`);
+
+  await page.click(".tree-search-input");
+  await page.keyboard.type("help");
+  const onSearch = await press(async () => ({ typed: await page.inputValue(".tree-search-input") }));
+  t.check(
+    "파일트리 검색 칸에 초점이 있을 때 Mod+R을 누르면 요청을 한 번 보내고 페이지를 다시 읽지 않으며 글자를 넣지 않는다",
+    once(onSearch) && onSearch.typed === "help",
+    JSON.stringify(onSearch),
+  );
+
+  // 열려 있던 팔레트, 필터 창, 진입점 메뉴는 새로고침이 시작될 때 닫힌다.
+  const shown = () =>
+    page.evaluate(() => ({
+      palette: document.querySelectorAll(".palette").length,
+      filters: document.querySelectorAll(".filter-panel").length,
+      menu: document.querySelectorAll(".menu").length,
+    }));
+  await page.keyboard.press(`${MOD}+k`);
+  await page.waitForSelector(".palette", { timeout: 5_000 }).catch(() => {});
+  const inPalette = await press(async () => ({ shown: await shown() }));
+  await page.click(".filter-button");
+  const opened = { filters: (await shown()).filters };
+  const inFilter = await press(async () => ({ shown: await shown() }));
+  await page.click(".toolbar-entries");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  opened.menu = (await shown()).menu;
+  const inMenu = await press(async () => ({ shown: await shown() }));
+  t.check(
+    "팔레트, 필터 창, 진입점 메뉴가 열려 있을 때 Mod+R을 누르면 그 창을 닫고 요청을 한 번 보낸다",
+    once(inPalette) && inPalette.shown.palette === 0 && opened.filters === 1 && once(inFilter) && inFilter.shown.filters === 0 && opened.menu === 1 && once(inMenu) && inMenu.shown.menu === 0,
+    `팔레트 ${JSON.stringify(inPalette)}, 필터 창 ${JSON.stringify(inFilter)}, 메뉴 ${JSON.stringify(inMenu)}, 열림 ${JSON.stringify(opened)}`,
+  );
+
+  // Mod+Shift+R은 받지 않는다.
+  const before = posts.length;
+  await page.evaluate(() => void (window.__shotsKeys.length = 0));
+  await page.keyboard.press(`${MOD}+Shift+r`);
+  await page.waitForTimeout(500);
+  const hard = await page.evaluate(() => window.__shotsKeys.find((each) => each.key.toLowerCase() === "r") ?? null).catch(() => null);
+  t.check(
+    "Mod+Shift+R은 화면이 막지 않고 다시 분석하는 요청을 보내지 않는다",
+    hard !== null && hard.prevented === false && posts.length === before,
+    `${JSON.stringify(hard)}, 요청 ${posts.length - before}번, load ${loads}번`,
+  );
 }
 
 // ── 4단계: 분석 상태 ─────────────────────────────────────────────
@@ -11467,6 +11579,7 @@ const SCENARIOS = [
   ["finder-ends", finderEnds],
   ["overlay-menu", overlayMenu],
   ["reload", reloadScenario],
+  ["reload-key", reloadKey],
   ["unused", unusedScenario],
   ["finder-overlay", finderOverlay],
   ["overlay-dark", overlayDark],
@@ -11560,7 +11673,7 @@ async function run(browser, name, scenario) {
     console.log(`[${name}]\n  건너뜀  순환이 있는 고정 레포로 연 화면 — --cycle-url을 주지 않았다`);
     return [{ label: name, ok: null, actual: "" }];
   }
-  if ((name === "reload" || name === "stale") && reloadUrl === null) {
+  if ((name === "reload" || name === "reload-key" || name === "stale") && reloadUrl === null) {
     console.log(`[${name}]\n  건너뜀  고정 레포의 임시 복사본으로 연 화면 — --reload-url을 주지 않았다`);
     return [{ label: name, ok: null, actual: "" }];
   }

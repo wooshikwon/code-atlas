@@ -5,6 +5,7 @@ import type { Status } from "../api/types";
 import { reload } from "../state/reload";
 import { phaseName, phaseText, running, staleLines, useStatus } from "../state/status";
 import { useAtlas } from "../state/store";
+import { modName } from "./keys";
 
 /** 새로고침 버튼의 말풍선 글. busy는 새로고침하는 중이거나 서버가 분석하는 중이라는 뜻이다. */
 export function reloadTip(busy: boolean, status: Status | null): string {
@@ -15,7 +16,7 @@ export function reloadTip(busy: boolean, status: Status | null): string {
     ].join("\n");
   }
   return [
-    "새로고침 · 레포를 다시 분석한다",
+    `새로고침 (${modName("R")}) · 레포를 다시 분석한다`,
     "보기 설정, 선택, 펼친 폴더, 경로 고정을 레포를 처음 연 상태로 되돌린다",
     ...(status === null ? [] : staleLines(status.stale)),
   ].join("\n");
