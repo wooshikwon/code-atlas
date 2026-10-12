@@ -15,6 +15,7 @@ import {
 import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { AtlasNode, Graph } from "../api/types";
+import { useNodeMenu } from "../nav/NodeMenu";
 import { useOpened } from "../panel/opened";
 import { focusOf, type History } from "../state/history";
 import { useOverlay } from "../state/overlay";
@@ -541,6 +542,13 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     }
     press(node.data.node.id);
   };
+  /** 노드의 눌리는 곳을 우클릭하면 그 노드의 메뉴를 연다. 선택과 화면은 그대로 둔다. 메뉴가 없는 노드는 브라우저의 메뉴를 막지 않는다. */
+  const onNodeContextMenu: NodeMouseHandler<AtlasFlowNode | PackFlowNode> = (event, node) => {
+    if (!isPack(node) && pressable(node.data, event.target) && useNodeMenu.getState().show(node.data.node.id, event.clientX, event.clientY, false)) {
+      event.preventDefault();
+      tooltip.hide();
+    }
+  };
   const onPaneClick = (event: ReactMouseEvent) => {
     tooltip.hide();
     if (repeated(event)) {
@@ -609,6 +617,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
+        onNodeContextMenu={onNodeContextMenu}
         onNodeMouseEnter={onNodeOver}
         onNodeMouseMove={onNodeOver}
         onNodeMouseLeave={onNodeLeave}

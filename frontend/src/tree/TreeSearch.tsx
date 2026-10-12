@@ -1,5 +1,6 @@
 import { useEffect, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import type { EntryKind } from "../search/index";
+import { useNodeMenu } from "../nav/NodeMenu";
 import { useSummaries } from "../state/summaries";
 import { Icon } from "./Icon";
 import type { Result } from "./rows";
@@ -115,6 +116,7 @@ export function TreeResults({ list, active, onPick }: Pick<SearchProps, "list" |
           data-tip={leads[hit.entry.id]}
           data-node={hit.entry.id}
           onClick={() => onPick(list[index])}
+          onContextMenu={(event) => useNodeMenu.getState().show(hit.entry.id, event.clientX, event.clientY, false) && event.preventDefault()}
         >
           <Icon kind={hit.entry.kind} />
           <span className="tree-label">{hit.field === "name" ? marked(hit.entry.name, hit.positions) : hit.entry.name}</span>

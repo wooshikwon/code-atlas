@@ -1527,6 +1527,23 @@ ul {
   pointer-events: none;
 }
 
+/* 메뉴에서 요청한 LLM 요약을 만들지 못한 까닭. 그래프 영역 위쪽 가운데에 뜨고 누르면 닫힌다. */
+.summary-notice {
+  position: absolute;
+  z-index: var(--z-dock);
+  top: 12px;
+  left: 50%;
+  max-width: min(480px, calc(100% - 24px));
+  padding: 4px 10px;
+  border: 1px solid var(--critical);
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 12px;
+  text-align: left;
+  white-space: pre-wrap;
+  transform: translateX(-50%);
+}
+
 /* 왼쪽 아래 칸. 아랫줄에 둥근 버튼을, 그 위에 펼친 미니맵과 범례, 경로 탐색 창을 나란히 둔다. 폭이 모자라면 오른쪽 칸부터 위로 올라간다.
    칸의 빈 곳은 마우스를 받지 않아 그래프를 가리지 않는다. */
 .dock {

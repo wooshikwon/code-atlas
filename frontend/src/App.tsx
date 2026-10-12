@@ -10,6 +10,7 @@ import { Entries } from "./nav/Entries";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
 import { bind } from "./nav/keys";
+import { NodeMenu, SummaryNotice } from "./nav/NodeMenu";
 import { Trail } from "./nav/Trail";
 import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
@@ -121,12 +122,14 @@ export function App() {
               <div className="stage">
                 {opened ? <GraphView key={epoch} /> : <Progress />}
                 {opened && <InfoPanel />}
+                <SummaryNotice />
               </div>
               <Palette />
             </div>
           </ReactFlowProvider>
         </Panel>
       </Group>
+      <NodeMenu />
       <Tooltip />
     </>
   );

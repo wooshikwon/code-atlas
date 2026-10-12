@@ -389,8 +389,8 @@ async function asidePanel(page) {
   });
 }
 
-/** 노드의 이름표(펼친 파일 상자는 머리 줄) 가운데를 마우스로 누른다. times가 2면 더블클릭이다. */
-async function clickNode(page, id, times = 1) {
+/** 노드의 이름표(펼친 파일 상자는 머리 줄) 가운데를 마우스로 누른다. times가 2면 더블클릭이고, button이 "right"면 우클릭이다. */
+async function clickNode(page, id, times = 1, button = "left") {
   const at = await page.evaluate(
     ([body, text]) => {
       const wrappers = [document.querySelector(body), document.querySelector(text)];
@@ -410,7 +410,7 @@ async function clickNode(page, id, times = 1) {
   if (!at.hit) {
     throw new Error(`노드가 화면 밖에 있거나 다른 요소에 가려 누르지 못한다: ${id} (${Math.round(at.x)}, ${Math.round(at.y)})`);
   }
-  await (times === 2 ? page.mouse.dblclick(at.x, at.y) : page.mouse.click(at.x, at.y));
+  await (times === 2 ? page.mouse.dblclick(at.x, at.y) : page.mouse.click(at.x, at.y, { button }));
 }
 
 /**
@@ -7718,6 +7718,276 @@ async function entry(t, page) {
   await page.screenshot({ path: HF3("entry-function") });
 }
 
+/**
+ * 노드의 우클릭 메뉴. 그래프의 노드와 파일트리의 행에서 LLM 요약을 요청하고, 선택과 화면, 탐색 이력이 그대로인지 본다.
+ * 요지 목록과 요약은 서버 대신 답하고 LLM을 부르지 않는다. 사진은 `hf3-menu-{이름}.png`로 남긴다.
+ */
+async function menu(t, page) {
+  const graph = await api("/api/graph");
+  const defined = definedIn(graph, FILE).filter((n) => !n.test);
+  const functions = defined.filter((n) => n.kind === "function" && n.id !== FUNCTION);
+  const KEPT = "노트의 구역을 다시 지어 바뀐 구역만 파일에 쓴다.";
+  const leadOf = (id) => `${id.split(":").at(-1)}의 요지다.`;
+  const text = (lead) => `${lead}\n\n하는 일\n문단\n\n앞뒤 흐름\n문단`;
+  /** 화면이 보낸 POST /api/summary. 시나리오가 answer나 fail로 답할 때까지 붙잡아 둔다. */
+  const posts = [];
+  await page.route((at) => at.pathname === "/api/summaries", (route) => route.fulfill({ json: { summaries: [{ node: FUNCTION, lead: KEPT }] } }));
+  await page.route(
+    (at) => at.pathname === "/api/summary",
+    (route) => {
+      const id = new URL(route.request().url()).searchParams.get("node");
+      if (route.request().method() === "POST") {
+        posts.push({
+          node: id,
+          refresh: new URL(route.request().url()).searchParams.get("refresh") === "true",
+          done: false,
+          answer: () => route.fulfill({ json: { summary: text(leadOf(id)) } }),
+          fail: (error) => route.fulfill({ status: 503, json: { error } }),
+        });
+        return undefined;
+      }
+      return route.fulfill({ json: { summary: id === FUNCTION ? text(KEPT) : null, stale: false, available: true, reason: null } });
+    },
+  );
+  /** 붙잡아 둔 요청에 차례로 답한다. 답하면 화면이 기다리던 다음 요청을 보내므로 더 오지 않을 때까지 되풀이한다. */
+  const answerAll = async () => {
+    for (let quiet = 0; quiet < 3; ) {
+      const open = posts.filter((post) => !post.done);
+      for (const post of open) {
+        post.done = true;
+        await post.answer();
+      }
+      quiet = open.length === 0 ? quiet + 1 : 0;
+      await page.waitForTimeout(150);
+    }
+  };
+  await page.addInitScript(() => {
+    window.__shotsMenus = [];
+    window.addEventListener("contextmenu", (event) => setTimeout(() => window.__shotsMenus.push(event.defaultPrevented)));
+  });
+  const blocked = async () => {
+    await page.waitForTimeout(50);
+    return page.evaluate(() => window.__shotsMenus.at(-1) ?? null);
+  };
+  /** 선택, 화면 위치, 뒤로·앞으로 버튼이 눌리는지, 탐색 경로의 글. 메뉴가 바꾸면 안 되는 값이다. */
+  const stateOf = () =>
+    page.evaluate(() => ({
+      selected: document.querySelector(".react-flow__node .node-selected")?.closest(".react-flow__node")?.dataset.id ?? null,
+      view: document.querySelector(".react-flow__viewport").style.transform,
+      steps: [...document.querySelectorAll(".toolbar-nav > .toolbar-button")].map((button) => button.disabled),
+      trail: document.querySelector(".toolbar-trail").textContent,
+      nodes: document.querySelectorAll(".react-flow__node").length,
+    }));
+  const busyOn = (ids) => page.evaluate((sels) => sels.filter((sel) => document.querySelector(`${sel} .badge-busy`) !== null).length, ids.map(face));
+  const labels = async () => (await listOf(page))?.items.map((item) => `${item.text}${item.disabled ? "(비활성)" : ""}`) ?? null;
+  const rightClick = async (selector) => {
+    const rect = await rectOf(page, selector);
+    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2, { button: "right" });
+  };
+  const tip = async (selector) => {
+    const rect = await rectOf(page, selector);
+    await page.mouse.move(5, 5);
+    await page.mouse.move(rect.x + rect.width / 2 - 1, rect.y + rect.height / 2);
+    await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.waitForTimeout(400);
+    return tipText(page);
+  };
+
+  await load(page);
+  await pick(page, FILE);
+  const shownIds = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`.react-flow__node[data-id="${id}#face"] .node-label`) !== null), functions.map((n) => n.id));
+  const [a, b, c] = shownIds;
+  const before = await stateOf();
+
+  // 여는 것만으로는 아무것도 바뀌지 않는다.
+  await clickNode(page, a, 1, "right");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  const opened = await listOf(page);
+  t.check(
+    '요약이 없는 함수 노드를 우클릭하면 브라우저의 메뉴 대신 "LLM 요약 요청" 항목의 메뉴가 뜬다',
+    (await blocked()) === true && opened?.role === "menu" && same(opened.roles, ["menuitem"]) && same(await labels(), ["LLM 요약 요청"]) && opened.inside,
+    `${(await labels())?.join(", ")}, 브라우저 메뉴 막음 ${await blocked()}`,
+  );
+  t.check("메뉴는 말풍선·선 목록과 같은 칸 바탕색, 경계선, 본문 잉크를 쓴다", same(opened?.style, await menuTokens(page)), JSON.stringify(opened?.style));
+  t.check("우클릭은 노드를 고르지 않고 화면과 탐색 이력을 그대로 둔다", same(await stateOf(), before) && posts.length === 0, JSON.stringify(await stateOf()));
+  await page.screenshot({ path: HF3("menu-open") });
+  await page.keyboard.press("Escape");
+  t.check("Esc는 메뉴만 닫고 선택을 그대로 둔다", (await count(page, ".menu")) === 0 && same(await stateOf(), before), `선택 ${(await stateOf()).selected}`);
+
+  // 상태별 항목 이름
+  await clickNode(page, FUNCTION, 1, "right");
+  const kept = await labels();
+  await page.click(".explorer-header");
+  const outside = (await count(page, ".menu")) === 0;
+  t.check('요약이 있는 함수 노드의 항목은 "요약 다시 만들기"이고 메뉴 밖을 누르면 닫힌다', same(kept, ["요약 다시 만들기"]) && outside, `${kept?.join(", ")}, 밖을 눌러 닫힘 ${outside}`);
+  await clickNode(page, FILE, 1, "right");
+  const onFile = await labels();
+  const bare = defined.length - 1;
+  t.check(
+    `파일 노드에는 요약이 없는 정의의 수(${bare})를 적은 "안에 든 정의 N개 모두 요약"이 더해진다`,
+    same(onFile, ["LLM 요약 요청", `안에 든 정의 ${bare}개 모두 요약`]),
+    onFile?.join(", "),
+  );
+  await page.screenshot({ path: HF3("menu-file") });
+  await page.keyboard.press("Escape");
+  const folder = graph.nodes.find((n) => n.kind === "package" && !n.test && n.parent !== null) ?? graph.nodes.find((n) => n.kind === "package" && !n.test);
+  await rightClick(`.tree-row.tree-dir[data-node="${folder.id}"] .tree-label`);
+  const onDir = { menu: await count(page, ".menu"), blocked: await blocked() };
+  t.check("폴더는 우클릭해도 메뉴가 뜨지 않는다", onDir.menu === 0 && onDir.blocked === false && same(await stateOf(), before), `${JSON.stringify(onDir)}, 선택 ${(await stateOf()).selected}`);
+
+  // 연달아 세 개를 요청한다. 서버로는 둘만 보내고 하나는 차례를 기다린다.
+  for (const id of [a, b, c]) {
+    await clickNode(page, id, 1, "right");
+    await page.click('.menu-item[data-key="one"]');
+  }
+  await page.waitForTimeout(300);
+  const asked = { busy: await busyOn([a, b, c]), posts: posts.map((post) => post.node), menu: await count(page, ".menu") };
+  t.check(
+    "세 노드에 연달아 요청하면 세 노드에 도는 표시가 뜨고, 서버로는 요청 두 개만 가고, 선택과 화면과 탐색 이력이 그대로다",
+    asked.busy === 3 && same(asked.posts, [a, b]) && posts.every((post) => !post.refresh) && asked.menu === 0 && same(await stateOf(), before),
+    `도는 표시 ${asked.busy}개, POST ${asked.posts.join(", ")}`,
+  );
+  await clickNode(page, c, 1, "right");
+  const waiting = await labels();
+  await page.click('.menu-item[data-key="one"]', { force: true });
+  await page.waitForTimeout(200);
+  t.check('만드는 중이거나 차례를 기다리는 노드의 항목은 누를 수 없는 "요약 만드는 중"이다', same(waiting, ["요약 만드는 중(비활성)"]) && posts.length === 2, waiting?.join(", "));
+  await page.screenshot({ path: HF3("menu-busy") });
+  await page.keyboard.press("Escape");
+  await answerAll();
+  const made = [];
+  for (const id of [a, b, c]) {
+    made.push(await tip(`${face(id)} .node-label`));
+  }
+  t.check(
+    "요청이 끝나면 기다리던 셋째 요청까지 가고, 도는 표시가 사라지며 세 노드의 말풍선이 새 요지를 적는다",
+    same(posts.map((post) => post.node), [a, b, c]) && (await busyOn([a, b, c])) === 0 && same(made, [a, b, c].map(leadOf)),
+    made.join(" / "),
+  );
+  await page.mouse.move(5, 5);
+  await clickNode(page, a, 1, "right");
+  t.check('요약을 만든 노드의 항목이 "요약 다시 만들기"로 바뀐다', same(await labels(), ["요약 다시 만들기"]), (await labels())?.join(", "));
+  await page.click('.menu-item[data-key="one"]');
+  await page.waitForTimeout(200);
+  t.check("다시 만들기는 캐시에 있어도 새로 만드는 요청을 보낸다", posts.at(-1).node === a && posts.at(-1).refresh, `POST ${posts.at(-1).node} refresh=${posts.at(-1).refresh}`);
+  await answerAll();
+
+  // 파일의 모두 요약
+  const rest3 = bare - 3;
+  await clickNode(page, FILE, 1, "right");
+  const fewer = await labels();
+  await page.click('.menu-item[data-key="all"]');
+  await page.waitForTimeout(300);
+  const sentNow = posts.filter((post) => !post.done).length;
+  const boxBusy = await page.evaluate((sel) => document.querySelectorAll(`${sel} .badge-busy`).length, ".react-flow__viewport");
+  await clickNode(page, FILE, 1, "right");
+  const drained = await labels();
+  await page.keyboard.press("Escape");
+  t.check(
+    `파일의 "모두 요약"은 요약이 없는 정의 ${rest3}개만 요청하고, 서버로는 둘씩 보내며, 요청한 뒤에는 0개가 되어 누를 수 없다`,
+    same(fewer, ["LLM 요약 요청", `안에 든 정의 ${rest3}개 모두 요약`]) && sentNow === 2 && boxBusy > 0 && same(drained, ["LLM 요약 요청", "안에 든 정의 0개 모두 요약(비활성)"]),
+    `${fewer?.join(", ")} → ${drained?.join(", ")}, 보낸 요청 ${sentNow}개, 도는 표시 ${boxBusy}개`,
+  );
+  await answerAll();
+  await page.waitForFunction(() => document.querySelector(".badge-busy") === null, null, { timeout: 15_000 }).catch(() => {});
+  const all = posts.map((post) => post.node);
+  const wanted = defined.filter((n) => n.id !== FUNCTION).map((n) => n.id);
+  t.check(
+    "모두 요약이 끝나면 파일 자신과 이미 요약이 있던 정의를 뺀 나머지 정의마다 요청이 한 번씩 갔다",
+    wanted.every((id) => all.filter((each) => each === id).length === (id === a ? 2 : 1)) && !all.includes(FILE) && !all.includes(FUNCTION) && same(await stateOf(), before),
+    `POST ${all.length}번, 정의 ${wanted.length}개`,
+  );
+
+  // 실패한 요청
+  const other = graph.nodes.find((n) => n.kind === "module" && !n.test && n.id !== FILE && n.entry);
+  t.expected.push("503");
+  await clickNode(page, other.id, 1, "right");
+  await page.click('.menu-item[data-key="one"]');
+  await page.waitForTimeout(200);
+  posts.at(-1).done = true;
+  await posts.at(-1).fail("Claude Code에 로그인돼 있지 않다");
+  await page.waitForSelector(".summary-notice", { timeout: 5_000 }).catch(() => {});
+  const notice = await page.evaluate(() => document.querySelector(".summary-notice")?.textContent ?? "");
+  t.check(
+    "메뉴에서 요청한 요약을 만들지 못하면 그래프 영역 위쪽에 그 노드의 이름과 까닭을 적는다",
+    notice === `LLM 요약을 만들지 못했다 · ${other.id.replaceAll(".", "/")}.py: Claude Code에 로그인돼 있지 않다` && same(await stateOf(), before),
+    notice,
+  );
+  await page.screenshot({ path: HF3("menu-failed") });
+  await page.click(".summary-notice");
+  t.check("알림을 누르면 닫힌다", (await count(page, ".summary-notice")) === 0);
+
+  // 파일트리
+  const row = (id) => `.tree-row.tree-symbol[data-node="${id}"]`;
+  await rightClick(`${row(b)} .tree-label`);
+  const inTree = await labels();
+  t.check("파일트리의 함수 행을 우클릭해도 같은 메뉴가 뜨고 선택이 그대로다", (await blocked()) === true && same(inTree, ["요약 다시 만들기"]) && same(await stateOf(), before), inTree?.join(", "));
+  await page.screenshot({ path: HF3("menu-tree") });
+  await page.keyboard.press("Escape");
+  await page.focus(".tree");
+  await page.keyboard.press("Shift+F10");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  const byKey = await listOf(page);
+  await page.keyboard.press("ArrowDown");
+  const moved = await listOf(page);
+  await page.keyboard.press("Escape");
+  const back = await page.evaluate(() => document.activeElement?.className ?? "");
+  t.check(
+    "파일트리에서 Shift+F10을 누르면 활성 행(고른 파일)의 메뉴가 첫 항목을 활성 항목으로 두고 뜨고, Esc에 닫히며 초점이 파일트리로 돌아간다",
+    byKey?.focused === true && byKey.active === "one" && same(byKey.items.map((item) => item.node), [FILE, FILE]) && moved?.active === "one" && back === "tree",
+    `항목 ${byKey?.items.map((item) => item.text).join(", ")}, 활성 ${byKey?.active}, 닫은 뒤 초점 ${back}`,
+  );
+  await page.keyboard.press("ContextMenu");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(200);
+  t.check("메뉴 키로 열어 Enter를 누르면 활성 항목인 파일의 요약을 요청한다", posts.at(-1).node === FILE && !posts.at(-1).refresh && (await count(page, ".menu")) === 0 && same(await stateOf(), before), `POST ${posts.at(-1).node}`);
+  await answerAll();
+
+  // 어두운 화면
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  await clickNode(page, FILE, 1, "right");
+  const dark = await listOf(page);
+  t.check("어두운 화면의 메뉴는 어두운 칸 바탕색에 밝은 글자다", same(dark?.style, await menuTokens(page)) && dark.style.backgroundColor !== opened.style.backgroundColor, JSON.stringify(dark?.style));
+  t.check("메뉴를 연 화면에 title 속성과 SVG title이 없다", (await nativeTips(page)).length === 0, (await nativeTips(page)).join(", "));
+  await page.screenshot({ path: HF3("menu-dark") });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "밝은 화면" }).click();
+
+  // 경로 고정 중에도 경로 밖 노드의 요약을 요청한다.
+  await page.keyboard.press("Escape");
+  await rest(page);
+  await pin(page);
+  const off = await page.evaluate(() => {
+    for (const wrapper of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
+      const label = wrapper.querySelector(":scope > .node-module:not([data-route]) .node-module-name .node-label");
+      const rect = label?.getBoundingClientRect();
+      if (rect !== undefined && wrapper.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))) {
+        return { id: wrapper.dataset.id.replace(/#face$/, ""), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+    }
+    return null;
+  });
+  if (off === null) {
+    t.skip("경로 고정 중에 경로 밖 노드를 우클릭하면 메뉴가 뜬다", "화면에 보이는 경로 밖 파일 상자가 없다");
+    return;
+  }
+  const pinned = await stateOf();
+  const flashes = () => page.evaluate(() => document.querySelector(".finder-pinned[data-flash]") !== null);
+  await page.mouse.click(off.x, off.y, { button: "right" });
+  const pinnedMenu = await labels();
+  await page.click('.menu-item[data-key="one"]');
+  await page.waitForTimeout(200);
+  t.check(
+    "경로 고정 중에 경로 밖 파일 상자를 우클릭해 요약을 요청해도 고정과 선택이 그대로고 막힌 조작의 알림이 뜨지 않는다",
+    pinnedMenu !== null && posts.at(-1).node === off.id && (await count(page, ".graph[data-pinned]")) === 1 && same(await stateOf(), pinned) && !(await flashes()),
+    `${off.id}: ${pinnedMenu?.join(", ")}`,
+  );
+  await page.screenshot({ path: HF3("menu-pinned") });
+  await answerAll();
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -7730,6 +8000,7 @@ const SCENARIOS = [
   ["badge-tip", badgeTip],
   ["entry-mark", entryMark],
   ["entry", entry],
+  ["menu", menu],
   ["tips", tips],
   ["minimap", minimap],
   ["region", region],
