@@ -1,6 +1,6 @@
 // 파일트리 행의 기호. 클래스·데이터 클래스·함수는 그래프의 노드 모양과 같은 모양을 쓴다.
 
-export type IconKind = "folder" | "folder-open" | "file" | "class" | "dataclass" | "function" | "method";
+export type IconKind = "folder" | "folder-open" | "file" | "class" | "dataclass" | "function" | "method" | "variable";
 
 function Shape({ kind }: { kind: IconKind }) {
   switch (kind) {

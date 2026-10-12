@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasNode, Graph } from "../api/types";
 import type { History } from "../state/history";
+import { variableFixture } from "../graph/fixture";
+import { hidden } from "../graph/visible";
 import { build, find, recent } from "./index";
 
 function node(id: string, kind: AtlasNode["kind"], parent: string | null, path: string | null, test = false): AtlasNode {
@@ -25,7 +27,7 @@ const graph: Graph = {
   edges: [],
 };
 
-const entries = build(graph, false);
+const entries = build(graph, hidden(graph, { showTests: false, showExternal: false }));
 const ids = (query: string, limit?: number) => find(entries, query, limit).map((hit) => hit.entry.id);
 
 describe("build", () => {
@@ -42,9 +44,19 @@ describe("build", () => {
 
   it("테스트 코드 토글이 꺼지면 테스트 노드가 빠지고 켜지면 들어간다", () => {
     expect(entries.some((entry) => entry.id.startsWith("tests."))).toBe(false);
-    const withTests = build(graph, true).map((entry) => entry.id);
+    const withTests = build(graph, hidden(graph, { showTests: true, showExternal: false })).map((entry) => entry.id);
     expect(withTests).toContain("tests.test_reminders");
     expect(withTests).toContain("tests.test_reminders:test_rns");
+  });
+
+  it("변수를 괄호 없는 이름으로 담고 토글로 숨긴 외부 값 변수와 테스트 코드의 변수는 뺀다", () => {
+    const made = (showTests: boolean, showExternal: boolean) => build(variableFixture, hidden(variableFixture, { showTests, showExternal }));
+    const variables = (list: ReturnType<typeof made>) => list.filter((entry) => entry.kind === "variable").map((entry) => entry.id);
+    expect(made(false, false)).toContainEqual({ id: "conf:PRESETS", name: "PRESETS", path: "conf.py", kind: "variable" });
+    expect(variables(made(false, false))).toEqual(["conf:PRESETS", "conf:LIMIT", "conf:DEFAULT", "conf:_cache", "app:STARTERS"]);
+    expect(variables(made(false, true))).toContain("conf:logger");
+    expect(variables(made(true, false))).toContain("tests.test_conf:SAMPLE");
+    expect(made(true, true).some((entry) => entry.id.startsWith("ext:"))).toBe(false);
   });
 });
 

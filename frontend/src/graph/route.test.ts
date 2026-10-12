@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Graph } from "../api/types";
-import { edge, node, routeFixture } from "./fixture";
+import { edge, node, routeFixture, variableFixture } from "./fixture";
 import { PATH_LIMIT, endpoints, lit, route, steps, type Path } from "./route";
 import { hidden } from "./visible";
 
@@ -275,5 +275,23 @@ describe("lit", () => {
     const result = route(routeFixture, "flow.walk:begin", "flow.walk:finish", off);
     expect(lit(result, 3)).toBeNull();
     expect(lit(result, -1)).toBeNull();
+  });
+});
+
+describe("변수 노드와 경로", () => {
+  const shownAll = hidden(variableFixture, { showTests: false, showExternal: true });
+  const found = steps(variableFixture, shownAll);
+
+  it("읽음·바꿈 선은 걸음이 아니다", () => {
+    const pairs = [...found.values()].flat().map((step) => `${step.source}|${step.target}`);
+    for (const e of variableFixture.edges.filter((each) => each.kind === "read" || each.kind === "write")) {
+      expect(pairs).not.toContain(`${e.source}|${e.target}`);
+    }
+    expect(found.has("conf:remember")).toBe(false);
+  });
+
+  it("변수에서 나가는 생성 선은 걸음이고, 파일을 출발로 고르면 그 안의 변수에서 시작하는 경로가 나온다", () => {
+    expect(found.get("conf:PRESETS")).toEqual([{ source: "conf:PRESETS", target: "conf:Preset", kind: "construct" }]);
+    expect(route(variableFixture, "app", "conf:Preset", shownAll)?.paths).toEqual([["app:STARTERS", "conf:Preset"]]);
   });
 });

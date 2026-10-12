@@ -4,7 +4,7 @@ import type { Graph } from "../api/types";
 import { nodeIndex } from "../graph/visible";
 import type { History } from "../state/history";
 
-export type EntryKind = "file" | "class" | "dataclass" | "function" | "method";
+export type EntryKind = "file" | "class" | "dataclass" | "function" | "method" | "variable";
 
 export interface Entry {
   id: string;
@@ -24,14 +24,14 @@ export interface Hit {
 }
 
 /**
- * 파일·클래스·데이터 클래스·함수·메서드를 검색 항목으로 만든다. 테스트 코드는 토글이 켜졌을 때만 넣는다.
- * 폴더와 모듈 노드가 없는 `__init__.py`는 넣지 않는다.
+ * 파일·클래스·데이터 클래스·함수·메서드·변수를 검색 항목으로 만든다. 토글로 숨긴 노드 off(`graph/visible.ts`의 `hidden`)는 넣지 않는다.
+ * 폴더와 외부 노드, 모듈 노드가 없는 `__init__.py`는 넣지 않는다.
  */
-export function build(graph: Graph, showTests: boolean): Entry[] {
+export function build(graph: Graph, off: Set<string>): Entry[] {
   const nodes = nodeIndex(graph);
   const entries: Entry[] = [];
   for (const node of graph.nodes) {
-    if (node.path === null || node.kind === "external" || (node.test && !showTests)) {
+    if (node.path === null || node.kind === "external" || off.has(node.id)) {
       continue;
     }
     if (node.kind === "package") {

@@ -12,6 +12,7 @@ const KIND_NAMES: Record<EntryKind, string> = {
   dataclass: "데이터 클래스",
   function: "함수",
   method: "메서드",
+  variable: "변수",
 };
 
 const resultId = (index: number) => `tree-result-${index}`;

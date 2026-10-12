@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { node as made, repoFixture, routeFixture } from "../graph/fixture";
+import { node as made, repoFixture, routeFixture, variableFixture } from "../graph/fixture";
 import { back, jump, push, type History, type Place } from "./history";
 import { useOverlay } from "./overlay";
 import { barred, chosenOf, litOf, parseUi, pinned, startFolds, undoable, useAtlas, type AtlasStore } from "./store";
@@ -178,6 +178,48 @@ describe("안쪽 자식 선택과 전부 펼침", () => {
     store().select("flow.walk:finish");
     expect(store().finder.focus).toBe("flow.walk:finish");
     expect(store().unpacked).toEqual(new Set());
+  });
+});
+
+describe("변수 노드", () => {
+  beforeEach(() => {
+    useAtlas.setState({ ...useAtlas.getInitialState(), graph: variableFixture }, true);
+  });
+
+  it("안쪽 자식인 변수를 고르면 그 파일 상자가 전부 펼침에 들고 뒤로·앞으로에서도 유지된다", () => {
+    store().select("conf:PRESETS");
+    expect(store().unpacked).toEqual(new Set());
+    store().select("conf:LIMIT");
+    expect(store().unpacked).toEqual(new Set(["conf"]));
+    store().back();
+    expect(store().selection).toEqual(node("conf:PRESETS"));
+    expect(store().unpacked).toEqual(new Set());
+    store().forward();
+    expect(store().selection).toEqual(node("conf:LIMIT"));
+    expect(store().unpacked).toEqual(new Set(["conf"]));
+  });
+
+  it("외부 노드 토글을 켜서 보이게 된 외부 값 변수를 고르면 그 파일 상자가 전부 펼침에 든다", () => {
+    store().toggleExternal();
+    store().select("conf:logger");
+    expect(store().unpacked).toEqual(new Set(["conf"]));
+  });
+
+  it("고른 변수를 다시 골라도 선택과 이력이 그대로다", () => {
+    store().select("conf:PRESETS");
+    const before = store();
+    store().select("conf:PRESETS");
+    expect(store().selection).toEqual(node("conf:PRESETS"));
+    expect(store().history).toBe(before.history);
+  });
+
+  it("setEnd는 변수를 받지 않는다", () => {
+    store().setEnd("from", "conf:PRESETS");
+    store().setEnd("to", "conf:LIMIT");
+    expect(store().finder).toMatchObject({ from: null, to: null, route: null });
+    store().setEnd("from", "app");
+    store().setEnd("to", "conf:Preset");
+    expect(store().finder.route?.paths).toEqual([["app:STARTERS", "conf:Preset"]]);
   });
 });
 

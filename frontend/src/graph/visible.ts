@@ -7,6 +7,10 @@ import type { Lit } from "./route";
 export interface Pack {
   /** 안쪽 자식. 그래프의 노드 순서다. */
   ids: string[];
+  /** 안쪽 자식 가운데 함수와 클래스의 수 */
+  definitions: number;
+  /** 안쪽 자식 가운데 변수의 수 */
+  variables: number;
   /** 전부 펼침 단계여서 안쪽 자식을 그렸는지 */
   open: boolean;
   /** 안쪽 자식과 그 안에 든 미사용 후보 수 */
@@ -71,7 +75,7 @@ export function unresolvedWithin(graph: Graph, off: Set<string>): Map<string, nu
 }
 
 /**
- * 접힌 상자의 배지에 적는 수. 파일 상자는 바로 아래에 든 함수·클래스 수이고 폴더는 안에 든 파일 수다. off에 든 노드는 세지 않는다.
+ * 접힌 상자의 배지에 적는 수. 파일 상자는 바로 아래에 든 함수·클래스·변수 수이고 폴더는 안에 든 파일 수다. off에 든 노드는 세지 않는다.
  */
 export function insideCounts(graph: Graph, off: Set<string>): Map<string, number> {
   const nodes = nodeIndex(graph);
@@ -94,11 +98,14 @@ export function insideCounts(graph: Graph, off: Set<string>): Map<string, number
   return result;
 }
 
-/** 토글로 숨긴 노드. 테스트 코드와 외부 노드는 토글이 켜졌을 때만 보인다. */
+/**
+ * 토글로 숨긴 노드. 테스트 코드와 외부 노드는 토글이 켜졌을 때만 보인다. 값을 만든 호출의 대상이 외부 노드인 변수(`external_value`)는
+ * 외부 노드 토글을 따른다.
+ */
 export function hidden(graph: Graph, opts: { showTests: boolean; showExternal: boolean }): Set<string> {
   return new Set(
     graph.nodes
-      .filter((n) => (n.kind === "external" ? !opts.showExternal : n.test && !opts.showTests))
+      .filter((n) => ((n.kind === "external" || n.external_value) && !opts.showExternal) || (n.test && !opts.showTests))
       .map((n) => n.id),
   );
 }
@@ -268,7 +275,14 @@ export function shown(
       [drawn, inner] = [kids, []];
     }
     if (opened && inner.length > 0) {
-      result.packs.set(box.id, { ids: inner.map((kid) => kid.id), open: full, unused: inner.reduce((sum, kid) => sum + countIn(kid, candidates), 0) });
+      const variables = inner.filter((kid) => kid.kind === "variable").length;
+      result.packs.set(box.id, {
+        ids: inner.map((kid) => kid.id),
+        definitions: inner.length - variables,
+        variables,
+        open: full,
+        unused: inner.reduce((sum, kid) => sum + countIn(kid, candidates), 0),
+      });
     }
     for (const kid of full ? kids : drawn) {
       addDefinition(kid, opened);

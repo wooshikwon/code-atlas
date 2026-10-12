@@ -349,6 +349,7 @@ function leafSize(node: AtlasNode, measure: Measure, marks: Marks): Size {
   switch (node.kind) {
     case "function":
     case "method":
+    case "variable":
       return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true, marks), height: LEAF_HEIGHT };
     case "class":
       return { width: labelWidth(node, measure, true, false, marks) + 28, height: HEX_HEIGHT };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture } from "../graph/fixture";
+import { repoFixture, variableFixture } from "../graph/fixture";
 import { hidden, nodeIndex } from "../graph/visible";
 import { COUNTED_KINDS } from "../graph/names";
 import { contentsOf, followedOf, groupOf, groupText, labelOf, linksOf, linksText, pathOf, relationText, restText, sizeText } from "./links";
@@ -67,6 +67,28 @@ describe("linksOf", () => {
   });
 });
 
+describe("linksOf: 변수 노드", () => {
+  const variables = nodeIndex(variableFixture);
+  const none = hidden(variableFixture, { showTests: false, showExternal: false });
+
+  it("변수는 들어오는 읽음을 세는 관계로 세고 값에서 나가는 생성을 나가는 연결로 센다", () => {
+    const { out, into } = linksOf(variableFixture, variables, none, "conf:PRESETS");
+    expect(linksText(into.counted.kinds)).toBe("읽음 2곳");
+    expect(into.counted.groups.map((group) => group.name)).toEqual(["app.py::run()"]);
+    expect(linksText(out.counted.kinds)).toBe("생성 2곳");
+    expect(into.rest.total + out.rest.total).toBe(0);
+  });
+
+  it("함수는 읽고 바꾸는 변수를 나가는 연결의 합계에 세고 묶음의 이름을 괄호 없이 적는다", () => {
+    const { out } = linksOf(variableFixture, variables, none, "conf:clamp");
+    expect(linksText(out.counted.kinds)).toBe("4곳 (호출 1곳, 읽음 3곳)");
+    expect(out.counted.groups.map((group) => group.name)).toEqual(["LIMIT", "DEFAULT", "_cache", "remember()"]);
+    expect(linksText(linksOf(variableFixture, variables, none, "conf:remember").out.counted.kinds)).toBe("바꿈 1곳");
+    const shownExternal = hidden(variableFixture, { showTests: false, showExternal: true });
+    expect(linksText(linksOf(variableFixture, variables, shownExternal, "conf:clamp").out.counted.kinds)).toBe("5곳 (호출 1곳, 읽음 4곳)");
+  });
+});
+
 describe("followedOf", () => {
   it("집계 선 키가 가리키는 선을 모아 출발 노드와 도착 노드, 종류마다의 수를 낸다", () => {
     const found = followedOf(repoFixture, nodes, off, ["agg|main|pkg"], null)!;
@@ -88,6 +110,14 @@ describe("followedOf", () => {
 });
 
 describe("contentsOf", () => {
+  it("파일은 변수도 세고 토글로 숨긴 외부 값 변수는 세지 않는다", () => {
+    const variables = nodeIndex(variableFixture);
+    const text = (showExternal: boolean) =>
+      contentsOf(variableFixture, variables, hidden(variableFixture, { showTests: false, showExternal }), variables.get("conf")!).map(({ name, count }) => `${name} ${count}`);
+    expect(text(false)).toEqual(["함수 2", "클래스 1", "변수 4"]);
+    expect(text(true)).toEqual(["함수 2", "클래스 1", "변수 5"]);
+  });
+
   it("파일은 함수와 클래스, 클래스는 메서드, 폴더는 파일을 세고 없는 것은 뺀다", () => {
     const text = (id: string) => contentsOf(repoFixture, nodes, off, nodes.get(id)!).map(({ name, count }) => `${name} ${count}`);
     expect(text("pkg.mod")).toEqual(["함수 1", "클래스 2"]);
@@ -129,6 +159,13 @@ describe("글", () => {
     expect(sizeText(nodes.get("main:run")!)).toBe("9줄 (5~15)");
     expect(sizeText(nodes.get("main")!)).toBe("40줄");
     expect(sizeText(nodes.get("ext:json")!)).toBeNull();
+  });
+
+  it("변수는 값의 종류와 원소 수를 줄 수 앞에 적는다", () => {
+    const variables = nodeIndex(variableFixture);
+    expect(sizeText(variables.get("conf:PRESETS")!)).toBe("dict · 2개 · 6줄 (7~12)");
+    expect(sizeText(variables.get("conf:LIMIT")!)).toBe("int · 1줄 (14~14)");
+    expect(pathOf(variables, variables.get("conf:PRESETS")!)).toEqual({ path: "conf.py::", name: "PRESETS" });
   });
 
   it("이름 줄은 정의를 `파일 경로::이름`으로, 파일과 폴더를 앞쪽 경로와 이름으로 나눈다", () => {

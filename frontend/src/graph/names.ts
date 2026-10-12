@@ -9,6 +9,7 @@ export const KIND_NAMES: Record<AtlasNode["kind"], string> = {
   dataclass: "데이터 클래스",
   function: "함수",
   method: "메서드",
+  variable: "변수",
   external: "외부",
 };
 
@@ -27,6 +28,8 @@ export const EDGE_KIND_NAMES: Record<EdgeKind, string> = {
   construct: "생성",
   import: "import",
   pass: "전달",
+  read: "읽음",
+  write: "바꿈",
   decorate: "데코레이터",
   type: "타입",
   inherit: "상속",
@@ -36,7 +39,7 @@ export const EDGE_KIND_NAMES: Record<EdgeKind, string> = {
 /** 선 분류에 드는 선 종류. 범례가 분류 이름의 말풍선에 적는다. */
 export const GROUP_KINDS: Record<EdgeGroup, EdgeKind[]> = {
   run: ["call", "construct"],
-  use: ["import", "pass", "decorate", "type"],
+  use: ["import", "pass", "read", "write", "decorate", "type"],
   derive: ["inherit", "override"],
 };
 
@@ -46,11 +49,11 @@ export function relationOf(kind: EdgeKind, count: number): string {
 }
 
 /**
- * 수로 세는 관계의 종류. 실행할 때 그 코드가 실제로 도는 관계(호출, 생성, 전달, 데코레이터, 상속, 오버라이드)다.
+ * 수로 세는 관계의 종류. 실행할 때 그 코드가 실제로 도는 관계(호출, 생성, 전달, 읽음, 바꿈, 데코레이터, 상속, 오버라이드)다.
  * 선의 말풍선, 선 위의 수와 도착 노드 앞의 합계, 정보 패널의 연결 합계가 이 종류만 센다. 이름만 쓰는 관계(타입, import)는
  * 선으로 그리고 정보 패널의 `그 밖` 묶음과 코드 줄 목록에 남긴다.
  */
-export const COUNTED_KINDS: EdgeKind[] = ["call", "construct", "pass", "decorate", "inherit", "override"];
+export const COUNTED_KINDS: EdgeKind[] = ["call", "construct", "pass", "read", "write", "decorate", "inherit", "override"];
 
 /** 세는 관계가 없는 선에 수 대신 적는 글. 타입과 import가 함께 있으면 타입의 글을 쓴다. */
 const ALONE: [EdgeKind, string][] = [
@@ -82,7 +85,15 @@ export function relationsOf(kinds: Kinds): string {
   return ALONE.find(([kind]) => kinds[kind] !== undefined)?.[1] ?? "";
 }
 
-/** 노드를 그 노드 하나로 가리킬 때 적는 이름. 파일은 파일 이름, 폴더는 `이름/`, 메서드는 `클래스.메서드()`다. */
+/** 변수 노드의 값의 종류와 원소 수: `dict · 9개`, `str`. 변수 노드가 아니면 빈 글이다. */
+export function valueAside(node: AtlasNode): string {
+  if (node.value === null) {
+    return "";
+  }
+  return node.value.size === null ? node.value.kind : `${node.value.kind} · ${node.value.size}개`;
+}
+
+/** 노드를 그 노드 하나로 가리킬 때 적는 이름. 파일은 파일 이름, 폴더는 `이름/`, 메서드는 `클래스.메서드()`, 변수는 괄호 없는 이름이다. */
 export function nameOf(nodes: Map<string, AtlasNode>, node: AtlasNode): string {
   switch (node.kind) {
     case "module":

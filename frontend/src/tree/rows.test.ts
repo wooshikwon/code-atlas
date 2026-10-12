@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasNode, Changes, Graph, Tree } from "../api/types";
+import { hidden } from "../graph/visible";
 import { build, find } from "../search/index";
 import { parentOf, results, rows, type TreeState } from "./rows";
 
@@ -65,6 +66,7 @@ const state = (change: Partial<TreeState> = {}): TreeState => ({
   selected: null,
   opened: null,
   showTests: false,
+  showExternal: false,
   changes: null,
   ...change,
 });
@@ -287,7 +289,7 @@ describe("변경 표시", () => {
 });
 
 describe("results", () => {
-  const entries = build(graph, false);
+  const entries = build(graph, hidden(graph, { showTests: false, showExternal: false }));
 
   it("질의가 있으면 결과 행이 find의 순서를 따른다", () => {
     const list = results(entries, "pl", null, null);
@@ -309,5 +311,36 @@ describe("results", () => {
     const list = results(entries, "sync", null, changes);
     expect(list.map((result) => [result.hit.entry.id, result.change])).toEqual([["arbiter:Arbiter.sync", "modified"]]);
     expect(results(entries, "parse_plan", null, changes)[0].change).toBeNull();
+  });
+});
+
+describe("변수 행", () => {
+  const variable = (id: string, start: number, external = false): AtlasNode => ({ ...node(id, "variable", "arbiter", "src/arbiter.py", start), external_value: external });
+  const withVariables: Graph = { nodes: [...graph.nodes, variable("arbiter:LIMIT", 1), variable("arbiter:TABLE", 40), variable("arbiter:logger", 5, true)], edges: [] };
+  const symbols = (change: Partial<TreeState> = {}) =>
+    rows(tree, withVariables, state({ selected: "arbiter", ...change }))
+      .filter((row) => row.kind === "symbol")
+      .map((row) => [row.label, row.icon]);
+
+  it("고른 파일의 목록에 변수를 다른 정의와 함께 소스 정의 순서로 넣고 이름에 괄호를 붙이지 않는다", () => {
+    expect(symbols()).toEqual([
+      ["LIMIT", "variable"],
+      ["State", "dataclass"],
+      ["Arbiter", "class"],
+      ["Arbiter.load()", "method"],
+      ["Arbiter.sync()", "method"],
+      ["TABLE", "variable"],
+      ["run()", "function"],
+    ]);
+  });
+
+  it("외부 값 변수는 외부 노드 토글을 켰을 때만 넣는다", () => {
+    expect(symbols().some(([label]) => label === "logger")).toBe(false);
+    expect(symbols({ showExternal: true }).map(([label]) => label)).toContain("logger");
+  });
+
+  it("변수를 고르면 그 변수가 든 파일의 목록을 펴고 변수 행을 고른 행으로 표시한다", () => {
+    const list = rows(tree, withVariables, state({ selected: "arbiter:TABLE" }));
+    expect(list.find((row) => row.key === "arbiter:TABLE")).toMatchObject({ selected: true, kind: "symbol", title: "TABLE" });
   });
 });

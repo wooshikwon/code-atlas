@@ -1,6 +1,6 @@
 // LLM 요약 칸과 코드 범위 설명 창에 그릴 설명을 나눈다. 요약은 요지와 표지가 붙은 구역으로, 구역의 글은 문단·목록·코드 블록으로,
 // 문단 안의 글은 백틱 식별자·정의 표기·굵은 글씨로 가른다.
-// 정의 표기는 레포 안의 함수·메서드·클래스를 `파일 경로::정의 이름`으로 적은 글자다(`arbiter.py::arbiter_sync`).
+// 정의 표기는 레포 안의 함수·메서드·클래스·변수를 `파일 경로::정의 이름`으로 적은 글자다(`arbiter.py::arbiter_sync`).
 import type { AtlasNode } from "../api/types";
 import { titleOf } from "../graph/layout";
 import { unitOf } from "../graph/visible";
@@ -146,7 +146,7 @@ export function spansOf(text: string): Span[] {
   return spans;
 }
 
-const DEFINITIONS = new Set<AtlasNode["kind"]>(["function", "method", "class", "dataclass"]);
+const DEFINITIONS = new Set<AtlasNode["kind"]>(["function", "method", "class", "dataclass", "variable"]);
 
 /**
  * 정의 표기 → 노드 id. 파일 경로는 그 정의가 든 파일 상자의 이름표(소스 루트 기준 경로)이고 정의 이름은 노드 id의 `:` 뒤다.

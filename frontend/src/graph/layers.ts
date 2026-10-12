@@ -32,6 +32,7 @@ const BODY_LAYER: Record<NodeKind, number> = {
   dataclass: LAYER.frame,
   function: LAYER.mark,
   method: LAYER.mark,
+  variable: LAYER.mark,
   external: LAYER.mark,
 };
 

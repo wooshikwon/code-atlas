@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { hidden } from "../graph/visible";
 import { useAtlas } from "../state/store";
 import { HitRow } from "./HitRow";
 import { build, find, recent, type Hit } from "./index";
@@ -8,12 +9,13 @@ const optionId = (index: number) => `palette-option-${index}`;
 function PaletteBox() {
   const graph = useAtlas((s) => s.graph);
   const showTests = useAtlas((s) => s.showTests);
+  const showExternal = useAtlas((s) => s.showExternal);
   const history = useAtlas((s) => s.history);
   const show = useAtlas((s) => s.show);
   const setPalette = useAtlas((s) => s.setPalette);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const entries = useMemo(() => (graph === null ? [] : build(graph, showTests)), [graph, showTests]);
+  const entries = useMemo(() => (graph === null ? [] : build(graph, hidden(graph, { showTests, showExternal }))), [graph, showTests, showExternal]);
   const hits = useMemo(() => find(entries, query, 50, recent(history)), [entries, query, history]);
 
   // 팔레트를 닫으면 열기 전에 포커스가 있던 요소로 돌아간다. 입력이 포커스를 받기 전인 첫 렌더에서 그 요소를 읽어 둔다.

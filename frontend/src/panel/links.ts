@@ -1,6 +1,6 @@
 // 정보 패널의 "정보" 구역에 적는 값. 노드의 크기와 안에 든 정의 수, 나가는 연결과 들어오는 연결, 선을 눌러 온 상태의 지나온 선을 계산한다.
 import type { AtlasEdge, AtlasNode, EdgeKind, Graph, SiteRef } from "../api/types";
-import { COUNTED_KINDS, countedOf, kindsOf, nameOf, relationOf, relationsOf } from "../graph/names";
+import { COUNTED_KINDS, countedOf, kindsOf, nameOf, relationOf, relationsOf, valueAside } from "../graph/names";
 import { definedName } from "../graph/rows";
 import { along, endsOf, type EdgeKey } from "../graph/scope";
 import { unitOf, within } from "../graph/visible";
@@ -121,13 +121,13 @@ export function followedOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set
   return { sources, target: ends[0].target, links: linked(nodes, edges, source, base) };
 }
 
-/** 안에 든 정의의 수. 파일 상자는 함수와 클래스, 클래스는 메서드, 폴더 상자는 파일을 센다. 그 밖의 노드와 안에 든 것이 없는 노드는 빈 배열이다. */
+/** 안에 든 정의의 수. 파일 상자는 함수와 클래스와 변수, 클래스는 메서드, 폴더 상자는 파일을 센다. 그 밖의 노드와 안에 든 것이 없는 노드는 빈 배열이다. */
 export function contentsOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<string>, node: AtlasNode): { name: string; count: number }[] {
   const inside = graph.nodes.filter((n) => n.id !== node.id && !off.has(n.id) && within(nodes, n.id, node.id));
   const counted = (name: string, kinds: (kind: AtlasNode["kind"]) => boolean) => ({ name, count: inside.filter((n) => kinds(n.kind)).length });
   let counts: { name: string; count: number }[] = [];
   if (node.kind === "module") {
-    counts = [counted("함수", (kind) => kind === "function"), counted("클래스", (kind) => CLASSES.has(kind))];
+    counts = [counted("함수", (kind) => kind === "function"), counted("클래스", (kind) => CLASSES.has(kind)), counted("변수", (kind) => kind === "variable")];
   } else if (CLASSES.has(node.kind)) {
     counts = [counted("메서드", (kind) => kind === "method")];
   } else if (node.kind === "package") {
@@ -168,16 +168,20 @@ export function relationText(kinds: Links["kinds"]): string {
   return countedOf(kinds) > 0 && rest !== null ? `${relationsOf(kinds)} · ${rest}` : relationsOf(kinds);
 }
 
-/** 노드의 줄 수와 정의의 줄 범위를 `42줄 (120~161)`로 적는다. 파일 상자와 폴더 상자는 줄 수만 적고, 외부 노드는 null이다. */
+/**
+ * 노드의 줄 수와 정의의 줄 범위를 `42줄 (120~161)`로 적는다. 파일 상자와 폴더 상자는 줄 수만 적고, 변수는 값의 종류와 원소 수를
+ * 앞에 적으며(`set · 15개 · 17줄 (21~37)`), 외부 노드는 null이다.
+ */
 export function sizeText(node: AtlasNode): string | null {
   if (node.kind === "external") {
     return null;
   }
-  return BOXES.has(node.kind) || node.range === null ? `${node.loc}줄` : `${node.loc}줄 (${node.range[0]}~${node.range[1]})`;
+  const lines = BOXES.has(node.kind) || node.range === null ? `${node.loc}줄` : `${node.loc}줄 (${node.range[0]}~${node.range[1]})`;
+  return node.kind === "variable" ? `${valueAside(node)} · ${lines}` : lines;
 }
 
 /**
- * 이름 줄에 적는 노드의 경로. path는 옅게 적는 앞쪽 경로이고 name은 끝까지 보이는 이름이다. 함수·메서드·클래스는 `파일 경로::`와 이름,
+ * 이름 줄에 적는 노드의 경로. path는 옅게 적는 앞쪽 경로이고 name은 끝까지 보이는 이름이다. 함수·메서드·클래스·변수는 `파일 경로::`와 이름,
  * 파일은 폴더 경로와 파일 이름, 폴더는 부모 폴더 경로와 `폴더 이름/`이다. 파일 경로가 없는 노드는 이름만 적는다.
  */
 export function pathOf(nodes: Map<string, AtlasNode>, node: AtlasNode): { path: string; name: string } {

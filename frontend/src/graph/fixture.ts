@@ -4,6 +4,7 @@
 // 함수 진입점 index에서 시작해 파일 경계를 넘는 세 단계 호출 사슬 index → render → wrap → pad,
 // 폴더 pkg 안의 테스트 코드 pkg.conftest, 폴더 app의 `__init__.py` 파일 app.__init__과 거기에 정의한 함수 app:version을 더한다.
 // routeFixture는 경로와 순환 묶음의 시험에 쓴다. 폴더 flow에 경로를, 폴더 ring·north·south·lazy에 import 순환을 담는다.
+// variableFixture는 모듈 변수 노드와 읽음·바꿈 선의 시험에 쓴다.
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 
 export function node(id: string, kind: AtlasNode["kind"], parent: string | null, extra: Partial<AtlasNode> = {}): AtlasNode {
@@ -25,6 +26,8 @@ export function node(id: string, kind: AtlasNode["kind"], parent: string | null,
     fields: null,
     method_kind: null,
     origin: null,
+    value: null,
+    external_value: false,
     ...extra,
   };
 }
@@ -171,5 +174,57 @@ export const routeFixture: Graph = {
     edge("lazy.two", "lazy.one", "import", { deferred: true }),
     edge("ring.a", "lazy.two", "import"),
     edge("lazy.one", "ring.b", "import"),
+  ],
+};
+
+/**
+ * 파일 conf의 변수 다섯 개와 그 변수를 읽고 바꾸는 함수, 파일 app, 테스트 코드 tests.test_conf를 담는다.
+ * - PRESETS: 다른 파일의 함수 app:run이 두 곳에서 읽고, 값이 같은 파일의 데이터 클래스 Preset을 두 곳에서 생성한다.
+ * - LIMIT, DEFAULT, _cache: 파일 안에서만 쓴다. DEFAULT의 값이 LIMIT을 읽고, remember가 _cache를 바꾼다.
+ * - logger: 값을 만든 호출의 대상이 외부 노드인 변수다.
+ * - app:STARTERS: 값이 다른 파일의 Preset을 생성한다.
+ * - tests.test_conf:SAMPLE: 테스트 코드의 변수다.
+ */
+export const variableFixture: Graph = {
+  nodes: [
+    node("conf", "module", null, { path: "conf.py", loc: 30 }),
+    node("conf:Preset", "dataclass", "conf", { path: "conf.py", range: [1, 5], fields: [{ name: "name", type: "str" }] }),
+    node("conf:clamp", "function", "conf", { path: "conf.py", range: [19, 25] }),
+    node("conf:remember", "function", "conf", { path: "conf.py", range: [27, 32] }),
+    node("app", "module", null, { path: "app.py", loc: 12, entry: true }),
+    node("app:run", "function", "app", { path: "app.py", range: [3, 9] }),
+    node("tests.test_conf", "module", null, { path: "tests/test_conf.py", test: true }),
+    node("tests.test_conf:test_clamp", "function", "tests.test_conf", { path: "tests/test_conf.py", test: true, range: [3, 6] }),
+    node("conf:PRESETS", "variable", "conf", { path: "conf.py", range: [7, 12], loc: 6, value: { kind: "dict", size: 2, text: '{"fast": Preset("fast"), "slow": Preset("slow")}' } }),
+    node("conf:LIMIT", "variable", "conf", { path: "conf.py", range: [14, 14], loc: 1, value: { kind: "int", size: null, text: "3" } }),
+    node("conf:DEFAULT", "variable", "conf", { path: "conf.py", range: [15, 15], loc: 1, value: { kind: "식", size: null, text: "LIMIT - 1" } }),
+    node("conf:_cache", "variable", "conf", { path: "conf.py", range: [16, 16], loc: 1, value: { kind: "dict", size: 0, text: "{}" } }),
+    node("conf:logger", "variable", "conf", {
+      path: "conf.py",
+      range: [17, 17],
+      loc: 1,
+      value: { kind: "logging.getLogger(…)", size: null, text: "logging.getLogger(__name__)" },
+      external_value: true,
+    }),
+    node("app:STARTERS", "variable", "app", { path: "app.py", range: [1, 1], loc: 1, value: { kind: "list", size: 1, text: '[Preset("first")]' } }),
+    node("tests.test_conf:SAMPLE", "variable", "tests.test_conf", { path: "tests/test_conf.py", test: true, range: [1, 1], loc: 1, value: { kind: "tuple", size: 0, text: "" } }),
+  ],
+  edges: [
+    edge("app", "conf", "import"),
+    edge("app:run", "conf:PRESETS", "read", { sites: [4, 6].map((line) => ({ path: "app.py", line, col: 4 })) }),
+    edge("app:run", "conf:clamp", "call"),
+    edge("app:run", "app:STARTERS", "read"),
+    edge("app:STARTERS", "conf:Preset", "construct"),
+    edge("conf:PRESETS", "conf:Preset", "construct", { sites: [8, 10].map((line) => ({ path: "conf.py", line, col: 12 })) }),
+    edge("conf:clamp", "conf:LIMIT", "read"),
+    edge("conf:clamp", "conf:DEFAULT", "read"),
+    edge("conf:clamp", "conf:_cache", "read"),
+    edge("conf:clamp", "conf:logger", "read"),
+    edge("conf:clamp", "conf:remember", "call"),
+    edge("conf:DEFAULT", "conf:LIMIT", "read"),
+    edge("conf:remember", "conf:_cache", "write"),
+    edge("tests.test_conf", "conf", "import"),
+    edge("tests.test_conf:test_clamp", "tests.test_conf:SAMPLE", "read"),
+    edge("tests.test_conf:test_clamp", "conf:clamp", "call"),
   ],
 };

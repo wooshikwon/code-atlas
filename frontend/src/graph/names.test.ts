@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { countedOf, relationsOf } from "./names";
+import { variableFixture } from "./fixture";
+import { countedOf, EDGE_KIND_NAMES, GROUP_KINDS, KIND_NAMES, kindsOf, nameOf, relationOf, relationsOf, valueAside } from "./names";
+import { nodeIndex } from "./visible";
 
 describe("relationsOf", () => {
   it("세는 관계(실행할 때 도는 관계)가 있으면 그 종류만 수와 함께 종류 이름의 순서로 적는다", () => {
@@ -20,5 +22,40 @@ describe("countedOf", () => {
   it("세는 관계의 수만 더한다", () => {
     expect(countedOf({ call: 5, construct: 2, inherit: 1, import: 7, type: 1, pass: 2, decorate: 1, override: 1 })).toBe(12);
     expect(countedOf({ import: 7 })).toBe(0);
+  });
+
+  it("읽음과 바꿈은 세는 관계다", () => {
+    expect(countedOf({ read: 3, write: 1, type: 2 })).toBe(4);
+    expect(kindsOf({ read: 3, write: 1, type: 2, import: 1 }, false)).toEqual(["import", "type"]);
+  });
+});
+
+describe("읽음과 바꿈", () => {
+  it("종류의 순서는 전달 다음이고 사용 분류에 든다", () => {
+    expect(Object.keys(EDGE_KIND_NAMES)).toEqual(["call", "construct", "import", "pass", "read", "write", "decorate", "type", "inherit", "override"]);
+    expect(GROUP_KINDS.use).toEqual(["import", "pass", "read", "write", "decorate", "type"]);
+    expect(relationsOf({ write: 1, decorate: 1, read: 3, pass: 2, call: 1 })).toBe("호출 1곳 · 전달 2곳 · 읽음 3곳 · 바꿈 1곳 · 데코레이터 1곳");
+  });
+
+  it("코드의 지점을 `곳`으로 센다", () => {
+    expect(relationOf("read", 3)).toBe("읽음 3곳");
+    expect(relationOf("write", 1)).toBe("바꿈 1곳");
+  });
+});
+
+describe("변수 노드의 이름", () => {
+  const nodes = nodeIndex(variableFixture);
+
+  it("종류 이름은 변수이고 이름에 괄호를 붙이지 않는다", () => {
+    expect(KIND_NAMES.variable).toBe("변수");
+    expect(nameOf(nodes, nodes.get("conf:PRESETS")!)).toBe("PRESETS");
+  });
+
+  it("값의 종류를 적고 원소 수가 있으면 함께 적는다. 변수 노드가 아니면 빈 글이다", () => {
+    expect(valueAside(nodes.get("conf:PRESETS")!)).toBe("dict · 2개");
+    expect(valueAside(nodes.get("conf:_cache")!)).toBe("dict · 0개");
+    expect(valueAside(nodes.get("conf:LIMIT")!)).toBe("int");
+    expect(valueAside(nodes.get("conf:logger")!)).toBe("logging.getLogger(…)");
+    expect(valueAside(nodes.get("conf:clamp")!)).toBe("");
   });
 });

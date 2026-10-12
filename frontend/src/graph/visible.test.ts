@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { node as made, repoFixture, routeFixture } from "./fixture";
+import { node as made, repoFixture, routeFixture, variableFixture } from "./fixture";
 import { flow } from "./flow";
 import { lit, route } from "./route";
 import { drawnOut, hidden, insideCounts, inward, lift, nodeIndex, outward, packedIn, shown, unresolvedWithin } from "./visible";
@@ -190,14 +190,14 @@ describe("shown: 세 단계 펼침", () => {
   it("펼침 단계의 파일 상자는 밖과 이어진 자식만 그리고 나머지를 손잡이에 담는다", () => {
     const result = at("pkg.mod");
     expect(inside(result, "pkg.mod")).toEqual(["pkg.mod:Store", "pkg.mod:Store.load", "pkg.mod:Store.save"]);
-    expect(result.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], open: false, unused: 0 });
+    expect(result.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], definitions: 2, variables: 0, open: false, unused: 0 });
     expect(lift(nodes, result, "pkg.mod:parse")).toBe("pkg.mod");
   });
 
   it("전부 펼침 단계는 나머지 자식도 그리고 손잡이는 같은 자식을 열린 채로 담는다", () => {
     const result = at("pkg.mod", { unpacked: new Set(["pkg.mod"]) });
     expect(inside(result, "pkg.mod")).toEqual(["pkg.mod:Row", "pkg.mod:Store", "pkg.mod:Store.load", "pkg.mod:Store.save", "pkg.mod:parse"]);
-    expect(result.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], open: true, unused: 0 });
+    expect(result.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], definitions: 2, variables: 0, open: true, unused: 0 });
   });
 
   it("고른 노드가 그 파일에 없으면 unpacked에 있어도 접힘이고 손잡이가 없다", () => {
@@ -248,7 +248,7 @@ describe("shown: 세 단계 펼침", () => {
   it("분석 표시가 표시하는 노드는 펼침 단계에서 그리고, 미사용 후보 수는 손잡이에 든 자식에서 센다", () => {
     const candidates = new Set(["pkg.mod:parse", "pkg.mod:Row"]);
     const off = at("pkg.mod", { candidates });
-    expect(off.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], open: false, unused: 2 });
+    expect(off.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], definitions: 2, variables: 0, open: false, unused: 2 });
     const on = at("pkg.mod", { candidates, marked: candidates });
     expect(inside(on, "pkg.mod")).toContain("pkg.mod:parse");
     expect(on.packs.has("pkg.mod")).toBe(false);
@@ -316,5 +316,77 @@ describe("shown: 강조하는 경로", () => {
     const picked = flow(routeFixture, "flow.build:Base.run", 2, hiddenNodes);
     const result = shown(routeFixture, { ...toggles, collapsed: new Set(), flow: picked, lit: walk });
     expect(result).toEqual(shown(routeFixture, { ...toggles, collapsed: new Set(), flow: null, lit: walk }));
+  });
+});
+
+describe("변수 노드", () => {
+  const variables = nodeIndex(variableFixture);
+  const [none, external, tests] = [
+    hidden(variableFixture, { showTests: false, showExternal: false }),
+    hidden(variableFixture, { showTests: false, showExternal: true }),
+    hidden(variableFixture, { showTests: true, showExternal: false }),
+  ];
+  const at = (selection: string, opts: { showTests: boolean; showExternal: boolean }, unpacked: string[] = []) =>
+    shown(variableFixture, { ...opts, collapsed: new Set(), flow: flow(variableFixture, selection, 1, hidden(variableFixture, opts)), lit: null, unpacked: new Set(unpacked) });
+
+  it("외부 값 변수는 외부 노드 토글이 꺼지면 숨기고, 테스트 코드의 변수는 테스트 코드 토글을 따른다", () => {
+    expect([...none].sort()).toEqual(["conf:logger", "tests.test_conf", "tests.test_conf:SAMPLE", "tests.test_conf:test_clamp"]);
+    expect(external.has("conf:logger")).toBe(false);
+    expect(tests.has("conf:logger")).toBe(true);
+    expect(tests.has("tests.test_conf:SAMPLE")).toBe(false);
+  });
+
+  it("다른 파일이 읽는 변수와 값이 다른 파일의 정의로 선을 보내는 변수는 밖과 이어진 자식이다", () => {
+    const linked = outward(variableFixture, none);
+    expect([...linked.get("conf")!].sort()).toEqual(["conf:PRESETS", "conf:Preset", "conf:clamp"]);
+    expect([...linked.get("app")!].sort()).toEqual(["app:STARTERS", "app:run"]);
+  });
+
+  it("파일 안에서만 쓰는 변수는 안쪽 자식이고 토글로 숨긴 외부 값 변수는 들지 않는다", () => {
+    expect([...inward(variableFixture, none).get("conf")!].sort()).toEqual(["conf:DEFAULT", "conf:LIMIT", "conf:_cache", "conf:remember"]);
+    expect(inward(variableFixture, external).get("conf")!.has("conf:logger")).toBe(true);
+    expect(inward(variableFixture, none).has("app")).toBe(false);
+    expect(packedIn(variableFixture, none, "conf:LIMIT")).toBe("conf");
+    expect(packedIn(variableFixture, none, "conf:PRESETS")).toBeNull();
+    expect(packedIn(variableFixture, none, "conf:logger")).toBeNull();
+    expect(packedIn(variableFixture, external, "conf:logger")).toBe("conf");
+  });
+
+  it("접힌 파일 상자의 배지는 변수까지 세고 숨긴 변수는 세지 않는다", () => {
+    expect(insideCounts(variableFixture, none).get("conf")).toBe(7);
+    expect(insideCounts(variableFixture, external).get("conf")).toBe(8);
+    expect(insideCounts(variableFixture, none).get("app")).toBe(2);
+    expect(insideCounts(variableFixture, none).has("tests.test_conf")).toBe(false);
+    expect(insideCounts(variableFixture, tests).get("tests.test_conf")).toBe(2);
+  });
+
+  it("손잡이는 안쪽 자식 가운데 함수·클래스의 수와 변수의 수를 따로 담고 숨긴 변수를 세지 않는다", () => {
+    const off = { showTests: false, showExternal: false };
+    const result = at("conf", off);
+    expect(result.packs.get("conf")).toEqual({
+      ids: ["conf:remember", "conf:LIMIT", "conf:DEFAULT", "conf:_cache"],
+      definitions: 1,
+      variables: 3,
+      open: false,
+      unused: 0,
+    });
+    expect(["conf:PRESETS", "conf:Preset", "conf:clamp"].every((id) => result.nodes.has(id))).toBe(true);
+    expect(result.nodes.has("conf:LIMIT")).toBe(false);
+    expect(lift(variables, result, "conf:LIMIT")).toBe("conf");
+    expect(lift(variables, result, "conf:logger")).toBeNull();
+    expect(at("conf", { showTests: false, showExternal: true }).packs.get("conf")).toMatchObject({ definitions: 1, variables: 4 });
+  });
+
+  it("전부 펼침 단계는 안쪽 자식인 변수를 그리고 숨긴 외부 값 변수는 그리지 않는다", () => {
+    const full = at("conf", { showTests: false, showExternal: false }, ["conf"]);
+    expect(["conf:LIMIT", "conf:DEFAULT", "conf:_cache", "conf:remember"].every((id) => full.nodes.has(id))).toBe(true);
+    expect(full.nodes.has("conf:logger")).toBe(false);
+    expect(at("conf", { showTests: false, showExternal: true }, ["conf"]).nodes.has("conf:logger")).toBe(true);
+  });
+
+  it("변수를 고르면 그 변수를 읽는 함수를 꺼내 그린다", () => {
+    const result = at("conf:PRESETS", { showTests: false, showExternal: false });
+    expect(result.nodes.has("app:run")).toBe(true);
+    expect(result.nodes.has("conf:Preset")).toBe(true);
   });
 });

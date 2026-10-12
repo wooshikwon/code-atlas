@@ -34,11 +34,21 @@ export interface Tree {
   entries: TreeEntry[];
 }
 
-export type NodeKind = "package" | "module" | "class" | "dataclass" | "function" | "method" | "external";
+export type NodeKind = "package" | "module" | "class" | "dataclass" | "function" | "method" | "variable" | "external";
 
 export interface Field {
   name: string;
   type: string | null;
+}
+
+/** 모듈 변수의 첫 대입문이 담은 값의 요약 */
+export interface Value {
+  /** 값의 종류: `str`, `dict`, `TaskPreset(…)`, `식` */
+  kind: string;
+  /** 컨테이너의 원소 수. 셀 수 없는 값은 null이다. */
+  size: number | null;
+  /** 값 식의 글. 80자에서 잘려 있다. */
+  text: string;
 }
 
 export interface AtlasNode {
@@ -59,11 +69,15 @@ export interface AtlasNode {
   fields: Field[] | null;
   method_kind: "property" | "static" | "class" | null;
   origin: "stdlib" | "thirdparty" | null;
+  /** 변수 노드만 담는다. 그 밖의 노드는 null이다. */
+  value: Value | null;
+  /** 값을 만든 호출의 대상이 외부 노드인 변수다 */
+  external_value: boolean;
 }
 
 export type EdgeGroup = "run" | "use" | "derive";
 
-export type EdgeKind = "call" | "construct" | "import" | "pass" | "decorate" | "type" | "inherit" | "override";
+export type EdgeKind = "call" | "construct" | "import" | "pass" | "read" | "write" | "decorate" | "type" | "inherit" | "override";
 
 /** line은 1부터, col은 0부터 세는 UTF-16 단위다. */
 export interface SiteRef {

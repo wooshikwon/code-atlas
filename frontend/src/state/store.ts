@@ -157,7 +157,7 @@ export interface AtlasStore {
   /** 경로 탐색 창을 펴거나 접는다. 고정 상태는 바꾸지 않는다. */
   toggleFinder(): void;
   /**
-   * 출발 칸이나 도착 칸을 채우거나 비운다. 그래프에 없는 id와 폴더는 받지 않는다. 두 칸이 차면 경로를 찾아 첫 경로를
+   * 출발 칸이나 도착 칸을 채우거나 비운다. 그래프에 없는 id와 폴더, 변수는 받지 않는다. 두 칸이 차면 경로를 찾아 첫 경로를
    * 강조하고 focus를 그 경로의 출발 노드에 둔다. 경로가 나왔는데 함수 시점 뷰면 구조 뷰로 돌아가는 단계를 이력에 넣는다.
    */
   setEnd(end: "from" | "to", id: string | null): void;
@@ -561,7 +561,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     toggleFinder: () => set((state) => ({ finder: { ...state.finder, open: !state.finder.open } })),
     setEnd: (end, id) => {
       const kind = id === null ? null : kindOf(id);
-      if (kind === undefined || kind === "package") {
+      if (kind === undefined || kind === "package" || kind === "variable") {
         return;
       }
       const { from, to } = get().finder;

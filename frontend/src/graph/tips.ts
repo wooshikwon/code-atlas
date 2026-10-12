@@ -2,6 +2,7 @@
 // 그래프에서는 그래프 뷰가 마우스 아래 배지와 표시에서 그 글을 찾아 노드의 말풍선 대신 띄운다. 줄은 `\n`으로 나눈다.
 // 선의 말풍선은 줄마다 세 칸으로 따로 그린다(`rows.ts`, `LineBubble.tsx`).
 import type { AtlasNode, Change } from "../api/types";
+import { valueAside } from "./names";
 
 export const ENTRY_TIP = "진입점: 실행을 시작하는 코드";
 
@@ -10,15 +11,14 @@ export const CHANGE_TIPS: Record<Change, string> = {
   added: "추가: 마지막 커밋에 없음",
 };
 
-/** 접힌 상자의 오른쪽 위 배지. 파일 상자는 안에 든 함수·클래스 수, 폴더 상자는 안에 든 파일 수다. */
+/** 접힌 상자의 오른쪽 위 배지. 파일 상자는 안에 든 함수·클래스·변수 수, 폴더 상자는 안에 든 파일 수다. */
 export function insideTip(node: AtlasNode, count: number): string {
-  return node.kind === "package" ? `안에 든 파일 ${count}개 · 펼치면 보인다` : `안에 든 함수·클래스 ${count}개 · 고르면 보인다`;
+  return node.kind === "package" ? `안에 든 파일 ${count}개 · 펼치면 보인다` : `안에 든 함수·클래스·변수 ${count}개 · 고르면 보인다`;
 }
 
-/** 모듈 변수 변경 배지 `g`. 바꾸는 모듈 변수 이름을 적는다. */
-export function globalTip(node: AtlasNode): string {
-  const names = node.writes.filter((name) => !name.includes("."));
-  return names.length === 0 ? "모듈 변수 변경: global 문으로 모듈 변수를 바꾼다" : `모듈 변수 변경: global 문으로 ${names.join(", ")}을 바꾼다`;
+/** 모듈 변수 변경 배지 `g`. names는 그 함수에서 나가는 바꿈 선의 도착 변수 이름이다. */
+export function globalTip(names: string[]): string {
+  return names.length === 0 ? "모듈 변수 변경: 모듈 변수를 바꾼다" : `모듈 변수 변경: ${names.join(", ")}을 바꾼다`;
 }
 
 /** LLM 요약을 만드는 중인 노드의 도는 원. 파일 상자는 안에 든 노드의 요청까지 세고, 요약이 없는 폴더는 안에 든 노드의 요청만 센다. */
@@ -27,6 +27,12 @@ export function busyTip(node: AtlasNode, count: number): string {
     return `LLM 요약을 만드는 중 · 안에 든 노드 남은 ${count}개`;
   }
   return `LLM 요약을 만드는 중 ${count}개${node.kind === "module" ? " · 이 상자와 안에 든 노드" : ""}`;
+}
+
+/** 변수 노드의 말풍선. 값의 종류와 원소 수 뒤에 값 식의 글을 적는다. 글이 없는 값은 종류와 원소 수만 적는다. */
+export function valueTip(node: AtlasNode): string {
+  const aside = valueAside(node);
+  return node.value === null || node.value.text === "" ? aside : `${aside} · ${node.value.text}`;
 }
 
 /** 이름표 옆 줄 수 숫자 */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
-import { repoFixture, routeFixture } from "./fixture";
+import { repoFixture, routeFixture, variableFixture } from "./fixture";
 import { DIM, flow } from "./flow";
 import { lit, route } from "./route";
 import { along, arriving, drawn, endsOf, followed, lifted, picked, trunkTarget, type DrawnEdge } from "./scope";
@@ -349,5 +349,24 @@ describe("along, followed", () => {
     expect(marked.map((e) => e.key)).toEqual(["agg|main|pkg.mod"]);
     expect(marked.every((e) => e.tone === "strong" && e.opacity === 1)).toBe(true);
     expect(opened.filter((e) => !e.via).every((e) => e.tone === "muted" && e.opacity === 0.5)).toBe(true);
+  });
+});
+
+describe("읽음·바꿈 선", () => {
+  const none = hidden(variableFixture, toggles);
+  const at = (selection: string | null) => {
+    const focus = selection === null ? null : flow(variableFixture, selection, 2, none);
+    const visible = shown(variableFixture, { ...toggles, collapsed: new Set(), flow: focus, lit: null });
+    return drawn(variableFixture, visible, focus, null, null);
+  };
+
+  it("접힌 파일 상자 사이의 집계 선은 읽은 곳을 무게에 더한다", () => {
+    const line = at(null).find((edge) => edge.source === "app" && edge.target === "conf")!;
+    expect(line).toMatchObject({ weight: 4, kinds: { import: 1, read: 2, call: 1, construct: 1 } });
+  });
+
+  it("함수에서 변수로 가는 선의 무게는 읽은 곳의 수다", () => {
+    const line = at("app:run").find((edge) => edge.source === "app:run" && edge.target === "conf:PRESETS")!;
+    expect(line).toMatchObject({ weight: 2, kinds: { read: 2 } });
   });
 });

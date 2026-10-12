@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture } from "./fixture";
-import { busyTip, cycleTip, globalTip, insideTip, locTip, nodeTip, packTip } from "./tips";
+import { repoFixture, variableFixture } from "./fixture";
+import { busyTip, cycleTip, globalTip, insideTip, locTip, nodeTip, packTip, valueTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
 const [file, folder, fn] = [nodes.get("main")!, nodes.get("pkg")!, nodes.get("main:run")!];
 
 describe("배지 말풍선", () => {
-  it("접힌 상자의 배지는 파일 상자면 안에 든 함수·클래스 수, 폴더 상자면 안에 든 파일 수를 적는다", () => {
-    expect(insideTip(file, 9)).toBe("안에 든 함수·클래스 9개 · 고르면 보인다");
+  it("접힌 상자의 배지는 파일 상자면 안에 든 함수·클래스·변수 수, 폴더 상자면 안에 든 파일 수를 적는다", () => {
+    expect(insideTip(file, 9)).toBe("안에 든 함수·클래스·변수 9개 · 고르면 보인다");
     expect(insideTip(folder, 30)).toBe("안에 든 파일 30개 · 펼치면 보인다");
   });
 
@@ -17,9 +17,17 @@ describe("배지 말풍선", () => {
     expect(packTip(["a()", "b()", "c()", "d()", "e()", "f()", "g()"])).toBe("이 파일 안에서만 쓰이는 내부 함수 7개 · a(), b(), c(), d(), e() 외 2개");
   });
 
-  it("모듈 변수 변경은 바꾸는 모듈 변수 이름을 적고 self 속성은 뺀다", () => {
-    expect(globalTip({ ...fn, writes: ["counter", "self.calls", "REGISTRY"] })).toBe("모듈 변수 변경: global 문으로 counter, REGISTRY을 바꾼다");
-    expect(globalTip({ ...fn, writes: [] })).toBe("모듈 변수 변경: global 문으로 모듈 변수를 바꾼다");
+  it("모듈 변수 변경은 바꿈 선의 도착 변수 이름을 적는다", () => {
+    expect(globalTip(["counter", "REGISTRY"])).toBe("모듈 변수 변경: counter, REGISTRY을 바꾼다");
+    expect(globalTip([])).toBe("모듈 변수 변경: 모듈 변수를 바꾼다");
+  });
+
+  it("변수 노드의 말풍선은 값의 종류와 원소 수, 값의 글을 적고 글이 없으면 종류와 원소 수만 적는다", () => {
+    const variables = nodeIndex(variableFixture);
+    expect(valueTip(variables.get("conf:PRESETS")!)).toBe('dict · 2개 · {"fast": Preset("fast"), "slow": Preset("slow")}');
+    expect(valueTip(variables.get("conf:LIMIT")!)).toBe("int · 3");
+    expect(valueTip(variables.get("tests.test_conf:SAMPLE")!)).toBe("tuple · 0개");
+    expect(valueTip(fn)).toBe("");
   });
 
   it("도는 원, 줄 수는 수를 함께 적는다", () => {

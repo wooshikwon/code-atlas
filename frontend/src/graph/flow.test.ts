@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture, routeFixture } from "./fixture";
+import { repoFixture, routeFixture, variableFixture } from "./fixture";
 import { DIM, flow, opacities, opacity } from "./flow";
 import { lit, route } from "./route";
 import { hidden } from "./visible";
@@ -115,5 +115,26 @@ describe("opacities", () => {
     for (const id of ["flow.build:Base", "flow.build:Base.run", "flow.walk", "flow.walk:begin", "flow.walk:left", "ring", "ring.a"]) {
       expect(result.get(id)).toBe(DIM);
     }
+  });
+});
+
+describe("변수 노드의 흐름", () => {
+  const none = hidden(variableFixture, { showTests: false, showExternal: false });
+
+  it("변수를 고르면 흐름의 단위가 노드이고 값 안의 생성 선을 나가는 방향으로, 읽는 함수를 들어오는 쪽으로 센다", () => {
+    const picked = flow(variableFixture, "conf:PRESETS", 2, none);
+    expect(picked.unit).toBe("node");
+    expect(picked.file).toBe("conf");
+    expect([...picked.out]).toEqual([["conf:Preset", 1]]);
+    expect([...picked.incoming]).toEqual(["app:run"]);
+  });
+
+  it("함수를 고르면 읽고 바꾸는 변수가 나가는 흐름에 들고 숨긴 외부 값 변수는 들지 않는다", () => {
+    const out = flow(variableFixture, "conf:clamp", 2, none).out;
+    expect(out.get("conf:LIMIT")).toBe(1);
+    expect(out.get("conf:_cache")).toBe(1);
+    expect(out.has("conf:logger")).toBe(false);
+    const shownExternal = hidden(variableFixture, { showTests: false, showExternal: true });
+    expect(flow(variableFixture, "conf:clamp", 2, shownExternal).out.get("conf:logger")).toBe(1);
   });
 });

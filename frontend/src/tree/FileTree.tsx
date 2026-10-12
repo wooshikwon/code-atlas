@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { hidden } from "../graph/visible";
 import { useNodeMenu } from "../nav/NodeMenu";
 import { useOpened } from "../panel/opened";
 import { useChanges } from "../state/changes";
@@ -20,6 +21,7 @@ export function FileTree() {
   const analysing = useStatus((s) => running(s.status) || s.status?.phase === "failed");
   const collapsed = useAtlas((s) => s.collapsed);
   const showTests = useAtlas((s) => s.showTests);
+  const showExternal = useAtlas((s) => s.showExternal);
   const structure = useAtlas((s) => s.view.kind === "structure");
   const select = useAtlas((s) => s.select);
   const show = useAtlas((s) => s.show);
@@ -29,8 +31,8 @@ export function FileTree() {
   const toggleOpened = useOpened((s) => s.toggle);
   const selected = useAtlas(chosenOf);
   const list = useMemo(
-    () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, opened, showTests, changes })),
-    [tree, graph, collapsed, selected, opened, showTests, changes],
+    () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, opened, showTests, showExternal, changes })),
+    [tree, graph, collapsed, selected, opened, showTests, showExternal, changes],
   );
   /** 지워진 파일은 노드가 없으므로 파일트리 아래에 경로만 적는다. */
   const deleted = useMemo(() => (changes?.files ?? []).filter((file) => file.status === "deleted"), [changes]);
@@ -44,7 +46,7 @@ export function FileTree() {
   /** 검색 칸의 질의. 비지 않으면 파일트리 대신 검색 결과 목록을 그린다. */
   const [query, setQuery] = useState("");
   const searching = query.trim() !== "";
-  const entries = useMemo(() => (graph === null ? [] : build(graph, showTests)), [graph, showTests]);
+  const entries = useMemo(() => (graph === null ? [] : build(graph, hidden(graph, { showTests, showExternal }))), [graph, showTests, showExternal]);
   const found = useMemo(() => results(entries, query, selected, changes), [entries, query, selected, changes]);
   /** 키보드로 옮기는 활성 결과 행의 번호 */
   const [mark, setMark] = useState(0);

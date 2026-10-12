@@ -1,8 +1,8 @@
 // 선의 말풍선에 적는 줄. 화면에 그린 선 하나를 고른 노드의 단계에 맞춰 출발·도착·관계의 줄로 푼다. 줄이 되는지는 양 끝의 단계로 정하고,
 // 세는 관계인지(`COUNTED_KINDS`)는 관계 칸에 수를 적을지만 정한다.
-// 단계는 파일과 함수 두 가지다. 고른 노드가 함수(클래스, 메서드)면 그 노드에 닿는 선을 실제 함수 사이의 관계로,
+// 단계는 파일과 함수 두 가지다. 고른 노드가 함수(클래스, 메서드, 변수)면 그 노드에 닿는 선을 실제 함수 사이의 관계로,
 // 파일이면 상대 끝을 파일로 풀고, 고른 노드가 없거나 고른 노드에 닿지 않는 선은 화면에 그린 양 끝을 그대로 적는다.
-// 줄의 끝이 클래스·함수·메서드면 기준 파일(`baseOf`)에서 갈라지는 곳부터의 경로를 이름 앞에 적는다(`definedName`).
+// 줄의 끝이 클래스·함수·메서드·변수면 기준 파일(`baseOf`)에서 갈라지는 곳부터의 경로를 이름 앞에 적는다(`definedName`).
 import type { AtlasEdge, AtlasNode, EdgeKind } from "../api/types";
 import { titleOf } from "./layout";
 import { nameOf, relationsOf, STEP_NAMES } from "./names";
@@ -29,7 +29,7 @@ export interface LineRow {
   list: EdgeKey | null;
 }
 
-const DEFINITIONS = new Set<AtlasNode["kind"]>(["function", "method", "class", "dataclass"]);
+const DEFINITIONS = new Set<AtlasNode["kind"]>(["function", "method", "class", "dataclass", "variable"]);
 const BOXES = new Set<AtlasNode["kind"] | undefined>(["module", "package"]);
 
 /**
@@ -130,9 +130,9 @@ function apartFrom(path: string, from: string): string {
 }
 
 /**
- * 클래스·함수·메서드 node를 기준 파일 base에서 갈라지는 곳부터 적은 이름. base 안의 정의는 이름만(`create_weekly()`),
+ * 클래스·함수·메서드·변수 node를 기준 파일 base에서 갈라지는 곳부터 적은 이름. base 안의 정의는 이름만(`create_weekly()`),
  * 같은 폴더의 다른 파일에 든 정의는 파일 이름부터(`note_batch.py::create_weekly()`), 다른 폴더의 정의는 두 경로가 갈라지는
- * 첫 폴더부터(`parser/weekly.py::parse_week()`) 적는다. 메서드의 이름은 `클래스.메서드()`다.
+ * 첫 폴더부터(`parser/weekly.py::parse_week()`) 적는다. 메서드의 이름은 `클래스.메서드()`, 변수의 이름은 괄호 없는 이름이다.
  */
 export function definedName(nodes: Map<string, AtlasNode>, base: string, node: AtlasNode): CellName {
   const name = nameOf(nodes, node);

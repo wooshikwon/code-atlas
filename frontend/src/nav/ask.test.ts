@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture as graph } from "../graph/fixture";
+import { repoFixture as graph, variableFixture } from "../graph/fixture";
 import { hidden } from "../graph/visible";
 import type { SummaryState } from "../state/summaries";
 import { asksOf } from "./ask";
@@ -81,6 +81,20 @@ describe("asksOf", () => {
     expect(asksOf(nested, empty, off, "pkg")[0].nodes).not.toContain("pkg.conftest");
     const shown = hidden(nested, { showTests: true, showExternal: false });
     expect(asksOf(nested, empty, shown, "pkg")[0]).toMatchObject({ label: "안에 든 파일 모두 요약 (4개)", nodes: ["pkg.mod", "pkg.util", "pkg.conftest", "pkg.sub.deep"] });
+  });
+
+  it("변수 노드는 항목이 없고 파일의 모두 요청하는 항목이 변수를 세지 않는다", () => {
+    const shown = hidden(variableFixture, { showTests: false, showExternal: true });
+    for (const id of ["conf:PRESETS", "conf:LIMIT", "conf:logger"]) {
+      expect(asksOf(variableFixture, empty, shown, id)).toEqual([]);
+    }
+    expect(asksOf(variableFixture, empty, shown, "conf")[1]).toEqual({
+      key: "all",
+      label: "이 파일과 안에 든 정의 모두 요약 (4개)",
+      disabled: false,
+      nodes: ["conf", "conf:Preset", "conf:clamp", "conf:remember"],
+      refresh: false,
+    });
   });
 
   it("외부 노드와 그래프에 없는 id는 항목이 없다", () => {

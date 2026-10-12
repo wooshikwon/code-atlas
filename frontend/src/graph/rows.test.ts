@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { node, repoFixture } from "./fixture";
+import { node, repoFixture, variableFixture } from "./fixture";
 import { flow } from "./flow";
 import { baseOf, definedName, rowsOf, stageOf, type RowLine } from "./rows";
 import { drawn } from "./scope";
@@ -163,5 +163,48 @@ describe("definedName", () => {
     expect(named("pkg", "main:run")).toMatchObject({ path: "main.py::", name: "run()" });
     expect(named("pkg", "pkg.mod:parse")).toMatchObject({ path: "pkg/mod.py::", name: "parse()" });
     expect(named("app", "pkg.mod:parse")).toMatchObject({ path: "pkg/mod.py::", name: "parse()" });
+  });
+});
+
+describe("변수 노드의 줄", () => {
+  const none = hidden(variableFixture, toggles);
+  const variables = nodeIndex(variableFixture);
+  /** 고른 노드 selection에서 그린 선 가운데 양 끝이 source와 target인 선 */
+  const line = (selection: string, source: string, target: string): RowLine => {
+    const focus = flow(variableFixture, selection, 2, none);
+    const visible = shown(variableFixture, { ...toggles, collapsed: new Set(), flow: focus, lit: null });
+    return drawn(variableFixture, visible, focus, null, null).find((edge) => edge.source === source && edge.target === target)!;
+  };
+
+  it("함수를 고르면 그 함수가 변수를 읽는 선은 함수 단계의 줄이고 관계 칸에 읽은 곳의 수를 적는다", () => {
+    const read = line("app:run", "app:run", "conf:PRESETS");
+    expect(stageOf(variables, "app:run", read)).toBe("function");
+    expect(rowsOf(variables, "app:run", read)).toMatchObject([{ source: "app:run", target: "conf:PRESETS", relation: "읽음 2곳", keys: ["app:run|conf:PRESETS|read"] }]);
+  });
+
+  it("변수를 고르면 들어오는 선과 값에서 나가는 선이 함수 단계의 줄이다", () => {
+    const read = line("conf:PRESETS", "app:run", "conf:PRESETS");
+    expect(stageOf(variables, "conf:PRESETS", read)).toBe("function");
+    expect(rowsOf(variables, "conf:PRESETS", read)).toMatchObject([{ source: "app:run", target: "conf:PRESETS", relation: "읽음 2곳" }]);
+    const made = line("conf:PRESETS", "conf:PRESETS", "conf:Preset");
+    expect(rowsOf(variables, "conf:PRESETS", made)).toMatchObject([{ source: "conf:PRESETS", target: "conf:Preset", relation: "생성 2곳" }]);
+  });
+
+  it("바꾸는 선의 관계 칸은 바꿈을 적는다", () => {
+    const full = shown(variableFixture, { ...toggles, collapsed: new Set(), flow: flow(variableFixture, "conf:remember", 2, none), lit: null, unpacked: new Set(["conf"]) });
+    const write = drawn(variableFixture, full, flow(variableFixture, "conf:remember", 2, none), null, null).find((edge) => edge.target === "conf:_cache" && edge.source === "conf:remember")!;
+    expect(rowsOf(variables, "conf:remember", write)).toMatchObject([{ source: "conf:remember", target: "conf:_cache", relation: "바꿈 1곳" }]);
+  });
+
+  it("파일을 고르면 변수에 닿는 선도 파일 단계의 줄에 들고 관계 칸이 읽은 곳을 함께 적는다", () => {
+    const into = line("conf", "app", "conf");
+    expect(stageOf(variables, "conf", into)).toBe("file");
+    expect(rowsOf(variables, "conf", into)).toMatchObject([{ source: "app", target: "conf", relation: "호출 1곳 · 생성 1곳 · 읽음 2곳" }]);
+  });
+
+  it("변수는 기준 파일에서 갈라지는 곳부터의 경로와 괄호 없는 이름으로 적는다", () => {
+    expect(definedName(variables, "app", variables.get("conf:PRESETS")!)).toEqual({ path: "conf.py::", name: "PRESETS", full: "conf.py::PRESETS" });
+    expect(definedName(variables, "conf", variables.get("conf:PRESETS")!)).toEqual({ path: "", name: "PRESETS", full: "conf.py::PRESETS" });
+    expect(baseOf(variables, "conf:PRESETS", { source: "app:run", target: "conf:PRESETS" }, "app:run")).toBe("conf");
   });
 });

@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useFlight } from "../graph/flight";
 import { PATH_LIMIT } from "../graph/route";
-import { nodeIndex } from "../graph/visible";
+import { hidden, nodeIndex } from "../graph/visible";
 import { build } from "../search/index";
 import { pinned, useAtlas } from "../state/store";
 import { EndField } from "./EndField";
@@ -20,6 +20,7 @@ const TOP_MARGIN = 12;
 export function Finder() {
   const graph = useAtlas((s) => s.graph);
   const showTests = useAtlas((s) => s.showTests);
+  const showExternal = useAtlas((s) => s.showExternal);
   const finder = useAtlas((s) => s.finder);
   const show = useAtlas((s) => s.show);
   const swapEnds = useAtlas((s) => s.swapEnds);
@@ -27,7 +28,11 @@ export function Finder() {
   const clearFinder = useAtlas((s) => s.clearFinder);
   const { fit } = useFlight();
   const nodes = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
-  const entries = useMemo(() => (graph === null ? [] : build(graph, showTests)), [graph, showTests]);
+  /** 출발 칸과 도착 칸의 검색 색인. 변수는 경로의 끝점이 아니므로 뺀다. */
+  const entries = useMemo(
+    () => (graph === null ? [] : build(graph, hidden(graph, { showTests, showExternal })).filter((entry) => entry.kind !== "variable")),
+    [graph, showTests, showExternal],
+  );
 
   /** 고정 중에 막힌 액션이 불리면 안내 줄을 FLASH_MS 동안 뒤집는다. */
   const [flash, setFlash] = useState(false);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture } from "../graph/fixture";
+import { repoFixture, variableFixture } from "../graph/fixture";
 import { nodeIndex } from "../graph/visible";
 import { blocksOf, partsOf, refsOf, spansOf } from "./parts";
 
@@ -77,6 +77,12 @@ describe("정의 표기", () => {
     expect(found.get("pkg/mod.py::nothing")).toBeUndefined();
     expect(found.get("src/cli.py::main")).toBeUndefined();
     expect([...found.values()].every((id) => id.includes(":"))).toBe(true);
+  });
+
+  it("refsOf는 `파일 경로::변수 이름`으로 변수 노드를 찾는다", () => {
+    const found = refsOf(nodeIndex(variableFixture));
+    expect(found.get("conf.py::PRESETS")).toBe("conf:PRESETS");
+    expect(found.get("conf.py::clamp")).toBe("conf:clamp");
   });
 });
 

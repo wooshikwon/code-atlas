@@ -263,7 +263,7 @@ export function Badges({ data, circle = false }: { data: AtlasNodeData; circle?:
         </span>
       )}
       {data.node.global_write && (
-        <span className="badge badge-global" style={style} data-tip={globalTip(data.node)}>
+        <span className="badge badge-global" style={style} data-tip={globalTip(data.node.writes.filter((name) => !name.includes(".")))}>
           g
         </span>
       )}
