@@ -110,14 +110,14 @@ export interface AtlasStore {
    * 경로 고정 중에는 selectEdge, toggleFolder, togglePack, setDepth, enterFunction, expandFunction, open, back, forward, jump,
    * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다(`barred`). select와 show, follow는
    * 강조한 경로 위의 노드를 받으면 finder.focus만 그 노드로 바꾸고, 그 밖의 노드를 받으면 같은 방식으로 막힌다.
-   * select(null)은 고정 중에 아무것도 하지 않는다.
+   * select(null)과 show(null)은 고정 중에 아무것도 하지 않는다.
    *
    * 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 폴더를 고르면 그 폴더를 접는다.
    * null을 넘기거나 고른 파일 상자·폴더·외부 노드를 다시 고르면 선택을 푼다. 고른 함수·클래스·메서드를 다시 고르면 아무것도 바꾸지 않는다.
    */
   select(id: string | null): void;
-  /** 구조 뷰로 돌아가 select처럼 노드를 고른다. 이미 고른 노드여도 선택을 풀지 않는다. */
-  show(id: string): void;
+  /** 구조 뷰로 돌아가 select처럼 노드를 고른다. 이미 고른 노드여도 선택을 풀지 않는다. null을 넘기면 구조 뷰로 돌아가 선택을 푼다. */
+  show(id: string | null): void;
   /** 선을 고른다. 초점은 직전에 초점을 둔 노드에 그대로 둔다. */
   selectEdge(key: EdgeKey): void;
   /** 폴더를 접거나 펼친다. 초점을 둔 노드가 든 폴더를 접거나 초점을 둔 폴더를 펼치면 선택을 푼다. */
@@ -137,6 +137,8 @@ export interface AtlasStore {
   enterFunction(id: string): void;
   /** 함수 시점 뷰에서 그 노드의 이웃을 한 단계 더 편다. */
   expandFunction(id: string): void;
+  /** 함수 시점 뷰에서 구조 뷰로 돌아가 고른 노드를 고른 채로 둔다. 고른 노드가 없으면 가운데 함수를 고른다. 구조 뷰에서는 아무것도 하지 않는다. */
+  leaveFunction(): void;
   /**
    * 더블클릭한 함수·메서드를 열어 함수 시점 뷰로 들어간다. 첫 클릭이 넣은 이력 단계를 버리도록 첫 클릭 전의 이력
    * from에서 이어 한 단계만 넣는다. 함수 시점 뷰의 가운데 함수면 from으로 되돌리기만 한다.
@@ -482,7 +484,9 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     show: (id) =>
       focused(id) ||
       guarded(() => {
-        if (kindOf(id) !== undefined) {
+        if (id === null) {
+          visit({ view: { kind: "structure" }, selection: null });
+        } else if (kindOf(id) !== undefined) {
           visit({ view: { kind: "structure" }, selection: { type: "node", id }, collapsed: revealed(id) });
         }
       })(),
@@ -523,6 +527,12 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         visit({ view: { ...view, expanded: [...view.expanded, id] } });
       }
     }),
+    leaveFunction: () => {
+      const { view, selection } = get();
+      if (view.kind === "function") {
+        get().show(focusOf(selection) ?? view.center);
+      }
+    },
     open: guarded((id, from) => {
       const kind = kindOf(id);
       const place = from.entries[from.index];

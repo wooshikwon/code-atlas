@@ -2115,6 +2115,166 @@ async function callview(t, page) {
     (await selectedOf(page)) === FUNCTION && (await count(page, ".node-call")) === 0,
     `선택 ${await selectedOf(page)}`,
   );
+
+  // 함수 시점 뷰에서 나가기. 상단 줄의 뷰 이름과 돌아가는 버튼, Esc, 탐색 경로의 레포 이름을 본다.
+  const HF5 = (name) => join(OUT, `hf5-callview-${name}.png`);
+  /** 지금 뷰(`function`, `structure`)와 고른 노드, 그 노드의 이름표 가운데 점이 그 노드에서 눌리는지 */
+  const placeOf = () =>
+    page.evaluate(() => {
+      const chosen = document.querySelector(".react-flow__node .node-selected")?.closest(".react-flow__node") ?? null;
+      const id = chosen?.dataset.id.replace(/#face$/, "") ?? null;
+      const drawn = [...document.querySelectorAll(".react-flow__node")].filter((each) => each.dataset.id.replace(/#face$/, "") === id);
+      const rect = drawn.map((each) => each.querySelector(".node-label")).find((label) => label !== null)?.getBoundingClientRect();
+      const hit = rect === undefined ? null : document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const seen = hit !== null && drawn.some((each) => each.contains(hit));
+      return { view: document.querySelector(".node-call") === null ? "structure" : "function", selected: id, seen };
+    });
+  const placeText = (at) => `${at.view === "function" ? "함수 시점 뷰" : "구조 뷰"}, 선택 ${at.selected}${at.selected === null ? "" : at.seen ? ", 화면 안" : ", 화면에서 눌리지 않음"}`;
+  const left = () => page.waitForFunction(() => document.querySelector(".node-call") === null && document.querySelector(".react-flow__node") !== null, null, { timeout: 30_000 }).then(() => settle(page));
+  const entered2 = () => page.waitForSelector(".node-call", { timeout: 30_000 }).then(() => settle(page));
+  /** 상단 줄의 뷰 이름과 돌아가는 버튼. 버튼은 가운데 점에서 눌리고 상단 줄 안에 있는지 본다. */
+  const barOf = () =>
+    page.evaluate(() => {
+      const shown = (element) => element !== null && element.getClientRects().length > 0;
+      const bar = document.querySelector(".toolbar").getBoundingClientRect();
+      const pressed = (element) => {
+        const rect = element?.getBoundingClientRect();
+        const hit = rect === undefined || rect.width === 0 ? null : document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return hit !== null && element.contains(hit) && rect.right <= bar.right;
+      };
+      const [view, leave, last] = [".trail-view", ".trail-leave", ".trail-last"].map((selector) => document.querySelector(selector));
+      return {
+        view: shown(view) ? view.textContent : null,
+        leave: leave === null ? null : [...leave.children].filter(shown).map((each) => each.textContent.trim()).join(""),
+        label: leave?.getAttribute("aria-label") ?? null,
+        leavePressed: pressed(leave),
+        lastPressed: pressed(last),
+        lastWidth: Math.round(last?.getBoundingClientRect().width ?? 0),
+      };
+    });
+
+  await clickNode(page, FUNCTION, 2);
+  await entered2();
+  await page.mouse.move(5, 5);
+  const bar = await barOf();
+  const leaveTip = await tipOver(page, ".trail-leave");
+  t.check(
+    "함수 시점 뷰의 상단 줄은 탐색 경로 뒤에 뷰 이름 `리니지 뷰`와 `그래프 뷰로` 버튼을 그리고 버튼의 말풍선에 Esc를 적는다",
+    bar.view === "리니지 뷰" && bar.leave === "그래프 뷰로" && bar.leavePressed && bar.lastPressed && leaveTip === "그래프 뷰로 돌아가기 · Esc" && (await nativeTips(page)).length === 0,
+    `뷰 이름 "${bar.view}", 버튼 "${bar.leave}", 말풍선 "${leaveTip}"`,
+  );
+  await page.screenshot({ path: HF5("bar") });
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await tipOver(page, ".trail-leave");
+  await page.screenshot({ path: HF5("bar-dark") });
+  await page.getByRole("button", { name: "밝은 화면" }).click();
+  await page.mouse.move(5, 5);
+
+  await page.keyboard.press("Escape");
+  await left();
+  const out = await placeOf();
+  t.check("함수 시점 뷰에서 Esc를 누르면 가운데 함수를 고른 구조 뷰로 돌아가고 그 함수가 화면 안에 있다", out.view === "structure" && out.selected === FUNCTION && out.seen && (await count(page, ".trail-view")) === 0, placeText(out));
+  await page.keyboard.press("Alt+ArrowLeft");
+  await entered2();
+  const again = { ...(await placeOf()), center: await centered() };
+  await page.keyboard.press("Alt+ArrowRight");
+  await left();
+  const forth = await placeOf();
+  t.check(
+    "Esc로 나온 뒤 Alt+←는 함수 시점 뷰로, Alt+→는 그 함수를 고른 구조 뷰로 옮긴다",
+    again.view === "function" && again.center === FUNCTION && forth.view === "structure" && forth.selected === FUNCTION,
+    `뒤로: ${placeText(again)}, 앞으로: ${placeText(forth)}`,
+  );
+  await page.keyboard.press("Escape");
+  await rest(page);
+  const cleared = await placeOf();
+  t.check("구조 뷰에서 Esc를 한 번 더 누르면 선택이 풀린다", cleared.view === "structure" && cleared.selected === null, placeText(cleared));
+
+  // 함수 시점 뷰에서 다른 함수를 고른 뒤 나간다.
+  await page.keyboard.press("Alt+ArrowLeft");
+  await waitSelected(page, FUNCTION);
+  await page.keyboard.press("Alt+ArrowLeft");
+  await entered2();
+  const other = await page.evaluate(() => {
+    const side = [...document.querySelectorAll(".node-call")].find((each) => each.dataset.side !== "center");
+    const rect = side.getBoundingClientRect();
+    return { id: side.closest(".react-flow__node").dataset.id, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await page.mouse.click(other.x, other.y);
+  await waitSelected(page, other.id);
+  await page.mouse.move(5, 5);
+  await page.keyboard.press("Escape");
+  await left();
+  const moved = await placeOf();
+  t.check("함수 시점 뷰에서 다른 함수를 고른 뒤 Esc를 누르면 그 함수를 고른 구조 뷰로 돌아가고 그 함수가 화면 안에 있다", moved.view === "structure" && moved.selected === other.id && moved.seen, `고른 함수 ${other.id}. ${placeText(moved)}`);
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await entered2();
+  await page.click(".trail-leave");
+  await left();
+  const pressed = await placeOf();
+  t.check("`그래프 뷰로` 버튼은 Esc와 같이 고른 함수를 고른 구조 뷰로 돌아간다", pressed.view === "structure" && pressed.selected === other.id && pressed.seen, placeText(pressed));
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await entered2();
+  await page.click(".trail-root >> nth=0");
+  await left();
+  const rooted = await placeOf();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await entered2();
+  const returned = { ...(await placeOf()), center: await centered() };
+  t.check(
+    "함수 시점 뷰에서 탐색 경로의 레포 이름을 누르면 선택을 푼 구조 뷰로 돌아가고 뒤로 가면 함수 시점 뷰로 돌아온다",
+    rooted.view === "structure" && rooted.selected === null && returned.view === "function" && returned.center === FUNCTION && returned.selected === other.id,
+    `레포 이름: ${placeText(rooted)}, 뒤로: ${placeText(returned)}`,
+  );
+
+  // 그래프의 빈 곳 클릭과 고정한 말풍선. 빈 곳은 아무것도 바꾸지 않고, Esc는 말풍선만 닫는다.
+  const steps = () => page.getByRole("button", { name: "앞으로" }).isDisabled();
+  const before = [await placeOf(), await steps()];
+  const pane = await page.evaluate(() => {
+    const graph = document.querySelector(".graph").getBoundingClientRect();
+    for (let y = graph.top + 60; y < graph.bottom - 60; y += 24) {
+      for (let x = graph.left + 20; x < graph.right - 20; x += 24) {
+        if (document.elementFromPoint(x, y)?.classList.contains("react-flow__pane") === true) {
+          return { x, y };
+        }
+      }
+    }
+    return null;
+  });
+  await page.mouse.click(pane.x, pane.y);
+  await page.waitForTimeout(400);
+  t.check("함수 시점 뷰의 빈 곳을 눌러도 뷰와 선택, 이력이 그대로다", same([await placeOf(), await steps()], before), placeText(await placeOf()));
+  const drawn = await hittable(page, await linesOf(page));
+  const pinnedBubble = await pinBubble(page, drawn.at);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  const kept = { ...(await placeOf()), bubble: await count(page, ".line-bubble[data-pinned]") };
+  await page.mouse.move(5, 5);
+  await page.keyboard.press("Escape");
+  await left();
+  const closed = await placeOf();
+  t.check(
+    "고정한 말풍선이 있으면 Esc는 말풍선만 닫고, 한 번 더 누르면 구조 뷰로 돌아간다",
+    pinnedBubble?.pinned === true && kept.bubble === 0 && kept.view === "function" && kept.selected === other.id && closed.view === "structure" && closed.selected === other.id,
+    `말풍선 고정 ${pinnedBubble?.pinned ?? false}. 첫 Esc: ${placeText(kept)}, 고정한 말풍선 ${kept.bubble}개. 둘째 Esc: ${placeText(closed)}`,
+  );
+
+  // 좁은 창. 뷰 이름을 그리지 않고 버튼은 ×만 그리며 마지막 단계와 버튼이 상단 줄 안에서 눌린다.
+  await page.keyboard.press("Alt+ArrowLeft");
+  await entered2();
+  await page.setViewportSize({ width: 720, height: 1000 });
+  await page.waitForTimeout(400);
+  const narrow = await barOf();
+  t.check(
+    "창 폭 720px의 함수 시점 뷰는 뷰 이름을 그리지 않고 버튼을 ×로 줄이며 마지막 단계와 버튼이 상단 줄 안에서 눌린다",
+    narrow.view === null && narrow.leave === "×" && narrow.label === "그래프 뷰로" && narrow.leavePressed && narrow.lastPressed,
+    `뷰 이름 ${narrow.view === null ? "없음" : `"${narrow.view}"`}, 버튼 "${narrow.leave}", 마지막 단계 폭 ${narrow.lastWidth}px`,
+  );
+  await page.screenshot({ path: HF5("narrow") });
+  await page.setViewportSize(VIEW);
+  await page.waitForTimeout(400);
 }
 
 async function search(t, page) {

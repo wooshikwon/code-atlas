@@ -528,6 +528,7 @@ ul {
   background: var(--hover-bg);
 }
 
+/* 함수 시점 뷰의 이름과 구조 뷰로 돌아가는 버튼. 탐색 경로의 마지막 단계 뒤에 그린다. */
 .trail-view {
   flex: none;
   margin-left: 6px;
@@ -536,6 +537,18 @@ ul {
   border-radius: 9px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.trail-leave-mark {
+  display: none;
+}
+
+/* 뷰 이름과 돌아가는 버튼이 탐색 경로의 폭에서 149px를 쓴다(뷰 이름과 그 앞의 틈·여백 67, 버튼과 그 앞의 틈 82). 좁은 상단 줄의 기준 545px에
+   이 폭을 더한 694px보다 줄이 좁으면 뷰 이름을 그리지 않는다. */
+@container toolbar (max-width: 694px) {
+  .trail-view {
+    display: none;
+  }
 }
 
 .toolbar-toggle {
@@ -609,6 +622,20 @@ ul {
   .toolbar-entries + .toolbar-trail {
     padding-left: 0;
     border-left: none;
+  }
+
+  /* 돌아가는 버튼은 글자 대신 테두리 없는 ×만 그린다. */
+  .toolbar-button.trail-leave {
+    padding: 1px 4px;
+    border: none;
+  }
+
+  .trail-leave-name {
+    display: none;
+  }
+
+  .trail-leave-mark {
+    display: inline;
   }
 }
 
