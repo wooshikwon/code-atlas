@@ -1,6 +1,7 @@
 // 파일트리를 화면에 그리는 행 배열로 편다. 폴더의 열림은 접은 폴더 집합에서, 파일 아래 목록은 선택에서 정한다.
 // 검색 칸에 질의가 있으면 행 배열 대신 검색 결과 행을 낸다.
-import type { AtlasNode, Change, ChangedFile, Changes, Graph, Tree, TreeEntry } from "../api/types";
+import type { AtlasNode, Change, ChangedFile, Changes, Comparison, Graph, Tree, TreeEntry } from "../api/types";
+import { gone, inSource, lineTotals, type Lines } from "../graph/compare";
 import { hidden, nodeIndex } from "../graph/visible";
 import { find, type Entry, type Hit } from "../search/index";
 import type { IconKind } from "./Icon";
@@ -16,6 +17,8 @@ export interface TreeState {
   showExternal: boolean;
   /** 마지막 커밋 뒤의 변경 내용. 아직 받지 못했으면 null이다. */
   changes: Changes | null;
+  /** 켜져 있는 시점 비교. 켜져 있으면 행에 변경 상태 대신 두 시점 사이에 바뀐 줄 수를 적는다. */
+  compared: Comparison | null;
 }
 
 export interface Row {
@@ -36,8 +39,14 @@ export interface Row {
   /** 아래 행을 펼쳤는지. 펼칠 행이 없으면 null이다. */
   expanded: boolean | null;
   selected: boolean;
-  /** 마지막 커밋 뒤의 변경 상태. 접은 폴더는 안에 바뀐 파일이 있으면 수정이다. */
+  /** 마지막 커밋 뒤의 변경 상태. 접은 폴더는 안에 바뀐 파일이 있으면 수정이다. 시점 비교가 켜져 있으면 null이다. */
   change: Change | null;
+  /** 시점 비교의 두 시점 사이에 추가되고 삭제된 줄 수. 폴더는 아래 파일의 합이다. 바뀐 줄이 없거나 비교가 꺼져 있으면 null이다. */
+  lines: Lines | null;
+  /** 대상 시점에 없는 파일·폴더·정의다 */
+  gone: boolean;
+  /** 이름이 바뀐 파일의 옛 이름. 폴더가 달라졌으면 레포 루트 기준 옛 경로다. */
+  from: string | null;
 }
 
 /** 검색 결과 행 하나 */
@@ -66,8 +75,11 @@ function labelOf(nodes: Map<string, AtlasNode>, node: AtlasNode): string {
   return node.kind === "function" ? `${node.name}()` : node.name;
 }
 
-/** 파일 노드 id마다 그 파일의 클래스·함수·메서드·변수를 소스 정의 순서로 담는다. 토글로 숨긴 노드 off는 담지 않는다. */
-function symbols(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<string>): Map<string, AtlasNode[]> {
+/**
+ * 파일 노드 id마다 그 파일의 클래스·함수·메서드·변수를 소스 정의 순서로 담는다. 토글로 숨긴 노드 off는 담지 않는다.
+ * changes는 시점 비교의 노드 변경 내용이고 삭제된 정의가 놓일 줄을 정한다.
+ */
+function symbols(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<string>, changes: Comparison["nodes"] | null): Map<string, AtlasNode[]> {
   const inner = new Map<string, AtlasNode[]>();
   for (const node of graph.nodes) {
     if (node.kind === "module" || node.kind === "package" || node.kind === "external" || off.has(node.id)) {
@@ -84,11 +96,13 @@ function symbols(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<string>):
       list.push(node);
     }
   }
-  for (const list of inner.values()) {
-    list.sort((a, b) => (a.range?.[0] ?? 0) - (b.range?.[0] ?? 0));
+  for (const [file, list] of inner) {
+    inner.set(file, inSource(list, changes));
   }
   return inner;
 }
+
+const lined = ({ added, deleted }: Lines): Lines | null => (added === 0 && deleted === 0 ? null : { added, deleted });
 
 /** 파일트리가 담은 모든 경로 */
 function pathsOf(entries: TreeEntry[], found = new Set<string>()): Set<string> {
@@ -133,24 +147,47 @@ function grown(entries: TreeEntry[], fresh: ChangedFile[]): TreeEntry[] {
  * 고른 노드를 품은 폴더는 접은 폴더여도 펼친 것으로 그린다.
  * 레포를 열어 분석한 뒤 생긴 파일은 그래프에 노드가 없는 행으로 넣는다. 파일 행은 모듈 노드만 가리키므로
  * 모듈 노드가 없는 `__init__.py` 행은 node 없이 file에 경로를 담는다.
+ * 시점 비교가 켜져 있으면 마지막 커밋 뒤의 변경 내용을 쓰지 않고, 비교 결과의 파일트리에 든 삭제된 파일·폴더·정의를 그 순서대로 낸다.
  */
 export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
   const nodes = nodeIndex(graph);
-  const inner = symbols(graph, nodes, hidden(graph, state));
+  const compared = state.compared;
+  const changes = compared === null ? state.changes : null;
+  const inner = symbols(graph, nodes, hidden(graph, state), compared?.nodes ?? null);
   const chosen = fileOf(nodes, state.selected);
   const held = new Set<string>();
   for (let at = nodes.get(state.selected ?? "")?.parent; at != null; at = nodes.get(at)?.parent) {
     held.add(at);
   }
   const changed = new Map<string, Change>();
-  for (const file of state.changes?.files ?? []) {
+  for (const file of changes?.files ?? []) {
     if (file.status === "modified" || file.status === "added") {
       changed.set(file.path, file.status);
     }
   }
   const analyzed = pathsOf(tree.entries);
-  const fresh = (state.changes?.files ?? []).filter((file) => file.status === "added" && !analyzed.has(file.path));
+  const fresh = (changes?.files ?? []).filter((file) => file.status === "added" && !analyzed.has(file.path));
   const within = (folder: string) => [...changed.keys()].some((path) => path.startsWith(`${folder}/`));
+  const files = new Map((compared?.files ?? []).map((file) => [file.path, file]));
+  const totals = compared === null ? null : lineTotals(graph, compared.files);
+  const off = gone(compared).nodes;
+  /** 폴더 행의 줄 수. 패키지 노드가 없는 폴더는 아래 파일의 줄 수를 경로로 더한다. */
+  const folderLines = (entry: TreeEntry): Lines | null => {
+    if (compared === null) {
+      return null;
+    }
+    if (entry.node !== null) {
+      return totals?.get(entry.node) ?? null;
+    }
+    const under = compared.files.filter((file) => file.path.startsWith(`${entry.path}/`));
+    return lined({ added: under.reduce((sum, file) => sum + file.added, 0), deleted: under.reduce((sum, file) => sum + file.deleted, 0) });
+  };
+  /** 이름이 바뀐 파일의 옛 이름. 같은 폴더 안에서 바뀌었으면 파일 이름만 적는다. */
+  const renamed = (path: string): string | null => {
+    const old = files.get(path)?.old ?? null;
+    const folder = path.slice(0, path.lastIndexOf("/") + 1);
+    return old !== null && old.startsWith(folder) && !old.slice(folder.length).includes("/") ? old.slice(folder.length) : old;
+  };
   const out: Row[] = [];
 
   const walk = (entries: TreeEntry[], level: number) => {
@@ -161,10 +198,11 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
       const base = { key: entry.path, level, title: entry.path };
       if (entry.kind === "dir") {
         const expanded = entry.node === null || !state.collapsed.has(entry.node) || held.has(entry.node);
-        const change = !expanded && within(entry.path) ? "modified" : null;
+        const change: Change | null = !expanded && within(entry.path) ? "modified" : null;
         const selected = entry.node !== null && entry.node === state.selected;
         const icon = expanded ? "folder-open" : "folder";
-        out.push({ ...base, kind: "dir", icon, label: `${entry.name}/`, node: entry.node, file: null, expanded, selected, change });
+        const marks = { change, lines: folderLines(entry), gone: entry.node !== null && off.has(entry.node), from: null };
+        out.push({ ...base, kind: "dir", icon, label: `${entry.name}/`, node: entry.node, file: null, expanded, selected, ...marks });
         if (expanded) {
           walk(entry.children ?? [], level + 1);
         }
@@ -175,8 +213,14 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
       const selected = node === null ? file !== null && file === state.opened : node === state.selected;
       const list = node === null ? [] : (inner.get(node) ?? []);
       const expanded = list.length === 0 ? null : node === chosen;
-      const change = changed.get(entry.path) ?? null;
-      out.push({ ...base, kind: "file", icon: "file", label: entry.name, node, file, expanded, selected, change });
+      const found = files.get(entry.path);
+      const marks = {
+        change: changed.get(entry.path) ?? null,
+        lines: found === undefined ? null : lined(found),
+        gone: found?.status === "deleted",
+        from: renamed(entry.path),
+      };
+      out.push({ ...base, kind: "file", icon: "file", label: entry.name, node, file, expanded, selected, ...marks });
       if (expanded === true) {
         for (const node of list) {
           out.push({
@@ -190,7 +234,10 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
             file: null,
             expanded: null,
             selected: node.id === state.selected,
-            change: state.changes?.nodes[node.id] ?? null,
+            change: changes?.nodes[node.id] ?? null,
+            lines: compared?.nodes[node.id] === undefined ? null : lined(compared.nodes[node.id]),
+            gone: off.has(node.id),
+            from: null,
           });
         }
       }

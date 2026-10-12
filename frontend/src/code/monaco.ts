@@ -25,6 +25,27 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
+/** 코드 뷰어의 모델이 작업 중인 상태의 어느 파일을 보이는지. hover와 정의 이동이 언어 서버에 묻는 위치를 이 값으로 정한다. */
+export interface Placed {
+  /** 레포 루트 기준 파일 경로 */
+  path: string;
+  /** 모델의 줄이 그 파일의 몇째 줄인지. 작업 중인 상태에 없는 줄이면 null이다. */
+  fileLine(line: number): number | null;
+  /** 파일의 줄이 모델의 몇째 줄인지 */
+  modelLine(line: number): number | null;
+}
+
+const placed = new Map<string, Placed>();
+
+/** 주소가 key인 모델이 보이는 파일을 적어 둔다. */
+export function place(key: string, at: Placed): void {
+  placed.set(monaco.Uri.parse(key).toString(), at);
+}
+
+export function placedOf(model: monaco.editor.ITextModel): Placed | undefined {
+  return placed.get(model.uri.toString());
+}
+
 const MODELS_KEPT = 20;
 const recent: string[] = [];
 
@@ -36,6 +57,8 @@ export function keepModel(path: string): void {
   }
   recent.push(path);
   while (recent.length > MODELS_KEPT) {
-    monaco.editor.getModel(monaco.Uri.parse(recent.shift()!))?.dispose();
+    const uri = monaco.Uri.parse(recent.shift()!);
+    placed.delete(uri.toString());
+    monaco.editor.getModel(uri)?.dispose();
   }
 }

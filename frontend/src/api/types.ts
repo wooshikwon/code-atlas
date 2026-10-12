@@ -169,8 +169,37 @@ export interface Explanation {
   stale: boolean;
 }
 
+/** 두 시점을 엮은 문서에서 고른, 삭제된 줄이 든 범위가 기준 시점에서 차지하는 줄. base와 target은 견준 두 시점의 이름이다. */
+export interface OldSpan {
+  base: string;
+  target: string;
+  start: number;
+  end: number;
+}
+
+/** 줄 머리에 `-`·`+`·빈칸 표시를 붙인 범위의 본문. 삭제된 줄이 든 범위는 old에 기준 시점의 줄을 담는다. */
+export interface MarkedCode {
+  code: string;
+  old: OldSpan | null;
+}
+
+/**
+ * 두 시점의 비교에 묶어 둔 코드 범위 설명. 삭제된 줄이 든 범위의 설명이다. start와 end는 대상 시점의 줄이고 그 범위에 대상 시점의 줄이
+ * 없으면 둘 다 0이다. digest는 설명을 만든 때의 표시 붙은 본문의 SHA-256이다.
+ */
+export interface ComparedExplanation {
+  start: number;
+  end: number;
+  old_start: number;
+  old_end: number;
+  text: string;
+  digest: string;
+}
+
 export interface Explanations {
   explanations: Explanation[];
+  /** 두 시점을 넘겨 물었을 때만 있다. */
+  compared?: ComparedExplanation[];
 }
 
 export type Change = "modified" | "added";

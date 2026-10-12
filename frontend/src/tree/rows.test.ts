@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AtlasNode, Changes, Graph, Tree } from "../api/types";
+import type { AtlasNode, Changes, Comparison, Graph, Tree } from "../api/types";
 import { hidden } from "../graph/visible";
 import { build, find } from "../search/index";
 import { parentOf, results, rows, type TreeState } from "./rows";
@@ -68,6 +68,7 @@ const state = (change: Partial<TreeState> = {}): TreeState => ({
   showTests: false,
   showExternal: false,
   changes: null,
+  compared: null,
   ...change,
 });
 
@@ -342,5 +343,111 @@ describe("변수 행", () => {
   it("변수를 고르면 그 변수가 든 파일의 목록을 펴고 변수 행을 고른 행으로 표시한다", () => {
     const list = rows(tree, withVariables, state({ selected: "arbiter:TABLE" }));
     expect(list.find((row) => row.key === "arbiter:TABLE")).toMatchObject({ selected: true, kind: "symbol", title: "TABLE" });
+  });
+});
+
+describe("시점 비교", () => {
+  // arbiter.py의 메서드 하나를 고치고 함수 하나를 지웠다. 폴더 old와 그 안의 파일 legacy.py를 지웠고, plan.py는 옛 이름이 draft.py다.
+  const compared: Comparison = {
+    base: "a".repeat(40),
+    target: "worktree",
+    revision: 1,
+    graph: {
+      nodes: [
+        ...graph.nodes,
+        node("arbiter:drop", "function", "arbiter", "src/arbiter.py", 44),
+        node("arbiter:OLD", "variable", "arbiter", "src/arbiter.py", 7),
+        node("old", "package", null, "src/old"),
+        node("old.legacy", "module", "old", "src/old/legacy.py"),
+        node("old.legacy:parse", "function", "old.legacy", "src/old/legacy.py", 3),
+      ],
+      edges: [],
+    },
+    tree: {
+      entries: [
+        {
+          ...tree.entries[0],
+          children: [
+            { path: "src/old", name: "old", kind: "dir", test: false, node: "old", children: [file("src/old/legacy.py", "old.legacy")] },
+            ...tree.entries[0].children!,
+          ],
+        },
+        tree.entries[1],
+      ],
+    },
+    nodes: {
+      "arbiter:Arbiter": { change: "modified", added: 4, deleted: 1 },
+      "arbiter:Arbiter.sync": { change: "modified", added: 4, deleted: 1 },
+      "arbiter:drop": { change: "deleted", added: 0, deleted: 6, slot: 35 },
+      "arbiter:OLD": { change: null, added: 0, deleted: 0, only: "base" },
+      old: { change: "deleted", added: 0, deleted: 9 },
+      "old.legacy": { change: "deleted", added: 0, deleted: 9 },
+      "old.legacy:parse": { change: "deleted", added: 0, deleted: 6, slot: 1 },
+    },
+    edges: {},
+    files: [
+      { path: "src/arbiter.py", old: null, status: "modified", added: 5, deleted: 8, test: false },
+      { path: "src/old/legacy.py", old: null, status: "deleted", added: 0, deleted: 9, test: false },
+      { path: "src/parser/__init__.py", old: null, status: "modified", added: 2, deleted: 0, test: false },
+      { path: "src/parser/plan.py", old: "src/parser/draft.py", status: "renamed", added: 1, deleted: 1, test: false },
+      { path: "src/empty.py", old: "lib/blank.py", status: "renamed", added: 0, deleted: 0, test: false },
+      { path: "tests/test_plan.py", old: null, status: "modified", added: 3, deleted: 0, test: true },
+    ],
+    unused: { definitions: 0, candidates: [] },
+  };
+  const list = (change: Partial<TreeState> = {}) => rows(compared.tree, compared.graph, state({ compared, ...change }));
+  const row = (key: string, change: Partial<TreeState> = {}) => list(change).find((r) => r.key === key)!;
+
+  it("파일 행에 그 파일의 추가되고 삭제된 줄 수를 적고 바뀌지 않은 행에는 적지 않는다", () => {
+    expect(row("src/arbiter.py").lines).toEqual({ added: 5, deleted: 8 });
+    expect(row("src/parser/__init__.py").lines).toEqual({ added: 2, deleted: 0 });
+    expect(row("src/empty.py").lines).toBeNull();
+  });
+
+  it("폴더 행의 수는 아래 파일의 합이고 패키지 노드가 없는 폴더도 같다", () => {
+    expect(row("src/parser").lines).toEqual({ added: 3, deleted: 1 });
+    expect(row("src/old").lines).toEqual({ added: 0, deleted: 9 });
+    expect(row("src").lines).toEqual({ added: 8, deleted: 18 });
+    expect(row("tests", { showTests: true }).lines).toEqual({ added: 3, deleted: 0 });
+  });
+
+  it("정의 행에 그 정의의 줄 수를 적는다", () => {
+    const made = list({ selected: "arbiter" }).filter((r) => r.kind === "symbol");
+    expect(made.map((r) => [r.label, r.lines, r.gone])).toEqual([
+      ["State", null, false],
+      ["OLD", null, true],
+      ["Arbiter", { added: 4, deleted: 1 }, false],
+      ["Arbiter.load()", null, false],
+      ["Arbiter.sync()", { added: 4, deleted: 1 }, false],
+      ["drop()", { added: 0, deleted: 6 }, true],
+      ["run()", null, false],
+    ]);
+  });
+
+  it("삭제된 파일과 폴더는 비교 결과의 파일트리에 든 순서대로 내고 대상 시점에 없는 행으로 표시한다", () => {
+    const made = list();
+    expect(made.slice(0, 3).map((r) => [r.key, r.gone])).toEqual([
+      ["src", false],
+      ["src/old", true],
+      ["src/old/legacy.py", true],
+    ]);
+    expect(made.filter((r) => r.gone).map((r) => r.key)).toEqual(["src/old", "src/old/legacy.py"]);
+    expect(list({ selected: "old.legacy:parse" }).find((r) => r.key === "old.legacy:parse")).toMatchObject({ gone: true, selected: true, lines: { added: 0, deleted: 6 } });
+  });
+
+  it("이름이 바뀐 파일은 옛 이름을 담고, 폴더가 달라졌으면 옛 경로를 담는다", () => {
+    expect(row("src/parser/plan.py")).toMatchObject({ from: "draft.py", lines: { added: 1, deleted: 1 } });
+    expect(row("src/empty.py").from).toBe("lib/blank.py");
+    expect(row("src/arbiter.py").from).toBeNull();
+  });
+
+  it("마지막 커밋 뒤의 변경 상태와 그래프에 없는 추가된 파일을 그리지 않는다", () => {
+    const made = list({ changes, selected: "arbiter" });
+    expect(made.every((r) => r.change === null)).toBe(true);
+    expect(made.some((r) => r.key === "src/latest.py")).toBe(false);
+  });
+
+  it("비교가 꺼져 있으면 줄 수와 옛 이름이 없다", () => {
+    expect(rows(tree, graph, state({ selected: "arbiter", changes })).every((r) => r.lines === null && !r.gone && r.from === null)).toBe(true);
   });
 });
