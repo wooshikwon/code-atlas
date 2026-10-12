@@ -23,7 +23,7 @@ const OUT = join(homedir(), "data", "code-atlas", "screenshots");
 const FILE = "arbiter";
 const FUNCTION = "arbiter:_rebuild_note_sections";
 /** 초점 상태에서 흐름 밖 노드가 받는 불투명도 */
-const DIM = 0.3;
+const DIM = 0.35;
 /** 함수 이름표가 모두 보이는 확대 비율 구간의 시작값. 이보다 작은 확대 비율에서 노드를 고르면 이 값이 된다. */
 const NAMED_ZOOM = 0.8;
 /** 정보 패널의 기본 폭과 기본 여백(위·오른쪽·아래)을 관계 그래프 영역의 폭으로 나눈 값, 패널의 최소 폭 */
