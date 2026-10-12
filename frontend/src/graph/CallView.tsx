@@ -1,7 +1,6 @@
 // 함수 시점 뷰. 가운데 함수와 그 함수를 호출하는 쪽·호출되는 쪽을 실행 선으로 이어 배치하고, 가운데 함수가 바뀌면 화면을 맞춘다.
 // 시점 비교가 켜져 있으면 삭제된 노드와 선을 뺀 대상 시점의 그래프로 그리고 변경 표시를 그리지 않는다.
 import {
-  getViewportForBounds,
   ReactFlow,
   type NodeMouseHandler,
   type NodeTypes,
@@ -33,7 +32,7 @@ import { nodeTip, tipOf, valueTip } from "./tips";
 import { NO_LINES } from "./view";
 import { tooltip } from "./Tooltip";
 import type { EdgeKey } from "./scope";
-import { boundsOf, fitPadding, FRAME_ZOOM, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { boundsOf, fitIn, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, nodeIndex, writtenBy } from "./visible";
 
 const nodeTypes: NodeTypes = { call: CallNode };
@@ -155,8 +154,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     if (scene.center !== framed.current && root.current !== null) {
       framed.current = scene.center;
       const stage = stageOf(root.current);
-      const { width, height } = stage.area;
-      const view = getViewportForBounds(boundsOf(to.boxes.values()), width, height, ZOOM_MIN, FRAME_ZOOM, fitPadding(stage.area, stage.free));
+      const view = fitIn(boundsOf(to.boxes.values()), stage.free);
       if (from === null) {
         jump(view);
       } else {

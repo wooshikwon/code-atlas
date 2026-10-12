@@ -8,7 +8,7 @@ export const ZOOM_MAX = 4;
 /** 함수 이름표가 모두 보이는 확대 비율 구간의 시작값. 노드를 고르면 확대 비율을 이 값까지 키운다. */
 export const NAMED_ZOOM = 0.8;
 /** 화면을 맞출 때 이름표가 본문 글자보다 커지지 않게 확대 비율을 100%에서 멈춘다. */
-export const FRAME_ZOOM = 1;
+const FRAME_ZOOM = 1;
 
 const INSET = 20;
 const FIT_MARGIN = 24;
@@ -160,15 +160,13 @@ export interface Stage {
   covers: Rect[];
 }
 
-/** 그래프를 관계 그래프 영역 area 안의 사각형 room에 24px를 두고 맞추도록 area의 네 변에서 비울 폭 */
-export function fitPadding(area: Rect, room: Rect) {
-  const px = (n: number) => `${Math.round(n) + FIT_MARGIN}px` as const;
-  return {
-    top: px(room.y - area.y),
-    right: px(area.x + area.width - room.x - room.width),
-    bottom: px(area.y + area.height - room.y - room.height),
-    left: px(room.x - area.x),
-  };
+/**
+ * 상자 box를 사각형 room의 네 변에서 24px 안쪽에 맞춘 화면. box의 가운데가 room의 가운데에 오고,
+ * 확대 비율은 `ZOOM_MIN`과 `FRAME_ZOOM` 사이다.
+ */
+export function fitIn(box: Box, room: Rect): View {
+  const zoom = Math.max(ZOOM_MIN, Math.min((room.width - 2 * FIT_MARGIN) / box.width, (room.height - 2 * FIT_MARGIN) / box.height, FRAME_ZOOM));
+  return { x: room.x + room.width / 2 - (box.x + box.width / 2) * zoom, y: room.y + room.height / 2 - (box.y + box.height / 2) * zoom, zoom };
 }
 
 /** 화면에서 관계 그래프 영역 root와 정보 패널, 왼쪽 아래 칸, 비교 버튼의 사각형을 읽는다. */

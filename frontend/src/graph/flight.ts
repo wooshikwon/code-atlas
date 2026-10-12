@@ -1,11 +1,11 @@
 // 화면 이동. 지금 화면에서 도착 화면까지 가는 경로와 걸리는 시간을 두 화면 사이의 거리에서 정하고, 그 경로를 프레임마다 그린다.
 // 코드가 화면을 옮기는 호출은 모두 `useFlight`가 돌려주는 함수를 지난다. 사용자가 끄는 이동과 휠 확대는 React Flow가 맡는다.
-import { getViewportForBounds, useReactFlow } from "@xyflow/react";
+import { useReactFlow } from "@xyflow/react";
 import { useMemo } from "react";
 import { create } from "zustand";
 import type { Rect } from "../state/store";
 import { reducedMotion } from "./motion";
-import { fitPadding, FRAME_ZOOM, stageOf, ZOOM_MIN, type View } from "./viewport";
+import { fitIn, stageOf, ZOOM_MIN, type View } from "./viewport";
 
 /**
  * 화면이 옆으로 움직이는 순항 속도. 1초에 기준 사각형의 짧은 변 몇 개만큼 가는지다. 화면 이동이 빠르거나 느리면 이 값을 바꾼다.
@@ -172,10 +172,9 @@ export function useFlight() {
       useFlying.setState({ on: true });
     };
     const fit = (root: Element, path: string[] | null) => {
-      const { area, free, clear } = stageOf(root);
+      const { free, clear } = stageOf(root);
       const room = path === null ? free : clear;
-      const bounds = getNodesBounds(path ?? getNodes().map((node) => node.id));
-      fly(getViewportForBounds(bounds, area.width, area.height, ZOOM_MIN, FRAME_ZOOM, fitPadding(area, room)), room);
+      fly(fitIn(getNodesBounds(path ?? getNodes().map((node) => node.id)), room), room);
     };
     return { fly, fit, jump, halt, heading };
   }, [getViewport, setViewport, getNodes, getNodesBounds]);

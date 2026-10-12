@@ -5,7 +5,6 @@
 // 화면을 다시 맞추고, 이름표가 읽히는 확대 비율 아래로 줄이지 않는다. 시점 비교가 켜져 있으면 비교 결과를 그래프에 그릴 값(`compare.ts`의
 // `compared`)으로 바꿔 배치와 노드·선에 넘긴다.
 import {
-  getViewportForBounds,
   ReactFlow,
   useReactFlow,
   useStore,
@@ -49,7 +48,7 @@ import { drawn, followed, type EdgeKey } from "./scope";
 import { clipped, nodeTip, packTip, tipOf, valueTip } from "./tips";
 import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
-import { anchorOn, autoView, boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, nearest, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
+import { anchorOn, autoView, boundsOf, centerOn, fitIn, frameOn, NAMED_ZOOM, nearest, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, unitOf, writtenBy, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -204,10 +203,9 @@ function ringOf(box: Box) {
  * (확대 비율을 100%보다 키우지 않는다), 들어오지 않으면 선을 눌러 간 폴더 pressed의 왼쪽 위를, 그런 폴더가 없으면
  * 그래프의 왼쪽 위를 그 영역의 왼쪽 위에 놓는다.
  */
-function fittedView(at: Layout, { area, free }: Stage, pressed: string | null): Viewport {
+function fittedView(at: Layout, { free }: Stage, pressed: string | null): Viewport {
   const bounds = boundsOf(at.boxes.values());
-  const whole = getViewportForBounds(bounds, area.width, area.height, ZOOM_MIN, FRAME_ZOOM, fitPadding(area, free));
-  return autoView(whole, at.boxes.get(pressed ?? "") ?? bounds, free);
+  return autoView(fitIn(bounds, free), at.boxes.get(pressed ?? "") ?? bounds, free);
 }
 
 export function GraphView() {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorOn, autoView, bottomSpan, boundsOf, centerOn, fitPadding, frameOn, freeRect, nearest } from "./viewport";
+import { anchorOn, autoView, bottomSpan, boundsOf, centerOn, fitIn, frameOn, freeRect, nearest } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -114,19 +114,29 @@ describe("autoView", () => {
   });
 });
 
-describe("fitPadding", () => {
-  it("패널이 오른쪽 위에 있으면 오른쪽을 패널 왼쪽 끝까지 비운다", () => {
-    const free = freeRect(area, [{ x: 912, y: 8, width: 480, height: 420 }]);
-    expect(fitPadding(area, free)).toEqual({ top: "24px", right: "512px", bottom: "24px", left: "24px" });
+describe("fitIn", () => {
+  const free = freeRect(area, [{ x: 912, y: 8, width: 480, height: 884 }]);
+
+  it("확대 비율이 100%에서 멈추는 작은 상자도 가운데를 빈 사각형의 가운데에 놓는다", () => {
+    const view = fitIn({ x: 40, y: 20, width: 100, height: 160 }, free);
+    expect(view.zoom).toBe(1);
+    expect([90 * view.zoom + view.x, 100 * view.zoom + view.y]).toEqual([456, 450]);
   });
 
-  it("패널이 왼쪽에 있으면 왼쪽을 패널 오른쪽 끝까지 비운다", () => {
-    const free = freeRect(area, [{ x: 8, y: 8, width: 400, height: 800 }]);
-    expect(fitPadding(area, free)).toEqual({ top: "24px", right: "24px", bottom: "24px", left: "432px" });
+  it("빈 사각형보다 큰 상자는 네 변에서 24px 안쪽에 들어오게 줄이고 가운데를 맞춘다", () => {
+    const view = fitIn({ x: 0, y: 0, width: 1728, height: 600 }, free);
+    expect(view.zoom).toBe(0.5);
+    expect([view.x, 1728 * view.zoom + view.x]).toEqual([24, 888]);
+    expect(300 * view.zoom + view.y).toBe(450);
   });
 
-  it("패널이 없으면 네 변을 24px씩 비운다", () => {
-    expect(fitPadding(area, area)).toEqual({ top: "24px", right: "24px", bottom: "24px", left: "24px" });
+  it("패널이 없으면 영역 전체의 가운데에 놓는다", () => {
+    const view = fitIn({ x: 0, y: 0, width: 200, height: 100 }, area);
+    expect([100 * view.zoom + view.x, 50 * view.zoom + view.y]).toEqual([700, 450]);
+  });
+
+  it("확대 비율을 5% 아래로 줄이지 않는다", () => {
+    expect(fitIn({ x: 0, y: 0, width: 100000, height: 100 }, free).zoom).toBe(0.05);
   });
 });
 

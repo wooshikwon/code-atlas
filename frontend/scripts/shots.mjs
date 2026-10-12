@@ -6397,6 +6397,108 @@ async function start(t, page) {
   );
 }
 
+const HF12 = (name) => join(OUT, `hf12-home-${name}.png`);
+
+/**
+ * 창 크기 1600×900과 2560×1440에서 레포를 연 처음 화면, "화면 맞춤", "화면 초기화", 새로 읽은 화면, 리니지 뷰의 처음 화면,
+ * 정보 패널을 오른쪽 끝으로 밀어 둔 처음 화면이 그래프를 정보 패널이 가리지 않는 영역의 가운데에 놓는지 본다.
+ * `--wide-url`을 받으면 그 레포에서도 본다. 1600×900의 처음 화면을 `hf12-home-{sync,mdp}.png`로 남긴다.
+ */
+async function homeFit(t, page) {
+  const SIZES = [
+    { width: 1600, height: 900 },
+    { width: 2560, height: 1440 },
+  ];
+  /** 그린 노드를 모두 품는 사각형 bounds, 정보 패널이 가리지 않는 영역 free, 확대 비율 */
+  const seen = async () => {
+    const { free } = await stageOf(page);
+    const bounds = await page.evaluate(() => {
+      const rects = [...document.querySelectorAll(".react-flow__node")].map((each) => each.getBoundingClientRect()).filter((rect) => rect.width > 0);
+      const [left, top] = [Math.min(...rects.map((rect) => rect.left)), Math.min(...rects.map((rect) => rect.top))];
+      return { x: left, y: top, width: Math.max(...rects.map((rect) => rect.right)) - left, height: Math.max(...rects.map((rect) => rect.bottom)) - top };
+    });
+    return { free, bounds, zoom: await zoomOf(page) };
+  };
+  /** 그래프의 가운데가 free의 가운데와 1.5px 안에서 같고 그래프가 free 안에 있는지 */
+  const centered = ({ free, bounds }) => near(center(bounds).x, center(free).x, 1.5) && near(center(bounds).y, center(free).y, 1.5) && within(bounds, free);
+  /** 코드가 스스로 맞추는 화면의 규칙: 80%~100%에서 전체가 free의 24px 안쪽에 들어오면 가운데에, 들어오지 않으면 80%에서 그래프의 왼쪽 위를 free의 왼쪽 위에서 24px 안쪽에 */
+  const auto = (at) => {
+    const whole = Math.min((at.free.width - 48) / (at.bounds.width / at.zoom), (at.free.height - 48) / (at.bounds.height / at.zoom));
+    return whole >= NAMED_ZOOM
+      ? near(at.zoom, Math.min(whole, 1), 0.002) && centered(at)
+      : near(at.zoom, NAMED_ZOOM, 0.001) && near(at.bounds.x, at.free.x + 24, 1.5) && near(at.bounds.y, at.free.y + 24, 1.5);
+  };
+  const text = ({ free, bounds, zoom }) =>
+    `그래프 가운데 (${center(bounds).x.toFixed(0)}, ${center(bounds).y.toFixed(0)}), 가리지 않는 영역 ${rectText(free)}의 가운데 (${center(free).x.toFixed(0)}, ${center(free).y.toFixed(0)}), 확대 비율 ${zoom.toFixed(3)}`;
+  const press = async (name) => {
+    await page.getByRole("button", { name }).click();
+    await page.mouse.move(1, 1);
+    await settle(page);
+  };
+
+  const repos = [{ name: "sync", at: url }];
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포의 처음 화면이 그래프를 정보 패널이 가리지 않는 영역의 가운데에 놓는다", "--wide-url을 주지 않았다");
+  } else {
+    repos.push({ name: "mdp", at: wideUrl });
+  }
+  for (const { name, at } of repos) {
+    for (const size of SIZES) {
+      const where = `${name} ${size.width}×${size.height}`;
+      await page.setViewportSize(size);
+      await page.goto(at);
+      await page.evaluate(() => localStorage.clear());
+      await load(page, at, false);
+      const first = await seen();
+      t.check(`${where}: 레포를 연 처음 화면이 그래프를 정보 패널이 가리지 않는 영역의 가운데에 놓거나, 80%에서 전체가 들어오지 않으면 왼쪽 위에 맞춘다`, auto(first), text(first));
+      if (size === SIZES[0]) {
+        await page.screenshot({ path: HF12(name) });
+      }
+
+      await press("화면 맞춤");
+      const fitted = await seen();
+      t.check(`${where}: "화면 맞춤"이 그래프 전체를 정보 패널이 가리지 않는 영역의 가운데에 놓는다`, fitted.zoom <= 1.001 && centered(fitted), text(fitted));
+
+      await page.mouse.move(center(first.free).x, center(first.free).y);
+      await page.mouse.wheel(0, -300);
+      await settle(page);
+      const moved = await seen();
+      await press("화면 초기화");
+      const reset = await seen();
+      t.check(
+        `${where}: 확대한 뒤 "화면 초기화"를 누르면 처음 화면의 맞춤으로 돌아온다`,
+        !near(moved.zoom, first.zoom, 0.001) && near(reset.zoom, first.zoom, 0.002) && sameRect(reset.bounds, first.bounds),
+        `확대한 화면 ${moved.zoom.toFixed(3)}, ${text(reset)}`,
+      );
+
+      await load(page, at, false);
+      const again = await seen();
+      t.check(`${where}: 새로 읽은 화면이 처음 화면과 같다`, near(again.zoom, first.zoom, 0.002) && sameRect(again.bounds, first.bounds), text(again));
+
+      if (name === "sync") {
+        await pick(page, FILE);
+        await clickNode(page, FUNCTION, 2);
+        await page.waitForSelector(".node-call", { timeout: 30_000 });
+        await settle(page);
+        const lineage = await seen();
+        t.check(`${where}: 리니지 뷰의 처음 화면이 그래프를 정보 패널이 가리지 않는 영역의 가운데에 놓는다`, lineage.zoom <= 1.001 && centered(lineage), text(lineage));
+      }
+
+      await page.evaluate(() => {
+        const saved = JSON.parse(localStorage.getItem("code-atlas:ui:v3") ?? "{}");
+        localStorage.setItem("code-atlas:ui:v3", JSON.stringify({ ...saved, panel: { x: 1, y: 0, width: 0, height: 1 } }));
+      });
+      await load(page, at, false);
+      const aside = await seen();
+      t.check(
+        `${where}: 정보 패널을 오른쪽 끝으로 밀어 두고 열면 넓어진 영역에서 같은 규칙으로 맞춘다`,
+        aside.free.width > first.free.width + 100 && auto(aside),
+        text(aside),
+      );
+    }
+  }
+}
+
 /**
  * 느린 배치. ELK worker로 가는 배치 요청을 늦춰, 배치가 펼치기·접기의 움직임 시간(300ms)을 넘기면 앞의 그래프를 둔 채
  * 표시가 뜨는지, Esc와 뒤로 가기가 그 조작만 되돌리는지 본다.
@@ -13380,6 +13482,7 @@ const SCENARIOS = [
   ["cycles-change", cyclesChange],
   ["cycles-pin", cyclesPin],
   ["start", start],
+  ["home-fit", homeFit],
   ["arranging", arranging],
   ["node-hover", nodeHover],
   ["hover-step", hoverStep],
