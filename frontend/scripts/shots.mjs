@@ -45,7 +45,11 @@ const PANEL_MIN = 260;
 const INSET = 20;
 const DARK = { surface: "#1a1a19", ink: "#ffffff" };
 /** 상단 줄 오른쪽 칸의 버튼. 왼쪽부터다. */
-const TOOLS = ["필터", "새로고침", "화면 맞춤", "화면 초기화", "어두운 화면"];
+const TOOLS = ["필터", "새로고침", "화면 맞춤", "화면 초기화", "세로창 모드로 바꾸기", "어두운 화면"];
+/** 세로창 모드로 열리는 창 크기와, 그 모드에서 아래 칸이 쓰는 높이의 기본 몫, 파일트리 칸의 기본 폭 */
+const TALL = { width: 800, height: 1200 };
+const LOWER_SHARE = 0.4;
+const TREE_WIDTH = 208;
 /** 좁은 창에서 상단 줄을 확인할 때 고르는 함수와 창 폭 */
 const NARROW = { owner: "parser.plan", id: "parser.plan:_parse_week_header", label: "_parse_week_header()", widths: [1700, 1440, 1280, 1160, 980, 900, 720] };
 /** 글자 요소가 그리는 글자와 배지. 이 요소의 가운데 점에서는 늘 그 노드가 눌린다. */
@@ -458,8 +462,9 @@ async function load(page, at = url, unfold = true) {
  */
 async function asidePanel(page) {
   await page.addInitScript(() => {
-    if (localStorage.getItem("code-atlas:ui:v3") === null) {
-      localStorage.setItem("code-atlas:ui:v3", JSON.stringify({ panel: { x: 1, y: 0, width: 0, height: 1 } }));
+    const saved = JSON.parse(localStorage.getItem("code-atlas:ui:v3") ?? "{}");
+    if (!("panel" in saved)) {
+      localStorage.setItem("code-atlas:ui:v3", JSON.stringify({ ...saved, panel: { x: 1, y: 0, width: 0, height: 1 } }));
     }
   });
 }
@@ -1203,6 +1208,344 @@ async function panelRatio(t, page) {
   t.check("머리 줄을 더블클릭하면 지금 창 크기의 기본 사각형으로 돌아간다", reset.ok, reset.text);
   await page.setViewportSize(VIEW);
   await redocked(page);
+}
+
+/** 칸 묶음의 id, 작업 영역·상단 줄·관계 그래프 영역·파일트리·정보 패널·왼쪽 아래 칸의 사각형, 정보 패널이 칸에 고정됐는지, 손잡이 수, 저장한 모드 */
+const cellsOf = (page) =>
+  page.evaluate(() => {
+    const rect = (selector) => {
+      const box = document.querySelector(selector)?.getBoundingClientRect();
+      return box === undefined ? null : { x: box.left, y: box.top, width: box.width, height: box.height };
+    };
+    return {
+      groups: [...document.querySelectorAll("[data-group]")].map((group) => group.id),
+      workspace: rect(".workspace"),
+      toolbar: rect(".toolbar"),
+      stage: rect(".stage"),
+      tree: rect(".explorer"),
+      panel: rect(".info-panel"),
+      dock: rect(".dock"),
+      docked: document.querySelector(".info-panel")?.hasAttribute("data-docked") ?? null,
+      inStage: document.querySelector(".stage .info-panel") !== null,
+      grips: document.querySelectorAll(".info-panel-resize").length,
+      layout: JSON.parse(localStorage.getItem("code-atlas:ui:v3") ?? "{}").layout ?? null,
+      window: { width: window.innerWidth, height: window.innerHeight },
+    };
+  });
+
+/** 세 칸이 세로창 모드의 위치에 있는지: 위에 작업 영역, 아래 왼쪽에 파일트리, 아래 오른쪽에 칸을 채운 정보 패널이고 경계선 두 개가 1px다 */
+function tall(cells) {
+  const { workspace, tree, panel, dock, stage, toolbar, window: view } = cells;
+  const ok =
+    same(cells.groups, ["portrait", "portrait-bottom"]) &&
+    cells.docked === true &&
+    !cells.inStage &&
+    cells.grips === 0 &&
+    near(workspace.x, 0) && near(workspace.y, 0) && near(workspace.width, view.width) &&
+    near(toolbar.y, 0) && near(stage.y, toolbar.y + toolbar.height) && near(stage.y + stage.height, workspace.y + workspace.height) &&
+    near(tree.x, 0) && near(tree.y, workspace.y + workspace.height + 1) && near(tree.y + tree.height, view.height) &&
+    near(panel.x, tree.x + tree.width + 1) && near(panel.y, tree.y) && near(panel.x + panel.width, view.width) && near(panel.y + panel.height, view.height) &&
+    within(dock, stage);
+  return { ok, text: `칸 묶음 ${cells.groups.join("·")}, 작업 영역 ${rectText(workspace)}, 파일트리 ${rectText(tree)}, 정보 패널 ${rectText(panel)}, 손잡이 ${cells.grips}개` };
+}
+
+/** 칸 묶음이 가로창 모드인지: 파일트리 옆에 작업 영역이 있고 정보 패널이 관계 그래프 영역 위에 손잡이 여덟 개와 함께 떠 있다 */
+function wide(cells) {
+  const { workspace, tree, window: view } = cells;
+  const ok =
+    same(cells.groups, ["main"]) && cells.docked === false && cells.inStage && cells.grips === 8 &&
+    near(tree.x, 0) && near(tree.height, view.height) && near(workspace.x, tree.width + 1) && near(workspace.x + workspace.width, view.width) && near(workspace.height, view.height);
+  return { ok, text: `칸 묶음 ${cells.groups.join("·")}, 작업 영역 ${rectText(workspace)}, 파일트리 ${rectText(tree)}, 손잡이 ${cells.grips}개` };
+}
+
+/** 창 크기를 바꾸고 칸 묶음이 group으로 바뀌어 화면이 멈출 때까지 기다린다. */
+async function resized(page, size, group) {
+  await page.setViewportSize(size);
+  await page.waitForSelector(`[data-group]#${group}`, { timeout: 5_000 }).catch(() => {});
+  await settle(page);
+}
+
+/** 800×1200 창에서 세로창 모드로 열리고 세 칸이 설계 명세의 위치에 있는지, 고른 모드가 없는 동안 창 크기를 따라 모드가 바뀌는지 */
+async function portraitAuto(t, page) {
+  await page.setViewportSize(TALL);
+  await load(page, url, false);
+  const first = await cellsOf(page);
+  const placed = tall(first);
+  t.check("창 800×1200에서 세로창 모드로 열려 위에 작업 영역, 아래 왼쪽에 파일트리, 아래 오른쪽에 손잡이 없는 정보 패널이 있다", placed.ok, placed.text);
+  const lower = TALL.height - first.workspace.height - 1;
+  t.check(
+    "아래 칸이 창 높이의 40%를 쓰고 파일트리 칸의 폭이 208px다",
+    near(lower, TALL.height * LOWER_SHARE, 1.5) && near(first.tree.width, TREE_WIDTH),
+    `아래 칸 ${lower.toFixed(1)}, 파일트리 ${first.tree.width.toFixed(1)}`,
+  );
+  const [toolbarTools, tip] = [await toolsOf(page), await tipOver(page, ".layout-button")];
+  t.check(
+    "상단 줄과 왼쪽 아래 칸이 작업 영역 안에 있고, 모드 버튼이 화면 색 버튼 앞에서 가로창 모드로 바꾸기를 말풍선에 적는다",
+    within(first.toolbar, first.workspace) && within(first.dock, first.stage) && same(toolbarTools.slice(-2), ["가로창 모드로 바꾸기", "어두운 화면"]) && tip === "가로창 모드로 바꾸기",
+    `오른쪽 칸 ${toolbarTools.join("·")}, 말풍선 "${tip}"`,
+  );
+  await t.shot();
+  await resized(page, { width: TALL.height, height: TALL.width }, "main");
+  const turned = wide(await cellsOf(page));
+  t.check("고른 모드가 없는 동안 창을 1200×800으로 바꾸면 가로창 모드로 바뀐다", turned.ok && (await cellsOf(page)).layout === null, turned.text);
+  await resized(page, { width: 1000, height: 1000 }, "main");
+  t.check("창의 높이와 폭이 같으면 가로창 모드다", wide(await cellsOf(page)).ok, (await cellsOf(page)).groups.join("·"));
+  await resized(page, TALL, "portrait");
+  const back = tall(await cellsOf(page));
+  t.check("창을 800×1200으로 되돌리면 세로창 모드로 돌아온다", back.ok, back.text);
+}
+
+/** 위아래 경계선과 아래 좌우 경계선을 끌면 칸의 크기가 바뀌고 다시 읽어도 유지되는지 */
+async function portraitResize(t, page) {
+  await page.setViewportSize(TALL);
+  await load(page, url, false);
+  const start = await cellsOf(page);
+  const lines = async () => ({ rows: await rectOf(page, "#portrait > .separator"), columns: await rectOf(page, "#portrait-bottom > .separator") });
+  await drag(page, center((await lines()).rows), 0, -120);
+  await settle(page);
+  const raised = await cellsOf(page);
+  t.check(
+    "위아래 경계선을 위로 120px 끌면 작업 영역이 120px 줄고 아래 칸이 120px 는다",
+    near(raised.workspace.height, start.workspace.height - 120, 1.5) && near(raised.tree.height, start.tree.height + 120, 1.5) && near(raised.panel.height, start.panel.height + 120, 1.5) && tall(raised).ok,
+    `작업 영역 ${start.workspace.height.toFixed(1)} → ${raised.workspace.height.toFixed(1)}, 정보 패널 ${start.panel.height.toFixed(1)} → ${raised.panel.height.toFixed(1)}`,
+  );
+  await drag(page, center((await lines()).columns), 80, 0);
+  await settle(page);
+  const widened = await cellsOf(page);
+  t.check(
+    "아래 좌우 경계선을 오른쪽으로 80px 끌면 파일트리가 80px 넓어지고 정보 패널이 80px 좁아진다",
+    near(widened.tree.width, start.tree.width + 80, 1.5) && near(widened.panel.width, start.panel.width - 80, 1.5) && near(widened.workspace.height, raised.workspace.height, 1.5) && tall(widened).ok,
+    `파일트리 ${start.tree.width.toFixed(1)} → ${widened.tree.width.toFixed(1)}, 정보 패널 ${start.panel.width.toFixed(1)} → ${widened.panel.width.toFixed(1)}`,
+  );
+  await t.shot();
+  const keys = await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("react-resizable-panels:")).sort());
+  t.check("두 경계선의 비율을 portrait-v1과 portrait-bottom-v1에 저장하고 main-v2는 쓰지 않는다", same(keys, ["react-resizable-panels:portrait-bottom-v1", "react-resizable-panels:portrait-v1"]), keys.join(", "));
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  const kept = await cellsOf(page);
+  t.check(
+    "다시 읽어도 두 경계선의 위치가 유지된다",
+    sameRect(kept.workspace, widened.workspace) && sameRect(kept.tree, widened.tree) && sameRect(kept.panel, widened.panel),
+    `작업 영역 ${rectText(kept.workspace)}, 파일트리 ${rectText(kept.tree)}, 정보 패널 ${rectText(kept.panel)}`,
+  );
+}
+
+/** 버튼으로 바꾼 모드가 창 크기와 무관하게 유지되는지, 모드를 바꿔도 관계 그래프와 떠 있는 패널의 사각형이 그대로인지 */
+async function portraitToggle(t, page) {
+  /** 관계 그래프 영역의 DOM 요소에 표시를 남기고, 그 표시가 남아 있는지 읽는다. 관계 그래프를 다시 만들면 표시가 사라진다. */
+  const mark = () => page.evaluate(() => void (document.querySelector(".react-flow").__shotsKept = true));
+  const marked = () => page.evaluate(() => document.querySelector(".react-flow")?.__shotsKept === true);
+  const viewOf = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+  const press = async (name, group) => {
+    await page.getByRole("button", { name }).click();
+    await page.mouse.move(1, 1);
+    await page.waitForSelector(`[data-group]#${group}`, { timeout: 5_000 }).catch(() => {});
+    await settle(page);
+  };
+  /** 코드가 스스로 맞추는 화면의 규칙(home-fit의 auto와 같다): 80%~100%에서 전체가 free의 24px 안쪽에 들어오면 가운데에, 들어오지 않으면 80%에서 왼쪽 위에 */
+  const auto = async () => {
+    const { free } = await stageOf(page);
+    const zoom = await zoomOf(page);
+    const bounds = await page.evaluate(() => {
+      const rects = [...document.querySelectorAll(".react-flow__node")].map((each) => each.getBoundingClientRect()).filter((rect) => rect.width > 0);
+      const [left, top] = [Math.min(...rects.map((rect) => rect.left)), Math.min(...rects.map((rect) => rect.top))];
+      return { x: left, y: top, width: Math.max(...rects.map((rect) => rect.right)) - left, height: Math.max(...rects.map((rect) => rect.bottom)) - top };
+    });
+    const whole = Math.min((free.width - 48) / (bounds.width / zoom), (free.height - 48) / (bounds.height / zoom));
+    const ok =
+      whole >= NAMED_ZOOM
+        ? near(zoom, Math.min(whole, 1), 0.002) && near(center(bounds).x, center(free).x, 1.5) && near(center(bounds).y, center(free).y, 1.5)
+        : near(zoom, NAMED_ZOOM, 0.001) && near(bounds.x, free.x + 24, 1.5) && near(bounds.y, free.y + 24, 1.5);
+    return { ok, text: `그래프 ${rectText(bounds)}, 가리지 않는 영역 ${rectText(free)}, 확대 비율 ${zoom.toFixed(3)}` };
+  };
+
+  await load(page, url, false);
+  await drag(page, center(await rectOf(page, ".info-panel-head")), -200, 60);
+  const floating = await rectOf(page, ".info-panel");
+  const stored = await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem("code-atlas:ui:v3")).panel));
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.mouse.move(1, 1);
+  await settle(page);
+  await mark();
+  await press("세로창 모드로 바꾸기", "portrait");
+  const turned = await cellsOf(page);
+  const placed = tall(turned);
+  t.check("창 1700×1000에서 모드 버튼을 누르면 세로창 모드로 바뀌고 고른 모드를 화면 설정에 저장한다", placed.ok && turned.layout === "portrait", `${placed.text}, 저장한 모드 ${turned.layout}`);
+  const refit = await auto();
+  t.check("전체 맞춤 상태에서 모드를 바꾸면 관계 그래프를 다시 만들지 않고 새 영역에 화면을 다시 맞춘다", (await marked()) && refit.ok, `${refit.text}, 표시 ${await marked()}`);
+  await t.shot();
+  const { free } = await stageOf(page);
+  await page.mouse.move(center(free).x, center(free).y);
+  await page.mouse.wheel(0, -300);
+  await settle(page);
+  const zoomed = await viewOf();
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  t.check("다시 읽어도 창 크기와 무관하게 세로창 모드다", tall(await cellsOf(page)).ok, (await cellsOf(page)).groups.join("·"));
+  await page.mouse.move(center(free).x, center(free).y);
+  await page.mouse.wheel(0, -300);
+  await settle(page);
+  const before = await viewOf();
+  await mark();
+  await resized(page, TALL, "portrait");
+  await press("가로창 모드로 바꾸기", "main");
+  const narrow = await cellsOf(page);
+  t.check(
+    "창 800×1200에서 모드 버튼을 누르면 가로창 모드로 바뀌고, 사용자가 옮겨 둔 화면과 관계 그래프가 그대로다",
+    wide(narrow).ok && narrow.layout === "landscape" && (await marked()) && (await viewOf()) === before && zoomed !== "",
+    `${wide(narrow).text}, 화면 ${before} → ${await viewOf()}`,
+  );
+  await resized(page, VIEW, "main");
+  const kept = await cellsOf(page);
+  const panel = await rectOf(page, ".info-panel");
+  const storedNow = await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem("code-atlas:ui:v3")).panel));
+  t.check(
+    "창을 1700×1000으로 되돌려도 고른 가로창 모드이고, 떠 있는 정보 패널이 세로창 모드에 가기 전의 사각형과 저장한 비율 그대로다",
+    wide(kept).ok && sameRect(panel, floating) && storedNow === stored,
+    `패널 ${rectText(floating)} → ${rectText(panel)}, 저장한 비율 ${storedNow}`,
+  );
+  await resized(page, TALL, "main");
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  t.check("창 800×1200에서 다시 읽어도 고른 가로창 모드다", wide(await cellsOf(page)).ok, (await cellsOf(page)).groups.join("·"));
+  await page.setViewportSize(VIEW);
+}
+
+/** 세로창 모드에서 고른 노드가 정보 패널의 사각형을 빼지 않은 영역의 가운데로 오는지 */
+async function portraitFit(t, page) {
+  await page.setViewportSize(TALL);
+  await load(page);
+  const { area, free, clear, panel } = await stageOf(page);
+  t.check(
+    "정보 패널이 관계 그래프 영역 밖에 있어 패널이 가리지 않는 영역이 영역 전체다",
+    sameRect(free, area) && apart(panel, area),
+    `영역 ${rectText(area)}, 가리지 않는 영역 ${rectText(free)}, 정보 패널 ${rectText(panel)}`,
+  );
+  const out = (
+    await page.evaluate(() =>
+      [...document.querySelectorAll(".react-flow__node")].map((wrapper) => {
+        const r = wrapper.getBoundingClientRect();
+        return { x: r.left, y: r.top, width: r.width, height: r.height };
+      }),
+    )
+  ).filter((rect) => !within(rect, area)).length;
+  t.check('"화면 맞춤"을 누르면 모든 상자가 관계 그래프 영역 안에 들어온다', out === 0, `영역을 벗어난 상자 ${out}개`);
+  await pick(page, FILE);
+  const box = await rectOf(page, node(FILE));
+  const placed = (start, length, from, room) => (length > room ? near(start, from + INSET) : near(start + length / 2, from + room / 2));
+  const room = (await stageOf(page)).clear;
+  t.check(
+    "고른 파일 상자의 중심이 왼쪽 아래 칸과 비교 버튼만 뺀 영역의 중심에 있거나, 상자가 영역보다 긴 축에서는 시작 끝이 20px 안쪽에 있다",
+    placed(box.x, box.width, room.x, room.width) && placed(box.y, box.height, room.y, room.height) && near(room.x + room.width, area.x + area.width) && clear.width > 0,
+    `상자 ${rectText(box)}, 영역 ${rectText(room)}`,
+  );
+  await pick(page, FUNCTION);
+  const seen = await reachable(page, FUNCTION);
+  t.check("고른 함수가 왼쪽 아래 칸이 가리지 않는 영역 안으로 와서 눌린다", seen.ok, `이름표 ${seen.at}`);
+  await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+}
+
+/** 세로창 모드의 정보 패널에서 머리 줄, 구역 접기, 요약 칸, 코드 뷰어, 그 사이 경계선이 가로창 모드와 같게 움직이는지 */
+async function portraitPanel(t, page) {
+  await answerSummaryReads(page, () => ({ summary: null, stale: false, available: true, reason: null }));
+  const graph = await api("/api/graph");
+  const sizes = async () => ({
+    panel: await rectOf(page, ".info-panel"),
+    summary: (await rectOf(page, ".info-panel-summary")).height,
+    code: await rectOf(page, ".info-panel .code"),
+  });
+  const pull = async (dy) => {
+    await drag(page, center(await rectOf(page, ".info-panel-divide")), 0, dy);
+    await page.waitForTimeout(300);
+    return sizes();
+  };
+  const open = async () => {
+    await pick(page, FILE);
+    await pick(page, FUNCTION);
+    await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+    await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 });
+  };
+  const text = (s) => `패널 ${rectText(s.panel)}, 요약 칸 ${s.summary.toFixed(1)}, 코드 뷰어 ${s.code.height.toFixed(1)}`;
+  await page.setViewportSize(TALL);
+  await load(page);
+  const empty = await headOf(page);
+  t.check("아무것도 고르지 않았으면 레포 머리 줄을 보이고 경계선이 없다", empty.startsWith(`${(await api("/api/repo")).name}\n레포`) && (await count(page, ".info-panel-divide")) === 0, empty.replaceAll("\n", " / "));
+  await open();
+  const start = await sizes();
+  const head = await headOf(page);
+  const around = touchingOf(graph, FUNCTION);
+  t.check(
+    "함수를 고르면 머리 줄이 파일 경로와 이름, 종류 칩을 적고 정보 구역이 연결을 적는다",
+    head.startsWith(`${spanOf(graph, FUNCTION).text}\n`) && head.includes("나가는 연결") && head.includes("들어오는 연결") && around.out + around.into > 0,
+    head.replaceAll("\n", " / "),
+  );
+  const rows = await codeRows(page);
+  t.check(
+    "LLM 요약 칸이 패널 높이의 4분의 1을 넘지 않고 코드 뷰어가 패널의 아래 끝까지 쓰며 함수의 범위를 보인다",
+    start.summary <= start.panel.height / 4 + 1 && near(start.code.y + start.code.height, start.panel.y + start.panel.height) && rows.some((row) => row.line === spanOf(graph, FUNCTION).from && !row.dim),
+    `${text(start)}, 보이는 줄 ${rows[0]?.line}~${rows.at(-1)?.line}`,
+  );
+  const tip = await tipOver(page, ".info-panel-head");
+  await drag(page, center(await rectOf(page, ".info-panel-head")), -120, -80);
+  await settle(page);
+  const held = await sizes();
+  t.check(
+    "머리 줄은 끌리지 않고 말풍선이 더블클릭의 동작만 적는다",
+    sameRect(held.panel, start.panel) && tip === "더블클릭하면 요약 칸이 기본 높이로 돌아간다" && (await page.evaluate(() => getComputedStyle(document.querySelector(".info-panel-head")).cursor)) === "default",
+    `${rectText(start.panel)} → ${rectText(held.panel)}, 말풍선 "${tip}"`,
+  );
+  const lower = await pull(100);
+  t.check(
+    "경계선을 아래로 100px 끌면 요약 칸이 100px 늘고 코드 뷰어가 100px 준다",
+    near(lower.summary, start.summary + 100, 1.5) && near(lower.code.height, start.code.height - 100, 1.5) && sameRect(lower.panel, start.panel),
+    `${text(start)} → ${text(lower)}`,
+  );
+  await t.shot();
+  const [top, bottom] = [await pull(-2000), await pull(2000)];
+  t.check("끝까지 끌어도 요약 칸은 56px, 코드 뷰어는 96px 아래로 줄지 않는다", near(top.summary, 56, 1.5) && near(bottom.code.height, 96, 1.5), `위로 ${text(top)}, 아래로 ${text(bottom)}`);
+  await pull(-2000);
+  await pull(100);
+  const set = await sizes();
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  await open();
+  const kept = await sizes();
+  t.check("다시 읽어도 요약 칸의 높이가 유지된다", near(kept.summary, set.summary, 1.5) && near(kept.code.height, set.code.height, 1.5), text(kept));
+  await drag(page, center(await rectOf(page, "#portrait > .separator")), 0, -150);
+  await settle(page);
+  const taller = await sizes();
+  t.check(
+    "위아래 경계선을 끌어 칸의 높이를 바꾸면 요약 칸이 패널 높이에 대한 비율을 유지한다",
+    taller.panel.height > kept.panel.height + 100 && near(taller.summary / taller.panel.height, kept.summary / kept.panel.height, 0.005),
+    `패널 ${kept.panel.height.toFixed(0)} → ${taller.panel.height.toFixed(0)}, 요약 칸 ${taller.summary.toFixed(1)}`,
+  );
+  await page.dblclick(".info-panel-head");
+  await settle(page);
+  const reset = await sizes();
+  t.check(
+    "머리 줄을 더블클릭하면 요약 칸의 높이만 처음으로 돌아가고 칸의 크기는 그대로다",
+    sameRect(reset.panel, taller.panel) && reset.summary <= reset.panel.height / 4 + 1 && reset.summary < taller.summary - 1 && (await page.evaluate(() => JSON.parse(localStorage.getItem("code-atlas:ui:v3")).split)) === null,
+    text(reset),
+  );
+  await page.locator(".info-panel-facts .info-section-head").click();
+  await page.locator(".info-panel-summary .info-section-head").click();
+  await page.waitForTimeout(300);
+  const folded = await page.evaluate(() => ({
+    rows: document.querySelectorAll(".info-row").length,
+    summary: document.querySelector(".info-panel-summary").hasAttribute("data-folded"),
+    divide: document.querySelectorAll(".info-panel-divide").length,
+    ui: JSON.parse(localStorage.getItem("code-atlas:ui:v3")),
+  }));
+  const after = await sizes();
+  t.check(
+    "정보 구역과 LLM 요약 구역의 머리를 누르면 접히고 코드 뷰어가 남은 높이를 쓴다",
+    folded.rows === 0 && folded.summary && folded.divide === 0 && !folded.ui.factsOpen && !folded.ui.summaryOpen && after.code.height > reset.code.height && near(after.code.y + after.code.height, after.panel.y + after.panel.height),
+    `정보 줄 ${folded.rows}개, 요약 접힘 ${folded.summary}, 코드 뷰어 ${reset.code.height.toFixed(1)} → ${after.code.height.toFixed(1)}`,
+  );
 }
 
 /** 코드 뷰어에 보이는 줄마다 줄 번호와 흐린 글자가 있는지, 코드 뷰어 위 끝에서 잰 높이. 위에서 아래 순서다. */
@@ -3990,7 +4333,7 @@ async function toolbar(t, page) {
     }
     /** 상단 줄 안에 보이는 버튼과 입력 가운데 창이나 상단 줄 밖에 있거나 가운데 점에서 눌리지 않는 것 */
     const read = () =>
-      page.evaluate(() => {
+      page.evaluate((margin) => {
         const shown = (element) => {
           const rect = element.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
@@ -4016,10 +4359,10 @@ async function toolbar(t, page) {
           last: last === null ? null : { text: last.textContent, width: Math.round(last.getBoundingClientRect().width), whole: last.scrollWidth <= last.clientWidth, inside: last.getBoundingClientRect().right <= area.right },
           cut: document.querySelector(".trail-cut")?.dataset.tip ?? null,
           stale: document.querySelector(".reload-dot") !== null,
-          gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom, Math.round(stage.width * 0.005)],
+          gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom, Math.round(stage.width * margin)],
           filters: filters === undefined ? null : { inside: filters.left >= area.left && filters.right <= Math.min(area.right, window.innerWidth) && filters.bottom <= window.innerHeight },
         };
-      });
+      }, PANEL_GAP);
     const bar = await read();
     t.check(
       `${name}: 상단 줄이 한 줄이고 ${["뒤로", "앞으로", ...TOOLS].join("·")} 버튼이 모두 창 안에서 가운데 점으로 눌린다`,
@@ -14475,6 +14818,11 @@ const SCENARIOS = [
   ["body", body],
   ["panel", panel],
   ["panel-ratio", panelRatio],
+  ["portrait-auto", portraitAuto],
+  ["portrait-resize", portraitResize],
+  ["portrait-toggle", portraitToggle],
+  ["portrait-fit", portraitFit],
+  ["portrait-panel", portraitPanel],
   ["code-scope", codeScope],
   ["hover", hover],
   ["edge", edge],
@@ -14649,6 +14997,8 @@ const VARIABLES = new Set(SCENARIOS.filter(([name]) => name.startsWith("var-")).
 const COMPARE = new Set(SCENARIOS.filter(([name]) => name.startsWith("compare-")).map(([name]) => name));
 /** 레포 열기 시나리오와 환경 점검 시나리오. 레포 없이 띄운 서버에서 돌고 스크린샷 이름이 s6-로 시작한다. */
 const OPEN = new Set(SCENARIOS.filter(([name]) => name.startsWith("open-") || name.startsWith("tools-")).map(([name]) => name));
+/** 세로창 모드 시나리오. 스크린샷 이름이 s6-로 시작한다. */
+const PORTRAIT = new Set(SCENARIOS.filter(([name]) => name.startsWith("portrait-")).map(([name]) => name));
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 
@@ -14679,9 +15029,19 @@ async function run(browser, name, scenario) {
       window.__shotsKeys.push({ key: event.key, mod: event.ctrlKey || event.metaKey, prevented: event.defaultPrevented }),
     );
   });
+  // 세로창 모드 시나리오가 아니면 가로창 모드의 화면을 본다. 창의 높이가 폭보다 큰 크기에서도 가로창 모드로 열리게, 고른 모드가 없는 화면 설정에
+  // 상단 줄의 버튼으로 가로창 모드를 고른 값을 넣어 둔다.
+  if (!PORTRAIT.has(name)) {
+    await context.addInitScript(() => {
+      const saved = JSON.parse(localStorage.getItem("code-atlas:ui:v3") ?? "{}");
+      if (!("layout" in saved)) {
+        localStorage.setItem("code-atlas:ui:v3", JSON.stringify({ ...saved, layout: "landscape" }));
+      }
+    });
+  }
   const results = [];
   const errors = [];
-  const path = join(OUT, `${OPEN.has(name) ? "s6" : COMPARE.has(name) ? "s5" : VARIABLES.has(name) ? "mv" : STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
+  const path = join(OUT, `${OPEN.has(name) || PORTRAIT.has(name) ? "s6" : COMPARE.has(name) ? "s5" : VARIABLES.has(name) ? "mv" : STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
   const page = await context.newPage();
   let shot = false;
   const t = {

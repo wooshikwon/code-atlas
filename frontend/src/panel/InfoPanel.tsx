@@ -1,7 +1,8 @@
-// 관계 그래프 위에 떠 있는 정보 패널. 저장소의 선택을 머리 줄, "정보" 구역과 그 안의 코드 줄 목록, LLM 요약 칸, 코드 뷰어로 바꾼다.
+// 정보 패널의 내용. 저장소의 선택을 머리 줄, "정보" 구역과 그 안의 코드 줄 목록, LLM 요약 칸, 코드 뷰어로 바꾼다.
 // 아무것도 고르지 않았으면 레포 머리 줄 아래에 켠 분석 표시의 요약을 보인다.
 // 경로 고정 중에는 선택 대신 finder.focus의 노드를 보인다.
-import { useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+// 내용을 놓는 틀은 두 가지다. 가로창 모드는 관계 그래프 위에 떠 있는 사각형(`Floating`)이고, 세로창 모드는 아래 오른쪽 칸을 채운다(`Docked`).
+import { useMemo, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { compared, gone } from "../graph/compare";
@@ -19,12 +20,10 @@ import { Facts, type FactRow } from "./Facts";
 import { Header, type HeaderItem } from "./Header";
 import { useOpened } from "./opened";
 import { Overview } from "./Overview";
-import { divide, MIN_CODE, MIN_SUMMARY, type Dir } from "./rect";
+import { divide } from "./rect";
 import { Sites } from "./Sites";
 import { Summary } from "./Summary";
-import { usePanelRect } from "./usePanelRect";
 
-const DIRS: Dir[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 const SUMMARIZED = new Set<AtlasNode["kind"]>(["module", "class", "dataclass", "function", "method"]);
 /** 안에 든 노드의 미확인 호출 수까지 합쳐 적는 종류 */
 const UNITS = new Set<AtlasNode["kind"]>(["module", "package"]);
@@ -49,7 +48,18 @@ function rangeAround(graph: Graph, site: SiteRef, among: (id: string) => boolean
   return found;
 }
 
-export function InfoPanel() {
+interface PanelBodyProps {
+  /** 틀의 DOM 요소. 요약 칸과 코드 뷰어를 이 요소 안에서 찾고 요약 칸의 높이를 이 요소의 높이로 나눈다. */
+  frame: RefObject<HTMLDivElement | null>;
+  /** 머리 줄의 pointerdown에 넣는 처리기. 머리 줄을 끌지 않는 틀은 주지 않는다. */
+  grip?: (event: ReactPointerEvent<HTMLElement>) => void;
+  /** 머리 줄을 더블클릭했을 때 요약 칸의 높이와 함께 틀을 처음 값으로 돌린다. 처음 값으로 돌릴 것이 없는 틀은 주지 않는다. */
+  reset?: () => void;
+  /** 머리 줄의 말풍선 글 */
+  tip: string;
+}
+
+export function PanelBody({ frame, grip, reset, tip }: PanelBodyProps) {
   const repo = useAtlas((s) => s.repo);
   const graph = useAtlas((s) => s.graph);
   const selection = useAtlas((s) => s.selection);
@@ -254,12 +264,11 @@ export function InfoPanel() {
         : node !== undefined && node.kind !== "package" && node.path !== null
           ? { path: node.path, range: node.kind === "module" ? null : node.range, base: past.nodes.has(node.id) }
           : null;
-  const { ref, rect, grip, reset } = usePanelRect();
   /** LLM 요약 칸을 그리는 노드. 대상 시점에 없는 노드는 요약을 요청할 수 없다. */
   const summarized = node !== undefined && SUMMARIZED.has(node.kind) && !past.nodes.has(node.id);
   /** LLM 요약 칸과 코드 뷰어 사이의 경계선을 끌어 요약 칸의 높이를 바꾸고, 그 높이를 패널 높이로 나눈 값을 저장한다. */
   const part = (event: ReactPointerEvent<HTMLElement>) => {
-    const panel = ref.current;
+    const panel = frame.current;
     const summary = panel?.querySelector<HTMLElement>(".info-panel-summary");
     const viewer = panel?.querySelector<HTMLElement>(".code");
     if (event.button !== 0 || panel === null || summary == null || viewer == null) {
@@ -284,52 +293,40 @@ export function InfoPanel() {
     );
   };
 
-  /** 패널의 사각형과 요약 칸의 높이를 처음 값으로 돌린다. */
+  /** 틀과 요약 칸의 높이를 처음 값으로 돌린다. */
   const restore = () => {
-    reset();
+    reset?.();
     setSplit(null);
   };
 
+  if (item === null || index === null) {
+    return null;
+  }
   return (
-    <div
-      ref={ref}
-      className="info-panel"
-      style={
-        rect === null
-          ? undefined
-          : ({ left: rect.x, top: rect.y, width: rect.width, height: rect.height, "--panel-height": `${rect.height}px`, "--summary-min": `${MIN_SUMMARY}px`, "--code-min": `${MIN_CODE}px` } as CSSProperties)
-      }
-    >
-      {rect !== null && item !== null && index !== null && (
-        <>
-          <div className="info-panel-head" onPointerDown={grip("move")} onDoubleClick={restore} data-tip="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다">
-            <Header item={item} nodes={index.nodes} />
-          </div>
-          {rows.length > 0 && (
-            <Facts rows={rows}>
-              {file === null && groups !== null && (
-                <Sites
-                  groups={groups}
-                  spread={new Set(groups.map((_, g) => g).filter((g) => PEERS.has(listed) === flipped.includes(g)))}
-                  toggle={(g) => setShownAt({ selection, via, listed, flipped: flipped.includes(g) ? flipped.filter((other) => other !== g) : [...flipped, g], site })}
-                  go={show}
-                  opened={site}
-                  open={(picked) => setShownAt({ selection, via, listed, flipped, site: picked === site ? null : picked })}
-                />
-              )}
-            </Facts>
+    <>
+      <div className="info-panel-head" onPointerDown={grip} onDoubleClick={restore} data-tip={tip}>
+        <Header item={item} nodes={index.nodes} />
+      </div>
+      {rows.length > 0 && (
+        <Facts rows={rows}>
+          {file === null && groups !== null && (
+            <Sites
+              groups={groups}
+              spread={new Set(groups.map((_, g) => g).filter((g) => PEERS.has(listed) === flipped.includes(g)))}
+              toggle={(g) => setShownAt({ selection, via, listed, flipped: flipped.includes(g) ? flipped.filter((other) => other !== g) : [...flipped, g], site })}
+              go={show}
+              opened={site}
+              open={(picked) => setShownAt({ selection, via, listed, flipped, site: picked === site ? null : picked })}
+            />
           )}
-          {item.type === "repo" && <Overview nodes={index.nodes} />}
-          {summarized && <Summary node={node.id} split={code === null || !summaryOpen ? null : split} />}
-          {summarized && summaryOpen && code !== null && (
-            <div className="info-panel-divide" onPointerDown={part} onDoubleClick={() => setSplit(null)} data-tip="끌어서 요약 칸과 코드의 높이를 바꾸고, 더블클릭하면 기본 높이로 돌아간다" />
-          )}
-          {code !== null && <CodeView {...code} />}
-        </>
+        </Facts>
       )}
-      {DIRS.map((dir) => (
-        <div key={dir} className="info-panel-resize" data-dir={dir} onPointerDown={grip(dir)} />
-      ))}
-    </div>
+      {item.type === "repo" && <Overview nodes={index.nodes} />}
+      {summarized && <Summary node={node.id} split={code === null || !summaryOpen ? null : split} />}
+      {summarized && summaryOpen && code !== null && (
+        <div className="info-panel-divide" onPointerDown={part} onDoubleClick={() => setSplit(null)} data-tip="끌어서 요약 칸과 코드의 높이를 바꾸고, 더블클릭하면 기본 높이로 돌아간다" />
+      )}
+      {code !== null && <CodeView {...code} />}
+    </>
   );
 }
