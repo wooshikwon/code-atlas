@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+from history import build
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_repo"
 CYCLE_FIXTURE = Path(__file__).parent / "fixtures" / "cycle_repo"
@@ -92,6 +93,20 @@ def git_repo(tmp_path: Path) -> Path:
 @pytest.fixture(scope="module")
 def module_repo(tmp_path_factory) -> Path:
     return _copy_fixture(tmp_path_factory.mktemp("module"))
+
+
+@pytest.fixture
+def history_repo(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    """이력이 있는 고정 레포와 단계 이름표별 커밋 해시."""
+    repo = tmp_path / "history_repo"
+    return repo, build(repo)
+
+
+@pytest.fixture(scope="module")
+def module_history(tmp_path_factory) -> tuple[Path, dict[str, str]]:
+    """모듈의 시험이 함께 읽는 `history_repo`. 시험은 이 레포를 고치지 않는다."""
+    repo = tmp_path_factory.mktemp("history") / "history_repo"
+    return repo, build(repo)
 
 
 @pytest.fixture(scope="session")

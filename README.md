@@ -209,7 +209,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | `code_atlas/runner.py` | 분석 태스크 하나의 수명과 진행 상태, 언어 서버 세션, 분석 캐시를 맡는다 |
 | `code_atlas/unused.py` | 분석 결과에서 들어오는 실행·사용 선이 없는 정의를 찾고 제외 규칙 일곱 개를 적용해 미사용 후보를 낸다 |
 | `code_atlas/venv.py` | 대상 레포의 가상환경 인터프리터 탐색 |
-| `code_atlas/changes.py` | 대상 레포에서 `git status`·`git diff HEAD`를 읽어 마지막 커밋 뒤에 바뀐 파일과 줄 범위를 낸다. 인덱스를 다시 쓰지 않는 읽기 전용 명령만 부른다 |
+| `code_atlas/git.py` | 대상 레포의 git을 읽는다. 지금 커밋과 브랜치, 파일의 상태(`git status`), 커밋 그래프(`git log`), 두 시점의 조상 관계와 갈라진 커밋(`git merge-base`), 두 시점 사이에 바뀐 `.py` 파일과 줄 단위 토막(`git diff`), 커밋의 파일 본문(`git show`)을 내고 커밋의 파일을 레포 밖 폴더에 꺼낸다(`git archive`). 모든 git 호출이 함수 하나를 지나고 인덱스를 다시 쓰지 않는 읽기 전용 명령만 부른다 |
 | `code_atlas/summary.py` | 분석 결과에서 앞뒤 흐름 자료를 모아 프롬프트를 만들고, Claude Code CLI(`claude -p`)를 불러 노드의 설명과 코드 범위의 설명을 받아 `~/.cache/code-atlas/summaries.db`에 저장한다 |
 | `code_atlas/api.py` | 서버가 뜬 뒤에 분석을 시작하고 분석 결과를 판 번호와 함께 응답 상태에 넣는다. `/api/status`(분석 단계와 진행 수, 판 번호, 언어 서버 상태, 분석 뒤 바뀐 파일), `/api/repo`·`/api/tree`·`/api/graph`·`/api/file`(분석 결과. `/api/file`은 분석할 때 읽은 본문을 돌려준다. 첫 결과가 나오기 전에는 `/api/status` 밖의 경로가 503이다), `POST /api/reload`(열어 둔 세션에서 바뀐 만큼만 다시 분석해 결과를 바꾸고 판 번호를 올린다. 분석하는 중에 온 요청은 그 분석이 끝나기를 기다린다), `/api/hover`·`/api/definition`(언어 서버에 묻는 타입 정보와 정의 위치), `/api/changes`(변경 표시), `/api/unused`(판정 대상 정의 수 `definitions`와 미사용 후보의 노드 id `candidates`), `/api/summary`(LLM 요약. 요약을 만든 `POST` 응답은 `claude` 호출의 토큰 수 `usage`를 담고, 캐시에서 읽은 요약은 `usage`가 `null`이다), `/api/summaries`(노드마다 남겨 둔 요약의 요지 목록), `/api/explanations`·`/api/explanation`(코드 범위 설명) 경로와 `frontend/dist/` 서빙. `127.0.0.1`에만 연다 |
 | `code_atlas/cli.py` | `code-atlas <레포>`(서버 실행과 분석)와 `code-atlas analyze <레포>`(결과 출력) 명령 |

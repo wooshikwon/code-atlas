@@ -20,7 +20,7 @@ from typing import TypeVar
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from . import changes
+from . import git
 from .analyze import Analyzed, Progress
 from .collect import RepoFiles, collected, is_test_path
 from .lsp import Location, Session, to_utf8
@@ -375,28 +375,36 @@ def create_app(
         analyzed: Analyzed = app.state.analyzed
         root = analyzed.files.root
         stale = analyzed.stale()
-        found = changes.status(root)
+        found = git.status(root)
         states = {path: state for path, state in (found or {}).items() if path.endswith(".py")}
-        fresh = [p for p, state in states.items() if state != changes.DELETED and p not in analyzed.texts]
+        fresh = [p for p, state in states.items() if state != git.DELETED and p not in analyzed.texts]
         for path in set(fresh) - collected(root, fresh):
             del states[path]
-        ranges = (changes.hunks(root) or {}) if changes.MODIFIED in states.values() else {}
+        head = git.head(root) if git.MODIFIED in states.values() else None
+        ranges = {
+            # 줄이 지워지기만 한 곳은 지워진 줄 바로 앞 줄과 뒤 줄이 범위다.
+            path: [
+                (h.new_start, h.new_start + h.new_count - 1) if h.new_count else (max(h.new_start, 1), h.new_start + 1)
+                for h in found_hunks
+            ]
+            for path, found_hunks in (git.hunks(root, head, git.WORKTREE) if head is not None else {}).items()
+        }
         nodes: dict[str, str] = {}
         for node in app.state.nodes.values():
             state = states.get(node.path)
-            if state is None or state == changes.DELETED:
+            if state is None or state == git.DELETED:
                 continue
             # 파일의 노드는 늘 넣고, 그 안의 정의는 줄 범위가 분석한 본문의 것이므로 본문이 그대로일 때만 넣는다.
             if node.kind in ("module", "package") or (
                 node.path not in stale
-                and (state == changes.ADDED or _overlaps(node.range, ranges.get(node.path, [])))
+                and (state == git.ADDED or _overlaps(node.range, ranges.get(node.path, [])))
             ):
                 nodes[node.id] = state
         for path in stale:
-            states.setdefault(path, changes.UNCHANGED)
+            states.setdefault(path, git.UNCHANGED)
         return {
             "git": found is not None,
-            "branch": changes.branch(root) if found is not None else None,
+            "branch": git.branch(root) if found is not None else None,
             "files": [
                 {"path": path, "status": state, "stale": path in stale, "test": is_test_path(path)}
                 for path, state in sorted(states.items())
