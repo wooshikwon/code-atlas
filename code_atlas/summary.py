@@ -37,6 +37,7 @@ MAX_STYLE_GUIDE = 100_000
 MAX_DOC = 400
 MAX_FILE_DOC = 1_200
 MAX_PROCESSES = 2
+STYLE_GUIDE_UNREADABLE = "style_guide_unreadable"
 TURN_POLL = 0.05  # `claude`의 확인 명령이 끝났는지 다시 보는 간격
 CACHE_PATH = Path.home() / ".cache" / "code-atlas" / "summaries.db"
 STYLE_GUIDE_ENV = "CODE_ATLAS_STYLE_GUIDE"
@@ -997,6 +998,8 @@ class Summaries:
         self._making: dict[str, _Making] = {}
         self._checking = asyncio.Lock()
         self._ready = False
+        # 마지막 `unavailable`이 낸 까닭의 경우. `tools.Found.code`의 값이거나 style_guide_unreadable이고, 까닭이 없으면 None이다
+        self.code: str | None = None
 
     async def unavailable(self) -> str | None:
         """설명을 만들 수 없는 까닭. 서술 규약 문서를 읽지 못하거나 Claude Code CLI를 부를 수 없으면 그 까닭이고, 만들 수 있으면 None이다.
@@ -1006,12 +1009,16 @@ class Summaries:
         try:
             system_prompt_of(self.style_guide)
         except SummaryError as exc:
+            self.code = STYLE_GUIDE_UNREADABLE
             return str(exc)
         async with self._checking:
             if self._ready:
+                self.code = None
                 return None
             reason = await unavailable()
             self._ready = reason is None
+            found = tools.last(tools.CLAUDE.name)
+            self.code = None if reason is None else found.code if found is not None else tools.NOT_FOUND
             return reason
 
     async def close(self) -> None:

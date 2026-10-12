@@ -494,7 +494,7 @@ def create_app(
         if not tried.ok:
             return JSONResponse(
                 status_code=400,
-                content={"error": f"실행하지 못했다: {tried.path} ({tried.detail})", "attempt": asdict(tried)},
+                content={"error": f"실행하지 못했다: {tried.path} ({tried.detail})", "code": tried.code, "attempt": asdict(tried)},
             )
         settings.keep_tool(tool, tried.path)
         tools.fresh(tool)
@@ -787,7 +787,7 @@ def create_app(
         summaries: Summaries = app.state.summaries
         reason = await summaries.unavailable()
         summary, stale = summaries.kept(prompt, Subject(state.repo["root"], "node", node))
-        return {"summary": summary, "stale": stale, "available": reason is None, "reason": reason}
+        return {"summary": summary, "stale": stale, "available": reason is None, "reason": reason, "code": summaries.code}
 
     @app.get("/api/summaries")
     def get_summaries(state: Workspace = ready) -> dict:

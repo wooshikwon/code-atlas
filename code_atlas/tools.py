@@ -37,6 +37,31 @@ SAVED = "saved"
 ENV = "env"
 KNOWN = "known"
 
+# `Attempt.code`와 `Found.code`의 값. 화면은 이 값으로 경우를 가르고 `detail`과 `note`는 보이기만 한다.
+OK = "ok"  # 확인을 통과했다
+NOT_FOUND = "not_found"  # Found만: 후보가 없거나 후보의 파일이 모두 없다
+MISSING = "missing"  # 없는 파일
+NOT_FILE = "not_file"  # 파일이 아니다
+NOT_EXECUTABLE = "not_executable"  # 실행 권한 없음
+NO_CLT = "no_clt"  # Xcode Command Line Tools가 없어 껍데기 파일을 실행하지 않았다
+TIMEOUT = "timeout"  # 확인 명령이 시간 안에 끝나지 않았다
+SPAWN_FAILED = "spawn_failed"  # 확인 명령을 띄우지 못했다
+FAILED = "failed"  # 확인 명령이 0이 아닌 종료 코드로 끝났다
+UNREADABLE = "unreadable"  # 확인 명령의 출력에서 판을 읽지 못했다
+NOT_ON_PATH = "not_on_path"  # `--python`에 준 이름이 `PATH`에 없다
+MANAGER_MISSING = "manager_missing"  # 표지 파일이 가리키는 관리자가 `PATH`에 없다
+MANAGER_FAILED = "manager_failed"  # 관리자 명령이 실패했거나 시간 안에 끝나지 않았다
+MANAGER_NO_ENV = "manager_no_env"  # 관리자 명령이 이 레포의 환경을 알려 주지 않았다
+DISABLED = "disabled"  # `CODE_ATLAS_NO_CLAUDE`가 켜져 있어 `claude`를 실행하지 않았다
+SHELL_PENDING = "shell_pending"  # 로그인 셸의 환경을 읽는 중이라 `claude`를 실행하지 않았다
+HOME_MISMATCH = "home_mismatch"  # 환경의 `HOME`이 계정의 홈 폴더가 아니라 `claude`를 실행하지 않았다
+USER_MISMATCH = "user_mismatch"  # 환경의 `USER`가 계정의 이름이 아니라 `claude`를 실행하지 않았다
+NO_KEYCHAIN_COMMAND = "no_keychain_command"  # 환경의 `PATH`에 `security`가 없어 `claude`를 실행하지 않았다
+NOT_LOGGED_IN_CODE = "not_logged_in"  # Found만: `claude`가 로그인돼 있지 않다
+NOT_ANSWERING_CODE = "not_answering"  # Found만: `claude auth status`가 응답하지 않았다
+# 파일이나 명령이 그 위치에 없다는 기록. 이것만 있는 결과는 `not_found`다.
+_ABSENT = frozenset({MISSING, NOT_ON_PATH, MANAGER_MISSING, MANAGER_NO_ENV})
+
 # 확인 명령의 시간 제한. 이 Mac에서 잰 값은 `claude --version` 0.14초, `claude auth status` 0.82초, `git --version`
 # 0.10초, `xcode-select -p` 0.09초, pyenv shim을 거친 인터프리터 0.2초 안쪽, 관리자 명령 가운데 가장 느린
 # `poetry env info -p`와 `conda env list --json`이 0.9초다. 느린 디스크와 처음 실행을 감안해 잰 값의 열 배 이상을 둔다.
@@ -62,7 +87,7 @@ NOT_ANSWERING = "Claude Code CLI가 응답하지 않는다"
 # Xcode Command Line Tools가 없으면 실행할 때 설치 창을 띄우는 macOS의 껍데기 파일
 CLT_STUBS = frozenset({"/usr/bin/git", "/usr/bin/python3"})
 XCODE_SELECT = "/usr/bin/xcode-select"
-NO_CLT = "Xcode Command Line Tools가 없다"
+NO_CLT_DETAIL = "Xcode Command Line Tools가 없다"
 
 # 출처 ③의 알려진 위치. `*`가 든 경로는 판 번호가 높은 순서로 편다.
 PLACES: dict[str, tuple[str, ...]] = {
@@ -94,6 +119,7 @@ class Attempt:
     path: str | None  # 후보의 경로. 경로를 내지 못한 시도(관리자 명령이 없음)는 None이다
     ok: bool
     detail: str  # 판 번호나 통과하지 못한 까닭
+    code: str = OK  # 통과하지 못한 경우를 가리키는 값. 통과했으면 ok
 
 
 @dataclass
@@ -109,6 +135,9 @@ class Found:
     auth: str | None = None  # claude만: CLI가 알려 준 로그인 방법
     prefix: str | None = None  # python만: sys.prefix
     venv: bool | None = None  # python만: 가상환경인지
+    # 도구를 쓸 수 있으면 ok, 로그인돼 있지 않으면 not_logged_in·not_answering. 경로가 없으면 없는 파일이 아닌 첫 기록의
+    # code이고, 그런 기록이 없으면 not_found다
+    code: str = NOT_FOUND
 
 
 @dataclass(frozen=True)
@@ -174,10 +203,12 @@ class _Candidate:
     source: str
     path: str | None
     detail: str = ""
+    code: str = OK
 
 
 _settings: Settings | None = None
 _memory: dict[tuple[str, str | None], tuple[Found, tuple[int, int, int, int], str | None]] = {}
+_last: dict[tuple[str, str | None], Found] = {}  # 도구마다 마지막으로 찾은 결과. 통과하지 못한 결과도 둔다
 _locks: dict[tuple[str, str | None], threading.Lock] = {}
 _guard = threading.Lock()
 
@@ -235,17 +266,17 @@ def _has_clt() -> bool:
 def _try(tool: _Tool, source: str, path: str, cwd: str) -> tuple[Attempt, dict[str, object] | None]:
     """후보 하나를 확인 명령으로 실행한다. 통과하면 기록과 `Found`에 적을 값을, 아니면 기록과 None을 낸다."""
 
-    def failed(detail: str) -> tuple[Attempt, None]:
-        return Attempt(source, path, False, detail), None
+    def failed(code: str, detail: str) -> tuple[Attempt, None]:
+        return Attempt(source, path, False, detail, code), None
 
     if not os.path.exists(path):
-        return failed("없는 파일")
+        return failed(MISSING, "없는 파일")
     if not os.path.isfile(path):
-        return failed("파일이 아니다")
+        return failed(NOT_FILE, "파일이 아니다")
     if not os.access(path, os.X_OK):
-        return failed("실행 권한 없음")
+        return failed(NOT_EXECUTABLE, "실행 권한 없음")
     if sys.platform == "darwin" and os.path.realpath(path) in CLT_STUBS and not _has_clt():
-        return failed(NO_CLT)
+        return failed(NO_CLT, NO_CLT_DETAIL)
     try:
         if tool.turns is not None:
             with tool.turns.alone():
@@ -253,14 +284,14 @@ def _try(tool: _Tool, source: str, path: str, cwd: str) -> tuple[Attempt, dict[s
         else:
             code, out, err = _execute([path, *tool.args], tool.timeout, cwd)
     except subprocess.TimeoutExpired:
-        return failed(f"{tool.timeout:g}초 안에 끝나지 않았다")
+        return failed(TIMEOUT, f"{tool.timeout:g}초 안에 끝나지 않았다")
     except OSError as exc:
-        return failed(f"실행하지 못했다: {exc.strerror or exc}")
+        return failed(SPAWN_FAILED, f"실행하지 못했다: {exc.strerror or exc}")
     if code != 0:
-        return failed(_failure(code, err))
+        return failed(FAILED, _failure(code, err))
     fields = tool.read(out)
     if fields is None:
-        return failed("확인 명령의 출력을 읽지 못했다")
+        return failed(UNREADABLE, "확인 명령의 출력을 읽지 못했다")
     return Attempt(source, path, True, str(fields["version"])), fields
 
 
@@ -309,7 +340,7 @@ def _find(
         seen: set[str] = set()
         for candidate in candidates():
             if candidate.path is None or candidate.detail:
-                found.attempts.append(Attempt(candidate.source, candidate.path, False, candidate.detail))
+                found.attempts.append(Attempt(candidate.source, candidate.path, False, candidate.detail, candidate.code))
                 continue
             identity = _identity(candidate.path)
             if identity in seen:
@@ -320,13 +351,16 @@ def _find(
             found.attempts.append(attempt)
             if fields is None or stamp is None:
                 continue
-            found.path, found.source = candidate.path, candidate.source
+            found.path, found.source, found.code = candidate.path, candidate.source, OK
             for name, value in fields.items():
                 setattr(found, name, value)
             if finish is not None:
                 finish(found)
             _memory[key] = (found, stamp, given)
             break
+        if found.path is None:
+            found.code = next((a.code for a in found.attempts if a.code not in _ABSENT), NOT_FOUND)
+        _last[key] = found
         return found
 
 
@@ -397,25 +431,26 @@ GIT = _Tool("git", ("--version",), GIT_TIMEOUT, _version)
 PYTHON = _Tool("python", ("-c", _PROBE), PROBE_TIMEOUT, _interpreter)
 
 
-def _claude_refused() -> str | None:
-    """지금 환경에서 `claude`를 실행하지 않는 까닭. 실행해도 되면 None이다.
+def _claude_refused() -> tuple[str, str] | None:
+    """지금 환경에서 `claude`를 실행하지 않는 경우의 code와 까닭. 실행해도 되면 None이다.
 
     Claude Code CLI는 자격 증명을 키체인 항목 하나에 두고, 계정 이름을 `USER`에서, 설정 폴더를 `HOME`에서 읽으며,
     `security`를 `PATH`에서 찾는다. 이 값이 사용자의 로그인 환경과 다른 프로세스가 CLI를 실행하면 CLI가 다른 항목을
     읽거나 쓰므로, 로그인 환경과 같다고 확인한 환경에서만 실행한다.
     """
-    if os.environ.get(NO_CLAUDE_ENV):
-        return f"환경 변수 {NO_CLAUDE_ENV}가 켜져 있다"
-    if shellenv.reading():
-        return "로그인 셸의 환경을 읽는 중이다"
+    refused = None
     account = pwd.getpwuid(os.getuid())
-    if os.environ.get("HOME") != account.pw_dir:
-        return f"환경의 HOME이 이 계정의 홈 폴더({account.pw_dir})가 아니다"
-    if os.environ.get("USER", account.pw_name) != account.pw_name:
-        return f"환경의 USER가 이 계정의 이름({account.pw_name})이 아니다"
-    if sys.platform == "darwin" and next(_on_path(KEYCHAIN_COMMAND), None) is None:
-        return f"환경의 PATH에 {KEYCHAIN_COMMAND}가 없다"
-    return None
+    if os.environ.get(NO_CLAUDE_ENV):
+        refused = DISABLED, f"환경 변수 {NO_CLAUDE_ENV}가 켜져 있다"
+    elif shellenv.reading():
+        refused = SHELL_PENDING, "로그인 셸의 환경을 읽는 중이다"
+    elif os.environ.get("HOME") != account.pw_dir:
+        refused = HOME_MISMATCH, f"환경의 HOME이 이 계정의 홈 폴더({account.pw_dir})가 아니다"
+    elif os.environ.get("USER", account.pw_name) != account.pw_name:
+        refused = USER_MISMATCH, f"환경의 USER가 이 계정의 이름({account.pw_name})이 아니다"
+    elif sys.platform == "darwin" and next(_on_path(KEYCHAIN_COMMAND), None) is None:
+        refused = NO_KEYCHAIN_COMMAND, f"환경의 PATH에 {KEYCHAIN_COMMAND}가 없다"
+    return (refused[0], f"{UNCHECKED}: {refused[1]}") if refused is not None else None
 
 
 def _login(found: Found) -> None:
@@ -424,7 +459,7 @@ def _login(found: Found) -> None:
         with CLAUDE_TURNS.alone():
             code, out, _ = _execute([found.path, *STATUS_ARGS], CLAUDE_TIMEOUT, "/")
     except (OSError, subprocess.TimeoutExpired):
-        found.note = NOT_ANSWERING
+        found.note, found.code = NOT_ANSWERING, NOT_ANSWERING_CODE
         return
     try:
         told = json.loads(out)
@@ -433,7 +468,7 @@ def _login(found: Found) -> None:
     if not isinstance(told, dict):
         told = {}
     if code == 1 or told.get("loggedIn") is False:
-        found.note = NOT_LOGGED_IN
+        found.note, found.code = NOT_LOGGED_IN, NOT_LOGGED_IN_CODE
     elif isinstance(told.get("authMethod"), str):
         found.auth = told["authMethod"]
 
@@ -475,21 +510,21 @@ MANAGERS: tuple[tuple[str, tuple[str, ...], Callable[[Path, str], list[str]]], .
 )
 
 
-def _ask(command: tuple[str, ...], cwd: str) -> tuple[str | None, str]:
-    """관리자 명령을 환경의 `PATH`에서 이름으로 찾아 실행한다. 표준 출력과, 출력을 받지 못한 까닭을 낸다."""
+def _ask(command: tuple[str, ...], cwd: str) -> tuple[str | None, str, str]:
+    """관리자 명령을 환경의 `PATH`에서 이름으로 찾아 실행한다. 표준 출력과, 출력을 받지 못한 경우의 code와 까닭을 낸다."""
     shown = " ".join(command)
     exe = next(_on_path(command[0]), None)
     if exe is None:
-        return None, f"PATH에 {command[0]}가 없다"
+        return None, MANAGER_MISSING, f"PATH에 {command[0]}가 없다"
     try:
         code, out, err = _execute([exe, *command[1:]], MANAGER_TIMEOUT, cwd)
     except subprocess.TimeoutExpired:
-        return None, f"`{shown}` 명령이 {MANAGER_TIMEOUT:g}초 안에 끝나지 않았다"
+        return None, MANAGER_FAILED, f"`{shown}` 명령이 {MANAGER_TIMEOUT:g}초 안에 끝나지 않았다"
     except OSError as exc:
-        return None, f"`{shown}` 명령을 실행하지 못했다: {exc.strerror or exc}"
+        return None, MANAGER_FAILED, f"`{shown}` 명령을 실행하지 못했다: {exc.strerror or exc}"
     if code != 0:
-        return None, f"`{shown}` 명령이 실패했다({_failure(code, err)})"
-    return out, ""
+        return None, MANAGER_FAILED, f"`{shown}` 명령이 실패했다({_failure(code, err)})"
+    return out, OK, ""
 
 
 def _managed(root: Path) -> Iterator[_Candidate]:
@@ -497,13 +532,14 @@ def _managed(root: Path) -> Iterator[_Candidate]:
     for marker, command, prefixes in MANAGERS:
         if not (root / marker).is_file():
             continue
-        out, why = _ask(command, str(root))
+        out, code, why = _ask(command, str(root))
         if out is None:
-            yield _Candidate(KNOWN, None, f"{marker}: {why}")
+            yield _Candidate(KNOWN, None, f"{marker}: {why}", code)
             continue
         folders = prefixes(root, out)
         if not folders:
-            yield _Candidate(KNOWN, None, f"{marker}: `{' '.join(command)}` 명령이 이 레포의 환경을 알려 주지 않았다")
+            shown = " ".join(command)
+            yield _Candidate(KNOWN, None, f"{marker}: `{shown}` 명령이 이 레포의 환경을 알려 주지 않았다", MANAGER_NO_ENV)
         for folder in folders:
             yield _Candidate(KNOWN, os.path.join(folder, "bin", "python"))
 
@@ -513,7 +549,7 @@ def _given(given: str) -> _Candidate:
     if os.sep in given:
         return _Candidate(SAVED, os.path.abspath(os.path.expanduser(given)))
     path = next(_on_path(given), None)
-    return _Candidate(SAVED, path) if path is not None else _Candidate(SAVED, given, "PATH에 없는 이름")
+    return _Candidate(SAVED, path) if path is not None else _Candidate(SAVED, given, "PATH에 없는 이름", NOT_ON_PATH)
 
 
 def _use(settings: Settings | None) -> None:
@@ -532,7 +568,9 @@ def claude(settings: Settings | None = None) -> Found:
     refused = _claude_refused()
     if refused is not None:
         fresh(CLAUDE.name)
-        return Found(CLAUDE.name, None, None, None, [Attempt(ENV, None, False, f"{UNCHECKED}: {refused}")])
+        found = Found(CLAUDE.name, None, None, None, [Attempt(ENV, None, False, refused[1], refused[0])], code=refused[0])
+        _last[(CLAUDE.name, None)] = found
+        return found
     return _find(CLAUDE, _named("claude"), finish=_login)
 
 
@@ -568,7 +606,7 @@ def attempt(tool: str, path: str) -> Attempt:
     """사용자가 직접 고른 `claude`·`git` 실행 파일 하나를 확인 명령으로 실행한 기록."""
     refused = _claude_refused() if tool == CLAUDE.name else None
     if refused is not None:
-        return Attempt(SAVED, path, False, f"{UNCHECKED}: {refused}")
+        return Attempt(SAVED, path, False, refused[1], refused[0])
     return _try({CLAUDE.name: CLAUDE, GIT.name: GIT}[tool], SAVED, os.path.abspath(os.path.expanduser(path)), "/")[0]
 
 
@@ -589,11 +627,11 @@ def _listed() -> Iterator[_Candidate]:
     for name in ("python3", "python"):
         for path in _on_path(name):
             yield _Candidate(ENV, path)
-    root, _ = _ask(("pyenv", "root"), "/")
+    root, *_ = _ask(("pyenv", "root"), "/")
     if root is not None:
         for path in sorted(glob.glob(os.path.join(glob.escape(root.strip()), "versions", "*", "bin", "python"))):
             yield _Candidate(KNOWN, path)
-    envs, _ = _ask(("conda", "env", "list", "--json"), "/")
+    envs, *_ = _ask(("conda", "env", "list", "--json"), "/")
     if envs is not None:
         try:
             folders = [env for env in json.loads(envs)["envs"] if isinstance(env, str)]
@@ -601,7 +639,7 @@ def _listed() -> Iterator[_Candidate]:
             folders = []
         for folder in folders:
             yield _Candidate(KNOWN, os.path.join(folder, "bin", "python"))
-    held, _ = _ask(("uv", "python", "dir"), "/")
+    held, *_ = _ask(("uv", "python", "dir"), "/")
     if held is not None:
         for path in sorted(glob.glob(os.path.join(glob.escape(held.strip()), "*", "bin", "python3"))):
             yield _Candidate(KNOWN, path)
@@ -621,12 +659,18 @@ def interpreters() -> list[Found]:
         if fields is None or fields["prefix"] in prefixes:
             continue
         prefixes.add(fields["prefix"])
-        found.append(Found(PYTHON.name, candidate.path, source=candidate.source, attempts=[attempt], **fields))
+        found.append(Found(PYTHON.name, candidate.path, source=candidate.source, attempts=[attempt], code=OK, **fields))
     return found
+
+
+def last(tool: str) -> Found | None:
+    """`claude`·`git`을 마지막으로 찾은 결과. 아무것도 실행하지 않는다. 찾은 적이 없으면 None이다."""
+    return _last.get((tool, None))
 
 
 def fresh(tool: str | None = None) -> None:
     """메모리의 값을 버린다. `tool`을 주지 않으면 모든 도구의 값을 버린다."""
-    for key in list(_memory):
-        if tool is None or key[0] == tool:
-            _memory.pop(key, None)
+    for kept in (_memory, _last):
+        for key in list(kept):
+            if tool is None or key[0] == tool:
+                kept.pop(key, None)

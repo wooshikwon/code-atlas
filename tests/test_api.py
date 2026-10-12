@@ -563,7 +563,7 @@ async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects
 
 def test_summary_is_made_on_post_and_read_from_cache(client, generated):
     node = {"node": "app.core:run_engine"}
-    assert client.get("/api/summary", params=node).json() == {"summary": None, "stale": False, "available": True, "reason": None}
+    assert client.get("/api/summary", params=node).json() == {"summary": None, "stale": False, "available": True, "reason": None, "code": None}
     assert generated == []
 
     assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 1", "usage": USAGE}
@@ -819,7 +819,7 @@ def test_summary_reports_unreadable_style_guide_and_reads_it_for_every_request(g
     assert calls == []
 
     guide.write_text("문장은 서술어로 끝낸다.")
-    assert client.get("/api/summary", params=node).json() == {"summary": None, "stale": False, "available": True, "reason": None}
+    assert client.get("/api/summary", params=node).json() == {"summary": None, "stale": False, "available": True, "reason": None, "code": None}
     assert client.post("/api/summary", params=node).json() == {"summary": "요약", "usage": None}
     assert "<서술 규약 문서>\n문장은 서술어로 끝낸다.\n</서술 규약 문서>" in calls[0][0]
     assert client.get("/api/summary", params=node).json()["summary"] == "요약"
@@ -835,7 +835,7 @@ def test_summary_reports_unavailable_cli(client, generated, monkeypatch):
 
     monkeypatch.setattr(summary, "unavailable", unavailable)
     body = client.get("/api/summary", params={"node": "app.core:helper"}).json()
-    assert body == {"summary": None, "stale": False, "available": False, "reason": "Claude Code CLI를 찾지 못했다"}
+    assert body == {"summary": None, "stale": False, "available": False, "reason": "Claude Code CLI를 찾지 못했다", "code": "not_found"}
 
 
 def test_summary_failure_is_503(client, generated, monkeypatch):
@@ -1309,7 +1309,7 @@ def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch
     assert client.get("/api/summary", params=past).status_code == 404
     assert client.get("/api/explanations", params={"path": "src/shop/audit.py"}).status_code == 404
     assert client.get("/api/summary", params=both).json() == {
-        "summary": "요약 2", "stale": True, "available": True, "reason": None,
+        "summary": "요약 2", "stale": True, "available": True, "reason": None, "code": None,
     }  # fmt: skip
     assert [s["node"] for s in client.get("/api/summaries").json()["summaries"]] == ["shop.pricing:tax"]
 

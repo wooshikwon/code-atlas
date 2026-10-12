@@ -97,7 +97,7 @@ def test_candidates_are_tried_in_the_order_saved_env_known(machine, tmp_path):
     os.remove(saved)
     found = tools.git()  # 설정을 다시 주지 않아도 저장한 경로를 읽는다
     assert (found.path, found.source) == (str(on_path / "git"), ENV)
-    assert found.attempts[0] == Attempt(SAVED, saved, False, "없는 파일")
+    assert found.attempts[0] == Attempt(SAVED, saved, False, "없는 파일", tools.MISSING)
 
     os.remove(on_path / "git")
     assert (tools.git().path, tools.git().source) == (str(known / "git"), KNOWN)
@@ -112,11 +112,11 @@ def test_a_saved_path_that_does_not_run_leaves_its_reason_and_the_next_source_is
 
     found = tools.git(Saved({"git": str(not_executable)}))
     assert found.path == good
-    assert found.attempts == [Attempt(SAVED, str(not_executable), False, "실행 권한 없음"), Attempt(ENV, good, True, "9.8.7")]
+    assert found.attempts == [Attempt(SAVED, str(not_executable), False, "실행 권한 없음", tools.NOT_EXECUTABLE), Attempt(ENV, good, True, "9.8.7")]
 
     tools.fresh()
     found = tools.git(Saved({"git": str(tmp_path)}))
-    assert found.attempts[0] == Attempt(SAVED, str(tmp_path), False, "파일이 아니다") and found.path == good
+    assert found.attempts[0] == Attempt(SAVED, str(tmp_path), False, "파일이 아니다", tools.NOT_FILE) and found.path == good
 
 
 def test_a_candidate_that_fails_the_check_command_does_not_pass(machine):
@@ -125,10 +125,10 @@ def test_a_candidate_that_fails_the_check_command_does_not_pass(machine):
     silent = script(known / "git", "exit 0\n")
 
     found = tools.git()
-    assert found.path is None and found.version is None and found.source is None
+    assert found.path is None and found.version is None and found.source is None and found.code == tools.FAILED
     assert found.attempts == [
-        Attempt(ENV, failing, False, "종료 코드 3: 설치가 깨졌다"),
-        Attempt(KNOWN, silent, False, "확인 명령의 출력을 읽지 못했다"),
+        Attempt(ENV, failing, False, "종료 코드 3: 설치가 깨졌다", tools.FAILED),
+        Attempt(KNOWN, silent, False, "확인 명령의 출력을 읽지 못했다", tools.UNREADABLE),
     ]
     assert runs(failing) == ["--version"] and runs(silent) == ["--version"]  # 파일이 있다는 것만으로 통과시키지 않는다
 
@@ -142,7 +142,7 @@ def test_a_candidate_that_does_not_end_in_time_is_ended_and_the_next_is_tried(ma
     started = time.monotonic()
     found = tools.git()
     assert time.monotonic() - started < 10
-    assert found.path == good and found.attempts[0] == Attempt(ENV, slow, False, "2초 안에 끝나지 않았다")
+    assert found.path == good and found.attempts[0] == Attempt(ENV, slow, False, "2초 안에 끝나지 않았다", tools.TIMEOUT)
 
 
 def test_the_same_file_is_tried_once(machine, monkeypatch):
@@ -152,7 +152,7 @@ def test_the_same_file_is_tried_once(machine, monkeypatch):
     monkeypatch.setenv("PATH", f"{on_path}:{known.parent / 'link'}:{on_path}")
     monkeypatch.setattr(tools, "PLACES", {**tools.PLACES, "git": (failing,)})
 
-    assert tools.git().attempts == [Attempt(ENV, failing, False, "종료 코드 1")]
+    assert tools.git().attempts == [Attempt(ENV, failing, False, "종료 코드 1", tools.FAILED)]
     assert runs(failing) == ["--version"]
 
 
@@ -188,7 +188,8 @@ def test_the_command_line_tools_stub_is_not_run_without_the_command_line_tools(m
 
     script(xcode_select, "echo 'xcode-select: error: unable to get active developer directory' >&2\nexit 2\n")
     found = tools.git()
-    assert found.path is None and found.attempts[0] == Attempt(ENV, stub, False, "Xcode Command Line Tools가 없다")
+    assert found.path is None and found.attempts[0] == Attempt(ENV, stub, False, "Xcode Command Line Tools가 없다", tools.NO_CLT)
+    assert found.code == "no_clt"  # 다른 위치의 없는 파일은 경우를 바꾸지 않는다
     assert runs(xcode_select) == ["-p"] and runs(stub) == []
 
     script(xcode_select, f"echo '{tmp_path / 'gone'}'\n")  # 알려 준 폴더가 없다
@@ -206,7 +207,7 @@ def test_claude_in_version_managers_is_found_newest_first(machine):
 
     found = tools.claude()
     assert (found.path, found.source, found.version) == (newest, KNOWN, "9.8.7")
-    assert found.attempts == [Attempt(KNOWN, str(known / "claude"), False, "없는 파일"), Attempt(KNOWN, newest, True, "9.8.7")]
+    assert found.attempts == [Attempt(KNOWN, str(known / "claude"), False, "없는 파일", tools.MISSING), Attempt(KNOWN, newest, True, "9.8.7")]
 
     os.remove(newest)
     assert tools.claude().path == str(known / "node" / "v20.1.0" / "bin" / "claude")
@@ -216,12 +217,12 @@ def test_claude_reports_the_login_and_asks_once(machine, monkeypatch):
     on_path, _ = machine
     cli = script(on_path / "claude", VERSION + LOGGED_IN)
     found = tools.claude()
-    assert (found.path, found.note, found.auth) == (cli, None, "claude.ai")
+    assert (found.path, found.note, found.auth, found.code) == (cli, None, "claude.ai", tools.OK)
     assert tools.claude() is found and runs(cli) == ["--version", "auth status --json"]
 
     script(on_path / "claude", VERSION + LOGGED_OUT)
     found = tools.claude()
-    assert (found.path, found.note, found.auth) == (cli, "Claude Code에 로그인돼 있지 않다", None)
+    assert (found.path, found.note, found.auth, found.code) == (cli, "Claude Code에 로그인돼 있지 않다", None, "not_logged_in")
 
     script(on_path / "claude", VERSION + 'if [ "$1" = "auth" ]; then echo "알 수 없는 명령"; exit 0; fi\n')
     found = tools.claude()  # 로그인 여부를 알려 주지 않는 CLI는 막지 않는다
@@ -229,7 +230,7 @@ def test_claude_reports_the_login_and_asks_once(machine, monkeypatch):
 
     script(on_path / "claude", VERSION + "/bin/sleep 30\n")
     monkeypatch.setattr(tools, "CLAUDE_TIMEOUT", 1.0)
-    assert tools.claude().note == "Claude Code CLI가 응답하지 않는다"
+    assert (tools.claude().note, tools.claude().code) == ("Claude Code CLI가 응답하지 않는다", "not_answering")
 
 
 def test_a_process_past_its_time_limit_gets_sigterm_and_is_killed_only_after_the_grace(machine, monkeypatch):
@@ -271,18 +272,18 @@ def test_claude_checks_run_alone_and_other_claude_runs_wait_for_them(machine):
 
 
 @pytest.mark.parametrize(
-    ("change", "reason"),
+    ("change", "code", "reason"),
     [
-        (lambda patch, home: patch.setenv(tools.NO_CLAUDE_ENV, "1"), "환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있다"),
-        (lambda patch, home: patch.setattr(tools.shellenv, "_reading", object()), "로그인 셸의 환경을 읽는 중이다"),
-        (lambda patch, home: patch.delenv("HOME"), "환경의 HOME이 이 계정의 홈 폴더({home})가 아니다"),
-        (lambda patch, home: patch.setenv("HOME", "/tmp"), "환경의 HOME이 이 계정의 홈 폴더({home})가 아니다"),
-        (lambda patch, home: patch.setenv("USER", "other"), "환경의 USER가 이 계정의 이름(tester)이 아니다"),
-        (lambda patch, home: patch.setenv("PATH", f"{home}/nowhere"), "환경의 PATH에 security가 없다"),
+        (lambda patch, home: patch.setenv(tools.NO_CLAUDE_ENV, "1"), "disabled", "환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있다"),
+        (lambda patch, home: patch.setattr(tools.shellenv, "_reading", object()), "shell_pending", "로그인 셸의 환경을 읽는 중이다"),
+        (lambda patch, home: patch.delenv("HOME"), "home_mismatch", "환경의 HOME이 이 계정의 홈 폴더({home})가 아니다"),
+        (lambda patch, home: patch.setenv("HOME", "/tmp"), "home_mismatch", "환경의 HOME이 이 계정의 홈 폴더({home})가 아니다"),
+        (lambda patch, home: patch.setenv("USER", "other"), "user_mismatch", "환경의 USER가 이 계정의 이름(tester)이 아니다"),
+        (lambda patch, home: patch.setenv("PATH", f"{home}/nowhere"), "no_keychain_command", "환경의 PATH에 security가 없다"),
     ],
     ids=["꺼 둠", "로그인 셸을 읽는 중", "HOME 없음", "다른 HOME", "다른 USER", "security 없는 PATH"],
 )
-def test_claude_is_not_run_in_an_environment_that_differs_from_the_login(machine, tmp_path, monkeypatch, change, reason):
+def test_claude_is_not_run_in_an_environment_that_differs_from_the_login(machine, tmp_path, monkeypatch, change, code, reason):
     on_path, known = machine
     monkeypatch.setattr(tools.sys, "platform", "darwin")
     cli = script(on_path / "claude", VERSION + LOGGED_IN)
@@ -292,16 +293,16 @@ def test_claude_is_not_run_in_an_environment_that_differs_from_the_login(machine
     change(monkeypatch, tmp_path / "home")
     detail = f"확인하지 못함: {reason.format(home=tmp_path / 'home')}"
     found = tools.claude()
-    assert (found.path, found.version, found.note) == (None, None, None)
-    assert found.attempts == [Attempt(ENV, None, False, detail)]
-    assert tools.attempt("claude", cli) == Attempt(SAVED, cli, False, detail)
+    assert (found.path, found.version, found.note, found.code) == (None, None, None, code)
+    assert found.attempts == [Attempt(ENV, None, False, detail, code)] and tools.last("claude") is found
+    assert tools.attempt("claude", cli) == Attempt(SAVED, cli, False, detail, code)
     assert len(runs(cli)) == 2 and runs(known / "claude") == []  # 찾아 둔 경로도 다른 위치의 후보도 실행하지 않는다
 
 
 def test_a_test_without_a_fake_claude_runs_no_claude():
     found = tools.claude()
     assert found.path is None and tools.PLACES["claude"] == ()
-    assert found.attempts == [Attempt(ENV, None, False, "확인하지 못함: 환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있다")]
+    assert found.attempts == [Attempt(ENV, None, False, "확인하지 못함: 환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있다", tools.DISABLED)]
     assert not any(os.path.exists(os.path.join(folder, "claude")) for folder in os.environ["PATH"].split(os.pathsep))
 
 
@@ -313,7 +314,7 @@ def test_claude_without_user_in_the_environment_runs_as_the_account(machine, mon
 
 
 def test_python_is_found_in_the_virtual_environments_of_the_repo(repo):
-    assert tools.python(repo).path is None and tools.python(repo).attempts == []
+    assert tools.python(repo).path is None and tools.python(repo).attempts == [] and tools.python(repo).code == "not_found"
 
     other = make_venv(repo / "env-b")
     (repo / "empty").mkdir()
@@ -322,7 +323,7 @@ def test_python_is_found_in_the_virtual_environments_of_the_repo(repo):
     found = tools.python(repo)
     assert (found.path, found.source, found.venv, found.prefix) == (other, ENV, True, str(repo / "env-b"))
     assert found.version == ".".join(map(str, sys.version_info[:3]))
-    assert found.attempts[0] == Attempt(ENV, str(repo / "broken" / "bin" / "python"), False, "없는 파일")
+    assert found.attempts[0] == Attempt(ENV, str(repo / "broken" / "bin" / "python"), False, "없는 파일", tools.MISSING)
 
     plain = make_venv(repo / "venv")
     dotted = make_venv(repo / ".venv")  # 두 가상환경의 바탕 인터프리터가 같아도 따로 본다
@@ -350,7 +351,7 @@ def test_python_saved_for_the_repo_comes_first_and_a_broken_one_leaves_its_reaso
     os.remove(chosen)
     found = tools.python(repo)
     assert (found.path, found.source) == (venv, ENV)
-    assert found.attempts[0] == Attempt(SAVED, chosen, False, "없는 파일")
+    assert found.attempts[0] == Attempt(SAVED, chosen, False, "없는 파일", tools.MISSING)
     assert tools.python(tmp_path).path is None  # 저장한 경로는 그 레포에만 쓴다
 
 
@@ -370,7 +371,7 @@ def test_python_is_asked_of_the_manager_the_marker_file_names(repo, machine, tmp
 
     found = tools.python(repo)
     assert found.path is None
-    assert found.attempts == [Attempt(KNOWN, None, False, f"{marker}: PATH에 {manager}가 없다")]
+    assert found.attempts == [Attempt(KNOWN, None, False, f"{marker}: PATH에 {manager}가 없다", tools.MANAGER_MISSING)]
 
     asked = script(on_path / manager, f'pwd > "$0.cwd"\n{answer.format(env=env)}')
     found = tools.python(repo)
@@ -391,8 +392,8 @@ def test_python_records_a_manager_that_fails_or_names_no_environment(repo, machi
     script(on_path / "conda", "echo '{\"envs\": [\"/x/base\"]}'\n")
 
     assert tools.python(repo).attempts == [
-        Attempt(KNOWN, None, False, "poetry.lock: `poetry env info -p` 명령이 실패했다(종료 코드 1: 가상환경이 없다)"),
-        Attempt(KNOWN, None, False, "environment.yml: `conda env list --json` 명령이 이 레포의 환경을 알려 주지 않았다"),
+        Attempt(KNOWN, None, False, "poetry.lock: `poetry env info -p` 명령이 실패했다(종료 코드 1: 가상환경이 없다)", tools.MANAGER_FAILED),
+        Attempt(KNOWN, None, False, "environment.yml: `conda env list --json` 명령이 이 레포의 환경을 알려 주지 않았다", tools.MANAGER_NO_ENV),
     ]
 
 
@@ -468,12 +469,14 @@ def test_tools_route_gives_what_was_found_and_check_looks_again(served, machine,
     assert found["shell"] == {"shell": "/bin/zsh", "ok": True, "detail": "", "seconds": 1.5}
     assert (found["git"]["path"], found["git"]["source"], found["git"]["version"]) == (git, ENV, "9.8.7")
     assert found["claude"]["path"] is None and found["claude"]["attempts"][0]["detail"] == "없는 파일"
+    assert (found["claude"]["code"], found["claude"]["attempts"][0]["code"], found["git"]["code"]) == ("not_found", "missing", "ok")
     assert found["python"] is None  # 연 레포가 없다
 
     cli = script(known / "claude", VERSION + LOGGED_OUT)
     assert client.get("/api/tools").json()["git"]["path"] == git and len(runs(git)) == 1
     found = client.post("/api/tools/check").json()
     assert (found["claude"]["path"], found["claude"]["note"]) == (cli, "Claude Code에 로그인돼 있지 않다")
+    assert found["claude"]["code"] == "not_logged_in"
     assert len(runs(git)) == 2
 
 
@@ -486,7 +489,8 @@ def test_a_chosen_tool_is_saved_only_when_it_passes_and_is_forgotten_on_delete(s
 
     refused = client.put("/api/tools/git", json={"path": broken})
     assert refused.status_code == 400 and settings.tool("git") is None
-    assert refused.json()["attempt"] == {"source": SAVED, "path": broken, "ok": False, "detail": "종료 코드 2"}
+    assert refused.json()["attempt"] == {"source": SAVED, "path": broken, "ok": False, "detail": "종료 코드 2", "code": "failed"}
+    assert refused.json()["code"] == "failed"
     assert client.put("/api/tools/python", json={"path": chosen}).status_code == 404
 
     saved = client.put("/api/tools/git", json={"path": chosen}).json()
@@ -534,3 +538,4 @@ def test_opening_repos_runs_claude_twice_in_all(served, machine, sample_repo):
     opened()
     client.get("/api/tools")
     assert runs(cli) == ["--version", "auth status --json"]  # 레포를 다시 열어도, 요약을 물어도 더 실행하지 않는다
+

@@ -51,12 +51,12 @@ def found_python(repo: Path, given: str | None = None, settings: Settings | None
     attempts = []
     if saved is not None:
         passed = os.path.isfile(saved) and os.access(saved, os.X_OK)
-        attempts.append(Attempt(tools.SAVED, saved, passed, "3.13.0" if passed else "없는 파일이다"))
+        attempts.append(Attempt(tools.SAVED, saved, passed, "3.13.0" if passed else "없는 파일", tools.OK if passed else tools.MISSING))
         if passed:
-            return Found("python", saved, "3.13.0", tools.SAVED, attempts)
+            return Found("python", saved, "3.13.0", tools.SAVED, attempts, code=tools.OK)
     if given is not None or (Path(repo) / NO_PYTHON).exists():
         return Found("python", None, None, None, attempts)
-    return Found("python", sys.executable, "3.13.0", tools.ENV, [*attempts, Attempt(tools.ENV, sys.executable, True, "3.13.0")])
+    return Found("python", sys.executable, "3.13.0", tools.ENV, [*attempts, Attempt(tools.ENV, sys.executable, True, "3.13.0")], code=tools.OK)
 
 
 @pytest.fixture(autouse=True)
@@ -247,7 +247,7 @@ async def test_open_that_fails_keeps_the_open_repo(sample_repo, external_repo, t
         ({"path": str(sample_repo / "pyproject.toml")}, f"폴더가 없다: {disk_path(sample_repo) / 'pyproject.toml'}"),
         ({"path": str(empty)}, f"파이썬 파일이 없는 폴더는 열지 못한다: {disk_path(empty)}"),
         ({"path": str(external_repo)}, "external_repo의 Python 인터프리터를 찾지 못했다"),
-        ({"path": str(external_repo), "python": missing}, f"Python 인터프리터가 아니다: {missing} (없는 파일이다)"),
+        ({"path": str(external_repo), "python": missing}, f"Python 인터프리터가 아니다: {missing} (없는 파일)"),
     ]
     async with served(tmp_path, sample_repo) as (app, client):
         graph = await analysed(app)
@@ -387,11 +387,12 @@ async def test_probe_route_answers_the_judgement_with_the_interpreter(home, samp
                 "path": sys.executable,
                 "version": "3.13.0",
                 "source": "env",
-                "attempts": [{"source": "env", "path": sys.executable, "ok": True, "detail": "3.13.0"}],
+                "attempts": [{"source": "env", "path": sys.executable, "ok": True, "detail": "3.13.0", "code": "ok"}],
                 "note": None,
                 "auth": None,
                 "prefix": None,
                 "venv": None,
+                "code": "ok",
             },
         }
         assert (await client.get("/api/status")).json()["session"] == 1
