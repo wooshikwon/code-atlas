@@ -183,6 +183,22 @@ def test_snapshots_share_facts_and_keep_their_own_answers(saved):
     assert len(rows(store, "SELECT path FROM facts")) == len(stored) + 1
 
 
+def test_snapshots_are_listed_by_environment(opened, saved, sample_repo, tmp_path, caplog):
+    store, _, answers = saved
+    assert store.snapshots(ENV) == {"worktree"} and store.snapshots("env-commit") == set()
+    store.save("0123abc", "env-commit", {}, answers)
+    store.save("4567def", ENV, {}, answers)
+    assert store.snapshots(ENV) == {"worktree", "4567def"} and store.snapshots("env-commit") == {"0123abc"}
+    store.save("0123abc", ENV, {}, answers)  # 다른 환경에서 다시 저장하면 그 환경의 시점이 된다
+    assert store.snapshots("env-commit") == set() and "0123abc" in store.snapshots(ENV)
+    assert opened(sample_repo, tmp_path / "other").snapshots(ENV) == set()
+    store._db.close()
+    with caplog.at_level(logging.WARNING):
+        assert store.snapshots(ENV) == set()
+    assert "시점의 목록" in caplog.text
+    store._db = store._open()
+
+
 def test_two_caches_write_the_same_file_in_turn(opened, saved, sample_repo):
     first, stored, answers = saved
     second = opened(sample_repo, first.path.parent)

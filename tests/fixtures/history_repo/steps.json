@@ -1,0 +1,20 @@
+{
+  "steps": [
+    {"label": "base", "branch": "main", "folder": "01-base", "message": "가게의 주문과 금액 계산"},
+    {"label": "edit", "branch": "main", "folder": "02-edit", "message": "합계를 반올림하고 옛 합계를 지운다"},
+    {"label": "feature", "branch": "feature", "from": "edit", "folder": "03-feature", "message": "쿠폰을 더한다"},
+    {
+      "label": "move",
+      "branch": "main",
+      "folder": "04-move",
+      "rename": [["src/shop/stock.py", "src/shop/inventory.py"]],
+      "delete": ["src/shop/audit.py"],
+      "message": "재고 파일의 이름을 바꾸고 기록을 지운다"
+    },
+    {"label": "merge", "branch": "main", "merge": "feature", "message": "쿠폰을 합친다"},
+    {"label": "topic", "branch": "topic", "from": "move", "folder": "05-topic", "message": "금액에 단위를 붙인다"}
+  ],
+  "tags": {"v0.1": "edit"},
+  "head": "main",
+  "worktree": "06-worktree"
+}

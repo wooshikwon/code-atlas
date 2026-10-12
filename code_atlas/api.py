@@ -1,32 +1,41 @@
-"""HTTP 경로를 메모리의 분석 결과와 미사용 후보, 언어 서버 세션, 요약 캐시, git 변경 내용에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
+"""HTTP 경로를 메모리의 분석 결과와 미사용 후보, 언어 서버 세션, 요약 캐시, git 변경 내용, 시점 비교에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
 
 서버는 분석을 기다리지 않고 뜬다. lifespan이 `Runner`로 분석 태스크를 띄우고, 태스크가 낸 결과를 `install` 한 곳에서
 응답이 읽는 상태에 넣으며 판 번호를 센다. 결과가 없는 동안 `/api/status`가 단계와 진행 수를 알리고 분석 결과를 읽는
 경로는 503을 낸다. `POST /api/reload`는 앞의 결과에서 증분으로 다시 분석한다. 세션과 분석 캐시는 `Runner`가 맡고
 서버가 내려갈 때 닫는다.
+
+시점 비교는 두 시점의 이름(커밋 해시나 `worktree`)을 받아 기준과 대상을 정리하고, 비교 태스크 하나가 `Snapshots`로 과거
+시점을 분석한 뒤 `compare.compare`의 판정을 응답으로 만든다. 요약 경로는 마지막 비교의 대상이 커밋인 동안 그 시점의
+분석 결과를 읽는다. 판정 규칙과 git 출력의 형식은 모른다.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import threading
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import TypeVar
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel
 
-from . import changes
+from . import compare, git
 from .analyze import Analyzed, Progress
-from .collect import RepoFiles, collected, is_test_path
+from .collect import RepoFiles, SourceFile, collected, is_test_path, module_id
+from .extract import FileFacts, extract
 from .lsp import Location, Session, to_utf8
 from .model import Analysis, Node, to_dict
 from .resolve import EXTERNAL_PREFIX, external_of
 from .runner import Runner
+from .snapshot import Snapshots
 from .summary import Made, Subject, Summaries, SummaryError, digest_of, lead_of, prompt_of, range_code, range_prompt_of
 
 HOST = "127.0.0.1"
@@ -40,6 +49,8 @@ STALE_MEMO = 1.0
 STALE_LISTED = 5  # `stale.paths`에 싣는 경로 수. 화면의 말풍선이 이름 다섯 개와 "외 k개"를 적는다
 
 NOT_STALE: dict = {"count": 0, "paths": []}
+HISTORY_PAGE = 200  # `/api/history`가 한 번에 내는 줄 수의 기본값
+_HASH = re.compile(r"[0-9a-f]{40}")
 
 T = TypeVar("T")
 
@@ -113,8 +124,30 @@ async def _disconnected(request: Request) -> None:
         pass
 
 
-def _overlaps(span: tuple[int, int] | None, ranges: list[tuple[int, int]]) -> bool:
-    return span is not None and any(start <= span[1] and span[0] <= end for start, end in ranges)
+class Ends(BaseModel):
+    """`POST /api/compare`의 본문. `/api/compare/stat`이 돌려준 기준과 대상이다."""
+
+    base: str
+    target: str
+
+
+def _facts(analyzed: Analyzed) -> dict[str, FileFacts]:
+    return {path: stored.facts for path, stored in analyzed.stored.items()}
+
+
+def _counted(hunks: dict[str, list[git.Hunk]]) -> tuple[int, int]:
+    """토막의 추가된 줄 수와 삭제된 줄 수의 합."""
+    found = [h for file in hunks.values() for h in file]
+    return sum(h.new_count for h in found), sum(h.old_count for h in found)
+
+
+def _change(change: compare.NodeChange) -> dict:
+    found: dict = {"change": change.change, "added": change.added, "deleted": change.deleted}
+    if change.slot is not None:
+        found["slot"] = change.slot
+    if change.only is not None:
+        found["only"] = change.only
+    return found
 
 
 def create_app(
@@ -172,7 +205,12 @@ def create_app(
         finally:
             running = app.state.running
             running.cancel()
-            await asyncio.gather(running, return_exceptions=True)
+            comparing = [app.state.comparing[1]] if app.state.comparing is not None else []
+            for task in comparing:
+                task.cancel()
+            await asyncio.gather(running, *comparing, return_exceptions=True)
+            if app.state.snapshots is not None:
+                app.state.snapshots.close()
             await runner.close()
 
     app = FastAPI(title="code-atlas", lifespan=lifespan)
@@ -180,7 +218,14 @@ def create_app(
     app.state.revision = 0
     app.state.draft = False
     app.state.stale = (None, 0.0, NOT_STALE)
+    app.state.snapshots = None  # 첫 비교가 만드는 `Snapshots`
+    app.state.comparing = None  # ((기준, 대상), 비교 태스크)
+    app.state.compare = None  # 비교할 시점을 분석하는 단계와 진행 수
+    app.state.compared = None  # (기준, 대상, 판 번호, 바뀐 파일, 토막, 분석 뒤 바뀐 파일)과 그 응답
+    app.state.shown = None  # 마지막 비교의 대상이 커밋이면 (커밋 해시, 분석 결과, 노드)
     counting = threading.Lock()
+    seen: set[str] = set()  # 이번 실행에서 비교에 쓴 커밋
+    heads: dict[tuple[str, str], tuple[FileFacts, str] | None] = {}  # (`HEAD` 해시, 경로) → 그 커밋의 추출 결과와 본문
 
     def analysed() -> None:
         """분석 결과를 읽는 경로의 공통 의존 함수. 결과가 아직 없으면 503을 낸다."""
@@ -206,6 +251,11 @@ def create_app(
             if app.state.stale[0] is analyzed:
                 app.state.stale = (analyzed, time.monotonic(), found)
             return found
+
+    def shown() -> tuple[Analyzed, dict[str, Node]]:
+        """지금 보이는 시점의 분석 결과와 노드. 마지막 비교의 대상이 커밋이면 그 시점이고 그 밖에는 작업 중인 상태다."""
+        held = app.state.shown
+        return (held[1], held[2]) if held is not None else (app.state.analyzed, app.state.nodes)
 
     async def ask(path: str, request: Callable[[Session], Awaitable[T]]) -> T:
         if path not in app.state.analyzed.texts:
@@ -233,6 +283,7 @@ def create_app(
             "lsp": runner.lsp,
             "error": runner.error,
             "stale": stale(),
+            "compare": asdict(state.compare) if state.compare is not None else None,
         }
 
     @app.get("/api/repo", dependencies=ready)
@@ -265,14 +316,210 @@ def create_app(
 
     @app.get("/api/graph", dependencies=ready)
     def get_graph() -> dict:
+        """작업 중인 상태의 그래프. 화면이 비교를 끄고 이 그래프로 돌아오므로 지금 보이는 시점도 작업 중인 상태로 되돌린다."""
+        app.state.shown = None
         return app.state.graph
 
     @app.get("/api/file", dependencies=ready)
-    def get_file(path: str) -> dict:
-        analyzed: Analyzed = app.state.analyzed
+    async def get_file(path: str, at: str | None = None) -> dict:
+        """분석할 때 읽은 본문. `at`이 커밋 해시면 그 커밋의 본문이고, 이번 실행에서 비교에 쓴 커밋만 받는다."""
+        if at is None or at == git.WORKTREE:
+            analyzed: Analyzed = app.state.analyzed
+        elif at not in seen:
+            raise HTTPException(status_code=404, detail=f"비교에 쓴 커밋이 아니다: {at}")
+        else:
+            analyzed = snapshots().held(at) or await snapshots().at(at, [app.state.analyzed])
         if path not in analyzed.texts:
             raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
         return {"path": path, "text": analyzed.texts[path]}
+
+    def snapshots() -> Snapshots:
+        if app.state.snapshots is None:
+            app.state.snapshots = Snapshots(app.state.analyzed.files.root, runner.python, runner.cache)
+        return app.state.snapshots
+
+    def moment(name: str) -> str:
+        """시점의 이름(40자 커밋 해시나 `worktree`)인지 확인한다."""
+        if name != git.WORKTREE and _HASH.fullmatch(name) is None:
+            raise HTTPException(status_code=400, detail=f"시점의 이름이 아니다: {name}")
+        return name
+
+    def versioned(*moments: str) -> tuple[Path, str]:
+        """레포 루트와 지금 커밋의 해시. 커밋이 있는 git 저장소가 아니거나 `moments`의 커밋이 없으면 404를 낸다."""
+        root = app.state.analyzed.files.root
+        head = git.head(root)
+        if head is None:
+            raise HTTPException(status_code=404, detail="커밋이 있는 git 저장소가 아니다")
+        for name in moments:
+            if name != git.WORKTREE and git.committed(root, name) is None:
+                raise HTTPException(status_code=404, detail=f"없는 커밋이다: {name}")
+        return root, head
+
+    def arranged(a: str, b: str) -> tuple[str, str, str | None]:
+        """고른 두 시점을 (기준, 대상, 갈라진 커밋)으로 정리한다.
+
+        조상 관계면 조상 쪽이 기준이고, 아니면 두 시점이 갈라진 커밋이 기준이며 새 쪽이 대상이다. 작업 중인 상태는
+        늘 대상이고 조상 관계는 지금 커밋으로 본다.
+        """
+        if a == b:
+            raise HTTPException(status_code=400, detail="같은 시점을 골랐다")
+        root, head = versioned(a, b)
+        picked = b if a == git.WORKTREE else a
+        other = head if git.WORKTREE in (a, b) else b
+        target = git.WORKTREE if git.WORKTREE in (a, b) else None
+        if git.is_ancestor(root, picked, other):
+            return picked, target or other, None
+        if target is None and git.is_ancestor(root, other, picked):
+            return other, picked, None
+        fork = git.merge_base(root, picked, other)
+        if fork is None:
+            raise HTTPException(status_code=400, detail="두 시점에 공통 조상이 없다")
+        newer = max((picked, other), key=lambda commit: (git.committed(root, commit) or 0, commit))
+        return fork, target or newer, fork
+
+    @app.get("/api/history", dependencies=ready)
+    def get_history(skip: int = Query(0, ge=0), limit: int = Query(HISTORY_PAGE, ge=1, le=1000)) -> dict:
+        """커밋 그래프의 `skip`번째 줄부터 `limit`줄. git 저장소가 아니면 `git`이 거짓이고 목록이 비어 있다."""
+        root = app.state.analyzed.files.root
+        states = git.status(root)
+        if states is None:
+            return {"git": False, "head": None, "branch": None, "default": None, "dirty": False, "commits": [], "more": False}
+        head = git.head(root)
+        found = git.commits(root, skip, limit + 1)
+        return {
+            "git": True,
+            "head": head,
+            "branch": git.branch(root),
+            "default": git.default_branch(root),
+            "dirty": head is not None and bool(collected(root, [path for path in states if path.endswith(".py")])),
+            "commits": [asdict(commit) for commit in found[:limit]],
+            "more": len(found) > limit,
+        }
+
+    @app.get("/api/compare/stat", dependencies=ready)
+    def get_stat(a: str, b: str) -> dict:
+        """고른 두 시점의 기준·대상·갈라진 커밋과, 그 사이에 바뀐 분석 대상 `.py` 파일의 수와 줄 수."""
+        base, target, fork = arranged(moment(a), moment(b))
+        root = app.state.analyzed.files.root
+        added, deleted = _counted(git.hunks(root, base, target))
+        return {
+            "base": base,
+            "target": target,
+            "fork": fork,
+            "files": len(git.changed(root, base, target)),
+            "added": added,
+            "deleted": deleted,
+        }
+
+    def unsaved(analyzed: Analyzed) -> set[str]:
+        """분석한 뒤 본문이 바뀐 파일, 생긴 파일, 없어진 파일의 경로."""
+        try:
+            return analyzed.stale()
+        except OSError:
+            return set()
+
+    def answer(
+        base: str,
+        target: str,
+        revision: int,
+        before: Analyzed,
+        after: Analyzed,
+        files: list[git.Changed],
+        hunks: dict[str, list[git.Hunk]],
+        skip: set[str],
+    ) -> bytes:
+        """두 시점의 분석 결과를 견줘 `POST /api/compare`의 응답 본문(JSON)을 만든다. 파일트리에는 삭제된 파일과 폴더를 더한다."""
+        result = compare.compare(
+            before.analysis, _facts(before), before.texts, after.analysis, _facts(after), after.texts, files, hunks, skip
+        )
+        listed = {f.path for f in after.files.files}
+        gone = {f["path"] for f in result.files if f["status"] == git.DELETED} - listed
+        files_with_gone = replace(after.files, files=[*after.files.files, *(f for f in before.files.files if f.path in gone)])
+        body = {
+            "base": base,
+            "target": target,
+            "revision": revision,
+            "graph": {"nodes": [to_dict(n) for n in result.nodes], "edges": [to_dict(e) for e in result.edges]},
+            "tree": {"entries": _tree(files_with_gone, replace(after.analysis, nodes=result.nodes))},
+            "nodes": {node: _change(change) for node, change in result.node_changes.items()},
+            "edges": {key: asdict(change) for key, change in result.edge_changes.items()},
+            "files": [{**f, "test": is_test_path(f["path"])} for f in result.files],
+            "unused": to_dict(after.unused),
+        }
+        return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+
+    async def compared(base: str, target: str) -> bytes:
+        """두 시점을 분석하고 견준 응답. 대상이 커밋이면 대상을 먼저 분석하고 기준을 그 결과에서 증분으로 분석한다.
+
+        대상이 작업 중인 상태면 돌고 있는 분석이 끝나기를 기다리고, 분석한 뒤 바뀐 파일이 있으면 다시 분석해 그 결과를
+        쓴다. 다시 분석하지 못하면 앞의 결과를 쓰고 바뀐 파일은 파일의 상태와 줄 수만 낸다. 진행 수는
+        `app.state.compare`에 적는다.
+        """
+        state = app.state
+        mine = asyncio.current_task()
+
+        def report(progress: Progress | None) -> None:
+            if state.comparing is not None and state.comparing[1] is mine:
+                state.compare = progress
+
+        report(Progress("collect"))
+        try:
+            root = state.analyzed.files.root
+            if target == git.WORKTREE:
+                if state.running.done() and await asyncio.to_thread(unsaved, state.analyzed):
+                    state.running = asyncio.create_task(reload())
+                await asyncio.gather(asyncio.shield(state.running), return_exceptions=True)
+                after, revision = state.analyzed, state.revision
+                near = [after]
+            else:
+                after, revision = await snapshots().at(target, [state.analyzed], report), 0
+                near = [state.analyzed, after]
+            before = await snapshots().at(base, near, report)
+            report(Progress("build"))
+            files, hunks, skip = await asyncio.gather(
+                asyncio.to_thread(git.changed, root, base, target),
+                asyncio.to_thread(git.hunks, root, base, target),
+                asyncio.to_thread(unsaved, after) if target == git.WORKTREE else asyncio.sleep(0, set()),
+            )
+            key = (base, target, revision, files, hunks, skip)
+            if state.compared is None or state.compared[0] != key:
+                body = await asyncio.to_thread(answer, base, target, revision, before, after, files, hunks, skip)
+                state.compared = (key, body)
+            seen.update(name for name in (base, target) if name != git.WORKTREE)
+            state.shown = None if target == git.WORKTREE else (target, after, {n.id: n for n in after.analysis.nodes})
+            return state.compared[1]
+        finally:
+            report(None)
+
+    @app.post("/api/compare", dependencies=ready)
+    async def post_compare(ends: Ends) -> Response:
+        """기준과 대상을 견준 그래프와 변경 내용. 두 시점의 분석이 끝난 뒤에 응답한다.
+
+        같은 두 시점의 요청이 분석 중에 다시 오면 그 분석이 끝나기를 함께 기다리고, 다른 두 시점의 요청이 오면 앞의
+        분석을 멈추고 앞의 요청에 409를 돌려준다. 분석하지 못하면 까닭을 적은 500을 돌려준다.
+        """
+        base, target = moment(ends.base), moment(ends.target)
+        if base == git.WORKTREE or base == target:
+            raise HTTPException(status_code=400, detail="기준은 대상과 다른 커밋이어야 한다")
+        await asyncio.to_thread(versioned, base, target)
+        state = app.state
+        current = state.comparing
+        if current is None or current[0] != (base, target) or current[1].done():
+            if current is not None:
+                current[1].cancel()
+            task = asyncio.create_task(compared(base, target))
+            task.add_done_callback(lambda task: task.cancelled() or task.exception())
+            state.comparing = current = ((base, target), task)
+        try:
+            return Response(await asyncio.shield(current[1]), media_type="application/json")
+        except asyncio.CancelledError:
+            if not current[1].cancelled():
+                raise
+            raise HTTPException(status_code=409, detail="다른 두 시점의 비교가 시작되어 이 비교를 멈췄다") from None
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"비교하지 못했다: {exc}") from exc
 
     @app.get("/api/hover", dependencies=ready)
     async def get_hover(path: str, line: int = Query(ge=1), col: int = Query(ge=0)) -> dict:
@@ -288,8 +535,8 @@ def create_app(
 
     def summarized(node_id: str) -> str:
         """노드 id를 설명을 만들 프롬프트로 바꾼다."""
-        analyzed: Analyzed = app.state.analyzed
-        prompt = prompt_of(app.state.nodes, analyzed.analysis.edges, analyzed.texts, node_id)
+        analyzed, nodes = shown()
+        prompt = prompt_of(nodes, analyzed.analysis.edges, analyzed.texts, node_id)
         if prompt is None:
             raise HTTPException(status_code=404, detail=f"요약할 노드가 아니다: {node_id}")
         return prompt
@@ -304,9 +551,10 @@ def create_app(
 
     @app.get("/api/summaries", dependencies=ready)
     def get_summaries() -> dict:
-        """노드마다 남겨 둔 가장 최근 요약의 요지. 지금 분석 결과에 있는 노드만 담는다."""
+        """노드마다 남겨 둔 가장 최근 요약의 요지. 지금 보이는 시점의 분석 결과에 있는 노드만 담는다."""
         kept = app.state.summaries.latest.listed(app.state.repo["root"], "node")
-        found = [{"node": k.name, "lead": lead_of(k.text)} for k in kept if k.name in app.state.nodes]
+        _, nodes = shown()
+        found = [{"node": k.name, "lead": lead_of(k.text)} for k in kept if k.name in nodes]
         return {"summaries": sorted(found, key=lambda s: s["node"])}
 
     async def made(request: Request, making: Awaitable[Made]) -> Made:
@@ -333,9 +581,9 @@ def create_app(
 
     def explained(path: str, start: int, end: int) -> tuple[str, Subject]:
         """파일의 줄 범위를 설명을 만들 프롬프트와, 그 설명을 남길 대상으로 바꾼다."""
-        analyzed: Analyzed = app.state.analyzed
+        analyzed, nodes = shown()
         code = range_code(analyzed.texts, path, start, end)
-        prompt = range_prompt_of(app.state.nodes, analyzed.analysis.edges, analyzed.texts, path, start, end)
+        prompt = range_prompt_of(nodes, analyzed.analysis.edges, analyzed.texts, path, start, end)
         if code is None or prompt is None:
             raise HTTPException(status_code=404, detail=f"설명할 코드 범위가 아니다: {path} {start}~{end}줄")
         return prompt, Subject(app.state.repo["root"], "range", f"{path}:{start}-{end}", digest_of(code))
@@ -343,7 +591,7 @@ def create_app(
     @app.get("/api/explanations", dependencies=ready)
     def get_explanations(path: str) -> dict:
         """파일에 남겨 둔 코드 범위 설명. 설명을 만든 뒤 그 줄 범위의 코드가 달라졌으면 `stale`이 참이다."""
-        analyzed: Analyzed = app.state.analyzed
+        analyzed, _ = shown()
         if path not in analyzed.texts:
             raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
         found = []
@@ -370,33 +618,63 @@ def create_app(
         app.state.summaries.latest.delete(app.state.repo["root"], "range", f"{path}:{start}-{end}")
         return {"deleted": True}
 
+    def at_head(head: str, path: str, source_root: str) -> tuple[FileFacts, str] | None:
+        """`HEAD`에 든 파일의 추출 결과와 본문. (`HEAD` 해시, 경로)로 기억하고 `HEAD`가 바뀌면 앞의 것을 버린다."""
+        key = (head, path)
+        if key not in heads:
+            for old in [k for k in heads if k[0] != head]:
+                del heads[old]
+            text = git.show(app.state.analyzed.files.root, head, path)
+            is_init = path == "__init__.py" or path.endswith("/__init__.py")
+            file = SourceFile(path, module_id(path, source_root), is_test_path(path), is_init)
+            heads[key] = (extract(file, text, frozenset()), text) if text is not None else None
+        return heads[key]
+
     @app.get("/api/changes", dependencies=ready)
     def get_changes() -> dict:
+        """마지막 커밋 뒤에 바뀐 파일과 정의. 정의의 판정은 `HEAD`와 작업 중인 상태를 견준 `compare.definitions`의 것이다."""
         analyzed: Analyzed = app.state.analyzed
         root = analyzed.files.root
         stale = analyzed.stale()
-        found = changes.status(root)
+        found = git.status(root)
         states = {path: state for path, state in (found or {}).items() if path.endswith(".py")}
-        fresh = [p for p, state in states.items() if state != changes.DELETED and p not in analyzed.texts]
+        fresh = [p for p, state in states.items() if state != git.DELETED and p not in analyzed.texts]
         for path in set(fresh) - collected(root, fresh):
             del states[path]
-        ranges = (changes.hunks(root) or {}) if changes.MODIFIED in states.values() else {}
+        head = git.head(root) if any(state != git.DELETED for state in states.values()) else None
+        if head is not None:
+            files, hunks = git.changed(root, head, git.WORKTREE), git.hunks(root, head, git.WORKTREE)
+        else:
+            files, hunks = [git.Changed(git.ADDED, p) for p, state in states.items() if state == git.ADDED], {}
+        committed = {
+            path: found_at
+            for path in (c.old or c.path for c in files if c.status != git.ADDED)
+            if (found_at := at_head(head, path, analyzed.files.source_root)) is not None
+        }
+        changes, _ = compare.definitions(
+            {path: facts for path, (facts, _) in committed.items()},
+            list(app.state.nodes.values()),
+            {path: text for path, (_, text) in committed.items()},
+            analyzed.texts,
+            files,
+            hunks,
+            stale,
+        )
         nodes: dict[str, str] = {}
         for node in app.state.nodes.values():
             state = states.get(node.path)
-            if state is None or state == changes.DELETED:
+            if state is None or state == git.DELETED:
                 continue
-            # 파일의 노드는 늘 넣고, 그 안의 정의는 줄 범위가 분석한 본문의 것이므로 본문이 그대로일 때만 넣는다.
-            if node.kind in ("module", "package") or (
-                node.path not in stale
-                and (state == changes.ADDED or _overlaps(node.range, ranges.get(node.path, [])))
-            ):
+            # 파일의 노드는 늘 `git status`의 상태로 넣고, 그 안의 정의는 `HEAD`의 정의와 견준 판정으로 넣는다.
+            if node.kind in ("module", "package"):
                 nodes[node.id] = state
+            elif (change := changes.get(node.id)) is not None and change.change in (git.ADDED, git.MODIFIED):
+                nodes[node.id] = change.change
         for path in stale:
-            states.setdefault(path, changes.UNCHANGED)
+            states.setdefault(path, git.UNCHANGED)
         return {
             "git": found is not None,
-            "branch": changes.branch(root) if found is not None else None,
+            "branch": git.branch(root) if found is not None else None,
             "files": [
                 {"path": path, "status": state, "stale": path in stale, "test": is_test_path(path)}
                 for path, state in sorted(states.items())

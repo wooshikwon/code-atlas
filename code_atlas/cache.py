@@ -251,6 +251,15 @@ class Cache:
             logger.warning("캐시에서 판정을 읽지 못했다: %s", snapshot, exc_info=True)
             return {}
 
+    def snapshots(self, env: str) -> set[str]:
+        """그 환경 지문으로 저장한 시점의 이름."""
+        try:
+            with self._lock:
+                return {name for (name,) in self._db.execute("SELECT name FROM snapshots WHERE env = ?", (env,))}
+        except sqlite3.Error:
+            logger.warning("캐시에서 시점의 목록을 읽지 못했다: %s", self.path, exc_info=True)
+            return set()
+
     def save(self, snapshot: str, env: str, facts: dict[str, Stored], answers: dict[str, Answers]) -> None:
         """한 트랜잭션으로 `facts`의 추출 결과를 더하고 그 시점의 판정을 `answers`로 바꾼다.
 
