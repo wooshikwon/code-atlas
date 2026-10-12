@@ -114,12 +114,17 @@ const rectOf = (page, selector) =>
 const selectedOf = (page) =>
   page.evaluate(() => document.querySelector(".react-flow__node .node-selected")?.closest(".react-flow__node")?.dataset.id ?? null);
 
-/** 정보 패널의 머리 줄과 "정보" 구역의 글. 첫 줄은 이름 줄, 둘째 줄은 종류 칩이고 그 아래는 "정보" 구역의 줄마다 `주제 내용`이다. */
+/** 정보 패널의 머리 줄과 "정보" 구역의 글. 첫 줄은 이름 줄, 둘째 줄은 종류 칩이고 그 아래는 "정보" 구역의 줄마다 `주제 내용`이며 `그 밖` 묶음은 한 칸 띄워 잇는다. */
 const headOf = (page) =>
   page.evaluate(() => {
     const texts = (selector) => [...document.querySelectorAll(selector)].map((element) => element.textContent);
     const name = document.querySelector(".info-panel-name")?.textContent ?? "";
-    return [name, texts(".info-panel-chip").join(" "), ...texts(".info-row").map((row, i) => `${document.querySelectorAll(".info-row dt")[i].textContent} ${row.slice(document.querySelectorAll(".info-row dt")[i].textContent.length)}`)].join("\n");
+    const rows = [...document.querySelectorAll(".info-row")].map((row) => {
+      const more = row.querySelector(".info-more")?.textContent ?? "";
+      const content = row.querySelector("dd").textContent;
+      return `${row.querySelector("dt").textContent} ${content.slice(0, content.length - more.length)}${more === "" ? "" : ` ${more}`}`;
+    });
+    return [name, texts(".info-panel-chip").join(" "), ...rows].join("\n");
   });
 
 const count = (page, selector) => page.evaluate((sel) => document.querySelectorAll(sel).length, selector);
@@ -525,8 +530,98 @@ const within = (inner, outer) =>
   inner.x >= outer.x - 0.5 && inner.y >= outer.y - 0.5 && inner.x + inner.width <= outer.x + outer.width + 0.5 && inner.y + inner.height <= outer.y + outer.height + 0.5;
 
 const tipText = (page) => page.evaluate(() => document.querySelector(".tooltip")?.textContent ?? "");
-/** 선의 말풍선이 관계를 적는 글: 종류 이름과 수, 단위를 종류마다 나눠 적는다. 예: `호출 2곳 · import 1줄` */
-const RELATIONS = String.raw`\S+ \d+(?:곳|줄)(?: · \S+ \d+(?:곳|줄))*`;
+/** 수로 세는 관계의 종류(`graph/names.ts`의 `COUNTED_KINDS`) */
+const COUNTED = ["call", "construct", "inherit"];
+/** 세는 관계가 없는 선에 수 대신 적는 글과 그 순서(`graph/names.ts`의 `ALONE`) */
+const ALONE = [
+  ["pass", "전달에만 쓰임"],
+  ["decorate", "데코레이터에만 쓰임"],
+  ["type", "타입에만 쓰임"],
+  ["override", "오버라이드 관계만 있음"],
+  ["import", "import 관계만 있음"],
+];
+/** 원래 선 edges의 종류마다 코드 줄 수 */
+const kindsOf = (edges) => {
+  const kinds = {};
+  for (const edge of edges) {
+    kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
+  }
+  return kinds;
+};
+/** 원래 선 edges 가운데 세는 관계의 코드 줄 수 */
+const countedSites = (edges) => edges.filter((edge) => COUNTED.includes(edge.kind)).reduce((sum, edge) => sum + edge.sites.length, 0);
+/** 선의 말풍선이 관계 칸에 적는 글: 세는 관계의 종류 이름과 수(`호출 2곳 · 생성 1곳`)이거나 세는 관계가 없을 때의 글 */
+const RELATIONS = String.raw`(?:\S+ \d+곳(?: · \S+ \d+곳)*|${ALONE.map(([, text]) => text).join("|")})`;
+
+/**
+ * 선의 말풍선. 칸 이름, 고정했는지, 사각형과 줄마다 그 줄을 낸 선의 키, 세 칸의 글, 출발·도착 칸의 노드 id와 앞쪽 경로, 칸마다 누를 수 있는지다.
+ * 말풍선이 없으면 null이다.
+ */
+const bubbleOf = (page) =>
+  page.evaluate(() => {
+    const bubble = document.querySelector(".line-bubble");
+    if (bubble === null) {
+      return null;
+    }
+    const rect = bubble.getBoundingClientRect();
+    return {
+      pinned: bubble.hasAttribute("data-pinned"),
+      head: [...bubble.querySelectorAll("th")].map((th) => th.textContent),
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      rows: [...bubble.querySelectorAll("tbody tr")].map((row) => {
+        const cells = [...row.querySelectorAll("td")];
+        return {
+          key: row.dataset.key,
+          source: cells[0].textContent,
+          target: cells[1].textContent,
+          relation: cells[2].textContent,
+          nodes: [cells[0].dataset.node, cells[1].dataset.node],
+          paths: cells.slice(0, 2).map((cell) => cell.querySelector(".line-cell-path")?.textContent ?? ""),
+          pressable: cells.map((cell) => cell.querySelector("button") !== null),
+        };
+      }),
+    };
+  });
+/** 말풍선의 줄을 `출발 → 도착 · 관계` 한 줄로 적은 글 */
+const rowText = (row) => `${row.source} → ${row.target} · ${row.relation}`;
+/** 떠 있는 선의 말풍선의 줄마다 `rowText`로 적은 글. 말풍선이 없으면 빈 배열이다. */
+const bubbleRows = async (page) => ((await bubbleOf(page))?.rows ?? []).map(rowText);
+/** 선 위의 점 at에 마우스를 올린 동안의 말풍선 */
+async function bubbleOver(page, at) {
+  await page.mouse.move(at.x - 1, at.y);
+  await page.mouse.move(at.x, at.y);
+  await page.waitForSelector(".line-bubble", { timeout: 3_000 }).catch(() => {});
+  return bubbleOf(page);
+}
+/**
+ * 점 at의 선을 눌러 고정한 말풍선. 마우스를 먼저 올려 선이 강조된 뒤에 누른다. 올리자마자 누르면 강조하며 다른 선 위의 층으로 옮겨 그린 선이
+ * 누른 요소와 달라져 클릭이 그래프 바탕으로 간다.
+ */
+async function pinBubble(page, at) {
+  await bubbleOver(page, at);
+  await page.waitForTimeout(150);
+  await page.mouse.click(at.x, at.y);
+  await page.waitForSelector(".line-bubble[data-pinned]", { timeout: 3_000 }).catch(() => {});
+  return bubbleOf(page);
+}
+/** 고정한 말풍선에서 줄 row(0부터)의 칸 cell(source, target, relation)을 누른다. */
+const pressCell = (page, row, cell) => page.click(`.line-bubble tbody tr:nth-child(${row + 1}) td[data-cell="${cell}"] button`, { timeout: 5_000 });
+/**
+ * 점 at의 선을 눌러 말풍선을 고정하고 줄 하나의 칸 cell을 누른다. 기본은 도착 이름이다. 줄은 번호 row로 고르거나, 선의 키 key와
+ * 도착 노드 to가 맞는 첫 줄로 고른다. 어느 것도 주지 않으면 첫 줄이다. 누를 줄이 없으면 거짓을 돌려준다.
+ */
+async function followLine(page, at, { row = null, key = null, to = null, cell = "target" } = {}) {
+  const bubble = await pinBubble(page, at);
+  const index = row ?? bubble?.rows.findIndex((each) => (key === null || each.key === key) && (to === null || each.nodes[1] === to)) ?? -1;
+  if (index < 0) {
+    return false;
+  }
+  await pressCell(page, index, cell).catch(async (error) => {
+    const now = await bubbleOf(page);
+    throw new Error(`말풍선의 줄 ${index}에서 ${cell} 칸을 누르지 못했다: ${now === null ? "말풍선 없음" : `고정 ${now.pinned}, ${now.rows.map((each) => `${rowText(each)} [${each.pressable}]`).join(" / ")}`} (${error.message.split("\n")[0]})`);
+  });
+  return true;
+}
 /** 화면이 선 종류를 적는 이름과 순서(`graph/names.ts`) */
 const KIND_NAMES = { call: "호출", construct: "생성", import: "import", pass: "전달", decorate: "데코레이터", type: "타입", inherit: "상속", override: "오버라이드" };
 /** 브라우저 기본 말풍선을 띄우는 요소: `title` 속성과 SVG의 `<title>` */
@@ -1119,15 +1214,16 @@ async function edge(t, page) {
   await page.waitForTimeout(300);
   const over = (await linesOf(page)).find((line) => line.key === first.key);
   const rest = (await linesOf(page)).filter((line) => line.key !== first.key);
+  const up = liftedShade(first);
   t.check(
-    "선에 마우스를 올리면 그 선만 굵어지고 빛을 두르며 본문 잉크로 다른 선 위의 층에 그려진다",
-    over.pointed && over.width > first.width && over.glow && over.tone === "strong" && over.opacity === 1 && over.layer === "5" &&
+    "선에 마우스를 올리면 그 선만 굵어지고 빛을 두르며 진하기를 한 단계 올려 다른 선 위의 층에 그려진다",
+    over.pointed && over.width > first.width && over.glow && over.tone === up.tone && over.opacity === up.opacity && over.layer === "5" &&
       rest.every((line) => !line.pointed && line.layer === "4" && !line.glow),
-    `굵기 ${first.width} → ${over.width}, 층 ${first.layer} → ${over.layer}, 진하기 ${first.tone} → ${over.tone}`,
+    `굵기 ${first.width} → ${over.width}, 층 ${first.layer} → ${over.layer}, 진하기 ${first.tone} ${first.opacity} → ${over.tone} ${over.opacity}`,
   );
   t.check(
-    "마우스를 올린 선의 숫자도 본문 잉크로 바뀐다",
-    over.digits === null ? digitsMatch(rest) : over.digits === over.stroke && over.stroke === (await colorOf(page, "--ink")).rgb,
+    "마우스를 올린 선의 숫자도 선과 같은 색이다",
+    over.digits === null ? digitsMatch(rest) : over.digits === over.stroke,
     `선 ${over.stroke}, 숫자 ${over.digits ?? "없음"}`,
   );
   await t.shot();
@@ -1138,9 +1234,9 @@ async function edge(t, page) {
 
   // 선 클릭
   const target = ends(first)[1];
-  await page.mouse.click(spot.x, spot.y);
+  await followLine(page, spot, { key: first.key });
   await waitSelected(page, target).catch(() => {});
-  t.check("선을 누르면 도착 노드가 선택되고 정보 패널이 그 노드를 적는다", (await selectedOf(page)) === target && (await count(page, ".info-panel-sites")) === 0, `선택 ${await selectedOf(page)}`);
+  t.check("선을 눌러 고정한 말풍선에서 도착 이름을 누르면 도착 노드가 선택되고 정보 패널이 그 노드를 적는다", (await selectedOf(page)) === target && (await count(page, ".info-panel-sites")) === 0, `선택 ${await selectedOf(page)}`);
   const focusedLines = await linesOf(page);
   const levels = [...new Set(focusedLines.map((line) => `${line.tone} ${line.opacity}`))].sort();
   t.check(
@@ -1150,11 +1246,11 @@ async function edge(t, page) {
   );
   const again = await hittable(page, (await linesOf(page)).filter((line) => ends(line)[1] === target));
   if (again === null) {
-    t.skip("고른 노드로 들어오는 선을 눌러도 선택이 풀리지 않는다", "화면에 누를 선이 없다");
+    t.skip("고른 노드로 들어오는 선의 도착 이름을 눌러도 선택이 풀리지 않는다", "화면에 누를 선이 없다");
   } else {
-    await page.mouse.click(again.at.x, again.at.y);
+    await followLine(page, again.at, { key: again.line.key, to: target });
     await settle(page);
-    t.check("고른 노드로 들어오는 선을 눌러도 선택이 풀리지 않는다", (await selectedOf(page)) === target, `선택 ${await selectedOf(page)}`);
+    t.check("고른 노드로 들어오는 선의 도착 이름을 눌러도 선택이 풀리지 않는다", (await selectedOf(page)) === target, `선택 ${await selectedOf(page)}`);
   }
   const { at: where } = await hittable(page, (await linesOf(page)).filter((line) => line.key.startsWith("agg|")));
   const chosen = await selectedOf(page);
@@ -1199,10 +1295,10 @@ async function edge(t, page) {
     pointedCall.pointed && pointedCall.width > call.width && pointedCall.layer === "5",
     `굵기 ${call.width} → ${pointedCall.width}, 층 ${pointedCall.layer}`,
   );
-  await page.mouse.click(point.x, point.y);
+  await followLine(page, point, { key: call.key });
   await waitSelected(page, ends(call)[1]).catch(() => {});
   t.check(
-    "함수 시점 뷰에서 선을 누르면 도착 함수가 선택되고 가운데 함수는 그대로다",
+    "함수 시점 뷰에서 선의 도착 이름을 누르면 도착 함수가 선택되고 가운데 함수는 그대로다",
     (await selectedOf(page)) === ends(call)[1] &&
       (await page.evaluate(() => document.querySelector('.node-call[data-side="center"]')?.closest(".react-flow__node")?.dataset.id)) === FUNCTION,
     `선택 ${await selectedOf(page)}`,
@@ -1220,7 +1316,7 @@ async function edge(t, page) {
           .dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: at.x, clientY: at.y, buttons: pressed })),
       [held.line.key, held.at, buttons],
     );
-  const marks = async () => ({ pointed: await count(page, ".edge[data-pointed]"), tip: await count(page, ".tooltip") });
+  const marks = async () => ({ pointed: await count(page, ".edge[data-pointed]"), tip: await count(page, ".line-bubble") });
   await moveOver(1);
   await page.waitForTimeout(300);
   const pressed = await marks();
@@ -1368,21 +1464,16 @@ async function tips(t, page) {
         kinds[each.kind] = (kinds[each.kind] ?? 0) + each.sites.length;
       }
     }
-    const relations = Object.keys(KIND_NAMES)
-      .filter((kind) => kinds[kind] !== undefined)
-      .map((kind) => `${KIND_NAMES[kind]} ${kinds[kind]}${kind === "import" ? "줄" : "곳"}`)
-      .join(" · ");
+    const relations = relationWords(kinds);
     const title = (id) => `${id.replaceAll(".", "/")}.py`;
-    await page.mouse.move(found.at.x, found.at.y - 1);
-    await page.mouse.move(found.at.x, found.at.y);
-    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
-    const rows = (await tipText(page)).split("\n");
+    await bubbleOver(page, { x: found.at.x, y: found.at.y });
+    const rows = await bubbleRows(page);
     t.check(
-      "집계 선에 올리면 말풍선이 출발과 도착, 그 선에 든 관계의 종류마다 수와 단위를 적는다",
+      "집계 선에 올리면 말풍선이 출발과 도착, 그 선에 든 호출·생성·상속의 수를 적고 그 셋이 없으면 수 없이 적는다",
       rows.includes(`${title(source)} → ${title(target)} · ${relations}`) && rows.every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
       rows.join(" / "),
     );
-    t.check("선의 말풍선에 분류 이름(실행, 사용, 계승)과 단위 없는 수가 없다", rows.every((row) => !/· (실행|사용|계승)( ·|$)/.test(row) && !/· \d+곳$/.test(row)), rows.join(" / "));
+    t.check("선의 말풍선에 분류 이름(실행, 사용, 계승)과 종류 없는 수가 없다", rows.every((row) => !/· (실행|사용|계승)( ·|$)/.test(row) && !/· \d+곳$/.test(row)), rows.join(" / "));
     await shot("line");
   }
 
@@ -4237,21 +4328,21 @@ async function finderPath(t, page) {
     await watchFlashes(page);
     await page.mouse.move(aggregate.at.x - 1, aggregate.at.y);
     await page.mouse.move(aggregate.at.x, aggregate.at.y);
-    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+    await page.waitForSelector(".line-bubble", { timeout: 3_000 }).catch(() => {});
     const hovered = (await linesOf(page)).find((line) => line.key === aggregate.line.key);
     t.check(
       "경로 밖 집계 선에 올리면 선이 굵어지거나 진해지지 않고 말풍선만 뜨며 커서가 not-allowed다",
-      !hovered.pointed && near(hovered.width, LINE.rest, 0.01) && hovered.tone === "muted" && hovered.opacity === DIM && (await tipText(page)) !== "" && (await cursorAt(page, aggregate.at)) === "not-allowed",
-      `굵기 ${hovered.width}px, 불투명도 ${hovered.opacity}, 말풍선 "${(await tipText(page)).replaceAll("\n", " / ")}"`,
+      !hovered.pointed && near(hovered.width, LINE.rest, 0.01) && hovered.tone === "muted" && hovered.opacity === DIM && (await bubbleRows(page)).length > 0 && (await cursorAt(page, aggregate.at)) === "not-allowed",
+      `굵기 ${hovered.width}px, 불투명도 ${hovered.opacity}, 말풍선 "${(await bubbleRows(page)).join(" / ")}"`,
     );
-    await page.mouse.click(aggregate.at.x, aggregate.at.y);
+    await followLine(page, aggregate.at, { key: aggregate.line.key });
     await page.waitForTimeout(250);
     await page.mouse.move(5, 5);
     await page.waitForSelector(".finder-pinned[data-flash]", { state: "detached", timeout: 3_000 }).catch(() => {});
     await rest(page);
     const after = (await routeLinesOf(page)).map((line) => line.key).sort();
     t.check(
-      "경로 밖 집계 선을 누르면 강조와 보이는 노드가 그대로이고 안내 줄이 한 번 뒤집힌다",
+      "경로 밖 집계 선의 도착 이름을 누르면 강조와 보이는 노드가 그대로이고 안내 줄이 한 번 뒤집힌다",
       same(after, first.lines) && (await selectedOf(page)) === route.paths[0][0] && (await flashesOf(page)) === 1 && same(await opacitiesOf(page), first.opacity),
       `걸음 ${after.length}개, 보이는 노드 ${await selectedOf(page)}, 뒤집힘 ${await flashesOf(page)}번`,
     );
@@ -4424,10 +4515,10 @@ async function finderStep(t, page) {
   }
   const target = found.line.key.split("|")[1];
   t.check("경로 위의 선에 올리면 커서가 pointer다", (await cursorAt(page, found.at)) === "pointer", await cursorAt(page, found.at));
-  await page.mouse.click(found.at.x, found.at.y);
+  await followLine(page, found.at, { key: found.line.key });
   await page.mouse.move(5, 5);
   const lined = await focusedOn(target);
-  t.check("경로 위의 선을 누르면 그 선의 도착 노드가 정보 패널에 보이고 강조는 그대로다", lined.ok, lined.text);
+  t.check("경로 위의 선을 눌러 고정한 말풍선에서 도착 이름을 누르면 그 노드가 정보 패널에 보이고 강조는 그대로다", lined.ok, lined.text);
 
   // 낮은 창에서 단계 목록이 목록 안에서 스크롤되고 지금 단계의 행이 목록 안에 보인다.
   await page.setViewportSize({ width: VIEW.width, height: LOW_HEIGHT });
@@ -5796,6 +5887,400 @@ async function dim(t, page) {
   await look("mdp");
 }
 
+/** 그래프의 포함 관계. within(id, ancestor)는 id가 ancestor 자신이거나 그 자손인지, unitOf(id)는 id가 든 파일(파일과 폴더는 자신)이다. */
+function ancestry(graph) {
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const within = (id, ancestor) => {
+    for (let now = id; now != null; now = nodes.get(now)?.parent) {
+      if (now === ancestor) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const unitOf = (id) => {
+    let now = nodes.get(id);
+    while (now !== undefined && now.kind !== "module" && now.kind !== "package" && now.parent !== null) {
+      now = nodes.get(now.parent);
+    }
+    return now?.id ?? id;
+  };
+  /** 두 토글이 꺼진 화면에서 그리는 원래 선 */
+  const edges = graph.edges.filter((e) => [e.source, e.target].every((id) => !nodes.get(id).test && nodes.get(id).kind !== "external"));
+  /** 화면의 선 key가 합친 원래 선. 집계 선은 출발이 키의 출발 노드 안에, 도착이 도착 노드 안에 든 선이다. */
+  const origins = (key) => {
+    const [source, target] = endsOfKey(key);
+    return key.startsWith("agg|") ? edges.filter((e) => within(e.source, source) && within(e.target, target)) : edges.filter((e) => `${e.source}|${e.target}|${e.kind}` === key);
+  };
+  /** 파일과 폴더의 이름표(소스 루트 기준 경로) */
+  const title = (id) => (nodes.get(id).kind === "package" ? `${id.replaceAll(".", "/")}/` : `${id.replaceAll(".", "/")}.py`);
+  return { nodes, within, unitOf, edges, origins, title };
+}
+
+/** 선의 말풍선이 관계 칸에 적는 글(`graph/names.ts`의 `relationsOf`와 같은 규칙) */
+function relationWords(kinds) {
+  const counted = Object.keys(KIND_NAMES).filter((kind) => kinds[kind] !== undefined && COUNTED.includes(kind));
+  return counted.length > 0 ? counted.map((kind) => `${KIND_NAMES[kind]} ${kinds[kind]}곳`).join(" · ") : (ALONE.find(([kind]) => kinds[kind] !== undefined)?.[1] ?? "");
+}
+
+/**
+ * 선의 말풍선과 선을 따라가는 단계를 본다. 세 칸과 칸 이름, 선 하나의 고정, Esc와 바깥 클릭, 방향키, 이름과 관계 칸의 동작,
+ * 고른 노드가 함수·파일·없음일 때 줄의 양 끝, 관계 글 세 가지와 선 위의 수, 경로 고정 중의 막음, 함수 시점 뷰를 차례로 본다.
+ * 사진은 `hf3-line-{이름}.png`로 남긴다. `--wide-url`을 받으면 그 레포에서 함수를 고른 채 접힌 폴더로 가는 선도 본다.
+ */
+async function lineBubble(t, page) {
+  const shot = (name) => page.screenshot({ path: join(OUT, `hf3-line-${name}.png`) });
+  const graph = await api("/api/graph");
+  const tree = ancestry(graph);
+  const away = async () => {
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(250);
+  };
+  /** from에서 to로 가는 그린 선과 누를 점 */
+  const lineBetween = async (from, to) => hittable(page, (await linesOf(page)).filter((line) => same(endsOfKey(line.key), [from, to])));
+  /** 화면에 그려져 있지 않은 정의를 말풍선이 적는 글: `파일 경로::이름` */
+  const hiddenName = (id) => `${tree.title(tree.unitOf(id))}::${shortName(graph, id)}`;
+  const folder = "parser";
+
+  // 고른 노드가 없으면 화면에 그린 양 끝을 적는다.
+  await load(page, url, false);
+  await away();
+  const first = await lineBetween(FILE, folder);
+  if (first === null) {
+    t.check("arbiter.py에서 접힌 parser/ 폴더로 가는 선이 화면에 있다", false);
+    return;
+  }
+  const hovered = await bubbleOver(page, first.at);
+  const drawnRow = hovered?.rows.find((row) => row.key === first.line.key);
+  t.check(
+    "선에 마우스를 올리면 칸 이름 출발·도착·관계와 줄마다 세 칸을 적은 말풍선이 뜨고 누를 수 있는 칸이 없다",
+    hovered !== null && !hovered.pinned && same(hovered.head, ["출발", "도착", "관계"]) && hovered.rows.every((row) => row.pressable.every((on) => !on)) && (await count(page, ".tooltip")) === 0,
+    hovered === null ? "말풍선 없음" : hovered.rows.map(rowText).join(" / "),
+  );
+  t.check(
+    "고른 노드가 없으면 줄이 화면에 그린 양 끝과 그 선의 관계다",
+    drawnRow !== undefined && same([drawnRow.source, drawnRow.target, drawnRow.relation], [tree.title(FILE), tree.title(folder), relationWords(kindsOf(tree.origins(first.line.key)))]),
+    drawnRow === undefined ? "" : rowText(drawnRow),
+  );
+  await shot("hover");
+  const pinned = await pinBubble(page, first.at);
+  t.check(
+    "선이 하나여도 누르면 같은 모양의 말풍선이 그곳에 고정되고 노드는 선택되지 않는다",
+    pinned !== null && pinned.pinned && same(pinned.rows.map(rowText), hovered.rows.map(rowText)) && near(pinned.rect.x, hovered.rect.x, 2) && near(pinned.rect.y, hovered.rect.y, 2) && (await selectedOf(page)) === null,
+    pinned === null ? "말풍선 없음" : `줄 ${pinned.rows.length}개, 말풍선 (${Math.round(hovered.rect.x)}, ${Math.round(hovered.rect.y)}) → (${Math.round(pinned.rect.x)}, ${Math.round(pinned.rect.y)})`,
+  );
+  t.check("고정한 말풍선은 출발·도착 이름과 관계 칸을 누를 수 있다", pinned !== null && pinned.rows.every((row) => row.pressable.every((on) => on)), pinned?.rows.map((row) => row.pressable.join(",")).join(" / "));
+  await shot("pinned");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  t.check("Esc는 말풍선을 풀고 선택을 바꾸지 않는다", (await bubbleOf(page))?.pinned !== true && (await selectedOf(page)) === null);
+  await page.waitForTimeout(600);
+  await pinBubble(page, first.at);
+  await page.mouse.click(40, 500);
+  await page.waitForTimeout(200);
+  t.check("말풍선 밖을 누르면 말풍선이 풀린다", (await bubbleOf(page)) === null);
+
+  // 방향키로 칸을 옮기고 Enter로 도착 이름을 누른다. 도착이 폴더면 그 폴더를 펼친다.
+  await page.waitForTimeout(600);
+  await pinBubble(page, first.at);
+  const focusAt = () => page.evaluate(() => [document.activeElement?.dataset.row ?? null, document.activeElement?.dataset.column ?? null]);
+  const start = await focusAt();
+  await page.keyboard.press("ArrowRight");
+  const right = await focusAt();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowLeft");
+  const back = await focusAt();
+  t.check("고정하면 첫 줄의 출발 칸에 초점이 가고 방향키로 칸을 옮긴다", same(start, ["0", "0"]) && same(right, ["0", "1"]) && same(back, ["0", "1"]), `${start} → ${right} → ${back}`);
+  const row = (await bubbleOf(page)).rows.findIndex((each) => each.key === first.line.key);
+  for (let i = 0; i < row; i += 1) {
+    await page.keyboard.press("ArrowDown");
+  }
+  await page.keyboard.press("Enter");
+  const reached = await page.waitForSelector(`.reached[data-node="${folder}"]`, { timeout: 5_000 }).then(() => true, () => false);
+  await away();
+  await settle(page);
+  t.check(
+    "고른 노드가 없을 때 도착 칸의 폴더 이름을 누르면 그 폴더를 펼치고 정보 패널이 연결과 관계 줄을 적는다",
+    reached && (await count(page, `${node(folder)} > .node-region`)) > 0 && (await selectedOf(page)) === null && (await headOf(page)).includes(`연결 ${shortName(graph, FILE)} → ${shortName(graph, folder)}`),
+    (await headOf(page)).replaceAll("\n", " / ").slice(0, 120),
+  );
+
+  // 관계 칸은 그 선의 코드 줄 목록을 연다.
+  await load(page, url, false);
+  await away();
+  const again = await lineBetween(FILE, folder);
+  await page.waitForTimeout(600);
+  await followLine(page, again.at, { row: (await bubbleOver(page, again.at)).rows.findIndex((each) => each.key === again.line.key), cell: "relation" });
+  await page.waitForSelector(".info-panel-sites", { timeout: 10_000 }).catch(() => {});
+  const sites = tree.origins(again.line.key).reduce((sum, edge) => sum + edge.sites.length, 0);
+  t.check(
+    "관계 칸을 누르면 그 선의 코드 줄 목록이 열리고 폴더는 접힌 채이며 노드는 선택되지 않는다",
+    (await count(page, ".info-panel-site")) === sites && (await count(page, `${node(folder)} > .node-package`)) > 0 && (await selectedOf(page)) === null && (await bubbleOf(page)) === null,
+    `코드 줄 ${await count(page, ".info-panel-site")}개, 그래프의 코드 줄 ${sites}개`,
+  );
+
+  // 함수를 고르면 접힌 폴더로 뭉친 선을 실제 상대 함수로 풀어 적고, 그 이름을 누르면 폴더를 펼쳐 그 함수를 고른다.
+  const callsInto = (id, box) => tree.edges.filter((e) => e.source === id && COUNTED.includes(e.kind) && tree.within(e.target, box));
+  const caller = graph.nodes
+    .filter((n) => n.kind === "function" && n.parent === FILE)
+    .sort((a, b) => new Set(callsInto(b.id, folder).map((e) => e.target)).size - new Set(callsInto(a.id, folder).map((e) => e.target)).size)[0];
+  await load(page, url, false);
+  await pickInTree(page, { owner: FILE, id: caller.id });
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await away();
+  await settle(page);
+  /** 함수 id에서 상자 box 안으로 가는 선의 줄: 실제 도착 정의마다 세는 관계를 묶는다. */
+  const functionRows = (id, box) => {
+    const targets = [...new Set(callsInto(id, box).map((e) => e.target))];
+    return targets.map((target) => `${shortName(graph, id).replace(/^.*\./, "")} → ${hiddenName(target)} · ${relationWords(kindsOf(callsInto(id, box).filter((e) => e.target === target)))}`);
+  };
+  const lump = await lineBetween(caller.id, folder);
+  if (lump === null) {
+    t.skip("함수를 고른 채 접힌 폴더로 가는 선의 줄이 실제 상대 함수다", `${caller.id}에서 접힌 ${folder}/로 가는 누를 수 있는 선이 없다`);
+  } else {
+    const stage = await bubbleOver(page, lump.at);
+    const mine = stage.rows.filter((each) => each.key === lump.line.key);
+    t.check(
+      "함수를 고른 채 접힌 폴더로 가는 선의 줄은 실제 상대 함수이고, 화면에 그려져 있지 않은 함수는 파일 경로를 함께 적는다",
+      mine.length > 0 && same(mine.map(rowText).sort(), functionRows(caller.id, folder).sort()) && mine.every((each) => each.paths[1].endsWith(".py::") && each.paths[0] === ""),
+      mine.map(rowText).join(" / "),
+    );
+    t.check("함수를 고른 채로는 폴더가 저절로 열리지 않는다", (await count(page, `${node(folder)} > .node-package`)) > 0);
+    await shot("function");
+    await page.evaluate(() => (document.documentElement.dataset.theme = "dark"));
+    await shot("function-dark");
+    await page.evaluate(() => (document.documentElement.dataset.theme = "light"));
+    const at = stage.rows.findIndex((each) => each.key === lump.line.key);
+    const wanted = stage.rows[at].nodes[1];
+    await followLine(page, lump.at, { row: at });
+    await waitSelected(page, wanted).catch(() => {});
+    await away();
+    const head = await headOf(page);
+    t.check(
+      "그 줄의 도착 이름을 누르면 폴더를 펼치고 그 함수를 고르며 지나온 선이 굵게 남는다",
+      (await selectedOf(page)) === wanted && (await count(page, `${node(folder)} > .node-region`)) > 0 && (await viaLines(page)).some((line) => line.via) && head.includes(`연결 ${shortName(graph, caller.id)} → ${shortName(graph, wanted)}`),
+      `선택 ${await selectedOf(page)}, ${head.replaceAll("\n", " / ").slice(0, 120)}`,
+    );
+    await shot("function-arrived");
+  }
+
+  // 파일을 고르면 접힌 폴더로 뭉친 선의 상대 끝을 그 안의 파일로 풀어 적는다.
+  await load(page, url, false);
+  await pick(page, FILE);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await away();
+  await settle(page);
+  const fileLine = await lineBetween(FILE, folder);
+  if (fileLine === null) {
+    t.skip("파일을 고른 채 접힌 폴더로 가는 선의 줄이 파일 이름이다", "arbiter.py에서 접힌 parser/로 가는 누를 수 있는 선이 없다");
+  } else {
+    const crossing = tree.edges.filter((e) => tree.within(e.source, FILE) && tree.within(e.target, folder));
+    const files = [...new Set(crossing.map((e) => tree.unitOf(e.target)))];
+    const want = files.map((file) => `${tree.title(FILE)} → ${tree.title(file)} · ${relationWords(kindsOf(crossing.filter((e) => tree.unitOf(e.target) === file)))}`);
+    const stage = await bubbleOver(page, fileLine.at);
+    const mine = stage.rows.filter((each) => each.key === fileLine.line.key);
+    t.check(
+      "파일을 고른 채 접힌 폴더로 가는 선의 줄은 그 폴더 안의 파일마다 하나이고 앞쪽 폴더 경로를 함께 적는다",
+      same(mine.map(rowText).sort(), want.sort()) && mine.every((each) => each.paths[1] === tree.title(folder)),
+      mine.map(rowText).join(" / "),
+    );
+    await shot("file");
+    const at = stage.rows.findIndex((each) => each.key === fileLine.line.key);
+    const wanted = stage.rows[at].nodes[1];
+    await followLine(page, fileLine.at, { row: at });
+    await waitSelected(page, wanted).catch(() => {});
+    await away();
+    t.check(
+      "그 줄의 도착 이름을 누르면 폴더를 펼치고 그 파일을 고른다",
+      (await selectedOf(page)) === wanted && tree.nodes.get(wanted).kind === "module" && (await count(page, `${node(folder)} > .node-region`)) > 0,
+      `선택 ${await selectedOf(page)}`,
+    );
+  }
+
+  // 관계 글 세 가지와 선 위의 수. 폴더를 펼친 처음 화면의 모든 선을 /api/graph에서 센 값과 견준다.
+  await load(page);
+  await away();
+  const drawnLines = await page.evaluate(() => [...document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")].map((edge) => ({ key: edge.dataset.key, sites: Number(edge.dataset.sites) })));
+  const wrong = drawnLines.filter((line) => line.sites !== countedSites(tree.origins(line.key)));
+  t.check(
+    `처음 화면의 선 ${drawnLines.length}개마다 선의 수가 /api/graph에서 센 호출·생성·상속 수와 같다`,
+    drawnLines.length > 0 && wrong.length === 0,
+    wrong.slice(0, 3).map((line) => `${line.key}: 화면 ${line.sites}, 그래프 ${countedSites(tree.origins(line.key))}`).join(" / "),
+  );
+  const sums = await trunksOf(page, "in");
+  t.check(
+    `들어오는 줄기 ${sums.length}개의 합계가 가지의 호출·생성·상속 수를 더한 값이고 0이나 1이면 적지 않는다`,
+    sums.every((trunk) => trunk.sum === (trunk.sites >= 2 ? trunk.sites : null)) && sums.every((trunk) => trunk.sites === trunk.branches.reduce((sum, key) => sum + countedSites(tree.origins(key)), 0)),
+    sums.filter((trunk) => trunk.sum !== (trunk.sites >= 2 ? trunk.sites : null)).slice(0, 3).map((trunk) => `${trunk.key}: 적힌 수 ${trunk.sum}, 합 ${trunk.sites}`).join(" / "),
+  );
+  /** 관계 글의 세 가지 경우와 그 글. 처음 화면에 그런 선이 없으면 순환이 있는 고정 레포의 화면에서 찾는다. */
+  const TEXTS = { "세는 관계": /^\S+ \d+곳( · \S+ \d+곳)*$/, 타입: /^타입에만 쓰임$/, import: /^import 관계만 있음$/ };
+  const left = new Set(Object.keys(TEXTS));
+  /** lines 가운데 가운데 점에 마우스를 올렸을 때 말풍선에 줄이 적히는 첫 선과 그 줄. 종류가 다른 선과 겹쳐 그려진 선은 맨 위 요소가 아니어도 줄이 적힌다. */
+  const over = async (lines) => {
+    for (const line of lines.slice(0, 12)) {
+      const at =
+        (await edgePoint(page, line.key)) ??
+        (await page.evaluate((key) => {
+          const path = [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].find((edge) => edge.dataset.key === key).querySelector(".edge-line");
+          const middle = path.getPointAtLength(path.getTotalLength() / 2);
+          const point = new DOMPoint(middle.x, middle.y).matrixTransform(path.getScreenCTM());
+          return document.elementFromPoint(point.x, point.y)?.closest(".react-flow__edge") == null ? null : { x: point.x, y: point.y };
+        }, line.key));
+      const row = at === null ? undefined : (await bubbleOver(page, at))?.rows.find((each) => each.key === line.key);
+      if (row !== undefined) {
+        return { line, at, row };
+      }
+      await away();
+    }
+    return null;
+  };
+  for (const base of [url, cycleUrl]) {
+    if (base === null || left.size === 0) {
+      continue;
+    }
+    const from = base === url ? tree : ancestry(await api("/api/graph", base));
+    if (base !== url) {
+      await load(page, base);
+      await away();
+    }
+    for (const name of [...left]) {
+      const found = await over((await linesOf(page)).filter((line) => !line.below && TEXTS[name].test(relationWords(kindsOf(from.origins(line.key))))));
+      if (found === null) {
+        continue;
+      }
+      left.delete(name);
+      const seen = found.row;
+      if (name !== "세는 관계") {
+        await shot(name === "타입" ? "type" : "import");
+      }
+      await away();
+      t.check(
+        `${name}${name === "세는 관계" ? "가 있는 선은 그 종류만 수와 함께 적는다" : "만 있는 선은 수 없이 적는다"}`,
+        seen !== undefined && seen.relation === relationWords(kindsOf(from.origins(found.line.key))) && !/import \d|타입 \d/.test(seen.relation),
+        seen === undefined ? "" : `${rowText(seen)} (원래 선 ${JSON.stringify(kindsOf(from.origins(found.line.key)))})`,
+      );
+    }
+  }
+  for (const name of left) {
+    t.skip(`${name}만 있는 선의 관계 글`, "화면에 그런 누를 수 있는 선이 없다");
+  }
+
+  // 함수를 고른 채 세는 관계가 없는 선은 누를 수 없는 줄 하나다.
+  await load(page);
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await away();
+  await settle(page);
+  let bare = null;
+  for (const line of (await linesOf(page)).filter((each) => /\|(type|import|pass)$/.test(each.key) && each.key.startsWith(`${FUNCTION}|`))) {
+    const at = await edgePoint(page, line.key);
+    const seen = at === null ? null : await bubbleOver(page, at);
+    if (seen !== null && seen.rows.length === 1 && seen.rows[0].key === line.key) {
+      bare = { line, at, seen };
+      break;
+    }
+    await away();
+  }
+  if (bare === null) {
+    t.skip("함수를 고른 채 세는 관계가 없는 선의 줄", "그 선 하나만 지나는 누를 수 있는 점이 없다");
+  } else {
+    await shot("function-bare");
+    const held = await pinBubble(page, bare.at);
+    t.check(
+      "함수를 고른 채 세는 관계가 없는 선은 관계 글을 적은 줄 하나이고 출발·도착 이름을 누를 수 없다",
+      held !== null && held.rows.length === 1 && ALONE.some(([, text]) => text === held.rows[0].relation) && same(held.rows[0].pressable.slice(0, 2), [false, false]) && (await selectedOf(page)) === FUNCTION,
+      held === null ? "" : `${rowText(held.rows[0])}, 누를 수 있는 칸 ${held.rows[0].pressable}`,
+    );
+    await page.keyboard.press("Escape");
+  }
+
+  // 경로 고정 중에는 경로 밖 이름을 눌러도 가지 않는다.
+  await load(page);
+  await pin(page);
+  await watchFlashes(page);
+  await away();
+  const outside = await hittable(page, (await linesOf(page)).filter((line) => line.tone === "muted" && !line.below));
+  if (outside === null) {
+    t.skip("경로 고정 중에 걸음이 아닌 선의 이름 클릭", "누를 수 있는 걸음 밖의 선이 없다");
+  } else {
+    const flashes = await flashesOf(page);
+    await followLine(page, outside.at);
+    await page.waitForTimeout(300);
+    t.check(
+      "경로 고정 중에 걸음이 아닌 선의 도착 이름을 누르면 가지 않고 안내 줄이 뒤집힌다",
+      (await pinnedOf(page)) && (await flashesOf(page)) === flashes + 1 && (await bubbleOf(page))?.pinned !== true,
+      `뒤집힘 ${(await flashesOf(page)) - flashes}번`,
+    );
+    await page.waitForSelector(".finder-pinned[data-flash]", { state: "detached", timeout: 3_000 }).catch(() => {});
+  }
+
+  // 함수 시점 뷰의 선도 같은 말풍선을 쓴다.
+  await load(page);
+  await pick(page, FILE);
+  await clickNode(page, FUNCTION, 2);
+  await page.waitForSelector(".node-call", { timeout: 30_000 });
+  await settle(page);
+  await away();
+  const callLine = await hittable(page, await linesOf(page));
+  const callTip = await bubbleOver(page, callLine.at);
+  await shot("call");
+  const callRow = callTip.rows.findIndex((each) => each.key === callLine.line.key);
+  const callEnd = endsOfKey(callLine.line.key).find((id) => id !== FUNCTION);
+  await followLine(page, callLine.at, { row: callRow, cell: endsOfKey(callLine.line.key)[0] === callEnd ? "source" : "target" });
+  await waitSelected(page, callEnd).catch(() => {});
+  t.check(
+    "함수 시점 뷰의 선도 세 칸 말풍선을 띄우고 이름을 누르면 그 함수를 고른다",
+    same(callTip.head, ["출발", "도착", "관계"]) && callRow >= 0 && new RegExp(`^${RELATIONS}$`).test(callTip.rows[callRow].relation) && (await selectedOf(page)) === callEnd && (await count(page, ".node-call")) > 0,
+    `${rowText(callTip.rows[Math.max(callRow, 0)])}, 선택 ${await selectedOf(page)}`,
+  );
+
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서 함수를 고른 채 접힌 폴더로 가는 선", "--wide-url을 주지 않았다");
+    return;
+  }
+  const wideGraph = await api("/api/graph", wideUrl);
+  const wide = ancestry(wideGraph);
+  const top = WIDE_LINE_FOLDER.open[0];
+  /** top 바로 아래 파일의 함수와 그 함수가 세는 관계로 닿는 top 바로 아래의 폴더 */
+  const pairs = wideGraph.nodes
+    .filter((n) => n.kind === "function" && !n.test && wide.nodes.get(n.parent)?.parent === top)
+    .flatMap((fn) => wideGraph.nodes.filter((box) => box.kind === "package" && box.parent === top).map((box) => ({ fn, box, edges: wide.edges.filter((e) => e.source === fn.id && COUNTED.includes(e.kind) && wide.within(e.target, box.id)) })))
+    .filter((pair) => pair.edges.length > 0)
+    .sort((a, b) => new Set(b.edges.map((e) => e.target)).size - new Set(a.edges.map((e) => e.target)).size);
+  await page.goto(wideUrl);
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  await openFolder(page, top);
+  let wideDone = false;
+  for (const { fn, box, edges } of pairs.slice(0, 5)) {
+    await pickInTree(page, { owner: fn.parent, id: fn.id });
+    await away();
+    const found = await lineBetween(fn.id, box.id);
+    if (found === null) {
+      continue;
+    }
+    const seen = (await bubbleOver(page, found.at)).rows.filter((each) => each.key === found.line.key);
+    const want = [...new Set(edges.map((e) => e.target))].map(
+      (target) => `${shortName(wideGraph, fn.id)} → ${wide.title(wide.unitOf(target))}::${shortName(wideGraph, target)} · ${relationWords(kindsOf(edges.filter((e) => e.target === target)))}`,
+    );
+    await shot("mdp-function");
+    t.check(`mdp: 함수 ${shortName(wideGraph, fn.id)}를 고른 채 접힌 ${wide.title(box.id)}로 가는 선의 줄이 실제 상대 함수다`, same(seen.map(rowText).sort(), want.sort()), seen.map(rowText).join(" / "));
+    const wanted = seen[0].nodes[1];
+    await followLine(page, found.at, { row: (await bubbleOf(page)).rows.findIndex((each) => each.key === found.line.key) });
+    await waitSelected(page, wanted).catch(() => {});
+    t.check("mdp: 그 줄의 도착 이름을 누르면 폴더를 펼치고 그 함수를 고른다", (await selectedOf(page)) === wanted && (await count(page, `${node(box.id)} > .node-region`)) > 0, `선택 ${await selectedOf(page)}`);
+    await away();
+    await shot("mdp-arrived");
+    wideDone = true;
+    break;
+  }
+  if (!wideDone) {
+    t.skip("mdp: 함수를 고른 채 접힌 폴더로 가는 선", "그런 누를 수 있는 선이 없다");
+  }
+}
+
 // ── 4단계: 선의 합류 ─────────────────────────────────────────────
 
 /**
@@ -6004,20 +6489,20 @@ async function mergeOut(t, page) {
   await page.waitForSelector(".edge-trunk[data-pointed]", { timeout: 5_000 }).catch(() => {});
   await page.waitForTimeout(300);
   const stem = (await trunksOf(page, "out")).find((each) => each.key === spot.trunk);
-  const rows = (await tipText(page)).split("\n");
+  const rows = await bubbleRows(page);
   t.check(
-    `선 ${spot.keys.length}개가 든 나가는 줄기의 출발 노드 쪽에 올리면 줄기와 그 선이 모두 본문 잉크로 다른 선 위의 층에 그려지고, 말풍선은 합계 줄 없이 선마다 한 줄이다`,
-    stem.pointed && stem.tone === "strong" && stem.layer === "5" && same(await pointedLines(page), spot.keys) && (await linesOf(page)).filter((line) => line.pointed).every((line) => line.stroke === ink) &&
+    `선 ${spot.keys.length}개가 든 나가는 줄기의 출발 노드 쪽에 올리면 줄기와 그 선이 모두 한 단계 진한 muted 100%로 다른 선 위의 층에 그려지고, 말풍선은 선마다 한 줄이다`,
+    stem.pointed && stem.tone === "muted" && stem.opacity === 1 && stem.layer === "5" && same(await pointedLines(page), spot.keys) && (await linesOf(page)).filter((line) => line.pointed).every((line) => line.tone === "muted" && line.opacity === 1) &&
       rows.length === spot.keys.length && rows.every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
     rows.join(" / "),
   );
   t.check("나가는 줄기 위에는 수를 적지 않는다", (await count(page, '.edge-trunk[data-end="out"] text')) === 0);
   await t.shot();
   await page.mouse.click(spot.x, spot.y);
-  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
+  await page.waitForSelector(".line-bubble[data-pinned]", { timeout: 3_000 }).catch(() => {});
   const menu = await menuOf(page);
   t.check(
-    "나가는 줄기를 누르면 노드를 고르지 않고 누른 자리에 그 줄기에 든 선의 목록을 고정한다",
+    "나가는 줄기를 누르면 노드를 고르지 않고 그 줄기에 든 선의 말풍선을 고정한다",
     menu !== null && same(menu.map((item) => item.key).sort(), spot.keys) && (await selectedOf(page)) === null,
     `항목 ${menu?.length ?? 0}개`,
   );
@@ -6059,14 +6544,14 @@ async function mergeHover(t, page) {
   const lines = await linesOf(page);
   const over = lines.find((line) => line.key === found.line.key);
   const whole = await page.evaluate((key) => document.querySelector(`.edge[data-key="${CSS.escape(key)}"]`)?.hasAttribute("data-whole"), found.line.key);
-  const branchTip = await tipText(page);
+  const branchTip = (await bubbleRows(page)).join("\n");
   t.check(
-    "가지에 올리면 그 선 하나가 출발부터 도착 노드까지 본문 잉크로 다른 선 위의 층에 그려지고 줄기와 다른 가지는 그대로다",
-    over.pointed && whole && over.stroke === ink && over.layer === "5" && near(over.end.x, trunk.end.x) && near(over.end.y, trunk.end.y) &&
+    "가지에 올리면 그 선 하나가 출발부터 도착 노드까지 한 단계 진한 muted 100%로 다른 선 위의 층에 그려지고 줄기와 다른 가지는 그대로다",
+    over.pointed && whole && over.tone === "muted" && over.opacity === 1 && over.layer === "5" && near(over.end.x, trunk.end.x) && near(over.end.y, trunk.end.y) &&
       lines.filter((line) => line.key !== over.key).every((line) => !line.pointed) && (await trunksOf(page)).every((each) => !each.pointed),
     `올린 선 ${over.key}, 전체 경로 ${whole}, 층 ${over.layer}`,
   );
-  t.check("가지의 말풍선은 그 선의 출발·도착과 종류마다의 수다", new RegExp(`^.+ → .+ · ${RELATIONS}$`).test(branchTip) && !branchTip.startsWith("노드 "), branchTip);
+  t.check("가지의 말풍선은 그 선의 출발·도착·관계 한 줄이다", new RegExp(`^.+ → .+ · ${RELATIONS}$`).test(branchTip), branchTip);
 
   const spot = await trunkPoint(page, trunk.key);
   await page.mouse.move(spot.x, spot.y - 1);
@@ -6075,18 +6560,16 @@ async function mergeHover(t, page) {
   await page.waitForTimeout(300);
   const pointed = (await trunksOf(page)).find((each) => each.key === trunk.key);
   const members = (await linesOf(page)).filter((line) => line.trunk === trunk.key);
-  const trunkTipText = await tipText(page);
+  const tipRows = await bubbleRows(page);
   t.check(
-    `줄기에 올리면 줄기와 가지 ${trunk.count}개가 모두 본문 잉크로 다른 선 위의 층에 그려진다`,
-    pointed.pointed && pointed.tone === "strong" && pointed.opacity === 1 && pointed.layer === "5" && members.length === trunk.count && members.every((line) => line.pointed && line.stroke === ink),
-    `줄기 ${pointed.tone} ${pointed.opacity}, 본문 잉크 가지 ${members.filter((line) => line.pointed).length}개`,
+    `줄기에 올리면 줄기와 가지 ${trunk.count}개가 모두 한 단계 진한 muted 100%로 다른 선 위의 층에 그려진다`,
+    pointed.pointed && pointed.tone === "muted" && pointed.opacity === 1 && pointed.layer === "5" && members.length === trunk.count && members.every((line) => line.pointed && line.tone === "muted" && line.opacity === 1),
+    `줄기 ${pointed.tone} ${pointed.opacity}, 올린 가지 ${members.filter((line) => line.pointed).length}개`,
   );
-  const sources = new Set(trunk.branches.map((key) => endsOfKey(key)[0])).size;
-  const tipRows = trunkTipText.split("\n");
   t.check(
-    "도착 노드 앞 줄기의 말풍선은 첫 줄에 선을 내보내는 노드 수와 도착 노드, 종류마다 합친 수를, 그 아래에 그 구간을 지나는 선을 한 줄씩 적는다",
-    new RegExp(`^노드 ${sources}개 → .+ · ${RELATIONS}$`).test(tipRows[0]) && tipRows.length === 1 + trunk.count && tipRows.slice(1).every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
-    trunkTipText.replaceAll("\n", " / "),
+    "도착 노드 앞 줄기의 말풍선은 그 구간을 지나는 선을 한 줄씩 적는다",
+    tipRows.length === trunk.count && tipRows.every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
+    tipRows.join(" / "),
   );
   await t.shot();
   await page.mouse.move(5, 5);
@@ -6117,16 +6600,20 @@ async function mergeClick(t, page) {
     `${head.replaceAll("\n", " / ").slice(0, 80)} / 묶음 ${groups.map((group) => group.name.trim()).join(", ")}`,
   );
   const total = groups.reduce((sum, group) => sum + group.sites, 0);
-  t.check("정보 구역의 관계 줄에 적은 수가 목록의 코드 줄 수와 같다", new RegExp(`관계 (${total}개|\\S+ ${total}[곳줄])`).test(head), `코드 줄 ${total}개`);
+  const tree = ancestry(await api("/api/graph"));
+  const along = trunk.branches.flatMap((key) => tree.origins(key));
+  t.check("정보 구역의 관계 줄이 줄기에 든 선의 관계를 적고 목록의 코드 줄 수가 그 선의 코드 줄 수와 같다", head.includes(`관계 ${linksWords(along).relation}`) && total === linksWords(along).total + linksWords(along).rest, `코드 줄 ${total}개, ${head.replaceAll("\n", " / ").slice(-80)}`);
   await t.shot();
   await page.click(".info-panel-site");
   await page.waitForSelector(".info-panel .monaco-editor .code-range", { timeout: 30_000 }).catch(() => {});
   t.check("목록의 줄을 누르면 코드 뷰어가 그 줄을 칠해 보인다", (await count(page, ".info-panel .monaco-editor .code-range")) > 0);
 
   await page.waitForTimeout(600);
-  await page.mouse.click(spot.x, spot.y);
+  const held = await pinBubble(page, spot);
+  t.check("줄기를 누르면 그 구간을 지나는 선마다 한 줄인 말풍선이 고정된다", held !== null && held.pinned && held.rows.length > 0 && held.rows.every((row) => trunk.branches.includes(row.key)), `줄 ${held?.rows.length ?? 0}개, 가지 ${trunk.count}개`);
+  await pressCell(page, 0, "target");
   await waitSelected(page, trunk.target).catch(() => {});
-  t.check("줄기를 누르면 도착 노드가 선택된다", (await selectedOf(page)) === trunk.target, `선택 ${await selectedOf(page)}`);
+  t.check("말풍선의 도착 이름을 누르면 도착 노드가 선택된다", (await selectedOf(page)) === trunk.target, `선택 ${await selectedOf(page)}`);
 }
 
 /** 함수를 골랐을 때 고른 노드에 닿는 선이 줄기 위에서 한 줄로 이어지는지 본다. */
@@ -6199,10 +6686,11 @@ async function mergePin(t, page) {
   await watchFlashes(page);
   const spot = await trunkPoint(page, offRoute[0].key);
   const before = await page.evaluate(() => document.querySelector(".finder-step[aria-current='true']")?.dataset.node ?? null);
-  await page.mouse.click(spot.x, spot.y);
+  await followLine(page, spot);
+  await page.mouse.move(5, 5);
   await rest(page);
   t.check(
-    "걸음이 지나지 않는 줄기를 눌러도 고정과 보이는 노드가 그대로이고 안내 줄이 뒤집힌다",
+    "걸음이 지나지 않는 줄기의 말풍선에서 도착 이름을 눌러도 고정과 보이는 노드가 그대로이고 안내 줄이 뒤집힌다",
     (await pinnedOf(page)) && (await page.evaluate(() => document.querySelector(".finder-step[aria-current='true']")?.dataset.node ?? null)) === before && (await flashesOf(page)) === 1,
     `뒤집힘 ${await flashesOf(page)}번`,
   );
@@ -7125,9 +7613,11 @@ async function numbers(t, page) {
 /** 화면의 선 가운데 pointed인 선의 키 */
 const pointedLines = (page) => page.evaluate(() => [...document.querySelectorAll(".react-flow__edge .edge[data-pointed]:not(.edge-trunk)")].map((edge) => edge.dataset.key).sort());
 
-/** 고정한 선 목록의 항목마다 선의 키와 글. 목록이 없으면 null이다. */
-const menuOf = (page) =>
-  page.evaluate(() => (document.querySelector(".line-menu") === null ? null : [...document.querySelectorAll(".line-menu-item")].map((item) => ({ key: item.dataset.key, text: item.textContent }))));
+/** 고정한 말풍선의 줄마다 그 줄을 낸 선의 키와 `rowText`로 적은 글. 고정한 말풍선이 없으면 null이다. */
+const menuOf = async (page) => {
+  const bubble = await bubbleOf(page);
+  return bubble === null || !bubble.pinned ? null : bubble.rows.map((row) => ({ key: row.key, text: rowText(row) }));
+};
 
 /**
  * 도착 노드가 다른 선 둘 이상이 함께 지나는 구간 위의 화면 좌표와 그 구간을 지나는 선의 키, 그 구간을 그리는 나가는 줄기의 키.
@@ -7170,7 +7660,7 @@ async function overlap(t, page) {
   const hoverAt = async (spot) => {
     await page.mouse.move(spot.x + 1, spot.y + 1);
     await page.mouse.move(spot.x, spot.y);
-    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+    await page.waitForSelector(".line-bubble", { timeout: 3_000 }).catch(() => {});
     await page.waitForTimeout(250);
   };
   // 줄기 가운데 일부 선만 지나는 구간: 줄기의 먼 쪽 끝. 이웃한 통로의 선이나 나가는 줄기가 커서에서 6px 안에 들지 않는 점을 먼 쪽 끝에서부터 찾는다.
@@ -7190,25 +7680,30 @@ async function overlap(t, page) {
       break;
     }
   }
-  const part = { pointed: await pointedLines(page), rows: (await tipText(page)).split("\n"), trunk: (await trunksOf(page)).find((each) => each.key === trunk.key).pointed };
+  const part = { pointed: await pointedLines(page), rows: await bubbleRows(page), trunk: (await trunksOf(page)).find((each) => each.key === trunk.key).pointed };
   t.check(
     `가지 ${trunk.count}개인 줄기의 먼 쪽 구간에 올리면 그 구간을 지나는 선만 강조하고 줄기 전체는 강조하지 않는다`,
     part.pointed.length >= 1 && part.pointed.length < trunk.count && !part.trunk && part.pointed.every((key) => trunk.branches.includes(key)),
     `강조한 선 ${part.pointed.length}개, 말풍선 ${part.rows.length}줄`,
   );
   t.check(
-    "말풍선의 줄 수가 그 구간을 지나는 선의 수와 같고(도착이 같은 여럿이면 합계 한 줄을 더한다) 선마다 출발 → 도착 · 종류마다의 수를 적는다",
-    part.rows.length === (part.pointed.length === 1 ? 1 : part.pointed.length + 1) && part.rows.slice(-part.pointed.length).every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
+    "말풍선의 줄 수가 그 구간을 지나는 선의 수와 같고 선마다 출발·도착·관계를 적는다",
+    part.rows.length === part.pointed.length && part.rows.every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
     part.rows.join(" / "),
   );
   await page.screenshot({ path: join(OUT, "s4-u7-fix-overlap-part.png") });
 
-  // 도착이 같은 줄기는 누르면 바로 도착 노드를 고른다.
+  // 도착이 같은 줄기도 누르면 말풍선을 고정하고, 도착 이름을 누르면 그 노드를 고른다.
   const near1 = await trunkPoint(page, trunk.key);
   await hoverAt(near1);
-  await page.mouse.click(near1.x, near1.y);
+  const stemRows = await pinBubble(page, near1);
+  await pressCell(page, 0, "target");
   await waitSelected(page, trunk.target).catch(() => {});
-  t.check("도착 노드가 같은 선이 겹친 줄기를 누르면 목록 없이 바로 도착 노드를 고른다", (await selectedOf(page)) === trunk.target && (await menuOf(page)) === null, `선택 ${await selectedOf(page)}`);
+  t.check(
+    "도착 노드가 같은 선이 겹친 줄기를 누르면 그 선마다 한 줄인 말풍선이 고정되고 도착 이름을 누르면 도착 노드를 고른다",
+    stemRows !== null && stemRows.pinned && stemRows.rows.length === trunk.count && (await selectedOf(page)) === trunk.target && (await menuOf(page)) === null,
+    `줄 ${stemRows?.rows.length ?? 0}개, 선택 ${await selectedOf(page)}`,
+  );
   await page.keyboard.press("Escape");
   await rest(page);
   await page.getByRole("button", { name: "화면 맞춤" }).click();
@@ -7218,11 +7713,11 @@ async function overlap(t, page) {
   // 도착이 다른 선이 겹친 구간.
   const spot = await sharedSpot(page);
   if (spot === null) {
-    t.skip("도착이 다른 선이 겹친 구간을 누르면 목록이 고정된다", `화면에 도착이 다른 선이 함께 지나는 구간이 없다 (선택 ${await selectedOf(page)}, 선 ${(await linesOf(page)).length}개)`);
+    t.skip("도착이 다른 선이 겹친 구간을 누르면 말풍선이 고정된다", `화면에 도착이 다른 선이 함께 지나는 구간이 없다 (선택 ${await selectedOf(page)}, 선 ${(await linesOf(page)).length}개)`);
     return;
   }
   await hoverAt(spot);
-  const shared = { pointed: await pointedLines(page), rows: (await tipText(page)).split("\n") };
+  const shared = { pointed: await pointedLines(page), rows: await bubbleRows(page) };
   t.check(
     `도착이 다른 선 ${spot.keys.length}개가 함께 지나는 구간에 올리면 그 선들만 강조하고 말풍선에 한 줄씩 적는다`,
     same(shared.pointed, spot.keys) && shared.rows.length === spot.keys.length && shared.rows.every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
@@ -7230,38 +7725,39 @@ async function overlap(t, page) {
   );
   await page.screenshot({ path: join(OUT, "s4-u7-fix-overlap-hover.png") });
   await page.mouse.click(spot.x, spot.y);
-  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
+  await page.waitForSelector(".line-bubble[data-pinned]", { timeout: 3_000 }).catch(() => {});
   const menu = await menuOf(page);
   t.check(
-    "그 구간을 누르면 노드를 고르지 않고 누른 자리에 선 목록을 고정한다. 항목은 말풍선의 줄과 같다",
+    "그 구간을 누르면 노드를 고르지 않고 말풍선을 그곳에 고정한다. 줄은 올렸을 때의 말풍선과 같다",
     menu !== null && same(menu.map((item) => item.key).sort(), spot.keys) && same(menu.map((item) => item.text), shared.rows) && (await selectedOf(page)) === null && (await count(page, ".tooltip")) === 0,
-    `항목 ${menu?.length ?? 0}개`,
+    `줄 ${menu?.length ?? 0}개`,
   );
-  const item = await rectOf(page, `.line-menu-item[data-key="${menu[1].key}"]`);
+  t.check("고정한 동안 누른 구간의 선이 모두 강조된다", same(await pointedLines(page), spot.keys), (await pointedLines(page)).join(", "));
+  const item = await rectOf(page, `.line-bubble tbody tr[data-key="${menu[1].key}"]`);
   await page.mouse.move(item.x + item.width / 2, item.y + item.height / 2);
   await page.waitForTimeout(250);
-  t.check("항목에 올리면 그 선 하나만 강조한다", same(await pointedLines(page), [menu[1].key]), (await pointedLines(page)).join(", "));
+  t.check("줄에 올리면 그 선 하나만 강조한다", same(await pointedLines(page), [menu[1].key]), (await pointedLines(page)).join(", "));
   await t.shot();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
   // 목록이 닫힌 뒤 커서 밑에 선이 있으면 그 선의 hover가 다시 뜬다.
   const onLine = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest(".react-flow__edge") != null, [item.x + item.width / 2, item.y + item.height / 2]);
-  t.check("Esc는 목록을 먼저 닫고 선택을 바꾸지 않는다", (await menuOf(page)) === null && (await selectedOf(page)) === null && (onLine || (await count(page, ".edge[data-pointed]")) === 0), `커서 밑에 선 ${onLine}`);
+  t.check("Esc는 말풍선을 먼저 풀고 선택을 바꾸지 않는다", (await menuOf(page)) === null && (await selectedOf(page)) === null && (onLine || (await count(page, ".edge[data-pointed]")) === 0), `커서 밑에 선 ${onLine}`);
 
   await page.mouse.click(spot.x, spot.y);
-  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
+  await page.waitForSelector(".line-bubble[data-pinned]", { timeout: 3_000 }).catch(() => {});
   await page.mouse.click(40, 500);
   await page.waitForTimeout(200);
-  t.check("목록 밖을 누르면 목록이 닫힌다", (await menuOf(page)) === null);
+  t.check("말풍선 밖을 누르면 말풍선이 풀린다", (await menuOf(page)) === null);
 
   await page.waitForTimeout(600);
   await page.mouse.click(spot.x, spot.y);
-  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
+  await page.waitForSelector(".line-bubble[data-pinned]", { timeout: 3_000 }).catch(() => {});
   const picked = (await menuOf(page))[0];
   const wanted = endsOfKey(picked.key)[1];
-  await page.click(`.line-menu-item[data-key="${picked.key}"]`);
+  await pressCell(page, 0, "target");
   await waitSelected(page, wanted).catch(() => {});
-  t.check("항목을 누르면 그 선의 도착 노드를 고르고 목록이 닫힌다", (await selectedOf(page)) === wanted && (await menuOf(page)) === null, `선택 ${await selectedOf(page)}`);
+  t.check("줄의 도착 이름을 누르면 그 선의 도착 노드를 고르고 말풍선이 풀린다", (await selectedOf(page)) === wanted && (await menuOf(page)) === null, `선택 ${await selectedOf(page)}`);
   await page.keyboard.press("Escape");
   await rest(page);
   await page.getByRole("button", { name: "화면 맞춤" }).click();
@@ -7273,12 +7769,11 @@ async function overlap(t, page) {
   await page.keyboard.down("Shift");
   await page.mouse.click(again.x, again.y);
   await page.keyboard.up("Shift");
-  await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
-  const listed = (await menuOf(page))[0];
-  await page.click(`.line-menu-item[data-key="${listed.key}"]`);
+  await page.waitForSelector(".line-bubble[data-pinned]", { timeout: 3_000 }).catch(() => {});
+  await pressCell(page, 0, "relation");
   await page.waitForSelector(".info-panel-sites", { timeout: 10_000 }).catch(() => {});
   t.check(
-    "Shift를 누른 채 누른 목록에서 항목을 고르면 그 선의 코드 줄 목록이 열리고 노드는 선택되지 않는다",
+    "Shift를 누른 채 누르면 말풍선이 고정되고 줄의 관계 칸을 누르면 그 선의 코드 줄 목록이 열리며 노드는 선택되지 않는다",
     (await count(page, ".info-panel-site")) > 0 && (await headOf(page)).includes("→") && (await selectedOf(page)) === null,
     (await headOf(page)).replaceAll("\n", " / ").slice(0, 80),
   );
@@ -7295,7 +7790,7 @@ const WIDE_LINE_FOLDER = { open: ["mdp", "mdp.settings"], file: "mdp.settings.lo
  * fits는 펼친 폴더 영역이 가리지 않는 영역 안에 들어와 있는지다.
  */
 async function lineToFolder(page, to, at, shot = null) {
-  await page.mouse.click(at.x, at.y);
+  await followLine(page, at, { to });
   await page.mouse.move(1, 1);
   const marked = await page.waitForSelector(`.reached[data-node="${to}"]`, { timeout: 5_000 }).then(() => true, () => false);
   await shot?.();
@@ -7442,21 +7937,30 @@ function shortName(graph, id) {
   return found.kind === "function" ? `${found.name}()` : found.name;
 }
 
-/** 종류마다의 수를 정보 패널이 적는 글로 바꾼다(frontend/src/panel/links.ts의 linksText와 같은 규칙) */
+/**
+ * 원래 선 edges를 정보 패널이 적는 글로 바꾼다(frontend/src/panel/links.ts의 linksText·restText·relationText와 같은 규칙).
+ * total은 세는 관계의 코드 줄 수, rest는 그 밖의 관계의 코드 줄 수, main은 연결 줄의 합계, more는 `그 밖` 묶음, text는 둘을 이은 글,
+ * relation은 선 하나의 `관계` 줄에 적는 글이다.
+ */
 function linksWords(edges) {
-  const kinds = {};
-  for (const edge of edges) {
-    kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
-  }
-  const list = Object.entries(kinds);
-  const total = list.reduce((sum, [, n]) => sum + n, 0);
-  if (list.length === 0) {
-    return { total, text: "없음" };
-  }
-  const each = Object.keys(KIND_WORDS)
-    .filter((kind) => kinds[kind] !== undefined)
-    .map((kind) => `${KIND_WORDS[kind]} ${kinds[kind]}${kind === "import" ? "줄" : "곳"}`);
-  return { total, text: each.length === 1 ? each[0] : `${total}개 (${each.join(", ")})` };
+  const kinds = kindsOf(edges);
+  const names = (counted) =>
+    Object.keys(KIND_WORDS)
+      .filter((kind) => kinds[kind] !== undefined && COUNTED.includes(kind) === counted)
+      .map((kind) => `${KIND_WORDS[kind]} ${kinds[kind]}${kind === "import" ? "줄" : "곳"}`);
+  const [each, others] = [names(true), names(false)];
+  const total = countedSites(edges);
+  const main = each.length === 0 ? "없음" : each.length === 1 ? each[0] : `${total}곳 (${each.join(", ")})`;
+  const more = others.length === 0 ? "" : `그 밖 ${others.join(", ")}`;
+  const words = relationWords(kinds);
+  return {
+    total,
+    rest: edges.reduce((sum, edge) => sum + edge.sites.length, 0) - total,
+    main,
+    more,
+    text: more === "" ? main : `${main} ${more}`,
+    relation: total > 0 && more !== "" ? `${words} · ${more}` : words,
+  };
 }
 
 /** 노드 id의 경계를 넘어 나가는 선과 들어오는 선. 테스트 코드와 외부 노드에 닿는 선은 뺀다(두 토글이 꺼진 화면). */
@@ -7488,10 +7992,11 @@ const factsOf = (page) =>
       rows: [...document.querySelectorAll(".info-row")].map((row) => {
         const [topic, value] = [row.querySelector("dt"), row.querySelector("dd")];
         const link = value.querySelector(".info-link");
+        const more = value.querySelector(".info-more")?.textContent ?? "";
         return {
           id: row.dataset.row,
           topic: topic.textContent,
-          text: value.textContent,
+          text: `${value.textContent.slice(0, value.textContent.length - more.length)}${more === "" ? "" : ` ${more}`}`,
           pressable: link !== null,
           link: link === null ? null : { color: getComputedStyle(link).color, line: getComputedStyle(link).textDecorationLine },
           left: [topic.getBoundingClientRect().left, value.getBoundingClientRect().left],
@@ -7606,6 +8111,20 @@ async function panelHead(t, page) {
   await page.click('.info-row[data-row="out"] .info-link');
   await page.waitForTimeout(200);
   t.check("합계를 다시 누르면 목록이 닫힌다", (await count(page, ".info-panel-sites")) === 0);
+  const others = linksWords(fnLinks.out);
+  if (others.rest === 0) {
+    t.skip("나가는 연결의 그 밖 묶음을 누르면 세지 않는 관계의 코드 줄 목록이 열린다", "고른 함수에서 나가는 import·타입 관계가 없다");
+  } else {
+    await page.click('.info-row[data-row="out"] .info-more');
+    await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
+    t.check(
+      "나가는 연결의 그 밖 묶음을 누르면 호출·생성·상속이 아닌 관계의 코드 줄 목록이 열린다",
+      (await count(page, ".info-panel-site")) === others.rest && (await page.textContent('.info-row[data-row="out"] .info-more')) === others.more,
+      `코드 줄 ${await count(page, ".info-panel-site")}개, ${others.more}`,
+    );
+    await page.click('.info-row[data-row="out"] .info-more');
+    await page.waitForTimeout(200);
+  }
 
   // 구역 접기
   const sizes = async () => ({
@@ -7633,7 +8152,7 @@ async function panelHead(t, page) {
   t.check(
     "정보 구역을 접으면 크기와 연결 수를 한 줄로 보이고 코드 뷰어가 그만큼 더 커진다",
     shut.rows.length === 0 &&
-      shut.brief === `${fn.loc}줄, 나가는 연결 ${total}개, 들어오는 연결 ${linksWords(fnLinks.into).total}개` &&
+      shut.brief === `${fn.loc}줄, 나가는 연결 ${total}곳, 들어오는 연결 ${linksWords(fnLinks.into).total}곳` &&
       near(foldedBoth.code - foldedSummary.code, foldedSummary.facts - foldedBoth.facts, 2),
     `${shut.brief} / 정보 구역 ${foldedSummary.facts.toFixed(0)} → ${foldedBoth.facts.toFixed(0)}, 코드 뷰어 ${foldedBoth.code.toFixed(0)}`,
   );
@@ -7671,22 +8190,22 @@ async function panelHead(t, page) {
   // 선을 눌러 온 상태
   const candidates = (await linesOf(page)).filter((line) => {
     const [source, target] = endsOfKey(line.key);
-    return line.trunk === null && source === FUNCTION && byId.get(target)?.kind !== "package";
+    return line.trunk === null && source === FUNCTION && byId.get(target)?.kind !== "package" && COUNTED.some((kind) => line.key.endsWith(`|${kind}`));
   });
   const found = await hittable(page, candidates);
   if (found === null) {
-    t.skip("고른 함수에서 나가는 선을 눌러 도착 노드로 간다", "줄기에 들지 않고 누를 점이 있는 선이 없다");
+    t.skip("고른 함수에서 나가는 선을 눌러 도착 노드로 간다", "줄기에 들지 않고 누를 점이 있는 호출·생성·상속 선이 없다");
   } else {
     const [, target] = endsOfKey(found.line.key);
     const along = found.line.key.startsWith("agg|") ? crossing(graph, target).into.filter((e) => e.source === FUNCTION) : graph.edges.filter((e) => `${e.source}|${e.target}|${e.kind}` === found.line.key);
-    await page.mouse.click(found.at.x, found.at.y);
+    await followLine(page, found.at, { key: found.line.key, to: target });
     await page.mouse.move(1, 1);
     await waitSelected(page, target);
     const came = await factsOf(page);
     const wantLink = `${shortName(graph, FUNCTION)} → ${shortName(graph, target)}`;
     t.check(
       "선을 눌러 도착 노드로 오면 정보 구역 맨 위에 연결과 관계 줄이 더해진다",
-      came.rows[0]?.topic === "연결" && came.rows[0].text === wantLink && came.rows[1]?.topic === "관계" && came.rows[1].text === linksWords(along).text && came.rows[1].pressable,
+      came.rows[0]?.topic === "연결" && came.rows[0].text === wantLink && came.rows[1]?.topic === "관계" && came.rows[1].text === linksWords(along).relation && came.rows[1].pressable,
       rowsText(came),
     );
     const lines = await viaLines(page);
@@ -7702,7 +8221,7 @@ async function panelHead(t, page) {
     );
     await page.click('.info-row[data-row="via"] .info-link');
     await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
-    t.check("관계의 수를 누르면 그 선의 코드 줄 목록이 열린다", (await count(page, ".info-panel-site")) === linksWords(along).total, `코드 줄 ${await count(page, ".info-panel-site")}개`);
+    t.check("관계의 글을 누르면 그 선의 코드 줄 목록이 열린다", (await count(page, ".info-panel-site")) === linksWords(along).total + linksWords(along).rest, `코드 줄 ${await count(page, ".info-panel-site")}개`);
     await page.click('.info-row[data-row="via"] .info-link');
     await page.screenshot({ path: HF2("line-light") });
     await page.getByRole("button", { name: "어두운 화면" }).click();
@@ -7757,7 +8276,7 @@ async function panelHead(t, page) {
   const split = (await viaLines(page)).filter((line) => line.via);
   t.check(
     "접힌 폴더로 들어가는 선을 누르면 선택 없이 폴더가 펼쳐지고 정보 패널에 연결과 관계 줄이 보인다",
-    reached.opened && reached.selected === null && atFolder.rows.length === 2 && atFolder.rows[0].text === `${shortName(graph, from)} → ${shortName(graph, to)}` && atFolder.rows[1].text === linksWords(intoFolder).text,
+    reached.opened && reached.selected === null && atFolder.rows.length === 2 && atFolder.rows[0].text === `${shortName(graph, from)} → ${shortName(graph, to)}` && atFolder.rows[1].text === linksWords(intoFolder).relation,
     `${atFolder.name} / ${rowsText(atFolder)}`,
   );
   t.check(
@@ -7865,6 +8384,7 @@ const SCENARIOS = [
   ["numbers", numbers],
   ["overlap", overlap],
   ["line-folder", lineFolder],
+  ["line-bubble", lineBubble],
   ["panel-head", panelHead],
   ["progress", progress],
   ["progress-failed", progressFailed],
@@ -7900,6 +8420,7 @@ const STAGE4 = new Set([
   "numbers",
   "overlap",
   "line-folder",
+  "line-bubble",
   "panel-head",
   "progress",
   "progress-failed",
