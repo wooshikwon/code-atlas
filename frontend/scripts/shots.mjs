@@ -1523,6 +1523,8 @@ async function tips(t, page) {
   for (const folder of chain) {
     await openFolder(page, folder);
   }
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await settle(page);
   await page.click(`.tree-row.tree-file[data-node="${long.id}"]`);
   await waitSelected(page, long.id);
   await settle(page);
@@ -6538,19 +6540,7 @@ async function packFolder(t, page) {
     await rest(page);
   };
 
-  // 전체 맞춤 상태: 레포를 연 처음 화면. 스스로 맞추는 화면은 이름표가 읽히는 확대 비율 아래로 줄이지 않는다.
-  /** 상자 id의 왼쪽 위 모서리가 정보 패널이 가리지 않는 영역의 왼쪽 위에서 24px 안쪽에 있는지 */
-  const cornered = async (id) => {
-    const { free } = await stageOf(page);
-    const rect = await rectOf(page, node(id));
-    return near(rect.x, free.x + 24, 1.5) && near(rect.y, free.y + 24, 1.5);
-  };
-  /** 이름표 전체가 정보 패널이 가리지 않는 영역 안에 보이는 상자 수 */
-  const readable = async (ids) => {
-    const { free } = await stageOf(page);
-    const rects = await page.evaluate((list) => list.map((id) => document.querySelector(`.react-flow__node[data-id="${id}#face"] .node-label`)?.getBoundingClientRect()).filter(Boolean).map((r) => ({ x: r.left, y: r.top, width: r.width, height: r.height })), ids);
-    return rects.filter((rect) => within(rect, free)).length;
-  };
+  // 전체 맞춤 상태: 레포를 연 처음 화면. 폴더를 여닫으면 다시 맞추지 않고 누른 상자의 모서리를 붙잡는다.
   const first = { zoom: await zoomOf(page), view: await viewport() };
   const firstOut = await outside();
   t.check(
@@ -6558,13 +6548,14 @@ async function packFolder(t, page) {
     first.zoom >= NAMED_ZOOM - 0.001 && first.zoom <= 1.001 && (firstOut.length === 0 || near(first.zoom, NAMED_ZOOM, 0.001)),
     `확대 비율 ${first.zoom.toFixed(3)}, 영역을 벗어난 상자 ${firstOut.length}개`,
   );
+  const pressed = await rectOf(page, node("parser"));
   await expand();
   const inside = graph.nodes.filter((n) => n.parent === "parser" && !n.test).map((n) => n.id);
-  const opened = { zoom: await zoomOf(page), out: (await outside()).length, corner: await cornered("parser"), names: await readable(inside) };
+  const opened = { zoom: await zoomOf(page), corner: await rectOf(page, node("parser")) };
   t.check(
-    "처음 화면에서 폴더 상자를 눌러 펼치면 확대 비율이 0.8 아래로 줄지 않고, 전체가 들어오지 않으면 펼친 영역의 왼쪽 위가 가리지 않는 영역의 왼쪽 위에 온다",
-    opened.zoom >= NAMED_ZOOM - 0.001 && (opened.out === 0 || (near(opened.zoom, NAMED_ZOOM, 0.001) && opened.corner)) && opened.names > 0,
-    `확대 비율 ${first.zoom.toFixed(3)} → ${opened.zoom.toFixed(3)}, 영역을 벗어난 상자 ${opened.out}개, 이름표가 영역 안에 보이는 파일 ${opened.names}/${inside.length}개`,
+    "처음 화면에서 폴더 상자를 눌러 펼치면 확대 비율이 그대로이고 영역의 왼쪽 위 모서리가 누른 상자의 왼쪽 위 모서리가 있던 좌표에 있다",
+    opened.zoom === first.zoom && near(opened.corner.x, pressed.x, 1.5) && near(opened.corner.y, pressed.y, 1.5),
+    `확대 비율 ${first.zoom.toFixed(3)} → ${opened.zoom.toFixed(3)}, (${Math.round(pressed.x)}, ${Math.round(pressed.y)}) → (${Math.round(opened.corner.x)}, ${Math.round(opened.corner.y)})`,
   );
   await t.shot();
   const files = await drawnIn(page, graph, "parser");
@@ -6577,12 +6568,13 @@ async function packFolder(t, page) {
   await rest(page);
   const fit = { zoom: await zoomOf(page), out: (await outside()).length };
   t.check('"화면 맞춤"을 누르면 확대 비율을 줄여서라도 모든 상자가 정보 패널이 가리지 않는 영역 안에 들어온다', fit.out === 0 && fit.zoom <= opened.zoom + 0.001, `확대 비율 ${fit.zoom.toFixed(3)}, 영역을 벗어난 상자 ${fit.out}개`);
+  const fitCorner = await rectOf(page, node("parser"));
   await fold();
-  const folded0 = { zoom: await zoomOf(page), out: (await outside()).length, corner: await cornered("parser") };
+  const folded0 = { zoom: await zoomOf(page), corner: await rectOf(page, node("parser")) };
   t.check(
-    '"화면 맞춤" 뒤에 머리 줄을 눌러 접으면 다시 스스로 맞춰 확대 비율이 0.8 이상이다',
-    folded0.zoom >= NAMED_ZOOM - 0.001 && (folded0.out === 0 || folded0.corner),
-    `확대 비율 ${folded0.zoom.toFixed(3)}, 영역을 벗어난 상자 ${folded0.out}개`,
+    '"화면 맞춤" 뒤에 머리 줄을 눌러 접으면 다시 맞추지 않아 확대 비율이 그대로이고 폴더 상자가 영역의 왼쪽 위 모서리가 있던 좌표에 놓인다',
+    folded0.zoom === fit.zoom && near(folded0.corner.x, fitCorner.x, 1.5) && near(folded0.corner.y, fitCorner.y, 1.5),
+    `확대 비율 ${fit.zoom.toFixed(3)} → ${folded0.zoom.toFixed(3)}, (${Math.round(fitCorner.x)}, ${Math.round(fitCorner.y)}) → (${Math.round(folded0.corner.x)}, ${Math.round(folded0.corner.y)})`,
   );
 
   // 사용자가 화면을 끈 뒤: 확대 비율을 그대로 두고 누른 상자의 모서리를 붙잡는다
@@ -6620,10 +6612,10 @@ async function packFolder(t, page) {
   );
 
   if (wideUrl === null) {
-    t.skip("폴더가 여러 겹인 레포에서도 펼칠 때마다 확대 비율이 0.8 이상이다", "--wide-url을 주지 않았다");
+    t.skip("폴더가 여러 겹인 레포에서도 펼칠 때마다 확대 비율과 누른 폴더의 왼쪽 위가 그대로다", "--wide-url을 주지 않았다");
     return;
   }
-  // 폴더가 여러 겹인 레포: 가장 큰 최상위 폴더와 그 안에서 자식이 가장 많은 폴더를 차례로 눌러 펼친다
+  // 폴더가 여러 겹인 레포: 가장 큰 최상위 폴더와 그 안에서 자식이 가장 많은 폴더를 파일트리의 폴더 행으로 차례로 펼친다
   const wide = await api("/api/graph", wideUrl);
   await page.goto(wideUrl);
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
@@ -6632,19 +6624,18 @@ async function packFolder(t, page) {
   const top = wide.nodes.filter((n) => n.kind === "package" && n.parent === null && !n.test).sort((a, b) => size(b.id) - size(a.id))[0];
   const inner = wide.nodes.filter((n) => n.kind === "package" && n.parent === top.id).sort((a, b) => wide.nodes.filter((n) => n.parent === b.id).length - wide.nodes.filter((n) => n.parent === a.id).length)[0];
   const seen = [`처음 ${(await zoomOf(page)).toFixed(3)}`];
-  let kept = (await zoomOf(page)) >= NAMED_ZOOM - 0.001;
+  const start = await zoomOf(page);
+  let kept = start >= NAMED_ZOOM - 0.001;
   for (const folder of [top, inner]) {
-    await clickNode(page, folder.id);
-    await page.waitForSelector(`${node(folder.id)} > .node-region`, { timeout: 30_000 });
+    const corner = await rectOf(page, node(folder.id));
+    await openFolder(page, folder.id);
     await page.mouse.move(5, 5);
     await rest(page);
-    const zoom = await zoomOf(page);
-    const kids = wide.nodes.filter((n) => n.parent === folder.id && !n.test).map((n) => n.id);
-    const names = await readable(kids);
-    kept = kept && zoom >= NAMED_ZOOM - 0.001 && ((await outside()).length === 0 || (await cornered(folder.id))) && names > 0;
-    seen.push(`${folder.name}/ ${zoom.toFixed(3)}(이름표 ${names}/${kids.length}개)`);
+    const [zoom, region] = [await zoomOf(page), await rectOf(page, node(folder.id))];
+    kept = kept && zoom === start && near(region.x, corner.x, 1.5) && near(region.y, corner.y, 1.5);
+    seen.push(`${folder.name}/ ${zoom.toFixed(3)}, (${Math.round(corner.x)}, ${Math.round(corner.y)}) → (${Math.round(region.x)}, ${Math.round(region.y)})`);
   }
-  t.check("폴더가 여러 겹인 레포에서도 펼칠 때마다 확대 비율이 0.8 이상이고 펼친 영역의 왼쪽 위와 그 안의 이름표가 가리지 않는 영역 안에 보인다", kept, seen.join(" → "));
+  t.check("폴더가 여러 겹인 레포에서도 펼칠 때마다 확대 비율과 누른 폴더의 왼쪽 위가 그대로다", kept, seen.join(" → "));
   await page.getByRole("button", { name: "화면 맞춤" }).click();
   await rest(page);
   t.check('그 화면에서 "화면 맞춤"을 누르면 모든 상자가 들어온다', (await outside()).length === 0, `확대 비율 ${(await zoomOf(page)).toFixed(3)}`);
@@ -7218,7 +7209,8 @@ async function lineFolder(t, page) {
   for (const folder of wide.open) {
     await openFolder(page, folder);
   }
-  await pick(page, wide.file);
+  await page.click(`.tree-row.tree-file[data-node="${wide.file}"]`);
+  await waitSelected(page, wide.file);
   const far = await dimFolderLine(page, wide.from, wide.to);
   if (far === null) {
     t.skip(`${wide.file}을 고른 채 흐린 선 ${wide.from} → ${wide.to}/를 누른다`, "그 선이 화면에 없거나 누를 점이 다른 선에 덮였다");
@@ -7781,6 +7773,73 @@ async function motion(t, page) {
   );
 }
 
+/**
+ * 폴더를 직접 여닫을 때 화면 이동이 없는지 본다. 접힌 폴더 상자를 그래프에서 눌러 펴고, 펼친 폴더 영역의 머리 줄을 눌러 접고,
+ * 파일트리의 폴더 행으로 펴고 접는다. 조작마다 `data-flying`이 붙은 프레임이 없고 그 폴더의 왼쪽 위 화면 좌표와 확대 비율이 그대로인지 본다.
+ * 첫 조작은 레포를 연 전체 맞춤 상태에서, 나머지는 전체 맞춤 상태가 꺼진 뒤에 한다. `--wide-url`을 받으면 그 레포에서도 본다.
+ */
+async function folderHold(t, page) {
+  const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+  /** 그래프에서 눌리는 접힌 폴더 상자 가운데 첫 상자의 id */
+  const folded = () =>
+    page.evaluate(() => {
+      for (const wrapper of document.querySelectorAll(".react-flow__node:has(> .node-package)")) {
+        const rect = wrapper.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        const row = document.querySelector(`.tree-row.tree-dir[data-node="${CSS.escape(wrapper.dataset.id)}"]`);
+        if (row !== null && hit !== null && (wrapper.contains(hit) || hit.closest(".react-flow__node")?.dataset.id === `${wrapper.dataset.id}#face`)) {
+          return wrapper.dataset.id;
+        }
+      }
+      return null;
+    });
+  const held = async (name, label, id, act, opens) => {
+    const before = { corner: await rectOf(page, node(id)), zoom: await zoomOf(page) };
+    await watchFrames(page);
+    await act();
+    await page.waitForSelector(`${node(id)} > ${opens ? ".node-region" : ".node-package"}`, { timeout: 30_000 });
+    await page.mouse.move(1, 1);
+    await settle(page);
+    const frames = await framesOf(page);
+    const after = { corner: await rectOf(page, node(id)), zoom: await zoomOf(page) };
+    t.check(
+      `${name}: ${label} 화면 이동이 없고 그 폴더의 왼쪽 위와 확대 비율이 그대로다`,
+      frames.every((frame) => !frame.flying) && frames.some((frame) => frame.moving) && near(after.corner.x, before.corner.x) && near(after.corner.y, before.corner.y) && after.zoom === before.zoom,
+      `${id}, 이동 프레임 ${frames.filter((frame) => frame.flying).length}개, 왼쪽 위 (${before.corner.x.toFixed(1)}, ${before.corner.y.toFixed(1)}) → (${after.corner.x.toFixed(1)}, ${after.corner.y.toFixed(1)}), 확대 비율 ${before.zoom} → ${after.zoom}`,
+    );
+  };
+  const round = async (name, at) => {
+    await load(page, at, false);
+    const id = await folded();
+    if (id === null) {
+      t.skip(`${name}: 폴더를 여닫아도 화면 이동이 없다`, "그래프에서 눌리는 접힌 폴더 상자가 없다");
+      return;
+    }
+    const row = `.tree-row.tree-dir[data-node="${id}"]`;
+    await held(name, "전체 맞춤 상태에서 접힌 폴더 상자를 눌러 펴면", id, () => clickNode(page, id), true);
+    const open = await viewport();
+    await page.getByRole("button", { name: "화면 맞춤" }).click();
+    await settle(page);
+    const refit = await viewport();
+    await page.getByRole("button", { name: "화면 맞춤" }).click();
+    await settle(page);
+    t.check(`${name}: 폴더를 편 화면은 다시 맞춘 화면이 아니고 "화면 맞춤"을 누르면 그래프 전체를 맞춘다`, (await viewport()) === refit, `편 뒤 ${open}, 맞춘 뒤 ${refit}`);
+    await held(name, "전체 맞춤 상태에서 폴더 영역의 머리 줄을 눌러 접으면", id, async () => {
+      const head = center(await rectOf(page, `${face(id)} .node-region-head`));
+      await page.mouse.click(head.x, head.y);
+    }, false);
+    await held(name, "전체 맞춤 상태가 꺼진 뒤 파일트리의 폴더 행으로 펴면", id, () => page.click(row), true);
+    await held(name, "전체 맞춤 상태가 꺼진 뒤 파일트리의 폴더 행으로 접으면", id, () => page.click(row), false);
+  };
+  await round("sync-engine", url);
+  await t.shot();
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서 폴더를 여닫아도 화면 이동이 없다", "--wide-url을 주지 않았다");
+  } else {
+    await round("폴더가 여러 겹인 레포", wideUrl);
+  }
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -7858,6 +7917,7 @@ const SCENARIOS = [
   ["line-folder", lineFolder],
   ["panel-head", panelHead],
   ["motion", motion],
+  ["folder-hold", folderHold],
   ["progress", progress],
   ["progress-failed", progressFailed],
   ["stale", staleScenario],
@@ -7892,6 +7952,7 @@ const STAGE4 = new Set([
   "line-folder",
   "panel-head",
   "motion",
+  "folder-hold",
   "progress",
   "progress-failed",
   "stale",
