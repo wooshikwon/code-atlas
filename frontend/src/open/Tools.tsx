@@ -25,8 +25,8 @@ function Command({ text }: { text: string }) {
 }
 
 /**
- * Claude Code를 쓰지 못하는 까닭과 고치는 방법. 찾지 못했으면 설치 명령을, 로그인돼 있지 않으면 앱은 터미널을 열어 로그인하게 하는
- * 버튼을, 브라우저는 로그인 명령을 적는다. 실행하지 않은 경우는 서버가 적은 글을 까닭 아래에 함께 적는다. said는 서버가 적은 글이고
+ * Claude Code를 쓰지 못하는 까닭과 고치는 방법. 고치는 방법은 번호를 붙인 단계로 적는다. 찾지 못했으면 설치 명령과 로그인 명령을,
+ * 로그인돼 있지 않으면 앱은 터미널을 열어 로그인하게 하는 버튼을, 브라우저는 로그인 명령을 적고 마지막 단계에 `다시 확인`을 적는다. 실행하지 않은 경우는 서버가 적은 글을 까닭 아래에 함께 적는다. said는 서버가 적은 글이고
  * 화면이 모르는 경우에 그대로 적는다.
  */
 export function ClaudeHelp({ state, said }: { state: Exclude<ClaudeState, { kind: "ready" }>; said: string }) {
@@ -34,15 +34,43 @@ export function ClaudeHelp({ state, said }: { state: Exclude<ClaudeState, { kind
     <div className="tools-help" data-claude={state.kind}>
       <span className="tools-trouble">{claudeLine(state, said)}</span>
       {state.kind === "unchecked" && state.detail !== "" && <span className="tools-note">{state.detail}</span>}
-      {state.kind === "missing" && <Command text={INSTALL} />}
-      {state.kind === "logged-out" &&
-        (host.app ? (
-          <button className="summary-action tools-login" onClick={() => void host.claudeLogin(state.path)}>
-            로그인
-          </button>
-        ) : (
-          <Command text={LOGIN} />
-        ))}
+      {state.kind === "missing" && (
+        <ol className="tools-steps">
+          <li>
+            터미널에서 설치합니다
+            <Command text={INSTALL} />
+          </li>
+          <li>
+            설치한 뒤 로그인합니다
+            <Command text={LOGIN} />
+          </li>
+          <li>
+            <b>다시 확인</b>을 누릅니다
+          </li>
+        </ol>
+      )}
+      {state.kind === "logged-out" && (
+        <ol className="tools-steps">
+          <li>
+            {host.app ? (
+              <>
+                터미널을 열어 로그인합니다
+                <button className="summary-action tools-login" onClick={() => void host.claudeLogin(state.path)}>
+                  로그인
+                </button>
+              </>
+            ) : (
+              <>
+                터미널에서 로그인합니다
+                <Command text={LOGIN} />
+              </>
+            )}
+          </li>
+          <li>
+            <b>다시 확인</b>을 누릅니다
+          </li>
+        </ol>
+      )}
     </div>
   );
 }

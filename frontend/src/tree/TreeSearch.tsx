@@ -2,7 +2,7 @@ import { useEffect, type KeyboardEvent, type ReactNode, type RefObject } from "r
 import type { EntryKind } from "../search/index";
 import { useNodeMenu } from "../nav/NodeMenu";
 import { useSummaries } from "../state/summaries";
-import { Icon } from "./Icon";
+import { Icon, SearchIcon } from "./Icon";
 import type { Result } from "./rows";
 import { ChangeMark } from "./TreeNode";
 
@@ -64,6 +64,7 @@ export function TreeSearch({ input, query, onQuery, list, active, onActive, onPi
 
   return (
     <div className="tree-search">
+      <SearchIcon />
       <input
         ref={input}
         className="tree-search-input"

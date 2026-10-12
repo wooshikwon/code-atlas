@@ -45,7 +45,7 @@ const PANEL_MIN = 260;
 const INSET = 20;
 const DARK = { surface: "#1a1a19", ink: "#ffffff" };
 /** 상단 줄 오른쪽 칸의 버튼. 왼쪽부터다. */
-const TOOLS = ["필터", "새로고침", "화면 맞춤", "화면 초기화", "세로창 모드로 바꾸기", "어두운 화면"];
+const TOOLS = ["세로창 모드로 바꾸기", "필터", "새로고침", "화면 맞춤", "화면 초기화", "어두운 화면"];
 /** 세로창 모드로 열리는 창 크기와, 그 모드에서 아래 칸이 쓰는 높이의 기본 몫, 파일트리 칸의 기본 폭 */
 const TALL = { width: 800, height: 1200 };
 const LOWER_SHARE = 0.4;
@@ -137,7 +137,7 @@ const rectOf = (page, selector) =>
 const selectedOf = (page) =>
   page.evaluate(() => document.querySelector(".react-flow__node .node-selected")?.closest(".react-flow__node")?.dataset.id ?? null);
 
-/** 정보 패널의 머리 줄과 "정보" 구역의 글. 첫 줄은 이름 줄, 둘째 줄은 종류 칩이고 그 아래는 "정보" 구역의 줄마다 `주제 내용`이며 `그 밖` 묶음은 한 칸 띄워 잇는다. */
+/** 정보 패널의 머리 줄과 "정보" 구역의 글. 첫 줄은 이름 줄, 둘째 줄은 선의 분류 칩(노드는 빈 줄)이고 그 아래는 "정보" 구역의 줄마다 `주제 내용`이며 `그 밖` 묶음은 한 칸 띄워 잇는다. */
 const headOf = (page) =>
   page.evaluate(() => {
     const texts = (selector) => [...document.querySelectorAll(selector)].map((element) => element.textContent);
@@ -751,7 +751,7 @@ async function open(t, page) {
     init !== undefined && shelf !== null && shelf.text === "연결 없음" && shelf.top >= others && init.y > shelf.top,
     `__init__.py 위 ${init?.y.toFixed(0)}, 선반 이름 ${shelf?.text ?? "없음"} 위 ${shelf?.top.toFixed(0)}, 다른 상자 아래 끝 ${others.toFixed(0)}`,
   );
-  t.check("범례 목록이 보이지 않는다", (await count(page, ".legend")) === 0 && (await count(page, ".legend-button")) === 1);
+  t.check("기호 창이 떠 있지 않다", (await count(page, ".legend")) === 0 && (await count(page, ".legend-button")) === 1);
   const edges = await edgesOf(page);
   const into = (id) => edges.filter((e) => e.key.startsWith("agg|") && e.target === id).length;
   t.check(
@@ -1280,8 +1280,8 @@ async function portraitAuto(t, page) {
   );
   const [toolbarTools, tip] = [await toolsOf(page), await tipOver(page, ".layout-button")];
   t.check(
-    "상단 줄과 왼쪽 아래 칸이 작업 영역 안에 있고, 모드 버튼이 화면 색 버튼 앞에서 가로창 모드로 바꾸기를 말풍선에 적는다",
-    within(first.toolbar, first.workspace) && within(first.dock, first.stage) && same(toolbarTools.slice(-2), ["가로창 모드로 바꾸기", "어두운 화면"]) && tip === "가로창 모드로 바꾸기",
+    "상단 줄과 왼쪽 아래 칸이 작업 영역 안에 있고, 모드 버튼이 필터 버튼 앞에서 가로창 모드로 바꾸기를 말풍선에 적는다",
+    within(first.toolbar, first.workspace) && within(first.dock, first.stage) && same(toolbarTools.slice(0, 2), ["가로창 모드로 바꾸기", "필터"]) && tip === "가로창 모드로 바꾸기",
     `오른쪽 칸 ${toolbarTools.join("·")}, 말풍선 "${tip}"`,
   );
   await t.shot();
@@ -1472,13 +1472,13 @@ async function portraitPanel(t, page) {
   await page.setViewportSize(TALL);
   await load(page);
   const empty = await headOf(page);
-  t.check("아무것도 고르지 않았으면 레포 머리 줄을 보이고 경계선이 없다", empty.startsWith(`${(await api("/api/repo")).name}\n레포`) && (await count(page, ".info-panel-divide")) === 0, empty.replaceAll("\n", " / "));
+  t.check("아무것도 고르지 않았으면 레포 머리 줄을 보이고 경계선이 없다", empty.startsWith(`${(await api("/api/repo")).name}\n`) && (await count(page, ".info-panel-chip")) === 0 && (await count(page, ".info-panel-divide")) === 0, empty.replaceAll("\n", " / "));
   await open();
   const start = await sizes();
   const head = await headOf(page);
   const around = touchingOf(graph, FUNCTION);
   t.check(
-    "함수를 고르면 머리 줄이 파일 경로와 이름, 종류 칩을 적고 정보 구역이 연결을 적는다",
+    "함수를 고르면 머리 줄이 파일 경로와 이름을 적고 정보 구역이 연결을 적는다",
     head.startsWith(`${spanOf(graph, FUNCTION).text}\n`) && head.includes("나가는 연결") && head.includes("들어오는 연결") && around.out + around.into > 0,
     head.replaceAll("\n", " / "),
   );
@@ -1488,7 +1488,12 @@ async function portraitPanel(t, page) {
     start.summary <= start.panel.height / 4 + 1 && near(start.code.y + start.code.height, start.panel.y + start.panel.height) && rows.some((row) => row.line === spanOf(graph, FUNCTION).from && !row.dim),
     `${text(start)}, 보이는 줄 ${rows[0]?.line}~${rows.at(-1)?.line}`,
   );
-  const tip = await tipOver(page, ".info-panel-head");
+  // 이름 줄의 이름에는 줄이지 않은 이름의 말풍선이 따로 있으므로 이름이 없는 오른쪽 끝에 올린다.
+  const title = await rectOf(page, ".info-panel-title");
+  await page.mouse.move(title.x + title.width - 6, title.y + title.height / 2);
+  await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+  const tip = await page.evaluate(() => document.querySelector(".tooltip")?.textContent ?? "");
+  await page.mouse.move(5, 5);
   await drag(page, center(await rectOf(page, ".info-panel-head")), -120, -80);
   await settle(page);
   const held = await sizes();
@@ -2269,7 +2274,7 @@ async function tips(t, page) {
 
   // 그래프 밖: 버튼의 말풍선, 키보드 초점, 잘린 파일트리 행.
   const legend = await settled(".legend-button");
-  t.check('범례 버튼에 올리면 앱의 말풍선이 "범례"를 적고 접근성 이름이 남아 있다', legend === "범례" && (await page.getAttribute(".legend-button", "aria-label")) === "범례", legend);
+  t.check('기호 설명 버튼에 올리면 앱의 말풍선이 "기호 설명"을 적고 접근성 이름이 남아 있다', legend === "기호 설명" && (await page.getAttribute(".legend-button", "aria-label")) === "기호 설명", legend);
   await shot("button");
   await page.mouse.move(5, 5);
   await page.waitForFunction(() => document.querySelector(".tooltip") === null, null, { timeout: 3_000 }).catch(() => {});
@@ -2300,28 +2305,30 @@ async function tips(t, page) {
   await drag(page, center(await rectOf(page, ".separator")), 200, 0);
   await rest(page);
 
-  // 창과 패널을 모두 연 화면에 브라우저 기본 말풍선이 없다.
+  // 기호 창은 선 분류 옆에 그 분류에 드는 선 종류를 적는다.
   await page.click(".legend-button");
+  await page.waitForSelector(".legend", { timeout: 5_000 });
+  const groups = await page.evaluate(() => ["run", "use", "derive"].map((group) => document.querySelector(`.legend li:has(.edge-${group})`)?.textContent.trim().replace(/\s+/g, " ") ?? ""));
+  const legendTips = await nativeTips(page);
+  const legendBox = await page.evaluate(() => ({ dialog: document.querySelector(".legend").closest('[role="dialog"][aria-modal="true"]') !== null, title: document.querySelector(".ask-title")?.textContent }));
+  await page.keyboard.press("Escape");
+  t.check(
+    "기호 설명 버튼을 누르면 기호 창이 뜨고 선 분류 옆에 그 분류에 드는 선 종류를 적으며 Esc로 닫힌다",
+    legendBox.dialog && legendBox.title === "기호" && same(groups, ["실행호출, 생성", "사용import, 전달, 읽음, 바꿈, 데코레이터, 타입", "계승상속, 오버라이드"]) && (await count(page, ".legend")) === 0,
+    groups.join(" / "),
+  );
+
+  // 창과 패널을 모두 연 화면에 브라우저 기본 말풍선이 없다.
   await page.click(".finder-button");
   await page.click(".filter-button");
   await page.waitForSelector(".filter-panel", { timeout: 5_000 });
   await page.fill(".tree-search-input", "note");
   await page.waitForSelector(".tree-result", { timeout: 5_000 });
-  const groups = [];
-  for (const group of ["run", "use", "derive"]) {
-    groups.push(await settled(`.legend li:has(.edge-${group})`));
-  }
-  t.check(
-    "범례의 선 분류에 올리면 말풍선이 그 분류에 드는 선 종류를 적는다",
-    same(groups, ["실행 선: 호출, 생성", "사용 선: import, 전달, 읽음, 바꿈, 데코레이터, 타입", "계승 선: 상속, 오버라이드"]),
-    groups.join(" / "),
-  );
-  const native = await nativeTips(page);
-  t.check("범례, 경로 탐색 창, 필터 창, 정보 패널, 파일트리 검색을 연 화면에 title 속성과 SVG title이 없다", native.length === 0, native.join(", "));
+  const native = [...legendTips, ...(await nativeTips(page))];
+  t.check("기호 창, 경로 탐색 창, 필터 창, 정보 패널, 파일트리 검색을 연 화면에 title 속성과 SVG title이 없다", native.length === 0, native.join(", "));
   await page.fill(".tree-search-input", "");
   await page.click(".filter-button");
   await page.click(".finder-button");
-  await page.click(".legend-button");
 
   // 어두운 화면
   await page.getByRole("button", { name: "어두운 화면" }).click();
@@ -2383,15 +2390,9 @@ async function minimap(t, page) {
     (await count(page, ".graph-minimap")) === 1 && (await drawn()) === files && (await count(page, ".react-flow__minimap-mask")) === 1,
     `미니맵 노드 ${await drawn()}개, 파일 상자와 폴더 영역 ${files}개`,
   );
-  await page.click(".legend-button");
-  const [map, legend, buttons] = [await rectOf(page, ".graph-minimap"), await rectOf(page, ".legend"), await rectOf(page, ".dock-buttons")];
+  const [map, buttons] = [await rectOf(page, ".graph-minimap"), await rectOf(page, ".dock-buttons")];
   const { panel } = await stageOf(page);
-  t.check(
-    "미니맵, 범례, 버튼 줄, 정보 패널이 서로 겹치지 않는다",
-    apart(map, legend) && apart(map, buttons) && apart(legend, buttons) && apart(map, panel) && apart(legend, panel),
-    `미니맵 ${rectText(map)}, 범례 ${rectText(legend)}, 버튼 줄 ${rectText(buttons)}`,
-  );
-  await page.click(".legend-button");
+  t.check("미니맵, 버튼 줄, 정보 패널이 서로 겹치지 않는다", apart(map, buttons) && apart(map, panel), `미니맵 ${rectText(map)}, 버튼 줄 ${rectText(buttons)}`);
 
   await pick(page, FILE);
   const tones = await page.evaluate(() => {
@@ -4461,9 +4462,8 @@ async function reloadScenario(t, page) {
     const home = await viewport();
     const boxed = Object.keys(await flowBoxes(page)).length;
 
-    // 화면 색, 범례, 보기 설정을 바꾸고 폴더 둘을 펴고 함수를 고른 뒤 화면을 확대한다.
+    // 화면 색과 보기 설정을 바꾸고 폴더 둘을 펴고 함수를 고른 뒤 화면을 확대한다.
     await page.getByRole("button", { name: "어두운 화면" }).click();
-    await page.click(".legend-button");
     await inFilters(page, async () => {
       const filters = page.locator(".filter-panel");
       await filters.getByLabel("테스트 코드").check();
@@ -4535,9 +4535,9 @@ async function reloadScenario(t, page) {
       `앞 ${before.at.map(Math.round).join(", ")}, 뒤 ${after.at.map(Math.round).join(", ")}`,
     );
     t.check(
-      "화면 색과 범례의 펼침은 그대로다",
-      (await page.evaluate(() => document.documentElement.dataset.theme)) === "dark" && (await count(page, ".legend")) === 1,
-      `화면 색 ${await page.evaluate(() => document.documentElement.dataset.theme)}, 범례 ${await count(page, ".legend")}개`,
+      "화면 색은 그대로다",
+      (await page.evaluate(() => document.documentElement.dataset.theme)) === "dark",
+      `화면 색 ${await page.evaluate(() => document.documentElement.dataset.theme)}`,
     );
     await page.fill(".tree-search-input", "");
     await page.waitForSelector(`.tree-row.tree-symbol[data-node="${added}"]`, { timeout: 10_000 }).catch(() => {});
@@ -4982,12 +4982,12 @@ async function staleScenario(t, page) {
     );
     t.check(
       "새로고침 버튼이 필터 버튼의 바로 오른쪽에 같은 크기와 테두리로 놓이고 그 뒤에 글자 버튼이 온다",
-      same(calm.order, TOOLS) && near(calm.box.width, calm.filter.width, 0.5) && near(calm.box.height, calm.filter.height, 0.5) && near(calm.box.top, calm.filter.top, 0.5) && near(calm.box.left - calm.filter.right, 12, 0.5) && calm.border[0] === calm.border[1],
+      same(calm.order, TOOLS) && near(calm.box.width, calm.filter.width, 0.5) && near(calm.box.height, calm.filter.height, 0.5) && near(calm.box.top, calm.filter.top, 0.5) && near(calm.box.left - calm.filter.right, 6, 0.5) && calm.border[0] === calm.border[1],
       `순서 ${calm.order.join("·")}, 새로고침 ${calm.box.width}×${calm.box.height}, 필터 ${calm.filter.width}×${calm.filter.height}, 틈 ${calm.box.left - calm.filter.right}`,
     );
     t.check(
       "바뀐 파일이 없으면 점이 없고 말풍선이 새로고침과 단축키, 하는 일을 적는다",
-      !calm.stale && calm.dot === null && same(calmTip, [`새로고침 ${MOD_R}`, "레포를 다시 분석해 그래프를 바꾸고 보던 화면은 그대로 둡니다"]),
+      !calm.stale && calm.dot === null && same(calmTip, [`새로고침 ${MOD_R}`]),
       calmTip.join(" / "),
     );
     await snap("idle");
@@ -5444,32 +5444,28 @@ async function setOverlay(page, kind) {
 
 async function finderOpen(t, page) {
   await load(page);
-  t.check("경로 탐색 창이 접힌 채로 열리고 왼쪽 아래 버튼 줄이 미니맵, 경로 찾기, 범례 순서다", (await count(page, ".finder")) === 0 &&
-    same(await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label"))), ["미니맵", "경로 찾기", "범례"]),
+  t.check("경로 탐색 창이 접힌 채로 열리고 왼쪽 아래 버튼 줄이 미니맵, 경로 찾기, 기호 설명 순서다", (await count(page, ".finder")) === 0 &&
+    same(await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label"))), ["미니맵", "경로 찾기", "기호 설명"]),
     (await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label")))).join("·"));
   await page.click(".finder-button");
   await page.waitForSelector(".finder", { timeout: 5_000 });
-  await page.click(".legend-button");
-  await page.waitForSelector(".legend", { timeout: 5_000 });
-  /** 펼친 세 칸의 사각형이 서로 겹치지 않고 관계 그래프 영역 안에 있는지 */
+  /** 펼친 두 칸과 버튼 줄의 사각형이 서로 겹치지 않고 관계 그래프 영역 안에 있는지 */
   const laid = async () => {
-    const [map, legend, finder, buttons] = [await rectOf(page, ".graph-minimap"), await rectOf(page, ".legend"), await rectOf(page, ".finder"), await rectOf(page, ".dock-buttons")];
+    const [map, finder, buttons] = [await rectOf(page, ".graph-minimap"), await rectOf(page, ".finder"), await rectOf(page, ".dock-buttons")];
     const { area } = await stageOf(page);
-    const boxes = [map, legend, finder, buttons];
+    const boxes = [map, finder, buttons];
     const separate = boxes.every((a, i) => boxes.slice(i + 1).every((b) => apart(a, b)));
-    return { map, legend, finder, buttons, area, ok: separate && boxes.every((box) => within(box, area)) };
+    return { map, finder, buttons, area, ok: separate && boxes.every((box) => within(box, area)) };
   };
   const wide = await laid();
   t.check(
-    "경로 찾기 버튼을 누르면 창이 버튼 줄 위에 펼쳐지고 미니맵·창·범례가 왼쪽부터 아래 끝을 맞춰 놓이며 서로 겹치지 않고 관계 그래프 영역 안에 있다",
+    "경로 찾기 버튼을 누르면 창이 버튼 줄 위에 펼쳐지고 미니맵과 창이 왼쪽부터 아래 끝을 맞춰 놓이며 서로 겹치지 않고 관계 그래프 영역 안에 있다",
     wide.ok &&
       wide.finder.y > wide.area.y + wide.area.height / 2 &&
       near(wide.finder.y + wide.finder.height, wide.map.y + wide.map.height) &&
-      near(wide.legend.y + wide.legend.height, wide.map.y + wide.map.height) &&
       wide.map.x < wide.finder.x &&
-      wide.finder.x < wide.legend.x &&
       wide.finder.y + wide.finder.height < wide.buttons.y,
-    `미니맵 ${rectText(wide.map)}, 창 ${rectText(wide.finder)}, 범례 ${rectText(wide.legend)}`,
+    `미니맵 ${rectText(wide.map)}, 창 ${rectText(wide.finder)}`,
   );
   const empty = await page.evaluate(() => ({
     fields: [...document.querySelectorAll(".finder-field .finder-input")].map((input) => input.placeholder),
@@ -5492,12 +5488,11 @@ async function finderOpen(t, page) {
     await page.reload();
     await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
     await settle(page);
-    await page.click(".legend-button");
     await pin(page);
     const at = await laid();
     const missed = [...(await unhittable(page, ".finder-pick")), ...(await unhittable(page, ".finder-clear")), ...(await unhittable(page, ".finder-button"))];
     t.check(
-      `창 폭 ${width}px: 펼친 세 칸이 서로 겹치지 않고 영역 안에 있으며, 경로 고정 중에 숫자 버튼 ${PATH_LIMIT}개와 끄기 버튼, 경로 찾기 버튼이 가운데 점에서 눌린다`,
+      `창 폭 ${width}px: 펼친 두 칸이 서로 겹치지 않고 영역 안에 있으며, 경로 고정 중에 숫자 버튼 ${PATH_LIMIT}개와 끄기 버튼, 경로 찾기 버튼이 가운데 점에서 눌린다`,
       at.ok && (await count(page, ".finder-pick")) === PATH_LIMIT && missed.length === 0,
       `창 ${rectText(at.finder)}, 영역 ${rectText(at.area)}, 눌리지 않는 버튼 ${missed.join("·") || "없음"}`,
     );
@@ -6396,10 +6391,10 @@ async function unusedScenario(t, page) {
   const legend = async () => {
     await page.click(".legend-button");
     const text = await page.evaluate(() => document.querySelector(".legend-overlay")?.textContent ?? "");
-    await page.click(".legend-button");
+    await page.keyboard.press("Escape");
     return text;
   };
-  t.check("범례 끝에 미사용 후보 줄이 붙는다", (await legend()).includes("미사용 후보"), await legend());
+  t.check("기호 창의 표시 묶음 끝에 미사용 후보 줄이 붙는다", (await legend()).includes("미사용 후보"), await legend());
   await page.screenshot({ path: join(OUT, "s3-unused-overview.png") });
 
   await pick(page, file);
@@ -6595,8 +6590,8 @@ async function cyclesScenario(t, page) {
   await page.mouse.move(5, 5);
   await page.click(".legend-button");
   const legend = await page.evaluate(() => document.querySelector(".legend-overlay")?.textContent ?? "");
-  await page.click(".legend-button");
-  t.check("범례 끝에 순환 의존 줄이 붙는다", legend.includes("순환"), legend);
+  await page.keyboard.press("Escape");
+  t.check("기호 창의 표시 묶음 끝에 순환 의존 줄이 붙는다", legend.includes("순환"), legend);
   await t.shot();
 
   // 분석 표시를 껐다 켜도 상자가 움직이지 않고, 끈 동안에는 critical 색이 없고 아이콘은 남는다.
@@ -8404,13 +8399,6 @@ async function mergeOut(t, page) {
   await page.mouse.move(5, 5);
   await rest(page);
 
-  await page.click(".legend-button");
-  t.check(
-    "범례가 갈림 견본(빈 원)과 합류 견본(채운 원)을 하나씩 보여 준다",
-    (await count(page, ".legend .edge-joint-out")) === 1 && (await count(page, ".legend .edge-joint-in")) === 1 && (await page.evaluate(() => document.querySelector(".legend").textContent.includes("갈림"))),
-  );
-  await page.click(".legend-button");
-
   await pickFile(page, FILE);
   await page.mouse.move(5, 5);
   await rest(page);
@@ -10118,8 +10106,8 @@ async function panelHead(t, page) {
   const onFile = await factsOf(page);
   const at = fileNode.path.lastIndexOf("/") + 1;
   t.check(
-    "파일 노드의 이름 줄은 폴더 경로와 파일 이름이고 종류 칩이 남는다",
-    onFile.path === fileNode.path.slice(0, at) && onFile.name === fileNode.path.slice(at) && onFile.chips.includes("파일"),
+    "파일 노드의 이름 줄은 폴더 경로와 파일 이름이고 종류 칩을 그리지 않는다",
+    onFile.path === fileNode.path.slice(0, at) && onFile.name === fileNode.path.slice(at) && onFile.chips.length === 0,
     `${onFile.path}${onFile.name} [${onFile.chips.join(", ")}]`,
   );
   const fileWant = [
@@ -10641,7 +10629,6 @@ async function entryMark(t, page) {
   const entries = graph.nodes.filter((n) => n.entry && !veiled(n));
   const glyphs = () => page.evaluate(() => [...document.body.innerText.matchAll(/[▶►✓✔]/g)].length);
   await load(page);
-  await page.click(".legend-button");
   await pick(page, FILE);
   const light = await entryMarks(page, ".react-flow__viewport");
   const shown = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`.react-flow__node[data-id="${id}#face"]`) !== null), entries.map((n) => n.id));
@@ -10660,13 +10647,15 @@ async function entryMark(t, page) {
     return { whole: label.right <= aside.left && aside.right <= head.right, gap: Math.round(aside.left - label.right) };
   }, face(FILE));
   t.check("펼친 진입점 파일 상자의 머리 줄에서 표지와 이름표가 함수 수 글자와 겹치지 않는다", fits.whole, `이름표와 함수 수 사이 ${fits.gap}px`);
+  await page.click(".legend-button");
   const legend = await page.evaluate(() => {
     const row = [...document.querySelectorAll(".legend li")].find((item) => item.textContent === "진입점");
     return { path: row?.querySelector("path.legend-entry") !== null, text: row?.querySelector("svg")?.textContent ?? null };
   });
+  await page.keyboard.press("Escape");
   const head = await entryMarks(page, ".info-panel-head");
   t.check(
-    "범례의 진입점 견본과 정보 패널 이름 줄의 표지도 같은 SVG 체크다",
+    "기호 창의 진입점 견본과 정보 패널 이름 줄의 표지도 같은 SVG 체크다",
     legend.path && legend.text === "" && head.length === 1 && head[0].drawn && head[0].text === "",
     `범례 ${legend.path}, 이름 줄 ${head.length}개`,
   );
@@ -11631,14 +11620,9 @@ async function summaryQueue(t, page) {
     await page.waitForTimeout(300);
     const moved = await placed();
     t.check(`${name}: 패널을 놓은 뒤에도 칸이 같은 곳에 있다`, moved.ok && moved.mode === "바닥" && moved.text === held.text, moved.text);
-    await page.click(".legend-button");
-    await page.waitForTimeout(300);
-    const wide = await placed();
-    t.check(`${name}: 범례를 펼쳐도 칸이 왼쪽 아래 칸과 겹치지 않는다`, wide.ok, wide.text);
     if (shoot) {
       await page.screenshot({ path: HF4("queue-bottom-moved") });
     }
-    await page.click(".legend-button");
 
     // 패널을 낮고 넓게 바꿔 바닥 줄을 모두 덮으면 칸은 패널과 왼쪽 아래 칸이 가리지 않는 영역으로 물러난다.
     await page.dblclick(".info-panel-head");
@@ -12672,8 +12656,8 @@ async function varSelect(t, page) {
     ["들어오는 연결", linksWords(links.into).text],
   ];
   t.check(
-    `정보 패널의 이름 줄이 ${target.path}::${target.name}, 종류 칩이 변수이고 크기와 연결 줄이 읽음·생성을 센다`,
-    facts.path === `${target.path}::` && facts.name === target.name && same(facts.chips, ["변수"]) && same(facts.rows.map((row) => [row.topic, row.text]), want),
+    `정보 패널의 이름 줄이 ${target.path}::${target.name}이고 크기와 연결 줄이 읽음·생성을 센다`,
+    facts.path === `${target.path}::` && facts.name === target.name && same(facts.rows.map((row) => [row.topic, row.text]), want),
     `${facts.path}${facts.name} [${facts.chips.join(", ")}] ${facts.rows.map((row) => `${row.topic}: ${row.text}`).join(" / ")}`,
   );
   t.check("변수의 정보 패널에는 요약 구역이 없다", (await count(page, ".info-panel-summary")) === 0);
@@ -13078,7 +13062,13 @@ const gutterOf = (page) =>
   page.evaluate(() => {
     const editor = document.querySelector(".info-panel .code .monaco-editor").getBoundingClientRect();
     const label = [...document.querySelectorAll(".info-panel .code .line-numbers")].find((each) => each.textContent !== "");
-    return { width: label.getBoundingClientRect().width, left: document.querySelector(".info-panel .code .view-lines").getBoundingClientRect().left - editor.left };
+    const digit = document.createElement("span");
+    digit.textContent = "0";
+    label.append(digit);
+    const unit = digit.getBoundingClientRect().width;
+    digit.remove();
+    const most = Math.max(...[...document.querySelectorAll(".info-panel .code .line-numbers")].map((each) => Number(each.textContent) || 0));
+    return { width: label.getBoundingClientRect().width, unit, most, left: document.querySelector(".info-panel .code .view-lines").getBoundingClientRect().left - editor.left };
   });
 
 async function waitCode(page) {
@@ -13228,8 +13218,9 @@ async function compareOn(t, page) {
   await page.click(".legend-button");
   await page.waitForSelector(".legend", { timeout: 5_000 });
   const legend = await page.evaluate(() => [...document.querySelectorAll('.legend-overlay[data-kind="compare"]')].map((row) => row.textContent.trim()));
+  await page.keyboard.press("Escape");
   t.check(
-    "범례 끝에 이름 옆 수, 삭제된 연결, 삭제된 정의와 파일 세 줄이 붙는다",
+    "기호 창의 표시 묶음 끝에 이름 옆 수, 삭제된 연결, 삭제된 정의와 파일 세 줄이 붙는다",
     legend.length === 3 && legend[0].includes("이름 옆 수") && legend[1].startsWith("삭제된 연결") && legend[2].startsWith("삭제된 정의와 파일"),
     legend.join(" / "),
   );
@@ -13584,7 +13575,7 @@ async function compareCode(t, page) {
     (await rectOf(page, ".info-panel")).width > panel.width + 200 && wide.editors === 1 && wide.split === 0 && wide.deleted === code.deleted && wide.added === code.added,
     `폭 ${panel.width.toFixed(0)} → ${(await rectOf(page, ".info-panel")).width.toFixed(0)}`,
   );
-  // 바뀐 줄이 없는 파일로 옮겨 줄 번호 칸의 폭과 코드의 왼쪽 끝을 견준다.
+  // 바뀐 줄이 없는 파일로 옮겨 두 뷰어의 줄 번호 칸의 폭을 가장 큰 줄 번호의 자릿수와 견준다.
   const changed = new Set(result.files.flatMap((each) => [each.path, each.old]));
   const kept = result.graph.nodes.find((n) => n.kind === "module" && n.path !== null && !changed.has(n.path));
   await page.click(`.tree-row.tree-file[data-node="${kept.id}"]`);
@@ -13593,9 +13584,9 @@ async function compareCode(t, page) {
   const plain = await wovenOf(page);
   const whole = await gutterOf(page);
   t.check(
-    `바뀐 줄이 없는 ${kept.path}로 옮겨도 줄 번호 칸의 폭과 코드의 왼쪽 끝이 그대로다`,
-    plain.deleted === 0 && plain.added === 0 && near(woven.width, whole.width, 0.5) && near(woven.left, whole.left, 0.5),
-    `줄 번호 칸 ${woven.width.toFixed(1)} → ${whole.width.toFixed(1)}, 코드의 왼쪽 끝 ${woven.left.toFixed(1)} → ${whole.left.toFixed(1)}`,
+    `엮은 문서와 바뀐 줄이 없는 ${kept.path} 모두 줄 번호 칸의 폭이 가장 큰 줄 번호의 자릿수다`,
+    plain.deleted === 0 && plain.added === 0 && [woven, whole].every((each) => near(each.width, each.unit * String(each.most).length, 1)),
+    `엮은 문서 ${woven.width.toFixed(1)}px(가장 큰 번호 ${woven.most}, 글자 폭 ${woven.unit.toFixed(1)}px), ${kept.path} ${whole.width.toFixed(1)}px(가장 큰 번호 ${whole.most})`,
   );
 }
 

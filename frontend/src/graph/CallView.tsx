@@ -294,6 +294,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     >
       <Markers />
       <ReactFlow
+        edgesFocusable={false}
         nodes={drawnNodes}
         edges={edges}
         nodeTypes={nodeTypes}

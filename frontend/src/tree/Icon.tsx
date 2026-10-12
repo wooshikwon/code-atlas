@@ -46,6 +46,16 @@ export function Icon({ kind }: { kind: IconKind }) {
   );
 }
 
+/** 검색 성격의 입력 칸 앞에 그리는 돋보기 */
+export function SearchIcon() {
+  return (
+    <svg className="search-icon" width={14} height={14} viewBox="0 0 14 14" aria-hidden="true">
+      <circle cx={6} cy={6} r={3.75} />
+      <path d="M9 9l3.25 3.25" />
+    </svg>
+  );
+}
+
 /** 아래 행을 펼 수 있는 행의 펼침 화살표 */
 export function Chevron({ open }: { open: boolean }) {
   return (

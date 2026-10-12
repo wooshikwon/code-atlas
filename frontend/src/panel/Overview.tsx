@@ -141,7 +141,7 @@ function Compared({ nodes }: { nodes: Map<string, AtlasNode> }) {
         바뀐 정의 {count}개 · 파일 {files.length}개
       </p>
       <p className="overview-hint">
-        기준 {pointName(result.base)} · 대상 {pointName(result.target)}. 두 시점 사이에 줄이 바뀐 함수·클래스·변수입니다. 행을 누르면 그 노드를 고릅니다.
+        기준 {pointName(result.base)} · 대상 {pointName(result.target)}
       </p>
       {files.map(({ file, list }) => (
         <section key={file.path}>

@@ -101,15 +101,15 @@ function Toolbar({ mode }: { mode: Mode }) {
         <Trail />
       </div>
       <div className="toolbar-tools">
+        <LayoutButton mode={mode} />
         <Filters />
         <Reload />
-        <button className="toolbar-button" aria-label="화면 맞춤" onClick={fitGraph}>
+        <button className="toolbar-button toolbar-texts" aria-label="화면 맞춤" onClick={fitGraph}>
           <span className="toolbar-wide">화면 </span>맞춤
         </button>
         <button className="toolbar-button" aria-label="화면 초기화" onClick={resetView} disabled={pin}>
           <span className="toolbar-wide">화면 </span>초기화
         </button>
-        <LayoutButton mode={mode} />
         <button className="toolbar-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
           {theme === "light" ? "어두운 화면" : "밝은 화면"}
         </button>
@@ -170,6 +170,10 @@ export function App() {
             return;
           }
           if (state.paletteOpen) {
+            return;
+          }
+          if (state.legendOpen) {
+            state.toggleLegend();
             return;
           }
           if (useCompare.getState().open) {

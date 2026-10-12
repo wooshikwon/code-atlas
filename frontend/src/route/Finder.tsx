@@ -101,7 +101,6 @@ export function Finder() {
     <div className="finder" id="finder" ref={box} style={{ maxHeight: room ?? undefined }}>
       <div className="finder-head">
         <span>경로 찾기</span>
-        <span>실행 선을 따라갑니다</span>
       </div>
       <div className="finder-ends">
         <div className="finder-fields">

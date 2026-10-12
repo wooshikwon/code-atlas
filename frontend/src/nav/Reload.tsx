@@ -17,7 +17,7 @@ export function reloadTip(busy: boolean, status: Status | null): string {
   }
   const name = `새로고침 ${modName("R")}`;
   const [count, ...paths] = status === null ? [] : staleLines(status.stale);
-  return count === undefined ? [name, "레포를 다시 분석해 그래프를 바꾸고 보던 화면은 그대로 둡니다"].join("\n") : [`${count} · ${name}`, ...paths].join("\n");
+  return count === undefined ? name : [`${count} · ${name}`, ...paths].join("\n");
 }
 
 /** 새로고침 버튼의 접근성 이름. 분석하는 중이면 분석 단계를, 분석 뒤 바뀐 파일이 있으면 그 수를 함께 적는다. */

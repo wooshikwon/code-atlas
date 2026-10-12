@@ -141,14 +141,14 @@ export function CodeView({ path, range, highlight, base = false }: CodeViewProps
   const lit = highlight === undefined ? undefined : woven === null ? highlight : (rowOf(woven, side, highlight) ?? undefined);
   /** 모델의 줄이 작업 중인 상태의 파일에서 몇째 줄인지. 언어 서버에 물을 수 없는 줄이면 null이다. */
   const fileLine = useMemo(() => (line: number) => (!live ? null : woven === null ? line : (woven.rows[line - 1]?.target ?? null)), [live, woven]);
+  // 줄 번호 칸의 폭은 가장 큰 줄 번호의 자릿수다. 엮은 문서는 두 시점의 가장 큰 줄 번호를, 그 밖에는 파일의 줄 수를 쓴다.
   const options = useMemo(() => {
     if (woven === null) {
-      return OPTIONS;
+      return code === undefined ? OPTIONS : { ...OPTIONS, lineNumbersMinChars: String(code.split("\n").length).length };
     }
     const { chars, label } = gutter(woven);
-    // 줄 번호 칸의 폭은 엮지 않은 본문의 코드 뷰어가 쓰는 최소 글자 수보다 좁아지지 않는다.
-    return { ...OPTIONS, lineNumbers: label, lineNumbersMinChars: Math.max(monaco.editor.EditorOptions.lineNumbersMinChars.defaultValue, chars) };
-  }, [woven]);
+    return { ...OPTIONS, lineNumbers: label, lineNumbersMinChars: chars };
+  }, [code, woven]);
 
   useEffect(() => {
     let cancelled = false;

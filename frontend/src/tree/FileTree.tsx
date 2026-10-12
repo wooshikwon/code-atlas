@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { hidden } from "../graph/visible";
+import { host } from "../host";
+import { modName } from "../nav/keys";
 import { useNodeMenu } from "../nav/NodeMenu";
 import { useOpened } from "../panel/opened";
 import { useChanges } from "../state/changes";
 import { useCompare } from "../state/compare";
+import { useOpening } from "../state/opening";
 import { running, useStatus } from "../state/status";
 import { chosenOf, useAtlas } from "../state/store";
 import { build } from "../search/index";
 import { parentOf, results, rows, type Result, type Row } from "./rows";
+import { Icon } from "./Icon";
 import { TreeNode } from "./TreeNode";
 import { TreeResults, TreeSearch } from "./TreeSearch";
 
@@ -158,7 +162,17 @@ export function FileTree() {
 
   return (
     <div className="explorer">
-      <div className="explorer-header">{repo?.name ?? "code-atlas"}</div>
+      <div className="explorer-header">
+        <span className="explorer-name">{repo?.name ?? "code-atlas"}</span>
+        <button
+          className="toolbar-button explorer-open"
+          aria-label="다른 레포 열기"
+          data-tip={host.app ? `폴더 열기… ${modName("O")}` : "폴더 열기…"}
+          onClick={() => void useOpening.getState().browse()}
+        >
+          <Icon kind="folder-open" />
+        </button>
+      </div>
       <TreeSearch
         input={search}
         query={query}

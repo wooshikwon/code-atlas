@@ -4,7 +4,7 @@
 import { useMemo } from "react";
 import type { AtlasNode, EdgeGroup, NodeChange } from "../api/types";
 import { lineTotals } from "../graph/compare";
-import { GROUP_NAMES, KIND_NAMES, nameOf } from "../graph/names";
+import { GROUP_NAMES, nameOf } from "../graph/names";
 import { EntryMark } from "../graph/nodes/common";
 import { Ends } from "../route/Ends";
 import { CHANGE_NAMES, useChange } from "../state/changes";
@@ -53,17 +53,17 @@ export function Header({ item, nodes }: HeaderProps) {
   let chips: (string | null)[];
   if (item.type === "repo") {
     name = item.name;
-    chips = ["레포"];
+    chips = [];
   } else if (item.type === "file") {
     const at = item.path.lastIndexOf("/") + 1;
     path = item.path.slice(0, at);
     name = item.path.slice(at);
-    chips = ["파일"];
+    chips = [];
   } else if (item.type === "node") {
     const { node } = item;
     entry = node.entry ? node : null;
     ({ path, name } = pathOf(nodes, node));
-    chips = [KIND_NAMES[node.kind], node.entry ? "진입점" : null, node.method_kind];
+    chips = [];
   } else if (item.type === "trunk") {
     name = `노드 ${item.sources}개 → ${named(item.target)}`;
     chips = ["합류"];
@@ -102,7 +102,6 @@ export function Header({ item, nodes }: HeaderProps) {
           </span>
         )}
       </div>
-      {item.type === "repo" && <div className="info-panel-hint">파일을 고르면 정보를, 함수를 고르면 코드를 보여 줍니다</div>}
       {item.type === "node" && <Ends node={item.node} />}
     </>
   );

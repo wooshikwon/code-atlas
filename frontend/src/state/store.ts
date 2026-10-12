@@ -203,7 +203,7 @@ export interface AtlasStore {
   setPalette(open: boolean): void;
 }
 
-type Ui = Pick<AtlasStore, "panel" | "split" | "factsOpen" | "summaryOpen" | "legendOpen" | "minimapOpen" | "theme" | "layout" | "depth" | "autoSummary">;
+type Ui = Pick<AtlasStore, "panel" | "split" | "factsOpen" | "summaryOpen" | "minimapOpen" | "theme" | "layout" | "depth" | "autoSummary">;
 
 const UI_KEY = "code-atlas:ui:v3";
 
@@ -233,7 +233,6 @@ export function parseUi(raw: string | null, theme: Theme): Ui {
     split: typeof saved.split === "number" && saved.split > 0 && saved.split < 1 ? saved.split : null,
     factsOpen: saved.factsOpen !== false,
     summaryOpen: saved.summaryOpen !== false,
-    legendOpen: saved.legendOpen === true,
     minimapOpen: saved.minimapOpen !== false,
     theme: saved.theme === "light" || saved.theme === "dark" ? saved.theme : theme,
     layout: saved.layout === "landscape" || saved.layout === "portrait" ? saved.layout : null,
@@ -408,8 +407,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
   /** 화면 설정을 바꾸고 localStorage에 쓴다. */
   const keep = (change: Partial<Ui>) => {
     set(change);
-    const { panel, split, factsOpen, summaryOpen, legendOpen, minimapOpen, theme, layout, depth, autoSummary } = get();
-    localStorage.setItem(UI_KEY, JSON.stringify({ panel, split, factsOpen, summaryOpen, legendOpen, minimapOpen, theme, layout, depth, autoSummary }));
+    const { panel, split, factsOpen, summaryOpen, minimapOpen, theme, layout, depth, autoSummary } = get();
+    localStorage.setItem(UI_KEY, JSON.stringify({ panel, split, factsOpen, summaryOpen, minimapOpen, theme, layout, depth, autoSummary }));
   };
 
   /** 경로 고정 중에는 액션을 실행하지 않는다. */
@@ -700,7 +699,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     setSplit: (split) => keep({ split }),
     toggleFacts: () => keep({ factsOpen: !get().factsOpen }),
     toggleSummary: () => keep({ summaryOpen: !get().summaryOpen }),
-    toggleLegend: () => keep({ legendOpen: !get().legendOpen }),
+    toggleLegend: () => set({ legendOpen: !get().legendOpen }),
     toggleMinimap: () => keep({ minimapOpen: !get().minimapOpen }),
     setPalette: (open) => set({ paletteOpen: open }),
   };

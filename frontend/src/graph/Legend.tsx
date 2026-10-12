@@ -1,12 +1,14 @@
-// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 일곱 개와 이름표 옆 표시와 접힌 상자의 배지, 선 모양 세 개와 갈림·합류, 찾은 경로의 선,
-// 변경 표시 두 색을 보여 주고, 선 모양에 마우스를 올리면 그 분류에 드는 선 종류를 말풍선에 적는다. 분석 표시를 켜면 켠 표시의 견본과 뜻을 끝에 덧붙인다.
-// 시점 비교가 켜져 있으면 그리지 않는 변경 표시 두 색을 빼고 이름 옆 줄 수, 삭제된 연결, 삭제된 정의와 파일의 견본 세 줄을 덧붙인다.
+// 그래프의 기호를 설명하는 창과, 그 창을 여는 왼쪽 아래 칸(`Dock.tsx`)의 물음표 버튼. 창은 화면 가운데에 뜨고 노드 모양, 선 모양, 표시 세 묶음을
+// 보여 준다. 창은 `document.body`에 그려 정보 패널 위에 뜬다. 선 모양 옆에는 그 분류에 드는 선 종류를 적는다. 분석 표시나 시점 비교를 켜면 켠 표시의 견본을 표시 묶음 끝에 덧붙이고,
+// 시점 비교가 켜져 있으면 그리지 않는 변경 표시 두 색을 뺀다. 창 밖을 누르거나 Esc를 누르면 닫힌다.
+import { createPortal } from "react-dom";
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
 import { useOverlay, type OverlayKind } from "../state/overlay";
+import { Ask, Title } from "../open/Asks";
 import { useAtlas } from "../state/store";
 import { DIM } from "./flow";
-import { diffTexts, FORK_RIM, JOINT_RADIUS } from "./layout";
+import { diffTexts } from "./layout";
 import { EDGE_KIND_NAMES, GROUP_KINDS, GROUP_NAMES } from "./names";
 import { CycleMark, ENTRY_PATH } from "./nodes/common";
 import { MARK_SIZE } from "./view";
@@ -19,8 +21,11 @@ const SHAPES = [
   { key: "function", name: "함수·메서드" },
   { key: "variable", name: "모듈 변수" },
   { key: "external", name: "외부 노드" },
+];
+
+const MARKS = [
   { key: "entry", name: "진입점" },
-  { key: "inside", name: "접힌 상자의 배지: 안에 든 함수·클래스·파일 수" },
+  { key: "inside", name: "접힌 상자에 든 것의 수" },
 ];
 
 const GROUPS: EdgeGroup[] = ["run", "use", "derive"];
@@ -78,7 +83,7 @@ function Compare() {
           <span className="diff-added">{DIFF_SAMPLE.added}</span>
           <span className="diff-deleted">{DIFF_SAMPLE.deleted}</span>
         </span>
-        이름 옆 수: 추가된 줄 · 삭제된 줄
+        이름 옆 수: 추가된 줄, 삭제된 줄
       </li>
       <li className="legend-overlay" data-kind="compare">
         <svg width={30} height={16}>
@@ -87,13 +92,13 @@ function Compare() {
             <circle cx={12} cy={8} r={MARK_SIZE / 2} className="edge-gone" />
           </g>
         </svg>
-        삭제된 연결: 기준 시점에만 있던 관계의 선. 숫자 대신 빨강 점
+        삭제된 연결
       </li>
       <li className="legend-overlay" data-kind="compare">
         <svg width={30} height={16}>
           <circle cx={15} cy={8} r={6} className="legend-node" opacity={DIM} />
         </svg>
-        삭제된 정의와 파일: 흐린 단계로 남고 이름 옆 수도 함께 흐려진다
+        삭제된 정의와 파일
       </li>
     </>
   );
@@ -126,74 +131,79 @@ function Overlay({ kind }: { kind: OverlayKind }) {
 
 export function Legend() {
   const open = useAtlas((s) => s.legendOpen);
+  const toggleLegend = useAtlas((s) => s.toggleLegend);
   const overlay = useOverlay((s) => s.kind);
   if (!open) {
     return null;
   }
-  return (
-    <div className="legend" id="legend">
-      <ul className="legend-list">
-        {SHAPES.map((s) => (
-          <li key={s.key}>
-            <svg width={22} height={16}>
-              <Shape kind={s.key} />
-            </svg>
-            {s.name}
-          </li>
-        ))}
-      </ul>
-      <ul className="legend-list">
-        {GROUPS.map((group) => (
-          <li key={group} data-tip={`${GROUP_NAMES[group]} 선: ${GROUP_KINDS[group].map((kind) => EDGE_KIND_NAMES[kind]).join(", ")}`}>
-            <svg width={30} height={16}>
-              <path
-                d="M2,8 L27,8"
-                className={`legend-edge edge-${group} tone-muted`}
-                markerEnd={`url(#arrow-${group}-muted)`}
-              />
-            </svg>
-            {GROUP_NAMES[group]}
-          </li>
-        ))}
-        <li>
-          <svg width={30} height={16}>
-            <path d="M2,4 L27,4" className="legend-edge tone-muted" markerEnd="url(#arrow-run-muted)" />
-            <path d="M9,4 L9,12 L27,12" className="legend-edge tone-muted" markerEnd="url(#arrow-run-muted)" />
-            <circle cx={9} cy={4} r={JOINT_RADIUS} strokeWidth={FORK_RIM} className="edge-joint-out tone-muted" />
-          </svg>
-          갈림: 한 노드에서 나가는 선
-        </li>
-        <li>
-          <svg width={30} height={16}>
-            <path d="M2,3 L10,3 L10,9 M2,14 L10,14 L10,9 L27,9" className="legend-edge tone-muted" markerEnd="url(#arrow-run-muted)" />
-            <circle cx={10} cy={9} r={JOINT_RADIUS} className="edge-joint-in tone-muted" />
-            <text x={17} y={9} dy="0.35em" textAnchor="middle" className="edge-trunk-count tone-muted">
-              7
-            </text>
-          </svg>
-          합류와 들어오는 관계의 합계
-        </li>
-        <li>
-          <svg width={30} height={16}>
-            <path d="M2,8 L27,8" className="legend-edge legend-route tone-strong" />
-          </svg>
-          찾은 경로
-        </li>
-        {overlay !== "compare" && CHANGES.map(({ change, name }) => (
-          <li key={change} data-change={change}>
-            <svg width={30} height={16}>
-              <rect x={1} y={2} width={3} height={12} className="legend-change-bar" />
-              <circle cx={11} cy={8} r={4.5} className="legend-change-ring" />
-              <text x={24} y={12} textAnchor="middle" className="legend-change-letter">
-                {CHANGE_LETTERS[change]}
-              </text>
-            </svg>
-            {name}
-          </li>
-        ))}
-        {overlay !== null && <Overlay kind={overlay} />}
-      </ul>
-    </div>
+  return createPortal(
+    <Ask wide close={toggleLegend}>
+      <Title>기호</Title>
+      <div className="legend" id="legend">
+        <section className="legend-group">
+          <h3 className="ask-label">노드</h3>
+          <ul className="legend-list">
+            {SHAPES.map((s) => (
+              <li key={s.key}>
+                <svg width={22} height={16}>
+                  <Shape kind={s.key} />
+                </svg>
+                {s.name}
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section className="legend-group">
+          <h3 className="ask-label">선</h3>
+          <ul className="legend-list">
+            {GROUPS.map((group) => (
+              <li key={group}>
+                <svg width={30} height={16}>
+                  <path d="M2,8 L27,8" className={`legend-edge edge-${group} tone-muted`} markerEnd={`url(#arrow-${group}-muted)`} />
+                </svg>
+                <span>
+                  {GROUP_NAMES[group]}
+                  <span className="legend-kinds">{GROUP_KINDS[group].map((kind) => EDGE_KIND_NAMES[kind]).join(", ")}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section className="legend-group">
+          <h3 className="ask-label">표시</h3>
+          <ul className="legend-list">
+            {MARKS.map((s) => (
+              <li key={s.key}>
+                <svg width={22} height={16}>
+                  <Shape kind={s.key} />
+                </svg>
+                {s.name}
+              </li>
+            ))}
+            {overlay !== "compare" &&
+              CHANGES.map(({ change, name }) => (
+                <li key={change} data-change={change}>
+                  <svg width={30} height={16}>
+                    <rect x={1} y={2} width={3} height={12} className="legend-change-bar" />
+                    <circle cx={11} cy={8} r={4.5} className="legend-change-ring" />
+                    <text x={24} y={12} textAnchor="middle" className="legend-change-letter">
+                      {CHANGE_LETTERS[change]}
+                    </text>
+                  </svg>
+                  {name}
+                </li>
+              ))}
+            {overlay !== null && <Overlay kind={overlay} />}
+          </ul>
+        </section>
+      </div>
+      <div className="ask-buttons">
+        <button className="toolbar-button" data-first onClick={toggleLegend}>
+          닫기
+        </button>
+      </div>
+    </Ask>,
+    document.body,
   );
 }
 
@@ -201,14 +211,7 @@ export function LegendButton() {
   const open = useAtlas((s) => s.legendOpen);
   const toggleLegend = useAtlas((s) => s.toggleLegend);
   return (
-    <button
-      className="dock-button legend-button"
-      onClick={toggleLegend}
-      data-tip="범례"
-      aria-label="범례"
-      aria-expanded={open}
-      aria-controls="legend"
-    >
+    <button className="dock-button legend-button" onClick={toggleLegend} data-tip="기호 설명" aria-label="기호 설명" aria-haspopup="dialog" aria-expanded={open}>
       ?
     </button>
   );

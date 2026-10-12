@@ -74,7 +74,7 @@ function Body({ step }: { step: Step }) {
           </Title>
           <p className="ask-note">하위 폴더만 열면 폴더 밖의 코드를 부르는 지점이 미확인으로 남습니다.</p>
           <div className="ask-buttons">
-            <button className="toolbar-button" data-first data-full={step.project} onClick={() => void choose(step.project)}>
+            <button className="toolbar-button confirm-button" data-first data-full={step.project} onClick={() => void choose(step.project)}>
               {nameOf(step.project)} 열기
             </button>
             <button className="toolbar-button" data-full={step.path} onClick={() => void choose(step.path, { asIs: true })}>

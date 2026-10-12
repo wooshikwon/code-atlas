@@ -1017,7 +1017,7 @@ describe("경로 고정", () => {
     vi.stubGlobal("localStorage", { setItem: (key: string, value: string) => saved.set(key, value) });
     store().toggleFinder();
     store().setEnd("from", begin);
-    store().toggleLegend();
+    store().toggleMinimap();
     vi.unstubAllGlobals();
     expect(Object.keys(JSON.parse(saved.get("code-atlas:ui:v3")!) as object)).not.toContain("finder");
     expect(saved.size).toBe(1);
@@ -1045,7 +1045,6 @@ describe("화면 설정", () => {
       split: 0.4,
       factsOpen: false,
       summaryOpen: true,
-      legendOpen: true,
       minimapOpen: false,
       theme: "dark",
       layout: "portrait",
@@ -1055,10 +1054,10 @@ describe("화면 설정", () => {
   });
 
   it("형태가 맞지 않는 값은 기본값으로 둔다", () => {
-    const defaults = { panel: null, split: null, factsOpen: true, summaryOpen: true, legendOpen: false, minimapOpen: true, theme: "dark", layout: null, depth: 2, autoSummary: false };
+    const defaults = { panel: null, split: null, factsOpen: true, summaryOpen: true, minimapOpen: true, theme: "dark", layout: null, depth: 2, autoSummary: false };
     expect(parseUi(null, "dark")).toEqual(defaults);
     expect(parseUi("{", "dark")).toEqual(defaults);
-    expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, split: 1.5, legendOpen: "yes", minimapOpen: 0, theme: "blue", layout: "tall", depth: 4, autoSummary: 1 }), "dark")).toEqual(
+    expect(parseUi(JSON.stringify({ panel: { x: 1, y: 2 }, split: 1.5, minimapOpen: 0, theme: "blue", layout: "tall", depth: 4, autoSummary: 1 }), "dark")).toEqual(
       defaults,
     );
   });

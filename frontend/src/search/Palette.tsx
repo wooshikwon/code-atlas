@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { hidden } from "../graph/visible";
 import { useAtlas } from "../state/store";
+import { SearchIcon } from "../tree/Icon";
 import { HitRow } from "./HitRow";
 import { build, find, recent, type Hit } from "./index";
 
@@ -68,24 +69,27 @@ function PaletteBox() {
   return (
     <div className="palette-backdrop" onMouseDown={() => setPalette(false)}>
       <div className="palette" onMouseDown={(event) => event.stopPropagation()}>
-        <input
-          className="palette-input"
-          role="combobox"
-          aria-expanded={hits.length > 0}
-          aria-controls="palette-list"
-          aria-activedescendant={hits[active] === undefined ? undefined : optionId(active)}
-          aria-autocomplete="list"
-          aria-label="파일·클래스·함수 검색"
-          placeholder="파일·클래스·함수 이름"
-          spellCheck={false}
-          autoFocus
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActive(0);
-          }}
-          onKeyDown={onKeyDown}
-        />
+        <div className="palette-field">
+          <SearchIcon />
+          <input
+            className="palette-input"
+            role="combobox"
+            aria-expanded={hits.length > 0}
+            aria-controls="palette-list"
+            aria-activedescendant={hits[active] === undefined ? undefined : optionId(active)}
+            aria-autocomplete="list"
+            aria-label="파일·클래스·함수 검색"
+            placeholder="파일·클래스·함수 이름"
+            spellCheck={false}
+            autoFocus
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActive(0);
+            }}
+            onKeyDown={onKeyDown}
+          />
+        </div>
         <ul id="palette-list" className="palette-list" role="listbox">
           {hits.map((hit, index) => (
             <HitRow

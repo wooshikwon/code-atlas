@@ -696,6 +696,7 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
     >
       <Markers />
       <ReactFlow
+        edgesFocusable={false}
         nodes={drawnNodes}
         edges={edges}
         nodeTypes={nodeTypes}
