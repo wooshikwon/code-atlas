@@ -2,6 +2,7 @@
 // 레포 정보(통계, 브랜치, 진입점 목록) 두 구역이다. 버튼은 기본값과 다른 보기 설정의 수를 적는다.
 import { useMemo, useRef, useState } from "react";
 import { titleOf } from "../graph/layout";
+import { EntryIcon } from "../graph/nodes/common";
 import { hidden } from "../graph/visible";
 import { useBranch } from "../state/changes";
 import { useCycles } from "../state/cycles";
@@ -69,7 +70,8 @@ function Entries({ onPick }: { onPick: () => void }) {
                 onPick();
               }}
             >
-              ▶ {titleOf(node)}
+              <EntryIcon />
+              {titleOf(node)}
             </button>
           </li>
         ))}

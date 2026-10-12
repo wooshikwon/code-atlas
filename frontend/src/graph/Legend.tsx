@@ -5,7 +5,7 @@ import { CHANGE_LETTERS } from "../state/changes";
 import { useOverlay, type OverlayKind } from "../state/overlay";
 import { useAtlas } from "../state/store";
 import { EDGE_KIND_NAMES, GROUP_KINDS, GROUP_NAMES } from "./names";
-import { CycleMark } from "./nodes/common";
+import { CycleMark, ENTRY_PATH } from "./nodes/common";
 
 const SHAPES = [
   { key: "package", name: "접힌 폴더" },
@@ -47,11 +47,7 @@ function Shape({ kind }: { kind: string }) {
     case "external":
       return <rect x={1} y={3} width={20} height={10} rx={5} className="legend-external" />;
     case "entry":
-      return (
-        <text x={11} y={12} textAnchor="middle" className="legend-entry">
-          ▶
-        </text>
-      );
+      return <path d={ENTRY_PATH} transform="translate(5 2)" className="legend-entry" />;
     case "inside":
       return (
         <g>

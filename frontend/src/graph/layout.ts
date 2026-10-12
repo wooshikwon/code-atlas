@@ -55,7 +55,8 @@ export const CAPTION_HEIGHT = 16;
 export const CIRCLE = 16;
 export const LEAF_HEIGHT = 18;
 export const EXTERNAL_HEIGHT = 24;
-export const ENTRY_MARK = "▶ ";
+/** 이름표 앞에 그리는 진입점 표지의 폭. 체크 아이콘 12px와 이름표까지의 4px다. */
+export const ENTRY_MARK_WIDTH = 16;
 /** 순환 묶음에 든 파일 상자와 그런 파일을 품은 접힌 폴더 상자의 이름표 앞에 그리는 순환 아이콘의 폭. 아이콘 12px와 이름표까지의 4px다. */
 export const CYCLE_MARK_WIDTH = 16;
 const LABEL_MAX = 36;
@@ -319,7 +320,7 @@ interface Marks {
 
 /** 순환 아이콘, 진입점 표지, 이름표의 폭. loc이 참이면 이름표 오른쪽 줄 수 숫자의 폭을, 출발·도착 표지가 있으면 그 폭을 더한다. */
 function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, loc: boolean, marks: Marks): number {
-  const label = (marks.cycle ? CYCLE_MARK_WIDTH : 0) + measure((node.entry ? ENTRY_MARK : "") + labelOf(node), bold);
+  const label = (marks.cycle ? CYCLE_MARK_WIDTH : 0) + (node.entry ? ENTRY_MARK_WIDTH : 0) + measure(labelOf(node), bold);
   const tag = marks.end === undefined ? 0 : END_GAP + measure(END_NAMES[marks.end], true) + 2 * END_PAD;
   return (loc ? label + LOC_GAP + measure(String(node.loc)) : label) + tag;
 }

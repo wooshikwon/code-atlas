@@ -5,7 +5,7 @@ import type { CSSProperties } from "react";
 import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
-import { BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, ENTRY_MARK, labelOf, type Box, type RouteEnd } from "../layout";
+import { BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, labelOf, type Box, type RouteEnd } from "../layout";
 import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, insideTip, locTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
@@ -144,11 +144,23 @@ export function nodeProps(base: string, data: AtlasNodeData, change: Change | nu
   };
 }
 
-/** 진입점 표지 ▶. 마우스를 올리면 말풍선이 뜨고 접근성 이름은 "진입점"이다. */
+/** 진입점 표지인 굵은 체크의 윤곽. 12px 칸에 그린다. */
+export const ENTRY_PATH = "M1.2 6.5 L3 4.8 L4.9 7 L9.2 1.6 L11 3 L5.1 10.5 Z";
+
+/** 굵은 체크 아이콘. 글자 색으로 채운다. */
+export function EntryIcon() {
+  return (
+    <svg className="entry-icon" viewBox="0 0 12 12" width={12} height={12} aria-hidden>
+      <path d={ENTRY_PATH} />
+    </svg>
+  );
+}
+
+/** 이름 앞의 진입점 표지. 폭은 layout.ts의 ENTRY_MARK_WIDTH가 잡는다. 마우스를 올리면 말풍선이 뜨고 접근성 이름은 "진입점"이다. */
 export function EntryMark({ className }: { className?: string }) {
   return (
-    <span className={className} role="img" aria-label="진입점" data-tip={ENTRY_TIP}>
-      {ENTRY_MARK}
+    <span className={className === undefined ? "entry-mark" : `entry-mark ${className}`} role="img" aria-label="진입점" data-tip={ENTRY_TIP}>
+      <EntryIcon />
     </span>
   );
 }

@@ -7390,6 +7390,82 @@ async function panelHead(t, page) {
   await t.shot();
 }
 
+/** hotfix 3의 사진. `hf3-{이름}.png`로 남긴다. */
+const HF3 = (name) => join(OUT, `hf3-${name}.png`);
+
+/** 화면에 그린 진입점 표지마다 SVG 윤곽이 있는지, 글자가 있는지, 칸의 크기와 채운 색, 이름표의 글자 색 */
+const entryMarks = (page, root) =>
+  page.evaluate((sel) => {
+    return [...document.querySelectorAll(`${sel} .entry-mark`)].map((mark) => {
+      const [rect, path] = [mark.getBoundingClientRect(), mark.querySelector("svg path")];
+      const scale = rect.width / mark.offsetWidth;
+      return {
+        drawn: path !== null && path.getBBox().width > 0,
+        text: mark.textContent,
+        size: [mark.offsetWidth, mark.offsetHeight],
+        fill: path === null ? null : getComputedStyle(path).fill,
+        ink: getComputedStyle(mark.parentElement).color,
+        name: mark.getAttribute("aria-label"),
+        tip: mark.dataset.tip,
+        scale,
+      };
+    });
+  }, root);
+
+/** 진입점 표지. 굵은 체크를 SVG로 그리고 화면에 세모와 체크 글자를 적지 않는다. 사진은 `hf3-entry-mark-{이름}.png`로 남긴다. */
+async function entryMark(t, page) {
+  const graph = await api("/api/graph");
+  const entries = graph.nodes.filter((n) => n.entry && !n.test);
+  const glyphs = () => page.evaluate(() => [...document.body.innerText.matchAll(/[▶►✓✔]/g)].length);
+  await load(page);
+  await page.click(".legend-button");
+  await pick(page, FILE);
+  const light = await entryMarks(page, ".react-flow__viewport");
+  const shown = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`.react-flow__node[data-id="${id}#face"]`) !== null), entries.map((n) => n.id));
+  t.check(
+    `화면에 보이는 진입점 노드 ${shown.length}개가 이름표 앞에 SVG 체크를 달고 표지 안에 글자가 없다`,
+    shown.length > 0 && light.length === shown.length && light.every((mark) => mark.drawn && mark.text === ""),
+    `표지 ${light.length}개`,
+  );
+  t.check(
+    '표지는 12px 칸에 이름표의 글자 색으로 그리고 접근성 이름 "진입점"과 말풍선 글을 그대로 둔다',
+    light.every((mark) => same(mark.size, [12, 12]) && mark.fill === mark.ink && mark.name === "진입점" && mark.tip.startsWith("진입점")),
+    light.map((mark) => `${mark.size.join("×")} ${mark.fill}`).join(", "),
+  );
+  const fits = await page.evaluate((sel) => {
+    const [head, label, loc] = [".node-module-head", ".node-label", ".loc"].map((each) => document.querySelector(`${sel} ${each}`).getBoundingClientRect());
+    return { whole: label.right <= loc.left && loc.right <= head.right, gap: Math.round(loc.left - label.right) };
+  }, face(FILE));
+  t.check("펼친 진입점 파일 상자의 머리 줄에서 표지와 이름표가 줄 수 숫자와 겹치지 않는다", fits.whole, `이름표와 줄 수 사이 ${fits.gap}px`);
+  const legend = await page.evaluate(() => {
+    const row = [...document.querySelectorAll(".legend li")].find((item) => item.textContent === "진입점");
+    return { path: row?.querySelector("path.legend-entry") !== null, text: row?.querySelector("svg")?.textContent ?? null };
+  });
+  const head = await entryMarks(page, ".info-panel-head");
+  t.check(
+    "범례의 진입점 견본과 정보 패널 이름 줄의 표지도 같은 SVG 체크다",
+    legend.path && legend.text === "" && head.length === 1 && head[0].drawn && head[0].text === "",
+    `범례 ${legend.path}, 이름 줄 ${head.length}개`,
+  );
+  t.check("화면의 글에 세모(▶)와 체크(✔) 글자가 없다", (await glyphs()) === 0, `${await glyphs()}개`);
+  await page.screenshot({ path: HF3("entry-mark-light") });
+
+  // 미사용 덮개와 순환 아이콘 옆에서도 체크가 진입점 표지에만 쓰인다.
+  await setOverlay(page, "unused");
+  await settle(page);
+  const checks = await page.evaluate(() => document.querySelectorAll(".graph svg.entry-icon").length);
+  t.check("미사용 덮개를 켜도 그래프의 체크 아이콘은 진입점 표지뿐이다", checks === light.length, `체크 ${checks}개, 표지 ${light.length}개`);
+  await page.screenshot({ path: HF3("entry-mark-unused") });
+  await setOverlay(page, "none");
+
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  const dark = await entryMarks(page, ".react-flow__viewport");
+  const ink = await colorOf(page, "--ink");
+  t.check("어두운 화면에서 표지가 어두운 화면의 글자 색을 따른다", dark.length === light.length && dark.every((mark) => mark.fill === mark.ink && mark.fill === ink.rgb), dark.map((mark) => mark.fill).join(", "));
+  await page.screenshot({ path: HF3("entry-mark-dark") });
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -7400,6 +7476,7 @@ const SCENARIOS = [
   ["hover", hover],
   ["edge", edge],
   ["badge-tip", badgeTip],
+  ["entry-mark", entryMark],
   ["tips", tips],
   ["minimap", minimap],
   ["region", region],
