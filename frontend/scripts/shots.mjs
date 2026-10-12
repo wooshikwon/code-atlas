@@ -6181,7 +6181,9 @@ async function lineBubble(t, page) {
   );
 
   // 함수를 고르면 접힌 폴더로 뭉친 선을 실제 상대 함수로 풀어 적고, 그 이름을 누르면 폴더를 펼쳐 그 함수를 고른다.
-  const callsInto = (id, box) => tree.edges.filter((e) => e.source === id && COUNTED.includes(e.kind) && tree.within(e.target, box));
+  /** 양 끝이 파일이나 폴더가 아닌 선. 함수 단계의 줄이 되는 선이다. */
+  const defined = (from) => (e) => [e.source, e.target].every((id) => !["module", "package"].includes(from.nodes.get(id).kind));
+  const callsInto = (id, box) => tree.edges.filter((e) => e.source === id && defined(tree)(e) && tree.within(e.target, box));
   const caller = graph.nodes
     .filter((n) => n.kind === "function" && n.parent === FILE)
     .sort((a, b) => new Set(callsInto(b.id, folder).map((e) => e.target)).size - new Set(callsInto(a.id, folder).map((e) => e.target)).size)[0];
@@ -6190,7 +6192,7 @@ async function lineBubble(t, page) {
   await page.getByRole("button", { name: "화면 맞춤" }).click();
   await away();
   await settle(page);
-  /** 함수 id에서 상자 box 안으로 가는 선의 줄: 실제 도착 정의마다 세는 관계를 묶는다. */
+  /** 함수 id에서 상자 box 안으로 가는 선의 줄: 실제 도착 정의마다 관계를 묶는다. */
   const functionRows = (id, box) => {
     const targets = [...new Set(callsInto(id, box).map((e) => e.target))];
     return targets.map((target) => `${shortName(graph, id).replace(/^.*\./, "")} → ${hiddenName(target)} · ${relationWords(kindsOf(callsInto(id, box).filter((e) => e.target === target)))}`);
@@ -6202,7 +6204,7 @@ async function lineBubble(t, page) {
     const stage = await bubbleOver(page, lump.at);
     const mine = stage.rows.filter((each) => each.key === lump.line.key);
     t.check(
-      "함수를 고른 채 접힌 폴더로 가는 선의 줄은 실제 상대 함수이고, 화면에 그려져 있지 않은 함수는 파일 경로를 함께 적는다",
+      "함수를 고른 채 접힌 폴더로 가는 선의 줄은 실제 상대 함수이고 모두 누를 수 있으며, 화면에 그려져 있지 않은 함수는 파일 경로를 함께 적는다",
       mine.length > 0 && same(mine.map(rowText).sort(), functionRows(caller.id, folder).sort()) && mine.every((each) => each.paths[1].endsWith(".py::") && each.paths[0] === ""),
       mine.map(rowText).join(" / "),
     );
@@ -6327,7 +6329,7 @@ async function lineBubble(t, page) {
     t.skip(`${name}만 있는 선의 관계 글`, "화면에 그런 누를 수 있는 선이 없다");
   }
 
-  // 함수를 고른 채 세는 관계가 없는 선은 누를 수 없는 줄 하나다.
+  // 함수를 고른 채 import만 있는 선은 풀어 적을 끝이 없어 누를 수 없는 안내 줄 하나다.
   await load(page);
   await pick(page, FILE);
   await pick(page, FUNCTION);
@@ -6335,7 +6337,7 @@ async function lineBubble(t, page) {
   await away();
   await settle(page);
   let bare = null;
-  for (const line of (await linesOf(page)).filter((each) => /\|(type|import)$/.test(each.key) && each.key.startsWith(`${FUNCTION}|`))) {
+  for (const line of (await linesOf(page)).filter((each) => each.key.endsWith("|import") && each.key.startsWith(`${FUNCTION}|`))) {
     const at = await edgePoint(page, line.key);
     const seen = at === null ? null : await bubbleOver(page, at);
     if (seen !== null && seen.rows.length === 1 && seen.rows[0].key === line.key) {
@@ -6345,16 +6347,41 @@ async function lineBubble(t, page) {
     await away();
   }
   if (bare === null) {
-    t.skip("함수를 고른 채 세는 관계가 없는 선의 줄", "그 선 하나만 지나는 누를 수 있는 점이 없다");
+    t.skip("함수를 고른 채 import만 있는 선의 줄", "고른 함수의 import 선 하나만 지나는 누를 수 있는 점이 없다");
   } else {
     await shot("function-bare");
     const held = await pinBubble(page, bare.at);
     t.check(
-      "함수를 고른 채 세는 관계가 없는 선은 관계 글을 적은 줄 하나이고 출발·도착 이름을 누를 수 없다",
-      held !== null && held.rows.length === 1 && ALONE.some(([, text]) => text === held.rows[0].relation) && same(held.rows[0].pressable.slice(0, 2), [false, false]) && (await selectedOf(page)) === FUNCTION,
+      "함수를 고른 채 import만 있는 선은 관계 글을 적은 줄 하나이고 출발·도착 이름을 누를 수 없다",
+      held !== null && held.rows.length === 1 && held.rows[0].relation === "import 관계만 있음" && same(held.rows[0].pressable.slice(0, 2), [false, false]) && (await selectedOf(page)) === FUNCTION,
       held === null ? "" : `${rowText(held.rows[0])}, 누를 수 있는 칸 ${held.rows[0].pressable}`,
     );
     await page.keyboard.press("Escape");
+  }
+
+  // 함수를 고른 채 타입에만 쓰이는 관계의 줄도 누를 수 있다.
+  let typed = null;
+  for (const line of (await linesOf(page)).filter((each) => each.key.endsWith("|type") && each.key.startsWith(`${FUNCTION}|`))) {
+    const at = await edgePoint(page, line.key);
+    const seen = at === null ? null : await bubbleOver(page, at);
+    if (seen !== null && seen.rows.length === 1 && seen.rows[0].key === line.key) {
+      typed = { line, at };
+      break;
+    }
+    await away();
+  }
+  if (typed === null) {
+    t.skip("함수를 고른 채 타입에만 쓰이는 선의 줄", "고른 함수의 타입 선 하나만 지나는 누를 수 있는 점이 없다");
+  } else {
+    const held = await pinBubble(page, typed.at);
+    const wanted = endsOfKey(typed.line.key)[1];
+    await pressCell(page, 0, "target");
+    await waitSelected(page, wanted).catch(() => {});
+    t.check(
+      "함수를 고른 채 타입에만 쓰이는 선의 줄은 `타입에만 쓰임`이고 도착 이름을 누르면 그 정의로 간다",
+      held.rows[0].relation === "타입에만 쓰임" && held.rows[0].pressable.every((on) => on) && (await selectedOf(page)) === wanted,
+      `${rowText(held.rows[0])}, 선택 ${await selectedOf(page)}`,
+    );
   }
 
   // 경로 고정 중에는 경로 밖 이름을 눌러도 가지 않는다.
@@ -6404,10 +6431,10 @@ async function lineBubble(t, page) {
   const wideGraph = await api("/api/graph", wideUrl);
   const wide = ancestry(wideGraph);
   const top = WIDE_LINE_FOLDER.open[0];
-  /** top 바로 아래 파일의 함수와 그 함수가 세는 관계로 닿는 top 바로 아래의 폴더 */
+  /** top 바로 아래 파일의 함수와 그 함수가 닿는 top 바로 아래의 폴더 */
   const pairs = wideGraph.nodes
     .filter((n) => n.kind === "function" && !n.test && wide.nodes.get(n.parent)?.parent === top)
-    .flatMap((fn) => wideGraph.nodes.filter((box) => box.kind === "package" && box.parent === top).map((box) => ({ fn, box, edges: wide.edges.filter((e) => e.source === fn.id && COUNTED.includes(e.kind) && wide.within(e.target, box.id)) })))
+    .flatMap((fn) => wideGraph.nodes.filter((box) => box.kind === "package" && box.parent === top).map((box) => ({ fn, box, edges: wide.edges.filter((e) => e.source === fn.id && defined(wide)(e) && wide.within(e.target, box.id)) })))
     .filter((pair) => pair.edges.length > 0)
     .sort((a, b) => new Set(b.edges.map((e) => e.target)).size - new Set(a.edges.map((e) => e.target)).size);
   await page.goto(wideUrl);
@@ -6439,6 +6466,42 @@ async function lineBubble(t, page) {
   }
   if (!wideDone) {
     t.skip("mdp: 함수를 고른 채 접힌 폴더로 가는 선", "그런 누를 수 있는 선이 없다");
+  }
+
+  // 타입에만 쓰이는 클래스를 고르고 들어오는 선을 누르면 줄의 출발 이름이 눌리고 그 정의로 간다.
+  const typeOnly = wideGraph.nodes
+    .filter((n) => (n.kind === "class" || n.kind === "dataclass") && !n.test)
+    .map((n) => ({ node: n, into: wide.edges.filter((e) => e.target === n.id) }))
+    .filter(({ into }) => into.length >= 2 && into.every((e) => e.kind === "type"))
+    .sort((a, b) => b.into.length - a.into.length);
+  let typeDone = false;
+  for (const { node: used } of typeOnly.slice(0, 4)) {
+    await page.goto(wideUrl);
+    await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+    await settle(page);
+    await palettePick(page, used.name, used.id);
+    await waitSelected(page, used.id).catch(() => {});
+    await away();
+    await settle(page);
+    const found = await hittable(page, (await linesOf(page)).filter((line) => endsOfKey(line.key)[1] === used.id));
+    if (found === null) {
+      continue;
+    }
+    const held = await pinBubble(page, found.at);
+    await shot("mdp-type");
+    const from = held.rows[0].nodes[0];
+    await pressCell(page, 0, "source");
+    await waitSelected(page, from).catch(() => {});
+    t.check(
+      `mdp: 타입에만 쓰이는 ${used.name}을 고르고 들어오는 선을 누르면 줄이 모두 \`타입에만 쓰임\`이고 눌리며, 출발 이름을 누르면 그 정의로 간다`,
+      held.rows.length > 0 && held.rows.every((row) => row.relation === "타입에만 쓰임" && row.pressable.every((on) => on) && row.nodes[1] === used.id) && (await selectedOf(page)) === from,
+      `줄 ${held.rows.length}개: ${held.rows.slice(0, 3).map(rowText).join(" / ")}, 선택 ${await selectedOf(page)}`,
+    );
+    typeDone = true;
+    break;
+  }
+  if (!typeDone) {
+    t.skip("mdp: 타입에만 쓰이는 클래스로 들어오는 선의 줄", "그런 클래스로 들어오는 누를 수 있는 선이 없다");
   }
 }
 

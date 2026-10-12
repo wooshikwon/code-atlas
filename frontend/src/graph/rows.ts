@@ -1,8 +1,9 @@
-// 선의 말풍선에 적는 줄. 화면에 그린 선 하나를 고른 노드의 단계에 맞춰 출발·도착·관계의 줄로 푼다.
+// 선의 말풍선에 적는 줄. 화면에 그린 선 하나를 고른 노드의 단계에 맞춰 출발·도착·관계의 줄로 푼다. 줄이 되는지는 양 끝의 단계로 정하고,
+// 세는 관계인지(`COUNTED_KINDS`)는 관계 칸에 수를 적을지만 정한다.
 // 단계는 파일과 함수 두 가지다. 고른 노드가 함수(클래스, 메서드)면 그 노드에 닿는 선을 실제 함수 사이의 관계로,
 // 파일이면 상대 끝을 파일로 풀고, 고른 노드가 없거나 고른 노드에 닿지 않는 선은 화면에 그린 양 끝을 그대로 적는다.
 import type { AtlasEdge, AtlasNode, EdgeKind } from "../api/types";
-import { COUNTED_KINDS, relationsOf, STEP_NAMES } from "./names";
+import { relationsOf, STEP_NAMES } from "./names";
 import { aggKey, edgeKey, type DrawnEdge, type EdgeKey } from "./scope";
 import { unitOf, within } from "./visible";
 
@@ -20,13 +21,14 @@ export interface LineRow {
   target: string;
   /** 관계 칸에 적는 글 */
   relation: string;
-  /** 이름을 눌러 그 끝으로 갈 때 지나온 선으로 담는 키. 누를 수 없는 줄은 null이다. */
+  /** 이름을 눌러 그 끝으로 갈 때 지나온 선으로 담는 키. 풀어 적을 끝이 없어 누를 수 없는 안내 줄은 null이다. */
   keys: EdgeKey[] | null;
   /** 관계 칸을 눌러 코드 줄 목록을 여는 선의 키. 원래 선 하나로 된 줄은 그 선이고 그 밖의 줄은 화면의 선이다. 코드 줄이 없으면 null이다. */
   list: EdgeKey | null;
 }
 
 const DEFINITIONS = new Set<AtlasNode["kind"]>(["function", "method", "class", "dataclass"]);
+const BOXES = new Set<AtlasNode["kind"] | undefined>(["module", "package"]);
 
 /**
  * 선 line의 양 끝을 적는 단계. 고른 노드 focus와 그 안의 노드에서 밖으로 나가거나 밖에서 들어오는 선만 고른 노드의 단계를 따르고,
@@ -42,8 +44,9 @@ export function stageOf(nodes: Map<string, AtlasNode>, focus: string | null, lin
 
 /**
  * 선 line을 말풍선의 줄로 푼다.
- * - 함수 단계: 세는 관계(`COUNTED_KINDS`)의 원래 선을 실제 출발·도착 정의마다 한 줄로 묶는다. 세는 관계가 없으면 화면의 양 끝과
- *   관계 글(`import 관계만 있음`)을 누를 수 없는 줄 하나로 낸다.
+ * - 함수 단계: 양 끝이 파일이나 폴더가 아닌 원래 선을 실제 출발·도착 정의마다 한 줄로 묶는다. 타입 관계도 줄이 되고, 파일과 파일
+ *   사이의 관계인 import는 풀어 적을 끝이 없어 줄이 되지 않는다. 그런 선뿐이면 화면의 양 끝과 관계 글(`import 관계만 있음`)을
+ *   누를 수 없는 안내 줄 하나로 낸다.
  * - 파일 단계: 고른 파일 쪽 끝은 화면에 그린 노드를, 상대 끝은 그 정의가 든 파일을 적어 상대 파일마다 한 줄로 묶는다.
  * - 그 밖: 화면에 그린 양 끝 한 줄이다. 실행 선이 없는 경로의 이음은 관계 대신 걸음의 이름을 적는다.
  * 줄은 원래 선이 그래프에 나오는 순서다.
@@ -61,7 +64,8 @@ export function rowsOf(nodes: Map<string, AtlasNode>, focus: string | null, line
     return [line.source, line.target];
   };
   const groups = new Map<string, { source: string; target: string; edges: AtlasEdge[] }>();
-  for (const edge of stage === "function" ? line.edges.filter((each) => COUNTED_KINDS.includes(each.kind)) : line.edges) {
+  const defined = (edge: AtlasEdge) => !BOXES.has(nodes.get(edge.source)?.kind) && !BOXES.has(nodes.get(edge.target)?.kind);
+  for (const edge of stage === "function" ? line.edges.filter(defined) : line.edges) {
     const [source, target] = ends(edge);
     const id = `${source}|${target}`;
     const group = groups.get(id) ?? { source, target, edges: [] };
