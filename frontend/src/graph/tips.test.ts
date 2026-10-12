@@ -24,7 +24,8 @@ describe("배지 말풍선", () => {
 
   it("도는 원, 줄 수는 수를 함께 적는다", () => {
     expect(busyTip(fn, 1)).toBe("LLM 요약을 만드는 중 1개");
-    expect(busyTip(folder, 2)).toBe("LLM 요약을 만드는 중 2개 · 이 상자와 안에 든 노드");
+    expect(busyTip(file, 2)).toBe("LLM 요약을 만드는 중 2개 · 이 상자와 안에 든 노드");
+    expect(busyTip(folder, 12)).toBe("LLM 요약을 만드는 중 · 안에 든 노드 남은 12개");
     expect(locTip({ ...fn, loc: 131 })).toBe("줄 수 131줄 · 빈 줄을 뺀 수");
   });
 

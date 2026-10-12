@@ -106,11 +106,15 @@ function itemsOf(
   const dim = opacities(scene.graph, scene.flow, scene.lit);
   const ends = endsOf(scene.lit);
   const inside = insideCounts(scene.graph, scene.shown.hidden);
-  /** 화면에 보이는 노드마다, 그 노드로 올린 노드 가운데 요약을 만드는 중인 노드 수 */
-  const busy = new Map<string | null, number>();
+  /** 화면에 보이는 노드마다, 그 노드로 올린 노드 가운데 요약을 만드는 중인 노드 수. 펼친 폴더는 안에 든 노드를 모두 센다. */
+  const busy = new Map<string, number>();
   for (const id of making) {
     const shownId = lift(nodes, scene.shown, id);
-    busy.set(shownId, (busy.get(shownId) ?? 0) + 1);
+    for (let at = shownId === null ? undefined : nodes.get(shownId); at !== undefined; at = at.parent === null ? undefined : nodes.get(at.parent)) {
+      if (at.id === shownId || at.kind === "package") {
+        busy.set(at.id, (busy.get(at.id) ?? 0) + 1);
+      }
+    }
   }
   return order.map((node) => {
     const opacity = dim.get(node.id) ?? 1;

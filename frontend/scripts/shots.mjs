@@ -2620,6 +2620,8 @@ const cornerText = (at) => (at === null ? "도는 원 없음" : `왼쪽으로 ${
 const HF4 = (name) => join(OUT, `hf4-${name}.png`);
 /** LLM 요약을 만드는 중인 노드의 도는 표시. 원이 있는 노드는 원 위의 고리, 상자는 왼쪽 위 모서리의 도는 원이다. */
 const BUSY = ".badge-busy, .busy-ring";
+/** 펼친 폴더 영역이 안에 든 노드의 요청을 세어 다는 도는 원을 뺀 도는 표시 */
+const OWN_BUSY = ":not(.node-region) > .badge-busy, .busy-ring";
 
 /**
  * id 노드의 원 위에서 도는 고리. 원과 같은 사각형인지(돌면서 화면 사각형이 바뀌므로 돌리기 전의 위치로 잰다), 도는지, 지금 돈 각도,
@@ -2687,7 +2689,7 @@ async function summaryBusy(t, page) {
   });
   t.check(
     '"요약 생성"을 누르면 그 함수의 지름 16px 원 위에서 고리가 돌고, 왼쪽 위 모서리에 따로 그린 도는 원은 없다',
-    held.length === 1 && spinning !== null && spinning.fits && spinning.size === 16 && spinning.animated && spinning.corner === 0 && (await count(page, BUSY)) === 1,
+    held.length === 1 && spinning !== null && spinning.fits && spinning.size === 16 && spinning.animated && spinning.corner === 0 && (await count(page, OWN_BUSY)) === 1,
     `POST ${held.length}번, ${ringText(spinning)}`,
   );
   t.check(
@@ -2814,7 +2816,7 @@ async function summaryBusy(t, page) {
     cornerText(entry),
   );
   held[1].answer(longSummary(1));
-  await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 1, BUSY, { timeout: 5_000 }).catch(() => {});
+  await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 1, OWN_BUSY, { timeout: 5_000 }).catch(() => {});
 
   if (extra === null) {
     t.skip("배지가 있는 접힌 상자는 도는 원을 왼쪽 위에, 안에 든 것의 수 배지를 오른쪽 위에 단다", "미확인 호출이 있는 파일이 없다");
@@ -2833,8 +2835,8 @@ async function summaryBusy(t, page) {
     }, `${face(extra.owner)} .badge-inside`);
     t.check(
       "배지가 있는 접힌 상자는 도는 원을 왼쪽 위에, 안에 든 것의 수 배지를 오른쪽 위에 단다",
-      atCorner(both) && mark !== null && near(mark.right, 6, 0.5) && near(mark.above, 7, 0.5) && (await count(page, ".badge-busy")) === 2,
-      `도는 원 ${cornerText(both)}, 배지 ${mark === null ? "없음" : `오른쪽으로 ${mark.right.toFixed(1)}px, 위로 ${mark.above.toFixed(1)}px`}, 도는 원 ${await count(page, ".badge-busy")}개`,
+      atCorner(both) && mark !== null && near(mark.right, 6, 0.5) && near(mark.above, 7, 0.5) && (await count(page, ":not(.node-region) > .badge-busy")) === 2,
+      `도는 원 ${cornerText(both)}, 배지 ${mark === null ? "없음" : `오른쪽으로 ${mark.right.toFixed(1)}px, 위로 ${mark.above.toFixed(1)}px`}, 도는 원 ${await count(page, ":not(.node-region) > .badge-busy")}개`,
     );
     held[2].answer(longSummary(1));
   }
@@ -9289,8 +9291,9 @@ async function menu(t, page) {
   await page.keyboard.press("Escape");
   const folder = graph.nodes.find((n) => n.kind === "package" && !n.test && n.parent !== null) ?? graph.nodes.find((n) => n.kind === "package" && !n.test);
   await rightClick(`.tree-row.tree-dir[data-node="${folder.id}"] .tree-label`);
-  const onDir = { menu: await count(page, ".menu"), blocked: await blocked() };
-  t.check("폴더는 우클릭해도 메뉴가 뜨지 않는다", onDir.menu === 0 && onDir.blocked === false && same(await stateOf(), before), `${JSON.stringify(onDir)}, 선택 ${(await stateOf()).selected}`);
+  const onDir = await labels();
+  t.check('폴더의 메뉴에는 "안에 든 파일 모두 요약 (N개)" 하나만 있고 선택과 화면이 그대로다', onDir?.length === 1 && /^안에 든 파일 모두 요약 \(\d+개\)$/.test(onDir[0]) && (await blocked()) === true && same(await stateOf(), before), onDir?.join(", "));
+  await page.keyboard.press("Escape");
 
   // 연달아 세 개를 요청한다. 서버로는 둘만 보내고 하나는 차례를 기다린다.
   for (const id of [a, b, c]) {
@@ -9455,6 +9458,181 @@ async function menu(t, page) {
   );
   await page.screenshot({ path: HF3("menu-pinned") });
   await answerAll();
+}
+
+/**
+ * 폴더의 우클릭 메뉴. 접힌 폴더 상자, 펼친 폴더 영역의 머리 줄, 파일트리의 폴더 행에서 "안에 든 파일 모두 요약 (N개)"가 뜨고, 누르면
+ * 그 폴더 아래 파일마다 요약을 한 번씩 요청하며 정의에는 요청하지 않는다. 요청한 동안 폴더 상자와 폴더 영역이 도는 원을 달고
+ * 말풍선에 남은 수를 적는다. 요약은 서버 대신 답한다. `--wide-url`을 받으면 그 레포에서도 본다. 사진은 `hf4-foldersum-{이름}.png`로 남긴다.
+ */
+async function folderSum(t, page) {
+  await page.route((at) => at.pathname === "/api/summaries", (route) => route.fulfill({ json: { summaries: [] } }));
+  await answerSummaryReads(page, () => ({ summary: null, stale: false, available: true, reason: null }));
+  const posts = await holdSummaryPosts(page);
+  await page.addInitScript(() => {
+    window.__shotsMenus = [];
+    window.addEventListener("contextmenu", (event) => setTimeout(() => window.__shotsMenus.push(event.defaultPrevented)));
+  });
+  const blocked = async () => {
+    await page.waitForTimeout(50);
+    return page.evaluate(() => window.__shotsMenus.at(-1) ?? null);
+  };
+  /** 선택, 화면 위치, 뒤로·앞으로 버튼이 눌리는지, 탐색 경로의 글, 노드 수. 메뉴가 바꾸면 안 되는 값이다. */
+  const stateOf = () =>
+    page.evaluate(() => ({
+      selected: document.querySelector(".react-flow__node .node-selected")?.closest(".react-flow__node")?.dataset.id ?? null,
+      view: document.querySelector(".react-flow__viewport").style.transform,
+      steps: [...document.querySelectorAll(".toolbar-nav > .toolbar-button")].map((button) => button.disabled),
+      trail: document.querySelector(".toolbar-trail").textContent,
+      nodes: document.querySelectorAll(".react-flow__node").length,
+    }));
+  const labels = async () => {
+    await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+    return (await listOf(page))?.items.map((item) => `${item.text}${item.disabled ? "(비활성)" : ""}`) ?? null;
+  };
+  /** 화면에서 눌리는 접힌 폴더 상자의 id */
+  const folded = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll(".react-flow__node:has(> .node-package)")]
+        .filter((wrapper) => {
+          const rect = wrapper.getBoundingClientRect();
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          return hit !== null && (wrapper.contains(hit) || hit.closest(".react-flow__node")?.dataset.id === `${wrapper.dataset.id}#face`);
+        })
+        .map((wrapper) => wrapper.dataset.id),
+    );
+  /** id 노드가 단 도는 원의 말풍선 글. 도는 원이 없으면 null이다. */
+  const busyTipOf = (id) => page.evaluate((sel) => document.querySelector(`${sel} > * > .badge-busy`)?.dataset.tip ?? null, face(id));
+  const answer = async (limit) => {
+    for (const post of posts.filter((each) => !each.done).slice(0, limit)) {
+      post.done = true;
+      await post.answer(`${post.node}의 요지다.\n\n하는 일\n문단\n\n앞뒤 흐름\n문단`);
+    }
+    await page.waitForTimeout(200);
+  };
+  const round = async (name, at, shoot) => {
+    posts.length = 0;
+    const graph = await api("/api/graph", at);
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const under = (n, id) => n !== undefined && (n.id === id || (n.parent !== null && under(byId.get(n.parent), id)));
+    const filesOf = (id) => graph.nodes.filter((n) => n.kind === "module" && !n.test && under(n, id)).map((n) => n.id);
+    const nests = (id) => graph.nodes.some((n) => n.kind === "package" && !n.test && n.parent === id);
+    await load(page, at, false);
+    // 하위 폴더가 있는 폴더를 먼저 고르고, 그 가운데 파일이 세 개 이상이면서 가장 적은 폴더를 고른다.
+    const id = (await folded())
+      .filter((each) => filesOf(each).length >= 3)
+      .sort((a, b) => Number(nests(b)) - Number(nests(a)) || filesOf(a).length - filesOf(b).length)[0];
+    if (id === undefined) {
+      t.skip(`${name}: 폴더의 메뉴`, "파일이 세 개 이상 든 접힌 폴더 상자가 화면에 없다");
+      return;
+    }
+    const files = filesOf(id);
+    const item = (count) => `안에 든 파일 모두 요약 (${count}개)`;
+    const row = `.tree-row.tree-dir[data-node="${id}"]`;
+    const before = await stateOf();
+
+    await clickNode(page, id, 1, "right");
+    const onBox = await labels();
+    t.check(
+      `${name}: 접힌 폴더 상자를 우클릭하면 그 폴더 아래의 요약 없는 파일 수(${files.length})를 적은 항목 하나만 뜨고, 선택과 화면이 그대로이며 폴더가 펼쳐지지 않는다`,
+      same(onBox, [item(files.length)]) && (await blocked()) === true && same(await stateOf(), before) && (await count(page, `${node(id)} > .node-package`)) === 1,
+      `${id}${nests(id) ? "(하위 폴더 있음)" : ""}: ${onBox?.join(", ")}`,
+    );
+    if (shoot) {
+      await page.screenshot({ path: HF4("foldersum-menu") });
+    }
+    await page.keyboard.press("Escape");
+    const tree = center(await rectOf(page, `${row} .tree-label`));
+    await page.mouse.click(tree.x, tree.y, { button: "right" });
+    const onRow = await labels();
+    t.check(`${name}: 파일트리의 폴더 행을 우클릭해도 같은 항목이 뜨고 폴더가 펼쳐지지 않는다`, same(onRow, onBox) && (await blocked()) === true && same(await stateOf(), before), onRow?.join(", "));
+    await page.keyboard.press("Escape");
+
+    await openFolder(page, id);
+    await page.mouse.move(1, 1);
+    const open = await stateOf();
+    const head = center(await rectOf(page, `${face(id)} .node-region-head .node-label`));
+    await page.mouse.click(head.x, head.y, { button: "right" });
+    const onHead = await labels();
+    t.check(
+      `${name}: 펼친 폴더 영역의 머리 줄을 우클릭해도 같은 항목이 뜨고 폴더가 접히지 않는다`,
+      same(onHead, onBox) && (await blocked()) === true && same(await stateOf(), open) && (await count(page, `${node(id)} > .node-region`)) === 1,
+      onHead?.join(", "),
+    );
+    await page.keyboard.press("Escape");
+    await page.click(row);
+    await page.waitForSelector(`${node(id)} > .node-package`, { timeout: 30_000 });
+    await page.mouse.move(1, 1);
+    await settle(page);
+
+    // 요청한다. 서버로는 둘만 가고 나머지는 차례를 기다린다.
+    const closed = await stateOf();
+    await clickNode(page, id, 1, "right");
+    await labels();
+    await page.click('.menu-item[data-key="all"]');
+    await page.waitForTimeout(300);
+    const left = (count) => `LLM 요약을 만드는 중 · 안에 든 노드 남은 ${count}개`;
+    const asked = { posts: posts.map((post) => post.node), tip: await busyTipOf(id), busy: await count(page, BUSY) };
+    t.check(
+      `${name}: 항목을 누르면 서버로 요청 두 개가 가고, 접힌 폴더 상자가 도는 원을 달아 말풍선에 남은 수(${files.length})를 적으며, 선택과 화면이 그대로다`,
+      asked.posts.length === 2 && asked.posts.every((each) => files.includes(each)) && asked.tip === left(files.length) && asked.busy === 1 && same(await stateOf(), closed),
+      `POST ${asked.posts.join(", ")}, 말풍선 "${asked.tip}", 도는 표시 ${asked.busy}개`,
+    );
+    const shown = await tipOver(page, `${face(id)} .badge-busy`);
+    t.check(`${name}: 도는 원에 마우스를 올리면 말풍선이 남은 수를 적는다`, shown === left(files.length), shown);
+    if (shoot) {
+      await page.screenshot({ path: HF4("foldersum-busy") });
+    }
+    await page.mouse.move(1, 1);
+    await clickNode(page, id, 1, "right");
+    const again = await labels();
+    t.check(`${name}: 요청한 뒤의 항목은 대상이 0개여서 누를 수 없다`, same(again, [`${item(0)}(비활성)`]), again?.join(", "));
+    await page.keyboard.press("Escape");
+    await answer(1);
+    const fewer = { tip: await busyTipOf(id), posts: posts.length };
+    t.check(`${name}: 요청 하나가 끝나면 말풍선의 남은 수가 하나 줄고 기다리던 요청이 간다`, fewer.tip === left(files.length - 1) && fewer.posts === 3, `말풍선 "${fewer.tip}", POST ${fewer.posts}번`);
+
+    // 펼치면 폴더 영역이 왼쪽 위 모서리에 도는 원을 달고, 안의 파일 상자와 접힌 하위 폴더 상자가 저마다 도는 원을 단다.
+    await openFolder(page, id);
+    await page.mouse.move(1, 1);
+    const inside = await page.evaluate(
+      ([ids, own]) => ids.filter((each) => each !== own && document.querySelector(`.react-flow__node[data-id="${each}#face"] > * > .badge-busy`) !== null).length,
+      [graph.nodes.filter((n) => under(n, id) && (n.kind === "module" || n.kind === "package")).map((n) => n.id), id],
+    );
+    const region = { tip: await busyTipOf(id), at: await busyAt(page, id, `${node(id)} > .node-region`) };
+    t.check(
+      `${name}: 펼친 폴더 영역은 왼쪽 위 모서리에 도는 원을 달아 남은 수를 적고, 안의 파일 상자와 접힌 하위 폴더 상자도 도는 원을 단다`,
+      region.tip === left(files.length - 1) && atCorner(region.at) && inside > 0 && (nests(id) || inside === files.length - 1),
+      `말풍선 "${region.tip}", ${cornerText(region.at)}, 안의 도는 원 ${inside}개`,
+    );
+    if (shoot) {
+      await page.screenshot({ path: HF4("foldersum-region") });
+    }
+    for (let quiet = 0; quiet < 3; ) {
+      const pending = posts.filter((post) => !post.done).length;
+      await answer(pending);
+      quiet = pending === 0 ? quiet + 1 : 0;
+    }
+    const sent = posts.map((post) => post.node);
+    t.check(
+      `${name}: 끝나면 그 폴더 아래 파일 ${files.length}개에 요청이 한 번씩 갔고 정의에는 가지 않았으며 도는 표시가 사라진다`,
+      same([...sent].sort(), [...files].sort()) && (await count(page, BUSY)) === 0,
+      `POST ${sent.length}번, 정의로 간 요청 ${sent.filter((each) => each.includes(":")).length}번, 도는 표시 ${await count(page, BUSY)}개`,
+    );
+    const head2 = center(await rectOf(page, `${face(id)} .node-region-head .node-label`));
+    await page.mouse.click(head2.x, head2.y, { button: "right" });
+    const after = await labels();
+    t.check(`${name}: 요약이 모두 생긴 폴더의 항목은 누를 수 없다`, same(after, [`${item(0)}(비활성)`]), after?.join(", "));
+    t.check(`${name}: 화면에 title 속성과 SVG title이 없다`, (await nativeTips(page)).length === 0, (await nativeTips(page)).join(", "));
+    await page.keyboard.press("Escape");
+  };
+  await round("sync-engine", url, true);
+  await t.shot();
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서 폴더의 메뉴", "--wide-url을 주지 않았다");
+  } else {
+    await round("폴더가 여러 겹인 레포", wideUrl, false);
+  }
 }
 
 /**
@@ -9718,6 +9896,7 @@ const SCENARIOS = [
   ["entry-mark", entryMark],
   ["entry", entry],
   ["menu", menu],
+  ["folder-sum", folderSum],
   ["tips", tips],
   ["minimap", minimap],
   ["region", region],
