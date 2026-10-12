@@ -51,6 +51,17 @@ export function freeRect(area: Rect, covers: Rect[]): Rect {
 }
 
 /**
+ * 관계 그래프 영역 area의 아래 끝에서 margin만큼 띄운 높이 height의 띠에서 가리는 칸 covers가 덮지 않는 가장 넓은 가로 구간.
+ * 띠에 조금이라도 걸친 칸은 그 칸의 폭만큼 띠를 덮는다.
+ */
+export function bottomSpan(area: Rect, covers: Rect[], height: number, margin: number): { x: number; width: number } {
+  const band = { x: area.x, y: area.y + area.height - margin - height, width: area.width, height };
+  const across = covers.filter((c) => c.y < band.y + band.height && c.y + c.height > band.y).map((c) => ({ x: c.x, y: band.y, width: c.width, height }));
+  const { x, width } = freeRect(band, across);
+  return across.some((c) => c.x < x + width && c.x + c.width > x) ? { x, width: 0 } : { x, width };
+}
+
+/**
  * 상자의 중심이 빈 사각형 free의 중심에 오는 화면 이동 좌표. 확대한 상자가 free보다 긴 축은 상자의 시작 끝을
  * free의 시작 끝에서 20px 안쪽에 맞춘다.
  */
@@ -124,12 +135,13 @@ export function boundsOf(boxes: Iterable<Box>): Box {
 /**
  * 관계 그래프 영역과 그 안의 빈 사각형 두 개. free는 정보 패널이 가리지 않는 사각형이고 그래프 전체를 맞출 때 쓴다.
  * clear는 정보 패널과 왼쪽 아래 칸(펼친 미니맵·범례·경로 탐색 창, 버튼 줄)이 모두 가리지 않는 사각형이고
- * 노드나 그래프의 한 점으로 화면을 옮길 때 쓴다.
+ * 노드나 그래프의 한 점으로 화면을 옮길 때 쓴다. covers는 정보 패널과 왼쪽 아래 칸의 사각형이다.
  */
 export interface Stage {
   area: Rect;
   free: Rect;
   clear: Rect;
+  covers: Rect[];
 }
 
 /** 그래프를 관계 그래프 영역 area 안의 사각형 room에 24px를 두고 맞추도록 area의 네 변에서 비울 폭 */
@@ -153,5 +165,6 @@ export function stageOf(root: Element): Stage {
   const area = { x: 0, y: 0, width: outer.width, height: outer.height };
   const panel = [...document.querySelectorAll(".info-panel")].map(within);
   const dock = [...root.querySelectorAll(".dock-panels > *, .dock-buttons")].map(within);
-  return { area, free: freeRect(area, panel), clear: freeRect(area, [...panel, ...dock]) };
+  const covers = [...panel, ...dock];
+  return { area, free: freeRect(area, panel), clear: freeRect(area, covers), covers };
 }

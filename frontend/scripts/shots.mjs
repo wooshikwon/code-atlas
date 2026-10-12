@@ -9715,8 +9715,8 @@ const queueOf = (page) =>
 
 /**
  * 요약 요청 묶음의 진행 칸과 취소. 폴더의 "모두 요약"으로 요청을 여럿 넣고 서버 대신 하나씩 답해, 칸의 수와 막대가 진행에 따라 바뀌는지,
- * 칸이 정보 패널·왼쪽 아래 칸과 겹치지 않는지, "취소" 뒤에 요청이 더 가지 않고 도는 표시가 줄어드는지 본다. 요청 하나에는 칸이 뜨지 않는다.
- * `--wide-url`을 받으면 그 레포에서도 본다. 사진은 `hf4-foldersum-queue.png`, `hf4-foldersum-queue-dark.png`로 남긴다.
+ * 칸이 영역의 바닥 줄에서 정보 패널·왼쪽 아래 칸을 피하는지, "취소" 뒤에 요청이 더 가지 않고 도는 표시가 줄어드는지 본다. 요청 하나에는 칸이 뜨지 않는다.
+ * `--wide-url`을 받으면 그 레포에서도 본다. 사진은 `hf4-queue-bottom-{이름}.png`로 남긴다.
  */
 async function summaryQueue(t, page) {
   const posts = [];
@@ -9761,18 +9761,38 @@ async function summaryQueue(t, page) {
     await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
     return (await listOf(page))?.items.map((item) => `${item.text}${item.disabled ? "(비활성)" : ""}`) ?? null;
   };
-  /** 칸이 정보 패널, 왼쪽 아래 칸과 겹치지 않고, 가리지 않는 사각형의 가로 가운데와 아래 끝에서 12px 위에 있는가 */
+  /**
+   * 칸의 위치. 영역의 바닥 줄(아래 끝에서 12px 위, 칸의 높이)에서 정보 패널과 왼쪽 아래 칸이 덮지 않는 가장 넓은 가로 구간에 칸이 양옆 12px를
+   * 두고 들어가면 그 구간의 가로 가운데와 버튼 줄의 아래 끝에 있어야 하고(mode "바닥"), 들어가지 않으면 둘이 가리지 않는 사각형의 가로 가운데,
+   * 아래 끝에서 12px 위에 있어야 한다(mode "빈 영역"). 어느 쪽이든 정보 패널, 왼쪽 아래 칸과 겹치지 않아야 한다.
+   */
   const placed = async () => {
     const [queue, stage] = [await queueOf(page), await stageOf(page)];
-    const dock = await page.evaluate(() => [...document.querySelectorAll(".dock-panels > *, .dock-buttons")].map((element) => (({ left, top, width, height }) => ({ x: left, y: top, width, height }))(element.getBoundingClientRect())));
+    const [dock, buttons] = await page.evaluate(() => {
+      const plain = (element) => (({ left, top, width, height }) => ({ x: left, y: top, width, height }))(element.getBoundingClientRect());
+      return [[...document.querySelectorAll(".dock-panels > *, .dock-buttons")].map(plain), plain(document.querySelector(".dock-buttons"))];
+    });
     if (queue === null) {
-      return { ok: false, text: "칸 없음" };
+      return { ok: false, mode: null, text: "칸 없음" };
     }
-    const off = queue.rect.x + queue.rect.width / 2 - (stage.clear.x + stage.clear.width / 2);
-    const gap = stage.clear.y + stage.clear.height - (queue.rect.y + queue.rect.height);
+    const floor = stage.area.y + stage.area.height - 12;
+    const across = [stage.panel, ...dock].filter((cover) => cover.y < floor && cover.y + cover.height > floor - queue.rect.height).sort((a, b) => a.x - b.x);
+    let [from, span] = [stage.area.x, { x: stage.area.x, width: 0 }];
+    for (const cover of [...across, { x: stage.area.x + stage.area.width, width: 0 }]) {
+      if (cover.x - from > span.width) {
+        span = { x: from, width: cover.x - from };
+      }
+      from = Math.max(from, cover.x + cover.width);
+    }
+    const mode = span.width - 24 >= queue.rect.width ? "바닥" : "빈 영역";
+    const room = mode === "바닥" ? span : stage.clear;
+    const off = queue.rect.x + queue.rect.width / 2 - (room.x + room.width / 2);
+    const gap = (mode === "바닥" ? floor + 12 : stage.clear.y + stage.clear.height) - (queue.rect.y + queue.rect.height);
+    const level = near(queue.rect.y + queue.rect.height, buttons.y + buttons.height) && near(queue.rect.height, buttons.height);
     return {
-      ok: [stage.panel, ...dock].every((cover) => apart(queue.rect, cover)) && near(off, 0) && near(gap, 12),
-      text: `칸 ${rectText(queue.rect)}, 패널 ${rectText(stage.panel)}, 가운데 차이 ${off.toFixed(1)}px, 아래 ${gap.toFixed(1)}px`,
+      ok: [stage.panel, ...dock].every((cover) => apart(queue.rect, cover)) && near(off, 0) && near(gap, 12) && (mode !== "바닥" || level),
+      mode,
+      text: `${mode}: 칸 ${rectText(queue.rect)}, 패널 ${rectText(stage.panel)}, 버튼 줄 ${rectText(buttons)}, 덮지 않는 구간 ${span.x.toFixed(0)}~${(span.x + span.width).toFixed(0)}, 가운데 차이 ${off.toFixed(1)}px, 아래 ${gap.toFixed(1)}px`,
     };
   };
   const round = async (name, at, shoot) => {
@@ -9816,7 +9836,7 @@ async function summaryQueue(t, page) {
       `POST ${posts.length}번, "${first?.text}", 막대 ${first?.share}, 버튼 ${first?.cancel}`,
     );
     const where = await placed();
-    t.check(`${name}: 칸은 정보 패널·왼쪽 아래 칸과 겹치지 않고 둘이 가리지 않는 영역의 가로 가운데, 아래 끝에서 12px 위에 있다`, where.ok, where.text);
+    t.check(`${name}: 칸은 왼쪽 아래 칸의 버튼 줄과 같은 높이·같은 아래 끝에 있고, 그 바닥 줄에서 버튼 줄과 정보 패널이 덮지 않는 구간의 가로 가운데에 있다`, where.ok && where.mode === "바닥", where.text);
     t.check(`${name}: 칸은 칸 바탕색에 본문 잉크, 선 색 테두리와 그림자를 쓴다`, same(first?.style, await page.evaluate(() => {
       const probe = document.body.appendChild(document.createElement("span"));
       probe.style.cssText = "background: var(--surface); color: var(--ink); border: 1px solid var(--line)";
@@ -9835,29 +9855,36 @@ async function summaryQueue(t, page) {
       `"${one?.text}" 막대 ${one?.share} → "${two?.text}" 막대 ${two?.share}, POST ${posts.length}번`,
     );
     if (shoot) {
-      await page.screenshot({ path: HF4("foldersum-queue") });
+      await page.screenshot({ path: HF4("queue-bottom-light") });
       await page.getByRole("button", { name: "어두운 화면" }).click();
       await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
       await page.mouse.move(1, 1);
       const dark = await queueOf(page);
       t.check(`${name}: 어두운 화면의 칸은 어두운 바탕에 밝은 글자다`, dark !== null && dark.style.backgroundColor !== first.style.backgroundColor && dark.style.color !== first.style.color, JSON.stringify(dark?.style));
-      await page.screenshot({ path: HF4("foldersum-queue-dark") });
+      await page.screenshot({ path: HF4("queue-bottom-dark") });
       await page.getByRole("button", { name: "밝은 화면" }).click();
       await page.waitForFunction(() => document.documentElement.dataset.theme !== "dark");
     }
 
-    // 정보 패널을 왼쪽으로 옮기고 범례를 펼쳐도 칸이 겹치지 않는다.
+    // 정보 패널을 왼쪽으로 끄는 동안과 놓은 뒤, 범례를 펼친 뒤에도 칸이 바닥 줄에서 패널을 피한다.
     const before = (await queueOf(page)).rect;
-    await drag(page, center(await rectOf(page, ".info-panel-head")), -600, 300);
+    const head = center(await rectOf(page, ".info-panel-head"));
+    await page.mouse.move(head.x, head.y);
+    await page.mouse.down();
+    await page.mouse.move(head.x - 600, head.y + 300, { steps: 8 });
+    await page.waitForTimeout(300);
+    const held = await placed();
+    t.check(`${name}: 정보 패널을 왼쪽으로 끄는 동안 칸이 바닥 줄에서 패널이 덮지 않는 구간으로 따라 옮겨 간다`, held.ok && held.mode === "바닥" && !sameRect(before, (await queueOf(page)).rect), held.text);
+    await page.mouse.up();
     await page.waitForTimeout(300);
     const moved = await placed();
-    t.check(`${name}: 정보 패널을 왼쪽 아래로 옮기면 칸이 패널이 가리지 않는 영역으로 옮겨 간다`, moved.ok && !sameRect(before, (await queueOf(page)).rect), moved.text);
+    t.check(`${name}: 패널을 놓은 뒤에도 칸이 같은 곳에 있다`, moved.ok && moved.mode === "바닥" && moved.text === held.text, moved.text);
     await page.click(".legend-button");
     await page.waitForTimeout(300);
     const wide = await placed();
     t.check(`${name}: 범례를 펼쳐도 칸이 왼쪽 아래 칸과 겹치지 않는다`, wide.ok, wide.text);
     if (shoot) {
-      await page.screenshot({ path: HF4("foldersum-queue-moved") });
+      await page.screenshot({ path: HF4("queue-bottom-moved") });
     }
     await page.click(".legend-button");
 
@@ -9970,6 +9997,23 @@ async function motion(t, page) {
     await page.click(row(id));
     await waitSelected(page, id);
   };
+    // 패널을 낮고 넓게 바꿔 바닥 줄을 모두 덮으면 칸은 패널과 왼쪽 아래 칸이 가리지 않는 영역으로 물러난다.
+    await page.dblclick(".info-panel-head");
+    await page.waitForTimeout(300);
+    for (const [dir, dx, dy] of [["n", 0, 600], ["w", -1500, 0]]) {
+      await drag(page, center(await rectOf(page, `.info-panel-resize[data-dir="${dir}"]`)), dx, dy);
+    }
+    await page.waitForTimeout(300);
+    const covered = await placed();
+    t.check(`${name}: 패널이 바닥 줄을 덮으면 칸은 패널과 왼쪽 아래 칸이 가리지 않는 영역의 가로 가운데, 아래 끝에서 12px 위로 물러난다`, covered.ok && covered.mode === "빈 영역", covered.text);
+    if (shoot) {
+      await page.screenshot({ path: HF4("queue-bottom-covered") });
+    }
+    await page.dblclick(".info-panel-head");
+    await page.waitForTimeout(300);
+    const home = await placed();
+    t.check(`${name}: 패널을 기본 위치로 돌리면 칸이 바닥 줄로 돌아온다`, home.ok && home.mode === "바닥", home.text);
+
   /** 파일트리에 행이 보이는 파일 상자와 그 가운데의 화면 좌표 */
   const files = async () => {
     const list = await boxes(page);

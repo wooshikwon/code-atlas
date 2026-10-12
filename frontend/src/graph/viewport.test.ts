@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorOn, autoView, boundsOf, centerOn, fitPadding, frameOn, freeRect } from "./viewport";
+import { anchorOn, autoView, bottomSpan, boundsOf, centerOn, fitPadding, frameOn, freeRect } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -36,6 +36,29 @@ describe("freeRect", () => {
 
   it("영역 밖으로 나간 패널은 영역 안쪽 부분만 뺀다", () => {
     expect(freeRect(area, [{ x: 1000, y: -100, width: 600, height: 500 }])).toEqual({ x: 0, y: 0, width: 1000, height: 900 });
+  });
+});
+
+describe("bottomSpan", () => {
+  const buttons = { x: 12, y: 854, width: 118, height: 34 };
+
+  it("버튼 줄과 패널 사이의 구간이다. 띠 위에 있는 미니맵은 덮지 않는다", () => {
+    const panel = { x: 912, y: 8, width: 480, height: 884 };
+    const minimap = { x: 12, y: 700, width: 220, height: 140 };
+    expect(bottomSpan(area, [panel, minimap, buttons], 34, 12)).toEqual({ x: 130, width: 782 });
+  });
+
+  it("패널이 띠 위에서 끝나면 버튼 줄 오른쪽 전부다", () => {
+    expect(bottomSpan(area, [{ x: 912, y: 8, width: 480, height: 420 }, buttons], 34, 12)).toEqual({ x: 130, width: 1270 });
+  });
+
+  it("패널이 띠의 가운데를 덮으면 양쪽 가운데 넓은 구간이다", () => {
+    expect(bottomSpan(area, [{ x: 300, y: 500, width: 500, height: 392 }, buttons], 34, 12)).toEqual({ x: 800, width: 600 });
+  });
+
+  it("띠를 모두 덮으면 폭이 0이다", () => {
+    expect(bottomSpan(area, [{ x: 0, y: 500, width: 1400, height: 400 }], 34, 12).width).toBe(0);
+    expect(bottomSpan(area, [{ x: 0, y: 500, width: 700, height: 400 }, { x: 700, y: 800, width: 700, height: 100 }], 34, 12).width).toBe(0);
   });
 });
 
