@@ -3,15 +3,9 @@
 // 관계 칸은 그 관계의 코드 줄 목록을 연다. 고정한 말풍선은 방향키로 줄과 칸을 옮기고 말풍선 밖을 누르면 풀린다.
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import type { LineRow } from "./rows";
+import type { CellName, LineRow } from "./rows";
 import type { EdgeKey } from "./scope";
 import { placeBeside } from "./Tooltip";
-
-/** 칸에 적는 노드 이름. path는 화면에 그려져 있지 않은 노드의 앞쪽 경로(`parser/weekly.py::`)이고 칸이 넘치면 path부터 줄인다. */
-export interface CellName {
-  path: string;
-  name: string;
-}
 
 /** 말풍선 하나. (x, y)는 말풍선을 띄운 마우스의 화면 좌표이고 lit은 고정한 동안 강조할 수 있는 선, lines는 줄로 푼 선의 키를 줄바꿈으로 이은 글이다. */
 export interface Bubble {
@@ -25,7 +19,8 @@ export interface Bubble {
 
 interface LineBubbleProps {
   bubble: Bubble;
-  name: (id: string) => CellName;
+  /** 줄 row의 출발 노드나 도착 노드 id를 칸에 적는 이름 */
+  name: (row: LineRow, id: string) => CellName;
   /** 줄에 마우스를 올리거나 방향키로 초점을 옮기면 그 줄의 선, 마우스가 떠나면 null을 받는다. */
   aim: (key: EdgeKey | null) => void;
   /** 줄 row의 출발 노드나 도착 노드 id로 간다. */
@@ -107,11 +102,13 @@ export function LineBubble({ bubble, name, aim, go, list, close }: LineBubblePro
     return (
       <td data-cell={kind} data-node={node}>
         {pinned && press !== null ? (
-          <button type="button" className="line-cell" data-row={row} data-column={column} onClick={press} onFocus={(event) => event.currentTarget.matches(":focus-visible") && aim(rows[row].line)}>
+          <button type="button" className="line-cell" data-full={content.full} data-row={row} data-column={column} onClick={press} onFocus={(event) => event.currentTarget.matches(":focus-visible") && aim(rows[row].line)}>
             {text}
           </button>
         ) : (
-          <span className="line-cell">{text}</span>
+          <span className="line-cell" data-full={content.full}>
+            {text}
+          </span>
         )}
       </td>
     );
@@ -132,9 +129,9 @@ export function LineBubble({ bubble, name, aim, go, list, close }: LineBubblePro
         <tbody>
           {rows.map((row, i) => (
             <tr key={i} data-key={row.line} onMouseEnter={() => aim(row.line)}>
-              {cell(i, 0, "source", name(row.source), row.source, row.keys === null ? null : () => go(row, row.source))}
-              {cell(i, 1, "target", name(row.target), row.target, row.keys === null ? null : () => go(row, row.target))}
-              {cell(i, 2, "relation", { path: "", name: row.relation }, undefined, row.list === null ? null : () => list(row))}
+              {cell(i, 0, "source", name(row, row.source), row.source, row.keys === null ? null : () => go(row, row.source))}
+              {cell(i, 1, "target", name(row, row.target), row.target, row.keys === null ? null : () => go(row, row.target))}
+              {cell(i, 2, "relation", { path: "", name: row.relation, full: row.relation }, undefined, row.list === null ? null : () => list(row))}
             </tr>
           ))}
         </tbody>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture } from "./fixture";
+import { node, repoFixture } from "./fixture";
 import { flow } from "./flow";
-import { rowsOf, stageOf, type RowLine } from "./rows";
+import { baseOf, definedName, rowsOf, stageOf, type RowLine } from "./rows";
 import { drawn } from "./scope";
 import { hidden, nodeIndex, shown } from "./visible";
 
@@ -97,5 +97,71 @@ describe("rowsOf", () => {
   it("원래 선 없이 넘긴 함수 시점 뷰의 선은 그린 양 끝 한 줄이고 코드 줄 목록을 연다", () => {
     const call: RowLine = { key: "a|b|call", source: "a", target: "b", kinds: { call: 2 }, route: null, edges: [] };
     expect(rowsOf(nodes, null, call)).toEqual([{ line: "a|b|call", source: "a", target: "b", relation: "호출 2곳", keys: ["a|b|call"], list: "a|b|call" }]);
+  });
+});
+
+describe("baseOf", () => {
+  it("줄의 한 끝이 고른 노드이거나 그 안의 노드이면 고른 노드가 든 파일이 기준이다", () => {
+    const row = { source: "main:run", target: "pkg.mod:Store.load" };
+    expect([baseOf(nodes, "main:run", row, row.source), baseOf(nodes, "main:run", row, row.target)]).toEqual(["main", "main"]);
+    expect(baseOf(nodes, "main", row, row.target)).toBe("main");
+    const inner = { source: "pkg.mod:Store.save", target: "main:helper" };
+    expect(baseOf(nodes, "pkg.mod:Store", inner, inner.target)).toBe("pkg.mod");
+  });
+
+  it("고른 노드가 없거나 폴더이거나 줄이 고른 노드에 닿지 않으면 줄의 다른 쪽 끝이 든 파일이 기준이다", () => {
+    const row = { source: "cli:main", target: "common:log" };
+    for (const focus of [null, "pkg", "main:run"]) {
+      expect([baseOf(nodes, focus, row, row.source), baseOf(nodes, focus, row, row.target)]).toEqual(["common", "cli"]);
+    }
+    const within = { source: "main:run", target: "main:helper" };
+    expect(baseOf(nodes, "main", within, within.target)).toBe("main");
+  });
+
+  it("다른 쪽 끝이 폴더면 그 폴더가 기준이다", () => {
+    const row = { source: "main:run", target: "pkg" };
+    expect(baseOf(nodes, null, row, row.source)).toBe("pkg");
+  });
+});
+
+describe("definedName", () => {
+  const named = (base: string, id: string) => definedName(nodes, base, nodes.get(id)!);
+
+  it("기준 파일 안의 정의는 이름만 적는다", () => {
+    expect(named("main", "main:helper")).toEqual({ path: "", name: "helper()", full: "main.py::helper()" });
+    expect(named("pkg.mod", "pkg.mod:Store.load")).toEqual({ path: "", name: "Store.load()", full: "pkg/mod.py::Store.load()" });
+  });
+
+  it("같은 폴더의 다른 파일에 든 정의는 파일 이름부터 적는다", () => {
+    expect(named("app.web", "app.text:wrap")).toEqual({ path: "text.py::", name: "wrap()", full: "app/text.py::wrap()" });
+    expect(named("cli", "common:log")).toMatchObject({ path: "common.py::", name: "log()" });
+  });
+
+  it("다른 폴더의 정의는 두 경로가 갈라지는 첫 폴더부터 적고 메서드는 클래스 이름을 함께 적는다", () => {
+    expect(named("main", "pkg.mod:Store.load")).toEqual({ path: "pkg/mod.py::", name: "Store.load()", full: "pkg/mod.py::Store.load()" });
+    expect(named("app.web", "pkg.mod:parse")).toMatchObject({ path: "pkg/mod.py::", name: "parse()" });
+    const deep = new Map(
+      [
+        node("a", "package", null),
+        node("a.b", "package", "a"),
+        node("a.b.x", "module", "a.b"),
+        node("a.b.x:f", "function", "a.b.x"),
+        node("a.c", "package", "a"),
+        node("a.c.y", "module", "a.c"),
+        node("a.c.y:g", "function", "a.c.y"),
+        node("a.b.b", "package", "a.b"),
+        node("a.b.b.z", "module", "a.b.b"),
+        node("a.b.b.z:h", "function", "a.b.b.z"),
+      ].map((each) => [each.id, each]),
+    );
+    expect(definedName(deep, "a.c.y", deep.get("a.b.x:f")!).path).toBe("b/x.py::");
+    expect(definedName(deep, "a.b.x", deep.get("a.b.b.z:h")!).path).toBe("b/z.py::");
+    expect(definedName(deep, "a.b.b.z", deep.get("a.b.x:f")!).path).toBe("x.py::");
+  });
+
+  it("기준이 폴더면 그 폴더와 갈라지는 곳부터 적는다", () => {
+    expect(named("pkg", "main:run")).toMatchObject({ path: "main.py::", name: "run()" });
+    expect(named("pkg", "pkg.mod:parse")).toMatchObject({ path: "pkg/mod.py::", name: "parse()" });
+    expect(named("app", "pkg.mod:parse")).toMatchObject({ path: "pkg/mod.py::", name: "parse()" });
   });
 });

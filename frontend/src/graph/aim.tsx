@@ -6,8 +6,8 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import { create } from "zustand";
 import type { FlowEdge } from "./edges/OrthogonalEdge";
 import type { Box, Point } from "./layout";
-import { LineBubble, moveBubble, type Bubble, type CellName } from "./LineBubble";
-import type { LineRow } from "./rows";
+import { LineBubble, moveBubble, type Bubble } from "./LineBubble";
+import type { CellName, LineRow } from "./rows";
 import { type EdgeKey } from "./scope";
 import { tooltip } from "./Tooltip";
 import { trunkKey, type EdgeView, type Lines } from "./view";
@@ -60,8 +60,8 @@ interface AimOptions {
   lines: Lines;
   /** 노드의 화면 기준 상자. 말풍선의 줄을 출발 노드의 위에서 아래, 왼쪽에서 오른쪽 순서로 놓는 데 쓴다. */
   boxes: Map<string, Box>;
-  /** 말풍선의 칸에 적는 노드 이름 */
-  name: (id: string) => CellName;
+  /** 줄의 출발 노드나 도착 노드 id를 말풍선의 칸에 적는 이름 */
+  name: (row: LineRow, id: string) => CellName;
   /** 선 하나를 말풍선의 줄로 푼다. */
   rows: (view: EdgeView) => LineRow[];
   /** 경로 고정 중이면 걸음인 선만 강조한다. 고정 중이 아니면 null이다. */

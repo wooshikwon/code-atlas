@@ -25,7 +25,7 @@ import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { flowNodes, parts, pointing, type Drawn } from "./nodes/common";
 import { UNUSED_OPACITY } from "./overlay";
-import { rowsOf } from "./rows";
+import { baseOf, definedName, rowsOf, type CellName, type LineRow } from "./rows";
 import { nodeTip, tipOf } from "./tips";
 import { NO_LINES } from "./view";
 import { tooltip } from "./Tooltip";
@@ -169,9 +169,9 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   useEffect(() => halt, [halt]);
 
   const lines = useMemo(() => (scene === null ? NO_LINES : callEdges(scene.calls, scene.center, scene.layout)), [scene]);
-  const cellName = (id: string) => {
+  const cellName = (row: LineRow, id: string): CellName => {
     const node = index?.get(id);
-    return { path: "", name: node === undefined || index === null ? id : callTitle(index, node) };
+    return node === undefined || index === null ? { path: "", name: id, full: id } : definedName(index, baseOf(index, null, row, id), node);
   };
   /**
    * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 말풍선이 고정되고, 그 줄의 이름을 누르면 그 노드를 고른다. 이미 고른 노드면 그대로 둔다.

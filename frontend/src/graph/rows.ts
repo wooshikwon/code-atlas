@@ -2,8 +2,10 @@
 // 세는 관계인지(`COUNTED_KINDS`)는 관계 칸에 수를 적을지만 정한다.
 // 단계는 파일과 함수 두 가지다. 고른 노드가 함수(클래스, 메서드)면 그 노드에 닿는 선을 실제 함수 사이의 관계로,
 // 파일이면 상대 끝을 파일로 풀고, 고른 노드가 없거나 고른 노드에 닿지 않는 선은 화면에 그린 양 끝을 그대로 적는다.
+// 줄의 끝이 클래스·함수·메서드면 기준 파일(`baseOf`)에서 갈라지는 곳부터의 경로를 이름 앞에 적는다(`definedName`).
 import type { AtlasEdge, AtlasNode, EdgeKind } from "../api/types";
-import { relationsOf, STEP_NAMES } from "./names";
+import { titleOf } from "./layout";
+import { nameOf, relationsOf, STEP_NAMES } from "./names";
 import { aggKey, edgeKey, type DrawnEdge, type EdgeKey } from "./scope";
 import { unitOf, within } from "./visible";
 
@@ -93,4 +95,52 @@ export function rowsOf(nodes: Map<string, AtlasNode>, focus: string | null, line
       list: !whole && edges.length === 1 ? edgeKey(edges[0]) : line.key,
     };
   });
+}
+
+/** 말풍선의 칸에 적는 노드 이름. path는 이름 앞에 적는 경로이고 칸이 넘치면 path부터 줄인다. full은 줄이지 않은 경로와 이름이다. */
+export interface CellName {
+  path: string;
+  name: string;
+  full: string;
+}
+
+/**
+ * 줄 row의 끝 id를 적을 때 기준으로 삼는 파일. 줄의 한 끝만 고른 노드 focus나 그 안의 노드이면 focus가 든 파일이고,
+ * 고른 노드가 없거나 폴더이거나 줄이 고른 노드에 닿지 않으면 줄의 다른 쪽 끝이 든 파일(다른 쪽 끝이 폴더면 그 폴더)이다.
+ */
+export function baseOf(nodes: Map<string, AtlasNode>, focus: string | null, row: Pick<LineRow, "source" | "target">, id: string): string {
+  const kind = focus === null ? undefined : nodes.get(focus)?.kind;
+  if (focus !== null && kind !== undefined && (kind === "module" || DEFINITIONS.has(kind)) && within(nodes, row.source, focus) !== within(nodes, row.target, focus)) {
+    return unitOf(nodes, focus);
+  }
+  return unitOf(nodes, id === row.source ? row.target : row.source);
+}
+
+/** 경로 path에서 경로 from과 앞에서부터 같은 폴더를 뺀 나머지. 두 경로의 마지막 마디(파일이나 폴더 자신)는 견주지 않는다. */
+function apartFrom(path: string, from: string): string {
+  const parts = path.split("/");
+  const others = from.replace(/\/$/, "").split("/");
+  /** 폴더 경로는 `/`로 끝나 마지막 마디가 빈 글자다. */
+  const last = parts.length - (path.endsWith("/") ? 2 : 1);
+  let same = 0;
+  while (same < last && same < others.length - 1 && parts[same] === others[same]) {
+    same += 1;
+  }
+  return parts.slice(same).join("/");
+}
+
+/**
+ * 클래스·함수·메서드 node를 기준 파일 base에서 갈라지는 곳부터 적은 이름. base 안의 정의는 이름만(`create_weekly()`),
+ * 같은 폴더의 다른 파일에 든 정의는 파일 이름부터(`note_batch.py::create_weekly()`), 다른 폴더의 정의는 두 경로가 갈라지는
+ * 첫 폴더부터(`parser/weekly.py::parse_week()`) 적는다. 메서드의 이름은 `클래스.메서드()`다.
+ */
+export function definedName(nodes: Map<string, AtlasNode>, base: string, node: AtlasNode): CellName {
+  const name = nameOf(nodes, node);
+  const unit = nodes.get(unitOf(nodes, node.id));
+  if (unit === undefined || unit.id === node.id) {
+    return { path: "", name, full: name };
+  }
+  const from = nodes.get(base);
+  const whole = titleOf(unit);
+  return { path: unit.id === base ? "" : `${from === undefined ? whole : apartFrom(whole, titleOf(from))}::`, name, full: `${whole}::${name}` };
 }

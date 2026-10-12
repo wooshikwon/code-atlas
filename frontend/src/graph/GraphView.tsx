@@ -34,14 +34,12 @@ import { functionCounts, labelOf, layout, packId, packLabel, titleOf, type Box, 
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { faceId, LAYER } from "./layers";
-import type { CellName } from "./LineBubble";
 import { flowNodes, parts, pointing, pressable, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
 import { isPack, type PackFlowNode } from "./nodes/PackNode";
-import { nameOf } from "./names";
 import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
-import { rowsOf } from "./rows";
+import { baseOf, definedName, rowsOf, type CellName, type LineRow } from "./rows";
 import { drawn, followed, type EdgeKey } from "./scope";
 import { clipped, nodeTip, packTip, tipOf } from "./tips";
 import { tooltip } from "./Tooltip";
@@ -462,24 +460,23 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   /** 그린 선마다 그 선에 합친 원래 선. 말풍선이 선을 고른 노드의 단계로 풀어 적는 데 쓴다. */
   const origins = useMemo(() => new Map(lines.edges.map((edge) => [edge.key, edge])), [lines]);
   /**
-   * 말풍선의 칸에 적는 노드 이름. 화면에 그려진 노드는 이름표를 적고, 그려져 있지 않은 정의는 `파일 경로::이름`으로, 그려져 있지 않은
-   * 파일과 폴더는 앞쪽 폴더 경로와 이름으로 나눠 적는다.
+   * 말풍선의 칸에 적는 노드 이름. 클래스·함수·메서드는 기준 파일(`rows.ts`의 `baseOf`)에서 갈라지는 곳부터의 경로와 이름으로 적는다.
+   * 파일과 폴더는 화면에 그려져 있으면 경로를 그대로, 그려져 있지 않으면 앞쪽 폴더 경로와 이름으로 나눠 적는다.
    */
-  const cellName = (id: string): CellName => {
+  const cellName = (row: LineRow, id: string): CellName => {
     const node = index?.nodes.get(id);
     if (node === undefined || index === null) {
-      return { path: "", name: id };
+      return { path: "", name: id, full: id };
     }
     const title = titleOf(node);
-    if (scene?.layout.boxes.has(id) === true) {
-      return { path: "", name: title };
+    if (unitOf(index.nodes, id) !== id) {
+      return definedName(index.nodes, baseOf(index.nodes, scene?.focus ?? null, row, id), node);
     }
-    const unit = index.nodes.get(unitOf(index.nodes, id));
-    if (unit !== undefined && unit.id !== id) {
-      return { path: `${titleOf(unit)}::`, name: nameOf(index.nodes, node) };
+    if (scene?.layout.boxes.has(id) === true) {
+      return { path: "", name: title, full: title };
     }
     const at = title.replace(/\/$/, "").lastIndexOf("/") + 1;
-    return { path: title.slice(0, at), name: title.slice(at) };
+    return { path: title.slice(0, at), name: title.slice(at), full: title };
   };
   /**
    * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 말풍선이 고정되고, 그 줄의 이름을 누르면 선을 따라 그 노드로 간다(`go`). 관계를 누르거나

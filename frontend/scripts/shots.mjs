@@ -6291,8 +6291,101 @@ async function lineBubble(t, page) {
   };
   /** from에서 to로 가는 그린 선과 누를 점 */
   const lineBetween = async (from, to) => hittable(page, (await linesOf(page)).filter((line) => same(endsOfKey(line.key), [from, to])));
-  /** 화면에 그려져 있지 않은 정의를 말풍선이 적는 글: `파일 경로::이름` */
-  const hiddenName = (id) => `${tree.title(tree.unitOf(id))}::${shortName(graph, id)}`;
+  /** 경로 path에서 경로 from과 앞에서부터 같은 폴더를 뺀 나머지(`graph/rows.ts`의 `apartFrom`과 같은 규칙) */
+  const apartFrom = (path, from) => {
+    const [parts, others] = [path.split("/"), from.replace(/\/$/, "").split("/")];
+    const last = parts.length - (path.endsWith("/") ? 2 : 1);
+    let k = 0;
+    while (k < last && k < others.length - 1 && parts[k] === others[k]) {
+      k += 1;
+    }
+    return parts.slice(k).join("/");
+  };
+  /** 클래스·함수·메서드 id를 기준 파일 base에서 갈라지는 곳부터 적은 글(`graph/rows.ts`의 `definedName`과 같은 규칙) */
+  const nameFrom = (g, tr, base, id) => `${tr.unitOf(id) === base ? "" : `${apartFrom(tr.title(tr.unitOf(id)), tr.title(base))}::`}${shortName(g, id)}`;
+  /**
+   * 화면의 선에 차례로 마우스를 올려 말풍선의 줄을 모으고, 줄의 끝이 정의인 칸마다 기준 파일에서 갈라지는 곳부터 적었는지 본다.
+   * 기준 파일은 줄의 한 끝만 고른 노드 focus나 그 안의 노드이면 focus가 든 파일이고, 그 밖에는 줄의 다른 쪽 끝이 든 파일이나 폴더다.
+   * wrong은 규칙과 다른 칸, kinds는 규칙대로 적은 칸을 경우마다 하나씩 든 보기다.
+   */
+  const sweep = async (g, tr, focus, limit = 80) => {
+    const rows = new Map();
+    for (const line of (await linesOf(page)).slice(0, limit)) {
+      const at = await edgePoint(page, line.key);
+      if (at === null) {
+        continue;
+      }
+      for (const row of (await bubbleOver(page, at))?.rows ?? []) {
+        rows.set(`${row.nodes[0]}|${row.nodes[1]}`, row);
+      }
+      await page.mouse.move(1, 1);
+    }
+    const [wrong, kinds] = [[], new Map()];
+    const folderOf = (unit) => tr.title(unit).replace(/\/$/, "").split("/").slice(0, -1).join("/");
+    for (const row of rows.values()) {
+      const touched = focus !== null && tr.nodes.get(focus).kind !== "package" && tr.within(row.nodes[0], focus) !== tr.within(row.nodes[1], focus);
+      for (const [i, id] of row.nodes.entries()) {
+        if (tr.unitOf(id) === id) {
+          continue;
+        }
+        const base = touched ? tr.unitOf(focus) : tr.unitOf(row.nodes[1 - i]);
+        const [want, got] = [nameFrom(g, tr, base, id), i === 0 ? row.source : row.target];
+        const kind = `${touched ? "고른 노드에 닿는 줄" : "닿지 않는 줄"}, ${tr.unitOf(id) === base ? "같은 파일" : folderOf(tr.unitOf(id)) === folderOf(base) ? "같은 폴더의 다른 파일" : "다른 폴더"}`;
+        if (want !== got || row.paths[i] !== want.slice(0, want.length - shortName(g, id).length)) {
+          wrong.push(`${got} (기대 ${want})`);
+        } else if (!kinds.has(kind)) {
+          kinds.set(kind, got);
+        }
+      }
+    }
+    return { rows: rows.size, wrong, kinds };
+  };
+  /** sweep의 결과에서 경우 want가 모두 나왔고 규칙과 다른 칸이 없는지 확인한다. */
+  const pathsCheck = (name, found, want) => {
+    const missing = want.filter((kind) => !found.kinds.has(kind));
+    const text = `줄 ${found.rows}개. ${[...found.kinds].map(([kind, got]) => `${kind}: ${got}`).join(" / ")}${found.wrong.length > 0 ? `. 다른 칸 ${found.wrong.slice(0, 5).join(", ")}` : ""}`;
+    if (found.wrong.length === 0 && missing.length > 0) {
+      t.skip(name, `화면의 선에 ${missing.join(" · ")} 경우가 없다. ${text}`);
+    } else {
+      t.check(name, found.wrong.length === 0, text);
+    }
+  };
+  const TOUCH = ["같은 파일", "같은 폴더의 다른 파일", "다른 폴더"].map((kind) => `고른 노드에 닿는 줄, ${kind}`);
+  /**
+   * 같은 파일, 같은 폴더의 다른 파일, 다른 폴더의 정의와 모두 이어진 함수를 골라 그 함수에 닿는 줄의 끝을 본다.
+   * 사진은 `hf4-line-paths-{shotName}.png`로 남긴다.
+   */
+  const pathsRound = async (name, g, tr, shotName) => {
+    const folderOf = (unit) => tr.title(unit).replace(/\/$/, "").split("/").slice(0, -1).join("/");
+    const defined = (id) => tr.unitOf(id) !== id;
+    const sorts = (id) => {
+      const others = tr.edges.filter((e) => (e.source === id) !== (e.target === id) && defined(e.source) && defined(e.target)).map((e) => tr.unitOf(e.source === id ? e.target : e.source));
+      const mine = tr.unitOf(id);
+      return [others.some((unit) => unit === mine), others.some((unit) => unit !== mine && folderOf(unit) === folderOf(mine)), others.some((unit) => folderOf(unit) !== folderOf(mine))];
+    };
+    const chosen = g.nodes.find((n) => n.kind === "function" && !n.test && sorts(n.id).every(Boolean));
+    if (chosen === undefined) {
+      t.skip(`${name}: 고른 함수에 닿는 줄의 끝`, "같은 파일, 같은 폴더의 다른 파일, 다른 폴더의 정의와 모두 이어진 함수가 없다");
+      return;
+    }
+    await palettePick(page, chosen.name, chosen.id);
+    await waitSelected(page, chosen.id);
+    await page.getByRole("button", { name: "화면 맞춤" }).click();
+    await away();
+    await settle(page);
+    pathsCheck(`${name}: ${shortName(g, chosen.id)}를 고르면 그 함수에 닿는 줄의 끝은 같은 파일 안이면 이름만, 같은 폴더의 다른 파일이면 파일 이름부터, 다른 폴더면 갈라지는 폴더부터 적는다`, await sweep(g, tr, chosen.id), TOUCH);
+    const crossing = await hittable(page, (await linesOf(page)).filter((line) => endsOfKey(line.key).some((id) => tr.within(id, chosen.id)) && endsOfKey(line.key).some((id) => tr.unitOf(id) !== tr.unitOf(chosen.id))));
+    if (crossing !== null) {
+      const pinned = await pinBubble(page, crossing.at);
+      const box = await page.evaluate(() => (({ width }) => ({ width, cells: [...document.querySelectorAll(".line-bubble .line-cell")].filter((cell) => [cell, ...cell.children].some((each) => each.scrollWidth > each.clientWidth)).length }))(document.querySelector(".line-bubble").getBoundingClientRect()));
+      t.check(`${name}: 고정한 말풍선이 창 안에 있다`, pinned !== null && pinned.rect.x >= 0 && pinned.rect.x + pinned.rect.width <= VIEW.width, `말풍선 폭 ${box.width.toFixed(0)}px, 줄 ${pinned?.rows.length}개, 경로를 줄인 칸 ${box.cells}개`);
+      await page.screenshot({ path: HF4(`line-paths-${shotName}`) });
+      await page.keyboard.press("Escape");
+      await away();
+    }
+  };
+  /** 접힌 폴더 안의 정의를 고른 함수의 파일 base에서 적는 글 */
+  const hiddenName = (id, base = FILE) => nameFrom(graph, tree, base, id);
   const folder = "parser";
 
   // 고른 노드가 없으면 화면에 그린 양 끝을 적는다.
@@ -6396,7 +6489,7 @@ async function lineBubble(t, page) {
     const stage = await bubbleOver(page, lump.at);
     const mine = stage.rows.filter((each) => each.key === lump.line.key);
     t.check(
-      "함수를 고른 채 접힌 폴더로 가는 선의 줄은 실제 상대 함수이고 모두 누를 수 있으며, 화면에 그려져 있지 않은 함수는 파일 경로를 함께 적는다",
+      "함수를 고른 채 접힌 폴더로 가는 선의 줄은 실제 상대 함수이고 모두 누를 수 있으며, 다른 폴더의 함수는 갈라지는 폴더부터의 파일 경로를 함께 적는다",
       mine.length > 0 && same(mine.map(rowText).sort(), functionRows(caller.id, folder).sort()) && mine.every((each) => each.paths[1].endsWith(".py::") && each.paths[0] === ""),
       mine.map(rowText).join(" / "),
     );
@@ -6417,6 +6510,15 @@ async function lineBubble(t, page) {
       `선택 ${await selectedOf(page)}, ${head.replaceAll("\n", " / ").slice(0, 120)}`,
     );
     await shot("function-arrived");
+
+    // 줄의 끝은 기준 파일에서 갈라지는 곳부터 적는다.
+    await pathsRound("sync-engine", graph, tree, "se");
+    await pickInTree(page, { owner: FILE, id: caller.id });
+    await page.getByRole("button", { name: "화면 맞춤" }).click();
+    await away();
+    await settle(page);
+    const loose = await sweep(graph, tree, caller.id);
+    pathsCheck("고른 함수에 닿지 않는 줄은 두 끝이 서로 갈라지는 곳부터 적는다", { ...loose, kinds: new Map([...loose.kinds].filter(([kind]) => kind.startsWith("닿지 않는"))) }, ["닿지 않는 줄, 같은 파일", "닿지 않는 줄, 다른 폴더"]);
   }
 
   // 파일을 고르면 접힌 폴더로 뭉친 선의 상대 끝을 그 안의 파일로 풀어 적는다.
@@ -6606,6 +6708,9 @@ async function lineBubble(t, page) {
   const callLine = await hittable(page, await linesOf(page));
   const callTip = await bubbleOver(page, callLine.at);
   await shot("call");
+  const calls = await sweep(graph, tree, null);
+  t.check("함수 시점 뷰의 줄도 두 끝이 서로 갈라지는 곳부터 적는다", calls.rows > 0 && calls.wrong.length === 0, `줄 ${calls.rows}개. ${[...calls.kinds].map(([kind, got]) => `${kind}: ${got}`).join(" / ")}${calls.wrong.length > 0 ? `. 다른 칸 ${calls.wrong.slice(0, 5).join(", ")}` : ""}`);
+  await bubbleOver(page, callLine.at);
   const callRow = callTip.rows.findIndex((each) => each.key === callLine.line.key);
   const callEnd = endsOfKey(callLine.line.key).find((id) => id !== FUNCTION);
   await followLine(page, callLine.at, { row: callRow, cell: endsOfKey(callLine.line.key)[0] === callEnd ? "source" : "target" });
@@ -6643,7 +6748,7 @@ async function lineBubble(t, page) {
     }
     const seen = (await bubbleOver(page, found.at)).rows.filter((each) => each.key === found.line.key);
     const want = [...new Set(edges.map((e) => e.target))].map(
-      (target) => `${shortName(wideGraph, fn.id)} → ${wide.title(wide.unitOf(target))}::${shortName(wideGraph, target)} · ${relationWords(kindsOf(edges.filter((e) => e.target === target)))}`,
+      (target) => `${shortName(wideGraph, fn.id)} → ${nameFrom(wideGraph, wide, wide.unitOf(fn.id), target)} · ${relationWords(kindsOf(edges.filter((e) => e.target === target)))}`,
     );
     await shot("mdp-function");
     t.check(`mdp: 함수 ${shortName(wideGraph, fn.id)}를 고른 채 접힌 ${wide.title(box.id)}로 가는 선의 줄이 실제 상대 함수다`, same(seen.map(rowText).sort(), want.sort()), seen.map(rowText).join(" / "));
@@ -6695,6 +6800,10 @@ async function lineBubble(t, page) {
   if (!typeDone) {
     t.skip("mdp: 타입에만 쓰이는 클래스로 들어오는 선의 줄", "그런 클래스로 들어오는 누를 수 있는 선이 없다");
   }
+
+  // 폴더가 여러 겹인 레포에서도 줄의 끝을 기준 파일에서 갈라지는 곳부터 적는다.
+  await page.keyboard.press("Escape");
+  await pathsRound("mdp", wideGraph, wide, "mdp");
 }
 
 // ── 4단계: 선의 합류 ─────────────────────────────────────────────
@@ -9888,6 +9997,23 @@ async function summaryQueue(t, page) {
     }
     await page.click(".legend-button");
 
+    // 패널을 낮고 넓게 바꿔 바닥 줄을 모두 덮으면 칸은 패널과 왼쪽 아래 칸이 가리지 않는 영역으로 물러난다.
+    await page.dblclick(".info-panel-head");
+    await page.waitForTimeout(300);
+    for (const [dir, dx, dy] of [["n", 0, 600], ["w", -1500, 0]]) {
+      await drag(page, center(await rectOf(page, `.info-panel-resize[data-dir="${dir}"]`)), dx, dy);
+    }
+    await page.waitForTimeout(300);
+    const covered = await placed();
+    t.check(`${name}: 패널이 바닥 줄을 덮으면 칸은 패널과 왼쪽 아래 칸이 가리지 않는 영역의 가로 가운데, 아래 끝에서 12px 위로 물러난다`, covered.ok && covered.mode === "빈 영역", covered.text);
+    if (shoot) {
+      await page.screenshot({ path: HF4("queue-bottom-covered") });
+    }
+    await page.dblclick(".info-panel-head");
+    await page.waitForTimeout(300);
+    const home = await placed();
+    t.check(`${name}: 패널을 기본 위치로 돌리면 칸이 바닥 줄로 돌아온다`, home.ok && home.mode === "바닥", home.text);
+
     // 취소. 아직 보내지 않은 요청만 빠지고 보낸 두 개는 끝까지 간다.
     await page.focus(".summary-queue-cancel");
     await page.keyboard.press("Enter");
@@ -9997,23 +10123,6 @@ async function motion(t, page) {
     await page.click(row(id));
     await waitSelected(page, id);
   };
-    // 패널을 낮고 넓게 바꿔 바닥 줄을 모두 덮으면 칸은 패널과 왼쪽 아래 칸이 가리지 않는 영역으로 물러난다.
-    await page.dblclick(".info-panel-head");
-    await page.waitForTimeout(300);
-    for (const [dir, dx, dy] of [["n", 0, 600], ["w", -1500, 0]]) {
-      await drag(page, center(await rectOf(page, `.info-panel-resize[data-dir="${dir}"]`)), dx, dy);
-    }
-    await page.waitForTimeout(300);
-    const covered = await placed();
-    t.check(`${name}: 패널이 바닥 줄을 덮으면 칸은 패널과 왼쪽 아래 칸이 가리지 않는 영역의 가로 가운데, 아래 끝에서 12px 위로 물러난다`, covered.ok && covered.mode === "빈 영역", covered.text);
-    if (shoot) {
-      await page.screenshot({ path: HF4("queue-bottom-covered") });
-    }
-    await page.dblclick(".info-panel-head");
-    await page.waitForTimeout(300);
-    const home = await placed();
-    t.check(`${name}: 패널을 기본 위치로 돌리면 칸이 바닥 줄로 돌아온다`, home.ok && home.mode === "바닥", home.text);
-
   /** 파일트리에 행이 보이는 파일 상자와 그 가운데의 화면 좌표 */
   const files = async () => {
     const list = await boxes(page);
@@ -10437,10 +10546,99 @@ async function folderTint(t, page) {
   t.check(`여러 겹으로 펼친 폴더 영역 ${nested.length}개도 머리 줄 띠 아래의 여백이 ${FOLDER.pad}px 이상이고 선의 통로가 없는 영역은 왼쪽 안쪽 여백과 같다`, spaced(nested) && nested.length >= chain.length, gapText(nested));
 }
 
+/**
+ * 탐색 경로 맨 앞의 레포 이름. 고른 노드가 없을 때와 있을 때의 이름 순서, 레포 이름과 소스 루트 폴더 이름을 눌러 선택을 푸는지와
+ * 그 단계가 이력에 담기는지, 창 폭 720px에서 앞 이름부터 줄고 마지막 단계가 눌리는지 본다. `--wide-url`을 받으면 소스 루트가
+ * 레포 루트인 그 레포에서도 본다. 사진은 `hf4-trail-root-{이름}.png`로 남긴다.
+ */
+async function trailRoot(t, page) {
+  /** 탐색 경로에 그린 이름과 `…`, 마지막 이름이 가운데 점에서 눌리고 상단 줄 안에 있는지 */
+  const trailOf = () =>
+    page.evaluate(() => {
+      const trail = document.querySelector(".toolbar-trail");
+      const bar = document.querySelector(".toolbar").getBoundingClientRect();
+      const names = [...trail.querySelectorAll(".trail-cut, .trail-root, .trail-step")];
+      const last = names.at(-1);
+      const rect = last?.getBoundingClientRect();
+      const hit = rect === undefined ? null : document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return {
+        names: names.map((each) => each.textContent.trim()),
+        roots: [...trail.querySelectorAll(".trail-root")].map((each) => ({ text: each.textContent.trim(), button: each.tagName === "BUTTON", tip: each.dataset.tip })),
+        cut: trail.querySelector(".trail-cut")?.dataset.tip ?? null,
+        pressed: last !== undefined && hit !== null && last.contains(hit) && rect.right <= bar.right,
+        clipped: last !== undefined && last.scrollWidth > last.clientWidth,
+        header: document.querySelector(".explorer-header")?.textContent ?? null,
+      };
+    });
+  const round = async (name, at, id, shot) => {
+    const [repo, graph] = [await api("/api/repo", at), await api("/api/graph", at)];
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const roots = [repo.name, ...(repo.source_root === "" ? [] : [repo.source_root])];
+    const chain = [];
+    for (let n = byId.get(id); n !== undefined; n = n.parent === null ? undefined : byId.get(n.parent)) {
+      chain.unshift(n.kind === "module" ? `${n.name}.py` : n.kind === "function" || n.kind === "method" ? `${n.name}()` : n.name);
+    }
+    await page.setViewportSize({ width: 1700, height: 1000 });
+    await load(page, at, false);
+    const idle = await trailOf();
+    t.check(
+      `${name}: 고른 노드가 없으면 탐색 경로는 ${roots.join(" > ")}이고 이름마다 선택을 푸는 버튼이다`,
+      same(idle.names, roots) && idle.roots.every((root) => root.button && root.tip === "선택 풀기") && idle.header === repo.name,
+      `${idle.names.join(" > ")}, 파일트리 머리 ${idle.header}`,
+    );
+    await palettePick(page, id.split(":")[1], id);
+    await waitSelected(page, id);
+    await page.mouse.move(5, 5);
+    const picked = await trailOf();
+    t.check(`${name}: 함수를 고르면 레포 이름 뒤에 단계가 이어지고 마지막 단계가 눌린다`, same(picked.names, [...roots, ...chain]) && picked.pressed && !picked.clipped, picked.names.join(" > "));
+    await page.screenshot({ path: HF4(`trail-root-${shot}`) });
+    const backs = () => page.getByRole("button", { name: "뒤로" }).isDisabled();
+    for (const [index, root] of roots.entries()) {
+      await page.click(`.trail-root >> nth=${index}`);
+      await page.mouse.move(5, 5);
+      await rest(page);
+      const cleared = (await selectedOf(page)) === null && same((await trailOf()).names, roots) && !(await backs());
+      await page.keyboard.press("Alt+ArrowLeft");
+      await waitSelected(page, id).catch(() => {});
+      t.check(`${name}: 탐색 경로의 ${root}를 누르면 선택이 풀리고 뒤로 가면 그 함수로 돌아온다`, cleared && (await selectedOf(page)) === id, `선택 ${await selectedOf(page)}`);
+    }
+
+    // 좁은 창. 앞 이름부터 `…`로 줄고 마지막 단계는 눌린다.
+    await page.setViewportSize({ width: 720, height: 1000 });
+    await page.waitForTimeout(400);
+    const narrow = await trailOf();
+    t.check(
+      `${name}: 창 폭 720px에서 탐색 경로는 앞 이름부터 줄이고 줄인 이름을 …의 말풍선에 적으며 마지막 단계가 상단 줄 안에서 눌린다`,
+      narrow.names.at(-1) === chain.at(-1) && narrow.pressed && (narrow.cut === null ? same(narrow.names, [...roots, ...chain]) : narrow.names[0] === "…" && narrow.cut.startsWith(repo.name)),
+      `${narrow.names.join(" > ")}, 줄인 이름 "${narrow.cut ?? "없음"}"${narrow.clipped ? ", 마지막 단계 말줄임" : ""}`,
+    );
+    if (shot === "se") {
+      await page.screenshot({ path: HF4("trail-root-narrow") });
+    }
+    await page.keyboard.press("Escape");
+    await rest(page);
+    const bare = await trailOf();
+    t.check(`${name}: 창 폭 720px에서 고른 노드가 없으면 마지막 이름이 상단 줄 안에서 눌린다`, bare.names.at(-1) === roots.at(-1) && bare.pressed && (await selectedOf(page)) === null, `${bare.names.join(" > ")}${bare.clipped ? ", 마지막 이름 말줄임" : ""}`);
+    if (shot === "mdp") {
+      await page.screenshot({ path: HF4("trail-root-mdp-narrow") });
+    }
+    await page.setViewportSize({ width: 1700, height: 1000 });
+  };
+  await round("sync-engine", url, FUNCTION, "se");
+  if (wideUrl === null) {
+    t.skip("소스 루트가 레포 루트인 레포의 탐색 경로", "--wide-url을 주지 않았다");
+  } else {
+    const graph = await api("/api/graph", wideUrl);
+    const deep = graph.nodes.filter((n) => n.kind === "function" && !n.test).sort((a, b) => b.id.split(".").length - a.id.split(".").length || a.id.localeCompare(b.id))[0];
+    await round("폴더가 여러 겹인 레포", wideUrl, deep.id, "mdp");
+  }
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
   ["function", functionScenario],
+  ["trail-root", trailRoot],
   ["body", body],
   ["panel", panel],
   ["code-scope", codeScope],
@@ -10546,99 +10744,10 @@ const STAGE4 = new Set([
   "merge-click",
   "merge-select",
   "merge-pin",
-/**
- * 탐색 경로 맨 앞의 레포 이름. 고른 노드가 없을 때와 있을 때의 이름 순서, 레포 이름과 소스 루트 폴더 이름을 눌러 선택을 푸는지와
- * 그 단계가 이력에 담기는지, 창 폭 720px에서 앞 이름부터 줄고 마지막 단계가 눌리는지 본다. `--wide-url`을 받으면 소스 루트가
- * 레포 루트인 그 레포에서도 본다. 사진은 `hf4-trail-root-{이름}.png`로 남긴다.
- */
-async function trailRoot(t, page) {
-  /** 탐색 경로에 그린 이름과 `…`, 마지막 이름이 가운데 점에서 눌리고 상단 줄 안에 있는지 */
-  const trailOf = () =>
-    page.evaluate(() => {
-      const trail = document.querySelector(".toolbar-trail");
-      const bar = document.querySelector(".toolbar").getBoundingClientRect();
-      const names = [...trail.querySelectorAll(".trail-cut, .trail-root, .trail-step")];
-      const last = names.at(-1);
-      const rect = last?.getBoundingClientRect();
-      const hit = rect === undefined ? null : document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-      return {
-        names: names.map((each) => each.textContent.trim()),
-        roots: [...trail.querySelectorAll(".trail-root")].map((each) => ({ text: each.textContent.trim(), button: each.tagName === "BUTTON", tip: each.dataset.tip })),
-        cut: trail.querySelector(".trail-cut")?.dataset.tip ?? null,
-        pressed: last !== undefined && hit !== null && last.contains(hit) && rect.right <= bar.right,
-        clipped: last !== undefined && last.scrollWidth > last.clientWidth,
-        header: document.querySelector(".explorer-header")?.textContent ?? null,
-      };
-    });
-  const round = async (name, at, id, shot) => {
-    const [repo, graph] = [await api("/api/repo", at), await api("/api/graph", at)];
-    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-    const roots = [repo.name, ...(repo.source_root === "" ? [] : [repo.source_root])];
-    const chain = [];
-    for (let n = byId.get(id); n !== undefined; n = n.parent === null ? undefined : byId.get(n.parent)) {
-      chain.unshift(n.kind === "module" ? `${n.name}.py` : n.kind === "function" || n.kind === "method" ? `${n.name}()` : n.name);
-    }
-    await page.setViewportSize({ width: 1700, height: 1000 });
-    await load(page, at, false);
-    const idle = await trailOf();
-    t.check(
-      `${name}: 고른 노드가 없으면 탐색 경로는 ${roots.join(" > ")}이고 이름마다 선택을 푸는 버튼이다`,
-      same(idle.names, roots) && idle.roots.every((root) => root.button && root.tip === "선택 풀기") && idle.header === repo.name,
-      `${idle.names.join(" > ")}, 파일트리 머리 ${idle.header}`,
-    );
-    await palettePick(page, id.split(":")[1], id);
-    await waitSelected(page, id);
-    await page.mouse.move(5, 5);
-    const picked = await trailOf();
-    t.check(`${name}: 함수를 고르면 레포 이름 뒤에 단계가 이어지고 마지막 단계가 눌린다`, same(picked.names, [...roots, ...chain]) && picked.pressed && !picked.clipped, picked.names.join(" > "));
-    await page.screenshot({ path: HF4(`trail-root-${shot}`) });
-    const backs = () => page.getByRole("button", { name: "뒤로" }).isDisabled();
-    for (const [index, root] of roots.entries()) {
-      await page.click(`.trail-root >> nth=${index}`);
-      await page.mouse.move(5, 5);
-      await rest(page);
-      const cleared = (await selectedOf(page)) === null && same((await trailOf()).names, roots) && !(await backs());
-      await page.keyboard.press("Alt+ArrowLeft");
-      await waitSelected(page, id).catch(() => {});
-      t.check(`${name}: 탐색 경로의 ${root}를 누르면 선택이 풀리고 뒤로 가면 그 함수로 돌아온다`, cleared && (await selectedOf(page)) === id, `선택 ${await selectedOf(page)}`);
-    }
-
-    // 좁은 창. 앞 이름부터 `…`로 줄고 마지막 단계는 눌린다.
-    await page.setViewportSize({ width: 720, height: 1000 });
-    await page.waitForTimeout(400);
-    const narrow = await trailOf();
-    t.check(
-      `${name}: 창 폭 720px에서 탐색 경로는 앞 이름부터 줄이고 줄인 이름을 …의 말풍선에 적으며 마지막 단계가 상단 줄 안에서 눌린다`,
-      narrow.names.at(-1) === chain.at(-1) && narrow.pressed && (narrow.cut === null ? same(narrow.names, [...roots, ...chain]) : narrow.names[0] === "…" && narrow.cut.startsWith(repo.name)),
-      `${narrow.names.join(" > ")}, 줄인 이름 "${narrow.cut ?? "없음"}"${narrow.clipped ? ", 마지막 단계 말줄임" : ""}`,
-    );
-    if (shot === "se") {
-      await page.screenshot({ path: HF4("trail-root-narrow") });
-    }
-    await page.keyboard.press("Escape");
-    await rest(page);
-    const bare = await trailOf();
-    t.check(`${name}: 창 폭 720px에서 고른 노드가 없으면 마지막 이름이 상단 줄 안에서 눌린다`, bare.names.at(-1) === roots.at(-1) && bare.pressed && (await selectedOf(page)) === null, `${bare.names.join(" > ")}${bare.clipped ? ", 마지막 이름 말줄임" : ""}`);
-    if (shot === "mdp") {
-      await page.screenshot({ path: HF4("trail-root-mdp-narrow") });
-    }
-    await page.setViewportSize({ width: 1700, height: 1000 });
-  };
-  await round("sync-engine", url, FUNCTION, "se");
-  if (wideUrl === null) {
-    t.skip("소스 루트가 레포 루트인 레포의 탐색 경로", "--wide-url을 주지 않았다");
-  } else {
-    const graph = await api("/api/graph", wideUrl);
-    const deep = graph.nodes.filter((n) => n.kind === "function" && !n.test).sort((a, b) => b.id.split(".").length - a.id.split(".").length || a.id.localeCompare(b.id))[0];
-    await round("폴더가 여러 겹인 레포", wideUrl, deep.id, "mdp");
-  }
-}
-
   "badge",
   "pack-place",
   "pack-file",
   "pack-flow",
-  ["trail-root", trailRoot],
   "pack-folder",
   "pack-find",
   "pack-pin",
