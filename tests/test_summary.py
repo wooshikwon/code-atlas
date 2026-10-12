@@ -4,6 +4,7 @@ import os
 import time
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 
 import pytest
@@ -707,6 +708,18 @@ def test_latest_reads_a_table_made_before_the_question_column_as_notes_without_a
     assert [(k.name, k.text, k.question) for k in latest.listed("/repo", "range")] == [("src/core.py:1-2", "옛 설명", "")]
     latest.put(summary.Subject("/repo", "range", "src/core.py:1-2?ab", "d", "왜?"), "답")
     assert len(summary.Latest(path).listed("/repo", "range")) == 2
+
+
+def test_latest_opened_by_several_servers_at_once_adds_the_question_column_once(tmp_path):
+    path = tmp_path / "summaries.db"
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute(
+            "CREATE TABLE latest (repo TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, digest TEXT NOT NULL, "
+            "text TEXT NOT NULL, created TEXT NOT NULL, PRIMARY KEY (repo, kind, name))"
+        )
+    with ThreadPoolExecutor(8) as pool:
+        opened = list(pool.map(lambda _: summary.Latest(path), range(8)))
+    assert all(latest.listed("/repo", "range") == [] for latest in opened)
 
 
 def test_compared_name_is_read_back_for_the_same_two_points_and_file():

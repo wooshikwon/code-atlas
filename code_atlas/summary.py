@@ -925,9 +925,13 @@ class Latest:
             "digest TEXT NOT NULL, text TEXT NOT NULL, created TEXT NOT NULL, question TEXT NOT NULL DEFAULT '', "
             "PRIMARY KEY (repo, kind, name))"
         )
-        # 질문 열이 없던 때에 만든 표에는 열을 더한다. 그 표의 설명은 질문 없는 설명으로 읽힌다.
-        if "question" not in {column[1] for column in self._execute("PRAGMA table_info(latest)")}:
-            self._execute("ALTER TABLE latest ADD COLUMN question TEXT NOT NULL DEFAULT ''")
+        # 질문 열이 없던 때에 만든 표에는 열을 더한다. 그 표의 설명은 질문 없는 설명으로 읽힌다. 함께 뜬 서버가 같은 표를
+        # 고치지 않도록 열을 확인하고 더하는 일을 쓰기 잠금 하나 안에서 한다.
+        with closing(sqlite3.connect(self.path, timeout=5, isolation_level=None)) as db:
+            db.execute("BEGIN IMMEDIATE")
+            if "question" not in {column[1] for column in db.execute("PRAGMA table_info(latest)")}:
+                db.execute("ALTER TABLE latest ADD COLUMN question TEXT NOT NULL DEFAULT ''")
+            db.execute("COMMIT")
 
     def _execute(self, sql: str, args: tuple = ()) -> list[tuple]:
         with closing(sqlite3.connect(self.path, timeout=5)) as db, db:
