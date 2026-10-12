@@ -267,11 +267,11 @@ def test_system_prompt_reports_unreadable_style_guide(tmp_path):
         summary.system_prompt_of(tmp_path)
     empty = tmp_path / "empty.md"
     empty.write_text(" \n")
-    with pytest.raises(SummaryError, match="비어 있다"):
+    with pytest.raises(SummaryError, match="비어 있습니다"):
         summary.system_prompt_of(empty)
     big = tmp_path / "big.md"
     big.write_text("가" * summary.MAX_STYLE_GUIDE)
-    with pytest.raises(SummaryError, match="넘는다"):
+    with pytest.raises(SummaryError, match="넘습니다"):
         summary.system_prompt_of(big)
 
 

@@ -2426,7 +2426,7 @@ button.line-cell:focus-visible {
 }
 
 :is(.info-panel-facts, .info-panel-summary) .info-section-head .info-section-caret {
-  margin: 0 2.5px;
+  margin: 0 3.5px 0 2.5px;
 }
 
 :is(.info-panel-facts, .info-panel-summary) .info-section-head[aria-expanded="false"] .info-section-caret {
@@ -4350,7 +4350,7 @@ ol.summary-list {
 }
 
 .tools-head .info-section-caret {
-  margin: 0 2.5px;
+  margin: 0 3.5px 0 2.5px;
 }
 
 .tools-head .info-section-head[aria-expanded="false"] .info-section-caret {
