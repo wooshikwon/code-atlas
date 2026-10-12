@@ -6325,6 +6325,10 @@ async function packFind(t, page) {
     hiddenBefore && afterPalette.includes(targets[0]) && (await selectedOf(page)) === targets[0],
     `손잡이 "${(await packOf(page, file.id))?.text ?? "없음"}"`,
   );
+  const opened = await packOf(page, file.id);
+  t.check("고른 함수가 든 파일 상자는 전부 펼침 단계가 되어 손잡이가 접는 손잡이로 바뀐다", opened?.open === true && same(afterPalette, file.kids), `손잡이 "${opened?.text ?? "없음"}"`);
+  await t.shot();
+  await load(page, url, false);
   await pickFile(page, file.id);
   const hiddenAgain = !(await drawnIn(page, graph, file.id)).includes(targets[1]);
   await page.click(`.tree-row.tree-symbol[data-node="${targets[1]}"]`);
@@ -6334,10 +6338,6 @@ async function packFind(t, page) {
     `손잡이에 든 ${targets[1]}를 파일트리에서 고르면 그 함수가 그려지고 선택된다`,
     hiddenAgain && (await drawnIn(page, graph, file.id)).includes(targets[1]) && (await selectedOf(page)) === targets[1],
   );
-  const pack = await packOf(page, file.id);
-  const left = file.inner.filter((id) => !(afterPalette.includes(id) && false)).length;
-  t.check("고른 함수는 손잡이의 수에서 빠진다", pack === null || Number(/내부 함수 (\d+)개/.exec(pack.text)[1]) < left, `손잡이 "${pack?.text ?? "없음"}"`);
-  await t.shot();
 }
 
 /** 전부 펼친 상자가 경로 고정 동안과 고정을 끈 뒤에 어떻게 보이는지 본다. */
@@ -6442,6 +6442,186 @@ async function packHistory(t, page) {
   await settle(page);
   await pickFile(page, file.id);
   t.check("페이지를 다시 열면 전부 펼침이 비워져 파일을 고르면 펼침 단계로 열린다", (await packOf(page, file.id))?.open === false, `"${(await packOf(page, file.id))?.text}"`);
+}
+
+/**
+ * 손잡이가 생기는 파일에서 밖과 이어진 함수 caller가 안쪽 함수 callee를 부르는 호출. 코드 뷰어가 caller의 첫 줄부터 보일 때 호출 줄이
+ * 함께 보이고 callee의 정의 줄은 보이지 않도록, 호출 줄이 caller의 첫 줄에서 12줄 안에 있고 callee의 정의가 40줄 넘게 떨어진 호출만 낸다.
+ * 안쪽 자식이 다섯 개 이상인 파일만 보고, 호출 줄이 caller의 첫 줄에 가까운 호출이 앞에 온다.
+ */
+function innerCalls(graph) {
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const plain = (id) => nodes.get(id).kind === "function";
+  return packedFiles(graph)
+    .filter((file) => file.inner.length >= 5)
+    .flatMap((file) =>
+      graph.edges
+        .filter((e) => e.kind === "call" && file.outer.includes(e.source) && file.inner.includes(e.target) && plain(e.source) && plain(e.target))
+        .map((e) => ({ file, caller: e.source, callee: e.target, gap: e.sites[0].line - nodes.get(e.source).range[0], apart: Math.abs(nodes.get(e.target).range[0] - nodes.get(e.source).range[0]) })),
+    )
+    .filter((call) => call.gap >= 1 && call.gap <= 12 && call.apart > 40)
+    .sort((a, b) => a.gap - b.gap);
+}
+
+/** 코드 뷰어에 보이는 줄 가운데 정의 줄이 아닌 줄에서 word가 처음 나오는 곳의 화면 사각형. 뷰어에 보이지 않으면 null이다. */
+const callRect = (page, word) =>
+  page.evaluate((text) => {
+    const editor = document.querySelector(".info-panel .monaco-editor");
+    const area = editor?.getBoundingClientRect();
+    const lines = [...(editor?.querySelectorAll(".view-lines .view-line") ?? [])].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+    for (const line of lines) {
+      if (/^\s*(async\s+)?def\s/.test(line.textContent.replaceAll(" ", " "))) {
+        continue;
+      }
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      for (let leaf = walker.nextNode(); leaf !== null; leaf = walker.nextNode()) {
+        const index = leaf.data.search(new RegExp(`(?<![A-Za-z0-9_])${text}(?![A-Za-z0-9_])`));
+        if (index < 0) {
+          continue;
+        }
+        const range = document.createRange();
+        range.setStart(leaf, index);
+        range.setEnd(leaf, index + text.length);
+        const rect = range.getBoundingClientRect();
+        if (rect.top >= area.top && rect.bottom <= area.bottom && rect.left >= area.left && rect.right <= area.right) {
+          return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+        }
+      }
+    }
+    return null;
+  }, word);
+
+/**
+ * 안쪽 자식을 고르면 그 파일 상자가 전부 펼침 단계가 되는지 본다. 고르는 경로는 코드 뷰어의 Mod+클릭, 파일트리, Mod+P 세 가지이고,
+ * 접는 손잡이를 누른 뒤의 선택과 뒤로·앞으로도 본다. --wide-url을 받으면 그 레포에서도 본다. 사진은 `hf3-inner-{이름}.png`로 남긴다.
+ */
+async function innerPick(t, page) {
+  const seen = async (name, at, tag) => {
+    const graph = await api("/api/graph", at);
+    const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+    const call = innerCalls(graph)[0];
+    if (call === undefined) {
+      t.skip(`${name}: 안쪽 함수를 코드 뷰어에서 Mod+클릭한다`, "밖과 이어진 함수가 첫 줄 가까이에서 안쪽 함수를 부르는 파일이 없다");
+      return;
+    }
+    const { file, caller, callee } = call;
+    const others = file.inner.filter((id) => id !== callee && nodes.get(id).kind === "function");
+    const open = async () => {
+      await page.goto(at);
+      await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+      await settle(page);
+    };
+    /** 파일 상자가 전부 펼침 단계인지: 손잡이가 접는 손잡이이고 바로 아래 자식을 모두 그렸다. 손잡이의 수는 흐름이 꺼낸 자식만큼 준다. */
+    const full = async () => {
+      const [pack, drawnNow] = [await packOf(page, file.id), await drawnIn(page, graph, file.id)];
+      return { ok: pack?.open === true && /^내부 함수 \d+개 접기$/.test(pack.text) && same(drawnNow, file.kids), text: `그린 정의 ${drawnNow.length}/${file.kids.length}개, 손잡이 "${pack?.text ?? "없음"}"` };
+    };
+    const staged = async () => (await packOf(page, file.id))?.open === false;
+
+    // 코드 뷰어의 Mod+클릭
+    await open();
+    await palettePick(page, nodes.get(caller).name, caller);
+    await waitSelected(page, caller);
+    await rest(page);
+    const before = await packOf(page, file.id);
+    t.check(`${name}: 밖과 이어진 ${caller}를 고르면 ${file.id}는 펼침 단계이고 묶는 손잡이가 있다`, before?.open === false, `손잡이 "${before?.text ?? "없음"}"`);
+    await page.waitForFunction((text) => document.querySelector(".info-panel .monaco-editor .view-lines")?.textContent.includes(text), nodes.get(callee).name, { timeout: 10_000 }).catch(() => {});
+    const word = await callRect(page, nodes.get(callee).name);
+    if (word === null) {
+      t.check(`${name}: 코드 뷰어에 ${callee}를 부르는 줄이 보인다`, false, "보이지 않는다");
+      return;
+    }
+    await page.keyboard.down(MOD);
+    await page.mouse.move(word.x + word.width / 2 - 6, word.y + word.height / 2);
+    await page.mouse.move(word.x + word.width / 2, word.y + word.height / 2, { steps: 3 });
+    await page.waitForSelector(".info-panel .code-link", { timeout: 3_000 }).catch(() => {});
+    await page.mouse.click(word.x + word.width / 2, word.y + word.height / 2);
+    await page.keyboard.up(MOD);
+    await waitSelected(page, callee).catch(() => {});
+    await page.mouse.move(5, 5);
+    await rest(page);
+    const clicked = await full();
+    t.check(
+      `${name}: 코드 뷰어에서 안쪽 함수 ${callee}를 Mod+클릭하면 그 함수를 고르고 ${file.id}가 전부 펼침 단계가 된다`,
+      (await selectedOf(page)) === callee && clicked.ok,
+      `선택 ${await selectedOf(page)}, ${clicked.text}`,
+    );
+    const reach = await reachable(page, callee);
+    t.check(`${name}: 전부 펼친 배치에서 고른 함수의 이름표가 가리지 않는 영역 안에 있다`, reach.ok, reach.at);
+    await page.screenshot({ path: join(OUT, `hf3-inner-${tag}.png`) });
+
+    // 접는 손잡이와 뒤로·앞으로
+    // 손잡이는 상자의 왼쪽 아래에 있으므로 그래프 전체를 맞춰 화면 안에 둔 뒤 누른다.
+    const steps = await count(page, ".trail-step");
+    await page.getByRole("button", { name: "화면 맞춤" }).click();
+    await page.mouse.move(1, 1);
+    await settle(page);
+    await clickPack(page, file.id);
+    await waitSelected(page, file.id).catch(() => {});
+    await rest(page);
+    t.check(
+      `${name}: 안쪽 함수를 고른 채 접는 손잡이를 누르면 선택이 ${file.id}로 올라가고 밖과 이어진 정의와 묶는 손잡이만 남는다`,
+      (await selectedOf(page)) === file.id && (await staged()) && same(await drawnIn(page, graph, file.id), file.outer),
+      `선택 ${await selectedOf(page)}, 손잡이 "${(await packOf(page, file.id))?.text ?? "없음"}", 이력 ${steps} → ${await count(page, ".trail-step")}단계`,
+    );
+    const step = async (key, id) => {
+      await page.keyboard.press(key);
+      await waitSelected(page, id).catch(() => {});
+      await rest(page);
+      return { selected: await selectedOf(page), open: (await packOf(page, file.id))?.open ?? null };
+    };
+    const back1 = await step("Alt+ArrowLeft", callee);
+    const back2 = await step("Alt+ArrowLeft", caller);
+    const forth = await step("Alt+ArrowRight", callee);
+    t.check(
+      `${name}: 뒤로 가면 안쪽 함수를 고른 전부 펼침으로, 한 번 더 가면 ${caller}를 고른 펼침으로 돌아가고, 앞으로 가면 다시 전부 펼침이다`,
+      same(back1, { selected: callee, open: true }) && same(back2, { selected: caller, open: false }) && same(forth, { selected: callee, open: true }),
+      [back1, back2, forth].map((each) => `${each.selected} ${each.open}`).join(" → "),
+    );
+    await palettePick(page, nodes.get(caller).name, caller);
+    await waitSelected(page, caller);
+    await rest(page);
+    t.check(`${name}: 그 뒤에 밖과 이어진 함수를 골라도 손잡이를 눌러 연 상자처럼 전부 펼침이 남는다`, (await full()).ok, (await full()).text);
+
+    // 파일트리
+    await open();
+    await palettePick(page, file.path, file.id);
+    await waitSelected(page, file.id);
+    await rest(page);
+    const closed = await staged();
+    await page.waitForSelector(`.tree-row.tree-symbol[data-node="${others[0]}"]`, { timeout: 10_000 });
+    await page.click(`.tree-row.tree-symbol[data-node="${others[0]}"]`);
+    await waitSelected(page, others[0]);
+    await page.mouse.move(5, 5);
+    await rest(page);
+    const viaTree = await full();
+    t.check(`${name}: 파일트리에서 안쪽 함수 ${others[0]}를 고르면 ${file.id}가 전부 펼침 단계가 된다`, closed && (await selectedOf(page)) === others[0] && viaTree.ok, viaTree.text);
+
+    // Mod+P 검색
+    await open();
+    await palettePick(page, file.path, file.id);
+    await waitSelected(page, file.id);
+    await rest(page);
+    const closedAgain = await staged();
+    await palettePick(page, nodes.get(others[1]).name, others[1]);
+    await waitSelected(page, others[1]);
+    await rest(page);
+    const viaPalette = await full();
+    t.check(`${name}: Mod+P로 안쪽 함수 ${others[1]}를 고르면 ${file.id}가 전부 펼침 단계가 된다`, closedAgain && (await selectedOf(page)) === others[1] && viaPalette.ok, viaPalette.text);
+    const outerOne = file.outer.find((id) => id !== caller && nodes.get(id).kind === "function") ?? caller;
+    await open();
+    await palettePick(page, nodes.get(outerOne).name, outerOne);
+    await waitSelected(page, outerOne);
+    await rest(page);
+    t.check(`${name}: 페이지를 다시 열고 밖과 이어진 ${outerOne}를 고르면 ${file.id}는 펼침 단계다`, await staged(), `손잡이 "${(await packOf(page, file.id))?.text ?? "없음"}"`);
+  };
+  await seen("sync-engine", url, "sync");
+  await t.shot();
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서 안쪽 함수를 고르면 그 파일 상자가 전부 펼침 단계가 된다", "--wide-url을 주지 않았다");
+    return;
+  }
+  await seen("폴더가 여러 겹인 레포", wideUrl, "wide");
 }
 
 /**
@@ -7640,6 +7820,7 @@ const SCENARIOS = [
   ["pack-overlay", packOverlay],
   ["pack-history", packHistory],
   ["pack-toggle", packToggle],
+  ["inner-pick", innerPick],
   ["lanes", lanes],
   ["numbers", numbers],
   ["overlap", overlap],
@@ -7673,6 +7854,7 @@ const STAGE4 = new Set([
   "pack-overlay",
   "pack-history",
   "pack-toggle",
+  "inner-pick",
   "lanes",
   "numbers",
   "overlap",

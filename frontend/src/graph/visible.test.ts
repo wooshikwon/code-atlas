@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture, routeFixture } from "./fixture";
+import { node as made, repoFixture, routeFixture } from "./fixture";
 import { flow } from "./flow";
 import { lit, route } from "./route";
-import { drawnOut, hidden, insideCounts, lift, nodeIndex, outward, shown, unresolvedWithin } from "./visible";
+import { drawnOut, hidden, insideCounts, inward, lift, nodeIndex, outward, packedIn, shown, unresolvedWithin } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
 const toggles = { showTests: false, showExternal: false };
@@ -146,6 +146,30 @@ describe("outward, insideCounts", () => {
     const more = (box: string) => [...(outward(repoFixture, all).get(box) ?? [])].filter((id) => !(outward(repoFixture, off).get(box)?.has(id) ?? false));
     expect(repoFixture.edges.some((e) => off.has(e.source) || off.has(e.target))).toBe(true);
     expect([...outward(repoFixture, all).keys()].flatMap(more).length).toBeGreaterThan(0);
+  });
+
+  it("inward는 밖과 이어진 자식도 진입점도 아닌 자식을 내고, 밖과 이어진 자식이 없거나 안쪽 자식이 하나뿐인 파일 상자는 내지 않는다", () => {
+    const inner = inward(repoFixture, off);
+    expect([...inner.get("pkg.mod")!].sort()).toEqual(["pkg.mod:Row", "pkg.mod:parse"]);
+    expect(inner.has("main")).toBe(false);
+    expect(inner.has("scratch")).toBe(false);
+    expect(outward(repoFixture, off).get("app.text")).toEqual(new Set(["app.text:wrap"]));
+    expect(inner.has("app.text")).toBe(false);
+    const all = hidden(routeFixture, { showTests: true, showExternal: false });
+    expect(inward(routeFixture, hidden(routeFixture, toggles)).has("flow.walk")).toBe(false);
+    expect([...inward(routeFixture, all).get("flow.walk")!].sort()).toEqual(["flow.walk:finish", "flow.walk:left", "flow.walk:mid", "flow.walk:right"]);
+  });
+
+  it("packedIn은 안쪽 자식과 그 안에 든 노드에 파일 상자를 내고, 밖과 이어진 자식과 파일 상자에는 null을 낸다", () => {
+    expect(packedIn(repoFixture, off, "pkg.mod:parse")).toBe("pkg.mod");
+    expect(packedIn(repoFixture, off, "pkg.mod:Store.save")).toBeNull();
+    expect(packedIn(repoFixture, off, "pkg.mod")).toBeNull();
+    expect(packedIn(repoFixture, off, "app.text:pad")).toBeNull();
+    const nested: typeof repoFixture = {
+      nodes: [...repoFixture.nodes, made("pkg.mod:Cache", "class", "pkg.mod"), made("pkg.mod:Cache.get", "method", "pkg.mod:Cache")],
+      edges: repoFixture.edges,
+    };
+    expect(packedIn(nested, off, "pkg.mod:Cache.get")).toBe("pkg.mod");
   });
 
   it("접힌 상자의 배지는 파일 상자면 바로 아래 정의 수, 폴더면 안에 든 파일 수다", () => {

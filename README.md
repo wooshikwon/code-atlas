@@ -59,7 +59,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | 동작 | 결과 |
 |---|---|
 | 파일 상자나 파일트리의 파일 클릭 | 그 파일을 펼침 단계로 열어 파일 밖과 이어진 함수·클래스와 `내부 함수 k개` 손잡이를 그리고 파일 단위 흐름을 보여 준다. 정보 패널의 코드 뷰어에 그 파일의 전체 코드를 연다 |
-| 펼친 파일 상자의 손잡이(`내부 함수 k개`) 클릭 | 그 파일 안에서만 쓰이는 정의까지 모두 그린다. 손잡이가 `내부 함수 k개 접기`로 바뀌고 다시 누르면 펼침 단계로 돌아간다 |
+| 펼친 파일 상자의 손잡이(`내부 함수 k개`) 클릭 | 그 파일 안에서만 쓰이는 정의까지 모두 그린다. 손잡이가 `내부 함수 k개 접기`로 바뀌고 다시 누르면 펼침 단계로 돌아간다. 손잡이에 묶이는 정의를 고른 채 접으면 그 파일을 고른다 |
 | 함수·클래스 클릭 | 그 노드에서 나가는 흐름을 필터 창의 "흐름 단계"(1~3, 기본 2)만큼 펼친다. 정보 패널의 코드 뷰어에 그 노드가 든 파일의 전체 코드를 열어 정의의 첫 줄을 맨 위에 두고, 정의 밖의 줄은 회색으로 흐리게 그린다 |
 | 함수 더블클릭 | 그 함수를 호출하는 함수와 그 함수가 호출하는 함수만 보여 주는 함수 시점 뷰로 들어간다 |
 | 접힌 폴더 상자 클릭 | 폴더를 한 단계 펼친다. 안의 파일 상자와 하위 폴더 상자가 모두 폴더 영역 안에 나온다 |
@@ -92,7 +92,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 
 - **접힘**: 상자 하나로 그린다. 오른쪽 위 배지는 안에 든 것의 수다(파일 상자는 함수·클래스 수, 폴더 상자는 파일 수).
 - **펼침**: 파일을 고르거나 그 안의 함수·클래스를 고르면 그 파일 상자가 파일 밖과 선을 주고받는 정의와 진입점만 그리고, 나머지를 상자 안 왼쪽 아래의 `내부 함수 k개` 손잡이에 묶는다. 손잡이는 그린 정의가 놓인 영역 아래에 놓인다. 함수를 고르면 그 함수의 흐름에 든 안쪽 정의가 손잡이에서 나와 그려진다. 미사용 덮개를 켜면 손잡이에 든 미사용 후보도 그려진다. 안쪽 정의가 하나뿐이거나 파일 밖과 선을 주고받는 정의가 하나도 없으면 손잡이 없이 모두 그린다.
-- **전부**: 손잡이를 누르면 모든 정의를 그린다. 펼침 단계에서 보이던 정의의 열과 위아래 순서는 그대로다.
+- **전부**: 손잡이를 누르거나 손잡이에 묶이는 정의를 그래프·파일트리·검색·코드 뷰어·뒤로·앞으로 어느 쪽으로든 고르면 모든 정의를 그린다. 펼침 단계에서 보이던 정의의 열과 위아래 순서는 그대로다.
 
 대상을 확인하지 못한 호출의 수는 정보 패널 정보 구역의 `미확인 호출` 줄에 적는다. 레포를 연 처음 화면과 "화면 맞춤"을 누른 화면은 전체 맞춤 상태다. 전체 맞춤 상태에서는 폴더를 펼치거나 접을 때, 손잡이를 누를 때, 테스트 코드·외부 노드 토글과 덮개를 바꿀 때처럼 배치가 바뀔 때마다 화면을 다시 맞춘다. 처음 화면과 이 맞춤은 이름표가 읽히는 확대 비율(80%) 아래로 줄이지 않는다. 그래프 전체가 80%~100%에서 정보 패널이 가리지 않는 영역에 들어오면 전체를 맞추고, 들어오지 않으면 확대 비율을 80%에 두고 방금 펼치거나 접은 상자의 왼쪽 위(그런 상자가 없으면 그래프의 왼쪽 위)를 그 영역의 왼쪽 위에 놓는다. 나머지는 화면을 끌거나 미니맵으로 본다. "화면 맞춤" 버튼은 확대 비율을 줄여서라도 그래프 전체를 맞춘다. 화면을 끌거나 확대·축소하거나 미니맵으로 옮기거나 노드를 골라 화면이 그 노드로 옮겨지면 전체 맞춤 상태가 꺼진다. 꺼진 뒤에는 확대 비율을 그대로 두고, 펼치거나 접은 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 붙잡는다. 그 모서리가 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역 밖이면 영역 안으로 들어올 만큼만 화면을 옮긴다. 배치 계산이 배치 움직임 시간(0.3초)보다 길어지면 앞의 그래프를 그대로 둔 채 그래프 위쪽에 `배치 계산 중 · Esc로 취소`를 띄우고, `Esc`를 누르면 계산을 버리고 그 조작 전의 화면으로 돌아간다.
 
@@ -229,17 +229,18 @@ node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wi
 
 떠 있는 서버의 주소를 받고(기본 `http://127.0.0.1:8766`) 서버를 띄우지 않는다. 시나리오마다 새 브라우저 컨텍스트에서 조작하고 확인 항목을 `통과`·`실패`·`건너뜀`과 함께 한 줄씩 출력한다. 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 `건너뜀`이고 실패로 세지 않는다. 실패한 확인 항목이나 페이지 오류·콘솔 오류가 있으면 종료 코드 1로 끝난다.
 
-- **시나리오**: `open`, `file`, `function`, `body`, `panel`, `code-scope`, `hover`, `edge`, `badge-tip`, `tips`, `minimap`, `region`, `folder`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `split`, `summary-busy`, `summary-stale`, `explain`, `summary-ask`, `summary-ref`, `summary`와 경로·덮개 시나리오 `finder-open`, `finder-search`, `finder-path`, `finder-folder`, `finder-step`, `finder-none`, `finder-pin`, `finder-change`, `finder-ends`, `overlay-menu`, `reload`, `unused`, `finder-overlay`, `overlay-dark`, `cycles`, `cycles-change`, `cycles-pin`, 처음 화면·펼침·합류·분석 상태 시나리오 `start`, `arranging`, `node-hover`, `merge`, `merge-out`, `merge-hover`, `merge-click`, `merge-select`, `merge-pin`, `badge`, `pack-place`, `pack-file`, `pack-flow`, `pack-folder`, `pack-find`, `pack-pin`, `pack-overlay`, `pack-history`, `pack-toggle`, `lanes`, `numbers`, `overlap`, `line-folder`, `panel-head`, `progress`, `progress-failed`, `stale` 78개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
+- **시나리오**: `open`, `file`, `function`, `body`, `panel`, `code-scope`, `hover`, `edge`, `badge-tip`, `tips`, `minimap`, `region`, `folder`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `split`, `summary-busy`, `summary-stale`, `explain`, `summary-ask`, `summary-ref`, `summary`와 경로·덮개 시나리오 `finder-open`, `finder-search`, `finder-path`, `finder-folder`, `finder-step`, `finder-none`, `finder-pin`, `finder-change`, `finder-ends`, `overlay-menu`, `reload`, `unused`, `finder-overlay`, `overlay-dark`, `cycles`, `cycles-change`, `cycles-pin`, 처음 화면·펼침·합류·분석 상태 시나리오 `start`, `arranging`, `node-hover`, `merge`, `merge-out`, `merge-hover`, `merge-click`, `merge-select`, `merge-pin`, `badge`, `pack-place`, `pack-file`, `pack-flow`, `pack-folder`, `pack-find`, `pack-pin`, `pack-overlay`, `pack-history`, `pack-toggle`, `inner-pick`, `lanes`, `numbers`, `overlap`, `line-folder`, `panel-head`, `progress`, `progress-failed`, `stale` 79개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
 - **기대값**: 노드 이름은 sync-engine을 연 서버가 기준이고, 노드 수·선 수·줄 범위는 서버 응답에서 읽는다. 경로 수와 단계 수, 순환 묶음, 미사용 후보 수, 파일 상자의 펼침 단계에 그리는 정의, 줄기와 들어오는 합계는 `/api/graph`와 `/api/unused` 응답에서 화면과 같은 규칙으로 계산한다. 폴더 안의 파일 상자를 보는 시나리오는 소스 루트 바로 아래의 접힌 폴더를 먼저 펼친다.
 - **순환 시나리오**: `cycles`, `cycles-change`, `cycles-pin`은 `tests/fixtures/cycle_repo`를 연 서버의 주소를 `--cycle-url`로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다.
 - **`reload`, `stale`**: 대상 레포의 파일을 고쳤다가 되돌리므로 `tests/fixtures/sample_repo`를 임시 폴더로 복사해 연 서버의 주소를 `--reload-url`로 받았을 때만 돈다.
 - **`lanes`, `numbers`**: 폴더가 여러 겹인 레포를 연 서버의 주소를 `--wide-url`로 받으면 폴더 세 개를 펼친 화면도 본다.
 - **`line-folder`**: 파일을 고른 채 접힌 폴더 상자로 들어가는 흐린 선을 눌러 그 폴더로 가는지 본다. `--wide-url`을 받으면 그 레포에서 `mdp/settings/loader.py`를 고르고 `mdp/cli/`에서 `mdp/runtime/`으로 가는 선도 누른다.
 - **`tips`**: 요지 목록과 요약을 서버 대신 답해 노드·선·버튼·파일트리 행의 말풍선과 어두운 화면의 색을 보고, 화면에 `title` 속성이 남지 않았는지 센다. `--wide-url`을 받으면 그 레포에서 이름표가 잘린 파일 상자의 말풍선도 본다. 사진은 `hf2-tip-{이름}.png`로 남긴다.
+- **`inner-pick`**: 손잡이에 묶이는 함수를 코드 뷰어의 `Mod`+클릭, 파일트리, `Mod+P`로 골라 그 파일 상자가 전부 펼침 단계가 되는지 보고, 접는 손잡이를 누른 뒤의 선택과 뒤로·앞으로를 본다. `--wide-url`을 받으면 그 레포에서도 본다. 사진은 `hf3-inner-{이름}.png`로 남긴다.
 - **`panel-head`**: 이름 줄의 경로 표기, 정보 구역의 줄과 순서, 구역 접기와 유지, 선을 눌러 온 상태의 `연결`·`관계` 줄과 굵은 선, 뒤로·앞으로, 폴더 도착을 보고 `hf2-panel-{이름}.png`를 남긴다.
 - **`progress`, `progress-failed`**: `/api/status`의 응답을 바꿔 분석 중인 화면과 분석하지 못한 화면을 본다. 서버의 분석은 건드리지 않는다.
 - **`finder-pin`**: 경로 고정 중에 경로 밖 파일 상자, 접힌 폴더 상자, 그래프 바탕, `Esc`, 더블클릭, 파일트리, `Mod+P`, 코드 뷰어의 `Mod`+클릭, 요약의 정의 표기, `Alt+←`, 토글과 흐름 단계를 실제로 눌러 강조가 그대로인지 본다.
-- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 75개 시나리오는 요약을 만드는 요청을 서버로 보내지 않고, Claude Code CLI의 설치와 로그인 상태를 전제하지 않는다.
+- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 76개 시나리오는 요약을 만드는 요청을 서버로 보내지 않고, Claude Code CLI의 설치와 로그인 상태를 전제하지 않는다.
 - **`changes`**: 대상 레포에서 `git status`·`git diff`를 직접 읽어 화면과 비교하므로 서버와 같은 컴퓨터에서 돌린다. 수정한 `.py` 파일이 없는 레포에서는 확인 항목을 건너뛴다.
 - **스크린샷**: `~/data/code-atlas/screenshots/s2-{이름}.png`(1700×1000, 배율 2)에 남기고, 경로·덮개 시나리오는 `s3-{이름}.png`에, 처음 화면·펼침·합류·분석 상태 시나리오는 `s4-{이름}.png`에 남긴다. `toolbar`는 창 폭 1700·1440·1280·1160·980·900·720px마다 `s2-toolbar-{폭}.png`를, `finder-open`과 `overlay-menu`는 창 폭 1700·1280·980·720px마다 `s3-{이름}-{폭}.png`를 더 남긴다.
 - **브라우저**: Playwright가 받은 chromium과 다른 실행 파일을 쓰려면 환경 변수 `CHROMIUM_PATH`에 경로를 넣는다.

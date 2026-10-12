@@ -67,6 +67,100 @@ describe("togglePack", () => {
   });
 });
 
+describe("안쪽 자식 선택과 전부 펼침", () => {
+  const parse = "pkg.mod:parse";
+  const save = "pkg.mod:Store.save";
+
+  it("안쪽 자식을 고르면 그 파일 상자를 같은 이력 단계에서 전부 펼침에 넣고, 밖과 이어진 자식과 파일 상자를 고르면 넣지 않는다", () => {
+    store().select(save);
+    store().select("pkg.mod");
+    expect(store().unpacked).toEqual(new Set());
+    const at = store().history.index;
+    store().select(parse);
+    expect(store().unpacked).toEqual(new Set(["pkg.mod"]));
+    expect(store().history.index).toBe(at + 1);
+    expect(store().history.entries[at + 1]).toMatchObject({ selection: node(parse), unpacked: ["pkg.mod"] });
+  });
+
+  it("show, follow, enterFunction, 더블클릭으로 골라도 전부 펼침에 넣는다", () => {
+    const picks: ((state: AtlasStore) => void)[] = [
+      (state) => state.show(parse),
+      (state) => state.follow([`run|${save}|${parse}`], parse),
+      (state) => state.enterFunction(parse),
+      (state) => state.open(parse, state.history),
+    ];
+    for (const pick of picks) {
+      useAtlas.setState({ ...useAtlas.getInitialState(), graph: repoFixture }, true);
+      pick(store());
+      expect(store().selection).toEqual(node(parse));
+      expect(store().unpacked).toEqual(new Set(["pkg.mod"]));
+    }
+  });
+
+  it("안쪽 자식을 고른 뒤 다른 노드를 고르거나 선택을 풀어도 전부 펼침은 남고, 뒤로·앞으로가 단계마다의 집합을 되돌린다", () => {
+    store().select(save);
+    store().select(parse);
+    store().select(save);
+    expect(store().unpacked).toEqual(new Set(["pkg.mod"]));
+    store().back();
+    store().back();
+    expect(store().selection).toEqual(node(save));
+    expect(store().unpacked).toEqual(new Set());
+    store().forward();
+    expect(store().selection).toEqual(node(parse));
+    expect(store().unpacked).toEqual(new Set(["pkg.mod"]));
+  });
+
+  it("안쪽 자식을 고른 채 접는 손잡이를 누르면 그 파일 상자를 고르고, 밖과 이어진 자식을 고른 채면 선택을 그대로 둔다", () => {
+    store().select(parse);
+    const at = store().history.index;
+    store().togglePack("pkg.mod");
+    expect(store().unpacked).toEqual(new Set());
+    expect(store().selection).toEqual(node("pkg.mod"));
+    expect(store().history.index).toBe(at + 1);
+    store().back();
+    expect(store().selection).toEqual(node(parse));
+    expect(store().unpacked).toEqual(new Set(["pkg.mod"]));
+
+    store().select(save);
+    store().togglePack("pkg.mod");
+    expect(store().unpacked).toEqual(new Set());
+    expect(store().selection).toEqual(node(save));
+  });
+
+  it("선을 골라 초점만 안쪽 자식에 남은 채 접는 손잡이를 눌러도 그 파일 상자를 고른다", () => {
+    store().select(parse);
+    store().selectEdge(`run|${save}|${parse}`);
+    store().togglePack("pkg.mod");
+    expect(store().selection).toEqual(node("pkg.mod"));
+    expect(store().unpacked).toEqual(new Set());
+  });
+
+  it("토글을 바꿔 고른 노드가 안쪽 자식이 되면 전부 펼침에 넣고, 뒤로 가서 되돌린 단계도 지금 토글로 맞춘다", () => {
+    useAtlas.setState({ ...useAtlas.getInitialState(), graph: routeFixture }, true);
+    store().select("flow.walk:mid");
+    store().select("flow.walk:left");
+    expect(store().unpacked).toEqual(new Set());
+    store().toggleTests();
+    expect(store().unpacked).toEqual(new Set(["flow.walk"]));
+    store().back();
+    expect(store().selection).toEqual(node("flow.walk:mid"));
+    expect(store().unpacked).toEqual(new Set(["flow.walk"]));
+    store().toggleTests();
+    expect(store().unpacked).toEqual(new Set(["flow.walk"]));
+  });
+
+  it("경로 고정 중에는 경로 위의 안쪽 자식에 focus를 두어도 전부 펼침을 바꾸지 않는다", () => {
+    useAtlas.setState({ ...useAtlas.getInitialState(), graph: routeFixture, showTests: true }, true);
+    store().setEnd("from", "flow.walk:begin");
+    store().setEnd("to", "flow.walk:finish");
+    expect(pinned(store().finder)).toBe(true);
+    store().select("flow.walk:finish");
+    expect(store().finder.focus).toBe("flow.walk:finish");
+    expect(store().unpacked).toEqual(new Set());
+  });
+});
+
 describe("selectEdge", () => {
   it("직전에 초점을 둔 노드를 선 선택에 담고, 선을 이어 골라도 그 노드를 유지한다", () => {
     store().select(a);

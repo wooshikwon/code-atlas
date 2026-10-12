@@ -137,6 +137,40 @@ export function outward(graph: Graph, off: Set<string>): Map<string, Set<string>
 }
 
 /**
+ * 파일 상자마다 손잡이가 묶는 바로 아래 자식(안쪽 자식). 밖과 이어진 자식(`outward`)도 진입점도 아닌 자식이다. 밖과 이어진 자식이 하나도
+ * 없는 파일 상자는 가를 기준이 없고 안쪽 자식이 하나뿐인 파일 상자는 그 자식을 그리므로, 두 경우의 파일 상자는 담지 않는다.
+ * 선택과 덮개에 따라 달라지지 않게 밖과 이어진 자식과 진입점만으로 판정한다.
+ */
+export function inward(graph: Graph, off: Set<string>): Map<string, Set<string>> {
+  const linked = outward(graph, off);
+  const result = new Map<string, Set<string>>();
+  for (const node of graph.nodes) {
+    const outer = node.parent === null ? undefined : linked.get(node.parent);
+    if (outer !== undefined && !off.has(node.id) && !outer.has(node.id) && !node.entry) {
+      result.set(node.parent!, (result.get(node.parent!) ?? new Set()).add(node.id));
+    }
+  }
+  for (const [box, inner] of result) {
+    if (inner.size === 1) {
+      result.delete(box);
+    }
+  }
+  return result;
+}
+
+/** id가 안쪽 자식(`inward`)이거나 그 안에 든 노드면 그 자식이 든 파일 상자, 아니면 null이다. */
+export function packedIn(graph: Graph, off: Set<string>, id: string): string | null {
+  const nodes = nodeIndex(graph);
+  const inner = inward(graph, off);
+  for (let at = nodes.get(id); at !== undefined && at.parent !== null; at = nodes.get(at.parent)) {
+    if (inner.get(at.parent)?.has(at.id) === true) {
+      return at.parent;
+    }
+  }
+  return null;
+}
+
+/**
  * 상자의 단계와 무관하게 꺼내 그리는 노드와 그 조상. 고른 노드, 고른 노드의 흐름에 든 노드(나가는 흐름, 고른 노드로 선을 보내는 노드),
  * 강조하는 경로 위 노드다. 파일 상자나 폴더를 골랐으면 흐름의 단위가 파일이므로 고른 상자 안의 정의는 꺼내지 않는다.
  * 꺼낼 자식의 새 조건은 여기에 더한다.
@@ -195,7 +229,7 @@ export function shown(
       children.set(node.parent, [...(children.get(node.parent) ?? []), node]);
     }
   }
-  const linked = outward(graph, off);
+  const inside = inward(graph, off);
   const pulled = drawnOut(graph, flow, lit);
   /** 노드와 그 안에 든 노드 가운데 set에 든 수 */
   const countIn = (node: AtlasNode, set: Set<string>): number =>
@@ -225,12 +259,9 @@ export function shown(
     }
     const opened = flow?.file === box.id;
     const full = opened && unpacked.has(box.id);
-    const outer = linked.get(box.id);
-    /**
-     * 펼침 단계가 그리는 자식. 밖과 이어진 자식이 하나도 없는 파일 상자는 가를 기준이 없으므로 모든 자식을 그린다.
-     * 선택과 덮개에 따라 달라지지 않게 밖과 이어진 자식만으로 판정한다.
-     */
-    const staged = outer === undefined ? kids : kids.filter((kid) => outer.has(kid.id) || kid.entry || countIn(kid, marked) > 0);
+    const packed = inside.get(box.id);
+    /** 펼침 단계가 그리는 자식. 안쪽 자식이 아닌 자식과 marked가 표시하는 노드를 품은 자식이다. */
+    const staged = packed === undefined ? kids : kids.filter((kid) => !packed.has(kid.id) || countIn(kid, marked) > 0);
     let drawn = kids.filter((kid) => pulled.has(kid.id) || (opened && staged.includes(kid)));
     let inner = kids.filter((kid) => !drawn.includes(kid));
     if (opened && inner.length === 1) {
