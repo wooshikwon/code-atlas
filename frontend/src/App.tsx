@@ -80,7 +80,7 @@ function Toolbar() {
 }
 
 export function App() {
-  const main = useDefaultLayout({ id: "main", storage: localStorage });
+  const main = useDefaultLayout({ id: "main-v2", storage: localStorage });
   const opened = useAtlas((s) => s.repo !== null);
   const epoch = useAtlas((s) => s.epoch);
 
@@ -137,7 +137,7 @@ export function App() {
         defaultLayout={main.defaultLayout}
         onLayoutChanged={main.onLayoutChanged}
       >
-        <Panel id="explorer" defaultSize={260} minSize={160} maxSize="40">
+        <Panel id="explorer" defaultSize={208} minSize={160} maxSize="40">
           <FileTree />
         </Panel>
         <Separator className="separator" />
