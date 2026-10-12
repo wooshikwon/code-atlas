@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from .collect import RepoFiles, SourceFile
 from .model import Node, Site
+from .routes import declared, prefixes
 
 DATA_BASES = {"NamedTuple", "TypedDict", "Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "BaseModel"}
 METHOD_KINDS = {
@@ -402,6 +403,7 @@ class _Extractor:
         self.file_names = bound_names(tree)
         self.variables = module_variables(tree, file.module_id)
         self.module_vars = {v.name for v in self.variables}
+        self.prefixes = prefixes(tree)
         self.nodes: list[Node] = []
         self.defs: dict[str, DefInfo] = {}
         self.sites: list[Site] = []
@@ -683,6 +685,9 @@ class _Extractor:
         for dec in d.decorator_list:
             if isinstance(dec, ast.Call):
                 self._site("decorate", dec, dec.func)
+                route = declared(dec, self.prefixes)
+                if route is not None:
+                    self.sites[-1].route = {**route, "handler": d.name, "line": d.lineno}
                 if isinstance(dec.func, ast.Attribute):
                     self.expr(dec.func.value)
                 for a in dec.args:

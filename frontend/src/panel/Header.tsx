@@ -27,7 +27,7 @@ export function Header({ item, nodes }: HeaderProps) {
     const node = nodes.get(id);
     return node === undefined ? id : nameOf(nodes, node);
   };
-  let entry = false;
+  let entry: AtlasNode | null = null;
   let path = "";
   let name: string;
   let chips: (string | null)[];
@@ -41,7 +41,7 @@ export function Header({ item, nodes }: HeaderProps) {
     chips = ["파일"];
   } else if (item.type === "node") {
     const { node } = item;
-    entry = node.entry;
+    entry = node.entry ? node : null;
     ({ path, name } = pathOf(nodes, node));
     chips = [KIND_NAMES[node.kind], node.entry ? "진입점" : null, node.method_kind];
   } else if (item.type === "trunk") {
@@ -55,7 +55,7 @@ export function Header({ item, nodes }: HeaderProps) {
     <>
       <div className="info-panel-title">
         <b className="info-panel-name" data-full={path + name}>
-          {entry && <EntryMark />}
+          {entry !== null && <EntryMark node={entry} />}
           {path !== "" && (
             <span className="info-panel-path">
               <bdi>{path}</bdi>

@@ -28,6 +28,7 @@ export function node(id: string, kind: AtlasNode["kind"], parent: string | null,
     origin: null,
     value: null,
     external_value: false,
+    routes: [],
     ...extra,
   };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { variableFixture } from "./fixture";
-import { countedOf, EDGE_KIND_NAMES, GROUP_KINDS, KIND_NAMES, kilo, kindsOf, nameOf, relationOf, relationsOf, valueAside } from "./names";
+import { countedOf, EDGE_KIND_NAMES, GROUP_KINDS, KIND_NAMES, kilo, kindsOf, nameOf, relationOf, relationsOf, routeText, valueAside } from "./names";
 import { nodeIndex } from "./visible";
 
 describe("relationsOf", () => {
@@ -49,6 +49,13 @@ describe("변수 노드의 이름", () => {
   it("종류 이름은 변수이고 이름에 괄호를 붙이지 않는다", () => {
     expect(KIND_NAMES.variable).toBe("변수");
     expect(nameOf(nodes, nodes.get("conf:PRESETS")!)).toBe("PRESETS");
+  });
+
+  it("엔드포인트는 메서드와 주소를 적고 읽지 못한 주소는 주소 미확인으로 적는다", () => {
+    expect(routeText({ methods: ["GET"], path: "/api/graph", handler: "get_graph", line: 3 })).toBe("GET /api/graph");
+    expect(routeText({ methods: ["GET", "POST"], path: "/items", handler: "items", line: 3 })).toBe("GET·POST /items");
+    expect(routeText({ methods: ["WS"], path: null, handler: "ws", line: 3 })).toBe("WS (주소 미확인)");
+    expect(routeText({ methods: [], path: "/x", handler: "x", line: 3 })).toBe("/x");
   });
 
   it("값의 종류를 적고 원소 수가 있으면 함께 적는다. 변수 노드가 아니면 빈 글이다", () => {

@@ -8,7 +8,7 @@ import { faceId, layerOf, type Part } from "../layers";
 import { ASIDE_GAP, BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, labelOf, type Box, type RouteEnd } from "../layout";
 import { kilo, valueAside } from "../names";
 import { lifted } from "../scope";
-import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, sizeTip } from "../tips";
+import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, entryTip, globalTip, sizeTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
@@ -186,10 +186,10 @@ export function EntryIcon() {
   );
 }
 
-/** 이름 앞의 진입점 표지. 폭은 layout.ts의 ENTRY_MARK_WIDTH가 잡는다. 마우스를 올리면 말풍선이 뜨고 접근성 이름은 "진입점"이다. */
-export function EntryMark({ className }: { className?: string }) {
+/** 진입점 node의 이름 앞에 그리는 표지. 폭은 layout.ts의 ENTRY_MARK_WIDTH가 잡는다. 마우스를 올리면 말풍선이 뜨고 접근성 이름은 "진입점"이다. */
+export function EntryMark({ node, className }: { node: AtlasNode; className?: string }) {
   return (
-    <span className={className === undefined ? "entry-mark" : `entry-mark ${className}`} role="img" aria-label="진입점" data-tip={ENTRY_TIP}>
+    <span className={className === undefined ? "entry-mark" : `entry-mark ${className}`} role="img" aria-label="진입점" data-tip={entryTip(node)}>
       <EntryIcon />
     </span>
   );
@@ -213,7 +213,7 @@ export function Label({ data, bold = false }: { data: AtlasNodeData; bold?: bool
     <>
       <span className={bold ? "node-label node-label-bold" : "node-label"}>
         {data.cycle !== null && <CycleMark tip={cycleTip(data.node, data.cycle)} />}
-        {data.node.entry && <EntryMark className="node-entry" />}
+        {data.node.entry && <EntryMark node={data.node} className="node-entry" />}
         {labelOf(data.node)}
       </span>
       {data.route !== null && data.route !== "via" && (

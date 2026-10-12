@@ -254,6 +254,84 @@ async def test_script_naming_a_variable_marks_its_module_as_the_entry(sample_rep
     assert reopened.asked == []
 
 
+ROUTES = """\
+from fastapi import APIRouter, FastAPI
+
+from app.core import run_engine
+
+router = APIRouter(prefix="/jobs")
+
+
+@router.get("/{job_id}")
+def job(job_id: int):
+    return run_engine()
+
+
+def create_app() -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/run")
+    def run():
+        return run_engine()
+
+    @app.get("/health")
+    def health():
+        return "ok"
+
+    app.include_router(router)
+    return app
+"""
+
+
+def move_route(repo: Path) -> None:
+    swap(repo, "src/app/web.py", '"/health"', '"/alive"')
+
+
+def drop_route(repo: Path) -> None:
+    swap(repo, "src/app/web.py", '@router.get("/{job_id}")\n', "")
+
+
+def shadow_router(repo: Path) -> None:
+    swap(repo, "src/app/web.py", "from fastapi import APIRouter, FastAPI", "from fastapi import FastAPI\nfrom app.core import APIRouter")
+    core = repo / "src" / "app" / "core.py"
+    core.write_text(core.read_text() + "\n\nclass APIRouter:\n    def __init__(self, prefix):\n        pass\n\n    def get(self, path):\n        return lambda f: f\n")
+
+
+ROUTE_EDITS = {"주소": move_route, "데코레이터 삭제": drop_route, "라우터가 레포의 클래스가 됨": shadow_router}
+
+
+def routes(analyzed) -> dict[str, list[tuple[str, str | None, str]]]:
+    return {
+        n.id: [("·".join(r["methods"]), r["path"], r["handler"]) for r in n.routes]
+        for n in analyzed.analysis.nodes
+        if n.routes
+    }
+
+
+@pytest.mark.parametrize("edit", ROUTE_EDITS.values(), ids=ROUTE_EDITS.keys())
+@pytest.mark.asyncio
+async def test_routes_equal_a_full_analysis(sample_repo, tmp_path, edit):
+    (sample_repo / "src" / "app" / "web.py").write_text(ROUTES)
+    store = Cache(sample_repo, tmp_path / "cache")
+    async with started() as live, started() as reopened, started() as full:
+        first = await refresh(sample_repo, sys.executable, live, cache=store)
+        edit(sample_repo)
+        from_cache = await refresh(sample_repo, sys.executable, reopened, cache=store)
+        from_previous = await refresh(sample_repo, sys.executable, live, previous=first)
+        expected = await refresh(sample_repo, sys.executable, full)
+    store.close()
+    assert routes(first) == {
+        "app.web:job": [("GET", "/jobs/{job_id}", "job")],
+        "app.web:create_app": [("POST", "/run", "run"), ("GET", "/health", "health")],
+    }
+    assert {n.id for n in first.analysis.nodes if n.entry} == {"app.cli", "app.cli:main", "app.web:job", "app.web:create_app"}
+    assert not {"app.web:job", "app.web:create_app"} & set(first.unused.candidates)
+    assert routes(expected) != routes(first)
+    assert ("app.web:job" in routes(expected)) == (edit is move_route)
+    assert judged(from_cache) == judged(expected)
+    assert judged(from_previous) == judged(expected)
+
+
 @pytest.mark.asyncio
 async def test_variable_added_elsewhere_extracts_the_files_that_name_it_again(sample_repo):
     session = FakeSession()

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture, variableFixture } from "./fixture";
-import { busyTip, cycleTip, globalTip, nodeTip, packCount, packTip, sizeTip, valueTip } from "./tips";
+import { busyTip, cycleTip, entryTip, globalTip, nodeTip, packCount, packTip, sizeTip, valueTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
@@ -39,6 +39,13 @@ describe("배지 말풍선", () => {
     expect(valueTip(variables.get("conf:LIMIT")!)).toBe("int · 3");
     expect(valueTip(variables.get("tests.test_conf:SAMPLE")!)).toBe("tuple · 0개");
     expect(valueTip(fn)).toBe("");
+  });
+
+  it("진입점 표지는 엔드포인트가 있으면 그 수와 글을 적고 여섯 개부터 줄인다", () => {
+    const route = (path: string) => ({ methods: ["GET"], path, handler: "f", line: 1 });
+    expect(entryTip(fn)).toBe("진입점: 실행을 시작하는 코드");
+    expect(entryTip({ ...fn, routes: [route("/a")] })).toBe("진입점: API 엔드포인트 1개 · GET /a");
+    expect(entryTip({ ...fn, routes: ["/a", "/b", "/c", "/d", "/e", "/f", "/g"].map(route) })).toBe("진입점: API 엔드포인트 7개 · GET /a, GET /b, GET /c, GET /d, GET /e 외 2개");
   });
 
   it("도는 원은 수를 함께 적는다", () => {

@@ -28,7 +28,7 @@ from .model import Node, Site
 logger = logging.getLogger(__name__)
 
 ANALYZER_VERSION = 3  # extract·resolve·graph의 판정이 달라지는 변경마다 올린다
-SCHEMA_VERSION = 3  # 표와 `body`의 모양이 달라지는 변경마다 올린다
+SCHEMA_VERSION = 4  # 표와 `body`의 모양이 달라지는 변경마다 올린다
 CACHE_DIR = Path.home() / ".cache" / "code-atlas"
 LOCK_TIMEOUT = 5.0
 PROBE_TIMEOUT = 5.0

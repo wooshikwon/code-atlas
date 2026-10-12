@@ -26,6 +26,7 @@ function unit(id: string, extra: Partial<AtlasNode> = {}): AtlasNode {
     origin: null,
     value: null,
     external_value: false,
+    routes: [],
     ...extra,
   };
 }
