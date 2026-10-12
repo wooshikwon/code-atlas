@@ -9557,6 +9557,192 @@ async function folderHold(t, page) {
   }
 }
 
+/** 폴더 색을 만드는 비율(styles.css의 --folder, --folder-tint, --folder-line)과 layout.ts의 PAD, REGION_HEAD */
+const FOLDER = { edge: 0.5, tint: 0.1, line: 0.6, pad: 16, head: 28 };
+
+/** CSS 색 글(`rgb()`, `rgba()`, `color(srgb …)`)을 0~1의 [r, g, b, a]로 바꾼다. */
+function channels(text) {
+  const [body, alpha] = text.slice(text.indexOf("(") + 1, -1).split("/");
+  const values = body.replace("srgb", "").split(/[\s,]+/).filter((part) => part !== "").map(Number);
+  const scale = text.startsWith("rgb") ? 255 : 1;
+  return [values[0] / scale, values[1] / scale, values[2] / scale, alpha !== undefined ? Number(alpha) : (values[3] ?? 1)];
+}
+
+/** 색 a를 share만큼, 색 b를 나머지만큼 섞은 불투명한 색 */
+const blend = (a, b, share) => [0, 1, 2].map((i) => a[i] * share + b[i] * (1 - share)).concat(1);
+const sameColor = (a, b) => a.every((value, i) => near(value, b[i], 0.012));
+/** 파란 채널이 빨간 채널보다 높으면 폴더 색이 섞인 색이다. 무채색 토큰은 세 채널이 거의 같다. */
+const tinted = (color) => color[2] - color[0] > 0.02;
+const colorText = (color) => `rgb(${color.slice(0, 3).map((value) => Math.round(value * 255)).join(" ")}${color[3] === 1 ? "" : ` / ${color[3].toFixed(2)}`})`;
+
+/**
+ * 폴더 색. 접힌 폴더 상자의 채움과 테두리, 펼친 폴더 영역의 머리 줄 띠·폴더 경로·테두리가 --link를 섞은 색이고 파일 상자는 무채색인지,
+ * 영역의 바탕이 불투명해 겹쳐도 같은 색인지, 머리 줄 띠와 첫 자식 사이가 옆 안쪽 여백과 같은지를 밝은 화면과 어두운 화면에서 본다.
+ * 여러 겹으로 펼친 폴더는 `--wide-url`을 받았을 때 그 레포에서 본다.
+ */
+async function folderTint(t, page) {
+  /** 화면의 폴더 영역, 접힌 폴더 상자, 파일 상자에서 읽은 색 */
+  const seen = () =>
+    page.evaluate(() => {
+      const style = (selector) => {
+        const element = document.querySelector(selector);
+        return element === null ? null : getComputedStyle(element);
+      };
+      const [area, head, box, file] = [
+        style(".react-flow__node > .node-body.node-region"),
+        style(".react-flow__node > .node-face.node-region .node-region-head"),
+        style(".react-flow__node > .node-body.node-package"),
+        style(".react-flow__node > .node-body.node-module:not(.node-module-open)"),
+      ];
+      return {
+        area: area && { fill: area.backgroundColor, edge: area.borderTopColor },
+        head: head && { fill: head.backgroundColor, text: getComputedStyle(document.querySelector(".node-face.node-region .node-label")).color },
+        box: box && { fill: box.backgroundColor, edge: box.borderTopColor },
+        file: file && { fill: file.backgroundColor, edge: file.borderTopColor },
+        regions: [...document.querySelectorAll(".react-flow__node > .node-body.node-region")].map((element) => getComputedStyle(element).backgroundColor),
+      };
+    });
+  const token = async (name) => channels((await colorOf(page, name)).rgb);
+  const colors = async (name) => {
+    const [found, link, muted, surface, ink] = [await seen(), await token("--link"), await token("--muted"), await token("--surface"), await token("--ink")];
+    const edge = blend(link, muted, FOLDER.edge);
+    const [fill, band, text, line] = [channels(found.box.fill), channels(found.head.fill), channels(found.head.text), channels(found.area.edge)];
+    t.check(
+      `${name}: 접힌 폴더 상자의 채움이 화면 바탕에 --link를 ${FOLDER.tint * 100}% 섞은 색이고 테두리가 --link와 muted 잉크를 반씩 섞은 색이다`,
+      sameColor(fill, blend(link, surface, FOLDER.tint)) && sameColor(channels(found.box.edge), edge) && tinted(fill),
+      `채움 ${colorText(fill)}, 테두리 ${colorText(channels(found.box.edge))}`,
+    );
+    t.check(
+      `${name}: 펼친 폴더 영역의 머리 줄 띠가 --link ${FOLDER.tint * 100}%이고 폴더 경로가 접힌 폴더 상자의 테두리 색이며 영역의 테두리가 그 색의 ${FOLDER.line * 100}%다`,
+      sameColor(band, [...link.slice(0, 3), FOLDER.tint]) && sameColor(text, edge) && sameColor(line, [...edge.slice(0, 3), FOLDER.line]),
+      `띠 ${colorText(band)}, 폴더 경로 ${colorText(text)}, 테두리 ${colorText(line)}`,
+    );
+    const [paper, sheet] = [channels(found.file.fill), channels(found.area.fill)];
+    t.check(
+      `${name}: 파일 상자의 채움과 테두리, 폴더 영역의 바탕은 무채색이고 영역의 바탕은 불투명하다`,
+      !tinted(paper) && !tinted(channels(found.file.edge)) && !tinted(sheet) && sheet[3] === 1 && sameColor(sheet, blend(ink, surface, 0.02)),
+      `파일 상자 ${colorText(paper)}, 영역 바탕 ${colorText(sheet)}`,
+    );
+    return found;
+  };
+  /** 펼친 폴더 영역마다 머리 줄 아래, 왼쪽, 아래의 안쪽 여백. 자식은 그 폴더 바로 아래의 상자와 영역이다. */
+  const gaps = async (graph) => {
+    const at = await flowBoxes(page);
+    const heads = await page.evaluate(() => {
+      const zoom = Number(/scale\(([^)]+)\)/.exec(document.querySelector(".react-flow__viewport").style.transform)?.[1] ?? 1);
+      return Object.fromEntries(
+        [...document.querySelectorAll(".react-flow__node > .node-face.node-region")].map((element) => {
+          const [strip, around] = [element.querySelector(".node-region-head").getBoundingClientRect(), element.getBoundingClientRect()];
+          return [element.parentElement.dataset.id.replace(/#face$/, ""), (strip.bottom - around.top) / zoom];
+        }),
+      );
+    });
+    return Object.entries(heads).map(([id, head]) => {
+      const kids = graph.nodes.filter((n) => n.parent === id && at[n.id] !== undefined).map((n) => at[n.id]);
+      const around = at[id];
+      return {
+        id,
+        head,
+        top: Math.min(...kids.map((box) => box.y)) - around.y - head,
+        left: Math.min(...kids.map((box) => box.x)) - around.x,
+        bottom: around.y + around.height - Math.max(...kids.map((box) => box.y + box.height)),
+      };
+    });
+  };
+  /** 배치는 선이 지나는 통로만큼 자식을 더 띄울 수 있으므로 여백은 PAD 이상이고, 통로가 없는 영역에서는 머리 줄 아래와 왼쪽이 모두 PAD다. */
+  const spaced = (found) =>
+    found.length > 0 &&
+    found.every((gap) => near(gap.head, FOLDER.head) && gap.top >= FOLDER.pad - 1 && gap.left >= FOLDER.pad - 1) &&
+    found.some((gap) => near(gap.top, FOLDER.pad) && near(gap.left, FOLDER.pad));
+  const gapText = (found) => found.map((gap) => `${gap.id} 머리 줄 ${gap.head.toFixed(0)}, 아래 ${gap.top.toFixed(0)}, 왼쪽 ${gap.left.toFixed(0)}, 바닥 ${gap.bottom.toFixed(0)}`).join(" / ");
+  const dark = async () => {
+    await page.getByRole("button", { name: "어두운 화면" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(300);
+  };
+
+  // sync-engine: parser/를 펼친 채 tests/ 폴더 상자를 함께 그린다.
+  await load(page);
+  await setToggle(page, "테스트 코드", true);
+  await page.waitForSelector(".react-flow__node > .node-body.node-package", { timeout: 30_000 });
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.mouse.move(1, 1);
+  await rest(page);
+  const graph = await api("/api/graph");
+  const light = await colors("밝은 화면");
+  const space = await gaps(graph);
+  t.check(
+    `펼친 폴더 영역의 머리 줄 띠 아래 끝과 첫 자식 위 끝의 거리가 왼쪽 안쪽 여백 ${FOLDER.pad}px와 같다`,
+    spaced(space) && space.every((gap) => near(gap.top, gap.left)),
+    gapText(space),
+  );
+  // 커서를 올린 접힌 폴더 상자는 테두리만 본문 잉크가 되고 채움은 그대로다.
+  const folded = await page.evaluate(() => document.querySelector(".react-flow__node > .node-body.node-package").parentElement.dataset.id);
+  const label = await rectOf(page, `${face(folded)} .node-label`);
+  await page.mouse.move(label.x + label.width / 2, label.y + label.height / 2);
+  await page.waitForSelector(`${node(folded)}.pointed`, { timeout: 3_000 }).catch(() => {});
+  const over = await page.evaluate((selector) => {
+    const style = getComputedStyle(document.querySelector(`${selector} > .node-body`));
+    return { fill: style.backgroundColor, edge: style.borderTopColor };
+  }, node(folded));
+  t.check(
+    "접힌 폴더 상자에 커서를 올리면 테두리가 본문 잉크가 되고 채움은 폴더 색 그대로다",
+    sameColor(channels(over.edge), await token("--ink")) && over.fill === light.box.fill,
+    `테두리 ${over.edge}, 채움 ${over.fill}`,
+  );
+  await page.mouse.move(1, 1);
+  await page.screenshot({ path: join(OUT, "hf4-folder-se-light.png") });
+  await dark();
+  const night = await colors("어두운 화면");
+  t.check("어두운 화면의 폴더 색은 밝은 화면과 다른 값이다", night.box.fill !== light.box.fill && night.head.text !== light.head.text, `채움 ${light.box.fill} → ${night.box.fill}`);
+  await page.screenshot({ path: join(OUT, "hf4-folder-se-dark.png") });
+
+  if (wideUrl === null) {
+    t.skip("세 겹으로 펼친 폴더의 가장 안쪽 영역 바탕이 바깥 영역 바탕과 같다", "--wide-url을 주지 않았다");
+    return;
+  }
+  const wide = await api("/api/graph", wideUrl);
+  await page.goto(wideUrl);
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  /** 가장 깊은 폴더에서 소스 루트까지 올라가는 폴더 id. 바깥 폴더가 앞이다. */
+  const depth = (id) => (wide.nodes.find((n) => n.id === id).parent === null ? 1 : 1 + depth(wide.nodes.find((n) => n.id === id).parent));
+  const deepest = wide.nodes.filter((n) => n.kind === "package" && !n.test).sort((a, b) => depth(b.id) - depth(a.id) || a.id.localeCompare(b.id))[0];
+  const chain = [];
+  for (let at = deepest; at !== undefined; at = wide.nodes.find((n) => n.id === at.parent)) {
+    chain.unshift(at.id);
+  }
+  for (const id of chain) {
+    await openFolder(page, id);
+  }
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.mouse.move(1, 1);
+  await rest(page);
+  for (const theme of ["밝은 화면", "어두운 화면"]) {
+    if (theme === "어두운 화면") {
+      await dark();
+    }
+    const found = await colors(`${chain.join(" > ")}, ${theme}`);
+    t.check(
+      `${theme}: ${chain.length}겹으로 펼친 폴더의 가장 안쪽 영역 바탕이 바깥 영역 바탕과 같다`,
+      chain.length >= 3 && found.regions.length >= chain.length && new Set(found.regions).size === 1 && channels(found.regions[0])[3] === 1,
+      `영역 ${found.regions.length}개의 바탕 ${[...new Set(found.regions)].join(", ")}`,
+    );
+  }
+  // 영역의 바탕이 불투명하므로 안쪽 영역은 같은 층의 바깥 영역보다 뒤에 그려야 테두리가 가려지지 않는다.
+  const stacked = await page.evaluate((ids) => {
+    const wrapper = (id) => document.querySelector(`.react-flow__node[data-id="${id}"]`);
+    return ids.slice(1).map((id, i) => {
+      const [outer, inner] = [wrapper(ids[i]), wrapper(id)];
+      return getComputedStyle(outer).zIndex === getComputedStyle(inner).zIndex && (outer.compareDocumentPosition(inner) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+  }, chain);
+  t.check("안쪽 폴더 영역은 바깥 폴더 영역과 같은 층에서 바깥 영역보다 뒤에 그린다", stacked.length >= 2 && stacked.every(Boolean), stacked.join(", "));
+  const nested = await gaps(wide);
+  t.check(`여러 겹으로 펼친 폴더 영역 ${nested.length}개도 머리 줄 띠 아래의 여백이 ${FOLDER.pad}px 이상이고 선의 통로가 없는 영역은 왼쪽 안쪽 여백과 같다`, spaced(nested) && nested.length >= chain.length, gapText(nested));
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -9574,6 +9760,7 @@ const SCENARIOS = [
   ["minimap", minimap],
   ["region", region],
   ["folder", folder],
+  ["folder-tint", folderTint],
   ["folder-select", folderSelect],
   ["init-file", initFile],
   ["toolbar", toolbar],

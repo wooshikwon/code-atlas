@@ -6,6 +6,19 @@
   --panel-bg: color-mix(in srgb, var(--ink) 3%, var(--surface));
   /* 누를 수 있는 글자의 색. 추가 표시의 파랑에 본문 잉크를 섞어 코드 칩 바탕 위에서 대비 4.5:1을 넘긴다. */
   --link: color-mix(in srgb, var(--ink) 25%, var(--added));
+  /* 폴더의 색. 접힌 폴더 상자와 펼친 폴더 영역, 미니맵과 범례의 폴더만 쓴다. --link를 muted 잉크와 반씩 섞어 테두리와 머리 줄의 폴더 경로를 그린다. */
+  --folder: color-mix(in srgb, var(--link) 50%, var(--muted));
+  /* 폴더의 면(접힌 폴더 상자의 채움, 펼친 영역의 머리 줄 띠)에 섞는 --link의 비율과, 커서를 올린 머리 줄 띠의 비율 */
+  --folder-tint: 10%;
+  --folder-tint-hover: 18%;
+  /* 펼친 영역의 테두리. 접힌 폴더 상자의 테두리보다 옅게 --folder 60%로 그린다. */
+  --folder-line: color-mix(in srgb, var(--folder) 60%, transparent);
+  /* 머리 줄 띠와 영역의 바탕을 가르는 선. 영역의 테두리보다 옅게 --folder 35%로 그린다. */
+  --folder-rule: color-mix(in srgb, var(--folder) 35%, transparent);
+  /* 접힌 폴더 상자의 채움과 펼친 영역의 바탕. 둘 다 불투명해서 폴더가 겹쳐도 색이 쌓이지 않는다. 머리 줄 띠는 영역의 바탕 위에 그린다. */
+  --folder-face: color-mix(in srgb, var(--link) var(--folder-tint), var(--surface));
+  --folder-band: color-mix(in srgb, var(--link) var(--folder-tint), transparent);
+  --region-bg: color-mix(in srgb, var(--ink) 2%, var(--surface));
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
@@ -930,25 +943,26 @@ ul {
 }
 
 .node-body.node-package {
-  border: 1px solid var(--muted);
+  border: 1px solid var(--folder);
+  background: var(--folder-face);
 }
 
 .node-face.node-package {
   padding: 1px;
 }
 
-/* 펼친 폴더 영역. 바탕 요소가 옅은 바탕과 테두리를 그리고 마우스를 받지 않는다. 글자 요소는 머리 줄에 폴더 경로를 적고
+/* 펼친 폴더 영역. 바탕 요소가 무채색 바탕과 폴더 색 테두리를 그리고 마우스를 받지 않는다. 글자 요소는 머리 줄의 띠에 폴더 경로를 적고
    펼친 파일 상자의 머리 줄처럼 머리 줄 전체에서 클릭을 받는다. 머리 줄의 높이는 layout.ts의 REGION_HEAD와 같다. */
 .node-region {
   width: 100%;
   height: 100%;
   border-radius: 8px;
-  color: var(--muted);
+  color: var(--folder);
 }
 
 .node-body.node-region {
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--ink) 2%, transparent);
+  border: 1px solid var(--folder-line);
+  background: var(--region-bg);
 }
 
 .node-face.node-region {
@@ -962,10 +976,12 @@ ul {
   line-height: 27px;
   white-space: nowrap;
   cursor: pointer;
+  background: var(--folder-band);
+  box-shadow: inset 0 -1px 0 var(--folder-rule);
 }
 
 .node-region-head:hover {
-  background: var(--hover-bg);
+  background: color-mix(in srgb, var(--link) var(--folder-tint-hover), transparent);
 }
 
 .node-module {
@@ -1666,8 +1682,8 @@ ul {
 }
 
 .react-flow__minimap-node.minimap-package.minimap-open {
-  fill: color-mix(in srgb, var(--ink) 3%, var(--surface));
-  stroke: var(--line);
+  fill: var(--region-bg);
+  stroke: var(--folder-line);
 }
 
 .react-flow__minimap-node.minimap-open.minimap-selected {
@@ -1722,7 +1738,8 @@ ul {
 }
 
 .legend-package {
-  fill: none;
+  fill: var(--folder-face);
+  stroke: var(--folder);
   stroke-width: 1;
 }
 
@@ -2409,8 +2426,12 @@ ol.summary-list {
   cursor: pointer;
 }
 
-.graph[data-pinned] :not([data-route]) > :is(.node-module-head, .node-region-head):hover {
+.graph[data-pinned] :not([data-route]) > .node-module-head:hover {
   background: none;
+}
+
+.graph[data-pinned] :not([data-route]) > .node-region-head:hover {
+  background: var(--folder-band);
 }
 
 /* 분석 덮개 */
@@ -2573,6 +2594,10 @@ ol.summary-list {
 .graph[data-overlay="cycles"] .node-body:is(.node-module, .node-dataclass, .node-package)[data-change] {
   border-left-color: var(--muted);
   box-shadow: none;
+}
+
+.graph[data-overlay="cycles"] .node-body.node-package[data-change] {
+  border-left-color: var(--folder);
 }
 
 .graph[data-overlay="cycles"] .node-body:is(.node-function, .node-call)[data-change] .node-circle {
