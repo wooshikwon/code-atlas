@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import threading
 import time
@@ -23,7 +24,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from . import compare, git
@@ -380,7 +381,8 @@ def create_app(
     def get_history(skip: int = Query(0, ge=0), limit: int = Query(HISTORY_PAGE, ge=1, le=1000)) -> dict:
         """커밋 그래프의 `skip`번째 줄부터 `limit`줄. git 저장소가 아니면 `git`이 거짓이고 목록이 비어 있다."""
         root = app.state.analyzed.files.root
-        if git.status(root) is None:
+        states = git.status(root)
+        if states is None:
             return {"git": False, "head": None, "branch": None, "default": None, "dirty": False, "commits": [], "more": False}
         head = git.head(root)
         found = git.commits(root, skip, limit + 1)
@@ -389,7 +391,7 @@ def create_app(
             "head": head,
             "branch": git.branch(root),
             "default": git.default_branch(root),
-            "dirty": head is not None and bool(git.changed(root, head, git.WORKTREE)),
+            "dirty": head is not None and bool(collected(root, [path for path in states if path.endswith(".py")])),
             "commits": [asdict(commit) for commit in found[:limit]],
             "more": len(found) > limit,
         }
@@ -425,15 +427,15 @@ def create_app(
         files: list[git.Changed],
         hunks: dict[str, list[git.Hunk]],
         skip: set[str],
-    ) -> dict:
-        """두 시점의 분석 결과를 견줘 `POST /api/compare`의 응답을 만든다. 파일트리에는 삭제된 파일과 폴더를 더한다."""
+    ) -> bytes:
+        """두 시점의 분석 결과를 견줘 `POST /api/compare`의 응답 본문(JSON)을 만든다. 파일트리에는 삭제된 파일과 폴더를 더한다."""
         result = compare.compare(
             before.analysis, _facts(before), before.texts, after.analysis, _facts(after), after.texts, files, hunks, skip
         )
         listed = {f.path for f in after.files.files}
         gone = {f["path"] for f in result.files if f["status"] == git.DELETED} - listed
         files_with_gone = replace(after.files, files=[*after.files.files, *(f for f in before.files.files if f.path in gone)])
-        return {
+        body = {
             "base": base,
             "target": target,
             "revision": revision,
@@ -444,8 +446,9 @@ def create_app(
             "files": [{**f, "test": is_test_path(f["path"])} for f in result.files],
             "unused": to_dict(after.unused),
         }
+        return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
 
-    async def compared(base: str, target: str) -> dict:
+    async def compared(base: str, target: str) -> bytes:
         """두 시점을 분석하고 견준 응답. 대상이 커밋이면 대상을 먼저 분석하고 기준을 그 결과에서 증분으로 분석한다.
 
         대상이 작업 중인 상태면 돌고 있는 분석이 끝나기를 기다리고, 분석한 뒤 바뀐 파일이 있으면 다시 분석해 그 결과를
@@ -489,7 +492,7 @@ def create_app(
             report(None)
 
     @app.post("/api/compare", dependencies=ready)
-    async def post_compare(ends: Ends) -> dict:
+    async def post_compare(ends: Ends) -> Response:
         """기준과 대상을 견준 그래프와 변경 내용. 두 시점의 분석이 끝난 뒤에 응답한다.
 
         같은 두 시점의 요청이 분석 중에 다시 오면 그 분석이 끝나기를 함께 기다리고, 다른 두 시점의 요청이 오면 앞의
@@ -508,7 +511,7 @@ def create_app(
             task.add_done_callback(lambda task: task.cancelled() or task.exception())
             state.comparing = current = ((base, target), task)
         try:
-            return await asyncio.shield(current[1])
+            return Response(await asyncio.shield(current[1]), media_type="application/json")
         except asyncio.CancelledError:
             if not current[1].cancelled():
                 raise
