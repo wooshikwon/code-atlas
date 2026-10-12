@@ -798,15 +798,16 @@ ul {
   height: 100%;
 }
 
-/* 코드 뷰어. 첫 줄 위에 코드 한 줄 높이(--code-top)를 비운다. */
+/* 코드 뷰어. 첫 줄 위에 코드 한 줄 높이(--code-top)를 비우고, 줄 번호를 정보 패널의 구역 본문과 같은 안쪽 여백(--code-left)에서 시작한다. */
 
 .code {
+  --code-left: var(--space-5);
   position: relative;
   flex: 1;
   box-sizing: border-box;
   min-height: 0;
   padding-top: var(--code-top, 0px);
-  padding-left: var(--space-2);
+  padding-left: var(--code-left);
   border-top: 1px solid var(--line);
   background: var(--surface);
   isolation: isolate;
@@ -826,6 +827,7 @@ ul {
   background: var(--panel-bg);
   font-size: var(--text-sm);
   margin-top: var(--code-top, 0px);
+  margin-left: var(--code-left);
   white-space: nowrap;
   pointer-events: none;
   transform: translate(8px, -100%);
@@ -844,7 +846,7 @@ ul {
 .code-notes {
   position: absolute;
   z-index: var(--z-menu);
-  inset: var(--code-top, 0px) 0 0;
+  inset: var(--code-top, 0px) 0 0 var(--code-left);
   pointer-events: none;
 }
 
