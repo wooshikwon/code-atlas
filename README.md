@@ -293,6 +293,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | `frontend/src-tauri/` | 앱 껍데기. `backend.rs`가 백엔드 프로세스의 수명을, `menu.rs`가 앱 메뉴를, `main.rs`가 창과 화면이 부르는 명령을 맡는다. `tauri.bundle.json`은 묶을 Python을 앱에 넣는 설정이고 빌드 명령만 쓴다 |
 | `frontend/scripts/shots.mjs` | 화면 시나리오 스크립트. 떠 있는 서버에서 정해진 조작을 하고 확인 항목의 통과 여부와 스크린샷을 남긴다 |
 | `frontend/scripts/perf.mjs` | 화면 측정 스크립트. 떠 있는 서버의 화면에서 처음 배치, 폴더 펼침, 노드 선택의 시간과 화면 이동·확대의 프레임 간격을 JSON으로 낸다 |
+| `frontend/scripts/frames.mjs`, `frames.js` | 프레임 시간 측정 스크립트. 같은 조작 시나리오(`frames.js`)를 Chromium과 앱 창(WKWebView)에서 돌려 폴더를 펼칠 때마다의 시간과 끌어 옮기기·확대·커서 올리기의 프레임 간격, 화면에 있는 요소의 수를 JSON으로 낸다 |
 | `scripts/build_app.py` | 앱을 만드는 빌드 명령. 빌드 전 점검, 묶을 Python 받기와 구성, 화면과 앱 껍데기 빌드, 임시 서명, 판정, `/Applications`에 놓기를 맡는다 |
 | `scripts/requirements-app.txt` | 앱에 묶는 Python 의존성의 판과 wheel 해시 |
 | `scripts/measure_analysis.py` | 레포를 분석하며 단계별 시간, 정의 요청 수, 응답 없음 수를 JSONL로 내고 `--compare`로 다른 분석 결과와 노드·선·지점 판정을 견준다 |
@@ -369,14 +370,17 @@ node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wi
 - **브라우저**: Playwright가 받은 chromium과 다른 실행 파일을 쓰려면 환경 변수 `CHROMIUM_PATH`에 경로를 넣는다.
 - **캐시를 쓰지 않는 실행**: 시나리오용 서버가 `~/.cache/code-atlas`에 분석 캐시를 남기지 않게 하려면 서버를 `HOME`을 임시 폴더로 바꿔 띄운다.
 
-성능은 세 스크립트로 잰다. 모두 대상 레포에 파일을 쓰지 않는다.
+성능은 네 스크립트로 잰다. 모두 대상 레포에 파일을 쓰지 않는다.
 
 ```bash
 .venv/bin/python scripts/measure_analysis.py <레포> [--python PATH] [--runs 3] [--no-cache] [--cache-dir 폴더] [--dump 결과.json] [--compare 결과.json]
 .venv/bin/python scripts/measure_compare.py <레포> <기준> [대상] [--python PATH] [--runs 3] [--cold] [--cache-dir 폴더]
 cd frontend && node scripts/perf.mjs <주소> [--expand 폴더id] [--pick 검색어] [--compare 기준,대상] [--shot 경로 접두어]
+cd frontend && node scripts/frames.mjs chromium <주소> --plan <plan.json> [--view 폭x높이] [--headless]
+cd frontend && node scripts/frames.mjs app <Atlas.app> --plan <plan.json> --home <폴더> [--path PATH]
 ```
 
 - **`measure_analysis.py`**: 실행마다 분석을 한 번 돌려 전체 시간과 단계별 시간(파일 수집, 구조 추출, 환경 지문, 언어 서버 기동과 준비 확인, 정의 요청, 그래프 조립, 미사용 판정, 캐시 쓰기), 정의 요청 수, 응답 없음 수를 한 줄에 실행 하나씩 JSONL로 출력한다. `--cache-dir`은 분석 캐시를 둘 폴더이고, `--dump`는 마지막 실행의 분석 결과를 `code-atlas analyze --json`과 같은 JSON으로 쓰며, `--compare`는 그 JSON과 노드·선·지점별 판정을 견줘 다른 수를 적는다.
 - **`measure_compare.py`**: 실행마다 앱을 새로 만들어(포트를 열지 않는다) `/api/history`, `/api/compare/stat`, `POST /api/compare`의 시간과 과거 시점의 분석이 띄운 언어 서버의 수, 정의 요청 수, 응답 없음 수, 바뀐 파일·노드·선의 수를 한 줄에 실행 하나씩 출력한다. 분석 캐시는 임시 폴더에 복사해 쓴다. `--cold`는 실행마다 복사본에서 두 시점의 판정을 지워 처음 비교를 재고, 없으면 캐시에 있는 시점의 비교를 잰다.
 - **`perf.mjs`**: 떠 있는 서버의 화면을 열어 첫 상자가 그려지기까지의 시간, 처음 화면·`--expand`로 펼친 화면·`--pick`으로 고른 화면마다 조작부터 화면이 멈추기까지의 시간, ELK worker의 응답 시간, 느린 배치 표시가 떴는지, 보이는 상자·선·줄기의 수, 화면을 끌어 옮길 때와 휠로 확대할 때의 프레임 간격(p50·p95, fps), `--pick`으로 고른 노드로 가는 화면 이동의 프레임 간격과 걸린 시간을 JSON 한 줄로 출력한다. `--compare`를 주면 비교 창이 뜨기까지와 줄 수가 적히기까지의 시간, 비교 응답이 온 뒤 배치가 멈추기까지의 시간, 비교가 켜진 화면의 프레임 간격을 함께 낸다.
+- **`frames.mjs`**: `frames.js`의 시나리오를 Chromium이나 `--features probe`로 빌드한 앱의 창에서 돌려 단계마다 JSON 한 줄을 출력한다. plan.json에 펼칠 폴더(`folders`), 열 파일(`files`), 요인을 하나씩 끄는 실험(`experiments`)을 적는다. 폴더를 펼칠 때마다 ELK 응답 시간, 배치를 DOM에 반영하는 시간, 배치 움직임의 프레임 간격, 50ms를 넘긴 프레임을 적고, 펼친 화면마다 가만히 있을 때·끌어 옮길 때·휠로 확대할 때·커서를 올릴 때의 프레임 간격(p50·p95·가장 긴 프레임)과 노드·선·경로의 수, 그래프 영역 밖에 그려진 수를 적는다. 프레임 간격은 화면의 주사율이 하한이고, 앱 창이 가려지거나 화면이 잠기면 WKWebView가 프레임을 멈추므로 단계마다 적히는 `visible`·`focused`·`idle`이 정상인 실행만 쓴다.
