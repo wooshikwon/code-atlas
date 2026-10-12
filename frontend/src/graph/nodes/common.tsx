@@ -221,18 +221,27 @@ export function Mark({ change }: { change: Change | null }) {
 }
 
 /**
- * 감싼 모양의 오른쪽 위 모서리에 접힌 상자 안에 든 것의 수를, 오른쪽 아래 모서리에 모듈 변수 변경을, 왼쪽 위 모서리에 LLM 요약을
- * 만드는 중인 도는 원을 단다. 글자 요소에만 그린다. 배지의 바깥쪽 끝은 모양의 그쪽 끝에서 `BADGE_OVERHANG`만큼 나간다.
+ * 감싼 모양의 오른쪽 위 모서리에 접힌 상자 안에 든 것의 수를, 오른쪽 아래 모서리에 모듈 변수 변경을 달고, LLM 요약을 만드는 중이면
+ * 도는 표시를 그린다. 도는 표시는 감싼 모양이 원(`circle`)이면 그 원의 테두리 위에서 도는 고리이고, 아니면 왼쪽 위 모서리의
+ * 도는 원이다. 글자 요소에만 그린다. 배지의 바깥쪽 끝은 모양의 그쪽 끝에서 `BADGE_OVERHANG`만큼 나간다.
  * 배지마다 뜻을 적은 말풍선 글(`tips.ts`)을 `data-tip`에 담는다.
  */
-export function Badges({ data }: { data: AtlasNodeData }) {
+export function Badges({ data, circle = false }: { data: AtlasNodeData; circle?: boolean }) {
   if (data.part === "body") {
     return null;
   }
   const style = { "--overhang": `${BADGE_OVERHANG}px` } as CSSProperties;
   return (
     <>
-      {data.busy > 0 && <span className="badge badge-busy" style={style} role="img" aria-label="요약을 만드는 중" data-tip={busyTip(data.node, data.busy)} />}
+      {data.busy > 0 && (
+        <span
+          className={circle ? "busy-ring" : "badge badge-busy"}
+          style={circle ? undefined : style}
+          role="img"
+          aria-label="요약을 만드는 중"
+          data-tip={busyTip(data.node, data.busy)}
+        />
+      )}
       {data.inside > 0 && (
         <span className="badge badge-inside" style={style} data-tip={insideTip(data.node, data.inside)}>
           {data.inside}
@@ -247,11 +256,11 @@ export function Badges({ data }: { data: AtlasNodeData }) {
   );
 }
 
-/** 함수·메서드의 지름 16px 원. 바탕 요소가 테두리와 채움을, 글자 요소가 배지와 선택 고리를 그린다. */
+/** 함수·메서드의 지름 16px 원. 바탕 요소가 테두리와 채움을, 글자 요소가 배지와 선택 고리, 테두리 위에서 도는 고리를 그린다. */
 export function Circle({ data }: { data: AtlasNodeData }) {
   return (
     <span className="node-circle" style={{ marginRight: CIRCLE_GAP }}>
-      <Badges data={data} />
+      <Badges data={data} circle />
     </span>
   );
 }

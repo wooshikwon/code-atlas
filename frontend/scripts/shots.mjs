@@ -2560,6 +2560,44 @@ const busyAt = (page, id, shape) =>
 const atCorner = (at) => at !== null && near(at.left, 6, 0.5) && near(at.above, 7, 0.5) && !at.covers;
 const cornerText = (at) => (at === null ? "도는 원 없음" : `왼쪽으로 ${at.left.toFixed(1)}px, 위로 ${at.above.toFixed(1)}px${at.covers ? ", 이름표와 겹침" : ""}`);
 
+/** hotfix 4의 사진. `hf4-{이름}.png`로 남긴다. */
+const HF4 = (name) => join(OUT, `hf4-${name}.png`);
+/** LLM 요약을 만드는 중인 노드의 도는 표시. 원이 있는 노드는 원 위의 고리, 상자는 왼쪽 위 모서리의 도는 원이다. */
+const BUSY = ".badge-busy, .busy-ring";
+
+/**
+ * id 노드의 원 위에서 도는 고리. 원과 같은 사각형인지(돌면서 화면 사각형이 바뀌므로 돌리기 전의 위치로 잰다), 도는지, 지금 돈 각도,
+ * 진한 구간과 나머지 테두리의 색, 그 노드가 따로 단 도는 원의 수, 접근성 이름과 말풍선 글. 고리가 없으면 null이다.
+ */
+const ringOf = (page, id) =>
+  page.evaluate((faceSel) => {
+    const ring = document.querySelector(`${faceSel} .node-circle > .busy-ring`);
+    if (ring === null) {
+      return null;
+    }
+    const circle = ring.parentElement;
+    const style = getComputedStyle(ring);
+    const [cos, sin] = style.transform === "none" ? [1, 0] : style.transform.slice(7).split(",").map(Number);
+    return {
+      fits: ring.offsetLeft === 0 && ring.offsetTop === 0 && ring.offsetWidth === circle.offsetWidth && ring.offsetHeight === circle.offsetHeight,
+      size: circle.offsetWidth,
+      animated: style.animationName !== "none",
+      angle: Math.round((Math.atan2(sin, cos) * 180) / Math.PI),
+      arc: style.borderTopColor,
+      rest: style.borderRightColor,
+      corner: document.querySelectorAll(`${faceSel} .badge-busy`).length,
+      label: ring.getAttribute("aria-label"),
+      tip: ring.dataset.tip ?? "",
+      title: ring.hasAttribute("title"),
+      opacity: Number(getComputedStyle(ring.closest(".react-flow__node")).opacity),
+    };
+  }, face(id));
+/** id 노드의 원과 이름표 둘레만 잘라 찍는다. */
+const shootRing = async (page, id, path) => {
+  const rect = await rectOf(page, `${face(id)} .node-circle`);
+  await page.screenshot({ path, clip: { x: rect.x - 40, y: rect.y - 24, width: 260, height: 64 }, scale: "device" });
+};
+
 async function summaryBusy(t, page) {
   // 폴더 안에 있는 파일의 함수 하나와 미확인 호출이 있는 파일의 함수 하나를 고른다.
   const graph = await api("/api/graph");
@@ -2576,27 +2614,109 @@ async function summaryBusy(t, page) {
   const held = await holdSummaryPosts(page);
   const aborted = summaryAborts(page);
   const busy = (id) => count(page, `${face(id)} .badge-busy`);
+  const ringText = (ring) => (ring === null ? "고리 없음" : `원 ${ring.size}px, 고리가 원과 겹침 ${ring.fits}, 도는 중 ${ring.animated}, 따로 그린 도는 원 ${ring.corner}개, 진한 구간 ${ring.arc}, 나머지 ${ring.rest}`);
   await load(page);
   await pickInTree(page, target);
   await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 });
   await page.click(".info-panel-summary .summary-make");
-  await page.waitForSelector(`${face(target.id)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
-  const spinning = await busyAt(page, target.id, `${face(target.id)} .node-circle`);
+  await page.waitForSelector(`${face(target.id)} .busy-ring`, { timeout: 5_000 }).catch(() => {});
+  await settle(page);
+  const spinning = await ringOf(page, target.id);
+  const ink = await page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement("span"));
+    probe.style.color = "var(--ink)";
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
   t.check(
-    '"요약 생성"을 누르면 그 함수의 원 왼쪽 위 모서리에 도는 원이 붙는다',
-    held.length === 1 && (await busy(target.id)) === 1 && spinning?.animated === true && atCorner(spinning),
-    `POST ${held.length}번, ${cornerText(spinning)}`,
+    '"요약 생성"을 누르면 그 함수의 지름 16px 원 위에서 고리가 돌고, 왼쪽 위 모서리에 따로 그린 도는 원은 없다',
+    held.length === 1 && spinning !== null && spinning.fits && spinning.size === 16 && spinning.animated && spinning.corner === 0 && (await count(page, BUSY)) === 1,
+    `POST ${held.length}번, ${ringText(spinning)}`,
   );
+  t.check(
+    "고리는 한 구간만 본문 잉크이고 나머지는 원의 테두리가 비치는 반투명 색이다",
+    spinning !== null && spinning.arc === ink && spinning.rest !== ink && /rgba|\/ 0\.|color\(srgb .* \/ /.test(spinning.rest),
+    ringText(spinning),
+  );
+  t.check(
+    '고리는 접근성 이름 "요약을 만드는 중"과 말풍선 글을 담고 title 속성이 없다',
+    spinning?.label === "요약을 만드는 중" && spinning.tip === "LLM 요약을 만드는 중 1개" && !spinning.title,
+    `${spinning?.label} / ${spinning?.tip}`,
+  );
+  await shootRing(page, target.id, HF4("spin-light"));
+  await page.waitForTimeout(240);
+  const later = await ringOf(page, target.id);
+  await shootRing(page, target.id, HF4("spin-light-2"));
+  t.check("0.24초 뒤에는 진한 구간이 다른 각도에 있다", later !== null && later.angle !== spinning?.angle, `${spinning?.angle}° → ${later?.angle}°`);
   await t.shot();
 
-  // 함수 시점 뷰에서도 그 함수의 원이 같은 곳에 도는 원을 단다.
-  await clickNode(page, target.id, 2);
-  await page.waitForSelector(`${face(target.id)} .node-call .badge-busy`, { timeout: 30_000 }).catch(() => {});
+  // 원 위에 커서를 올리면 고리의 말풍선이 뜬다.
+  const circle = await rectOf(page, `${face(target.id)} .node-circle`);
+  await page.mouse.move(5, 5);
+  await page.mouse.move(circle.x + circle.width / 2 - 1, circle.y + circle.height / 2);
+  await page.mouse.move(circle.x + circle.width / 2, circle.y + circle.height / 2);
+  await page.waitForTimeout(500);
+  const ringTip = await tipText(page);
+  await shootRing(page, target.id, HF4("spin-hover"));
+  t.check("도는 원에 커서를 올리면 고리의 말풍선이 뜬다", ringTip === "LLM 요약을 만드는 중 1개", `"${ringTip}"`);
+  await page.mouse.move(5, 5);
+
+  // 어두운 화면
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  const darkRing = await ringOf(page, target.id);
+  t.check("어두운 화면의 고리는 진한 구간이 밝은 본문 잉크다", darkRing !== null && darkRing.arc !== spinning?.arc && darkRing.corner === 0, ringText(darkRing));
+  await shootRing(page, target.id, HF4("spin-dark"));
+  await page.getByRole("button", { name: "밝은 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme !== "dark");
+
+  // 움직임을 줄이는 설정에서는 돌지 않고 진한 구간만 보인다.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const still = await ringOf(page, target.id);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  t.check("움직임을 줄이는 설정에서는 고리가 돌지 않고 진한 구간이 위쪽에 남는다", still !== null && !still.animated && still.angle === 0 && still.arc === ink, ringText(still));
+
+  // 같은 파일의 다른 함수를 골라 요약을 만드는 중인 함수가 흐려져도 고리가 돈다.
+  const siblings = functions.filter((n) => ownerOf(n).id === target.owner && n.id !== target.id).slice(0, 8);
+  let dim = null;
+  for (const sibling of siblings) {
+    await pickInTree(page, { id: sibling.id, owner: target.owner });
+    await settle(page);
+    const ring = await ringOf(page, target.id);
+    if (ring !== null && near(ring.opacity, DIM, 0.01)) {
+      dim = ring;
+      break;
+    }
+  }
+  if (dim === null) {
+    t.skip("흐린 함수 노드의 원 위에서도 고리가 돈다", `${target.owner}에서 고른 함수의 흐름 밖에 놓이는 경우를 찾지 못했다`);
+  } else {
+    await shootRing(page, target.id, HF4("spin-dim"));
+    const label = await rectOf(page, `${face(target.id)} .node-label`);
+    await page.mouse.move(label.x + label.width / 2 - 1, label.y + label.height / 2);
+    await page.mouse.move(label.x + label.width / 2, label.y + label.height / 2);
+    await page.waitForTimeout(300);
+    const lifted = await ringOf(page, target.id);
+    await shootRing(page, target.id, HF4("spin-dim-hover"));
+    await page.mouse.move(5, 5);
+    t.check(
+      `흐린 함수 노드(불투명도 ${DIM})의 원 위에서도 고리가 돌고, 커서를 올려 진하기가 한 단계 오른 동안에도 돈다`,
+      dim.animated && dim.fits && dim.corner === 0 && lifted !== null && lifted.animated && lifted.opacity > DIM,
+      `불투명도 ${dim.opacity} → 커서를 올리면 ${lifted?.opacity}`,
+    );
+  }
+  await pickInTree(page, target);
   await settle(page);
-  const called = await busyAt(page, target.id, `${face(target.id)} .node-circle`);
-  t.check("함수 시점 뷰에서도 그 함수의 원 왼쪽 위 모서리에 도는 원이 붙는다", (await count(page, ".node-call .badge-busy")) === 1 && atCorner(called), cornerText(called));
+
+  // 함수 시점 뷰에서도 그 함수의 원 위에서 고리가 돈다.
+  await clickNode(page, target.id, 2);
+  await page.waitForSelector(`${face(target.id)} .node-call .busy-ring`, { timeout: 30_000 }).catch(() => {});
+  await settle(page);
+  const called = await ringOf(page, target.id);
+  t.check("함수 시점 뷰에서도 그 함수의 원 위에서 고리가 돌고 따로 그린 도는 원은 없다", called !== null && called.fits && called.animated && (await count(page, ".node-call .badge-busy")) === 0, ringText(called));
   await page.keyboard.press("Alt+ArrowLeft");
-  await page.waitForSelector(`${face(target.id)} .node-function .badge-busy`, { timeout: 30_000 }).catch(() => {});
+  await page.waitForSelector(`${face(target.id)} .node-function .busy-ring`, { timeout: 30_000 }).catch(() => {});
   await settle(page);
 
   // 다른 파일의 함수를 고르면 요약을 만들던 함수가 화면에서 사라지고 그 함수가 든 파일 상자가 배지를 단다.
@@ -2638,7 +2758,7 @@ async function summaryBusy(t, page) {
     cornerText(entry),
   );
   held[1].answer(longSummary(1));
-  await page.waitForFunction(() => document.querySelectorAll(".badge-busy").length === 1, null, { timeout: 5_000 }).catch(() => {});
+  await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 1, BUSY, { timeout: 5_000 }).catch(() => {});
 
   if (extra === null) {
     t.skip("배지가 있는 접힌 상자는 도는 원을 왼쪽 위에, 안에 든 것의 수 배지를 오른쪽 위에 단다", "미확인 호출이 있는 파일이 없다");
@@ -2663,8 +2783,8 @@ async function summaryBusy(t, page) {
     held[2].answer(longSummary(1));
   }
   held[0].answer(longSummary(1));
-  await page.waitForFunction(() => document.querySelector(".badge-busy") === null, null, { timeout: 5_000 }).catch(() => {});
-  t.check("요약이 다 만들어지면 도는 원이 사라진다", (await count(page, ".badge-busy")) === 0);
+  await page.waitForFunction((sel) => document.querySelector(sel) === null, BUSY, { timeout: 5_000 }).catch(() => {});
+  t.check("요약이 다 만들어지면 도는 원과 고리가 사라진다", (await count(page, BUSY)) === 0);
   await pickInTree(page, target);
   await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 5_000 }).catch(() => {});
   t.check(
@@ -8807,7 +8927,9 @@ async function menu(t, page) {
       trail: document.querySelector(".toolbar-trail").textContent,
       nodes: document.querySelectorAll(".react-flow__node").length,
     }));
-  const busyOn = (ids) => page.evaluate((sels) => sels.filter((sel) => document.querySelector(`${sel} .badge-busy`) !== null).length, ids.map(face));
+  /** 원 위에서 고리가 돌고 따로 그린 도는 원은 없는 함수 노드의 수 */
+  const busyOn = (ids) =>
+    page.evaluate((sels) => sels.filter((sel) => document.querySelector(`${sel} .node-circle > .busy-ring`) !== null && document.querySelector(`${sel} .badge-busy`) === null).length, ids.map(face));
   const labels = async () => (await listOf(page))?.items.map((item) => `${item.text}${item.disabled ? "(비활성)" : ""}`) ?? null;
   const rightClick = async (selector) => {
     await page.locator(selector).scrollIntoViewIfNeeded();
