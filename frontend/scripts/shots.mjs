@@ -1264,6 +1264,34 @@ async function badgeTip(t, page) {
   );
   await t.shot();
   const label = await rectOf(page, `${face(id)} .node-label`);
+  /** 배지의 바탕색·글자색·불투명도와 같은 상자의 줄 수 숫자의 색 */
+  const badgeOf = (wrapper) =>
+    page.evaluate((selector) => {
+      const badge = getComputedStyle(document.querySelector(`${selector} .badge-inside`));
+      const loc = document.querySelector(`${selector} .loc`);
+      return { background: badge.backgroundColor, color: badge.color, opacity: badge.opacity, loc: loc === null ? null : getComputedStyle(loc).color };
+    }, wrapper);
+  const hoverBadge = async (wrapper, rect, theme) => {
+    await page.mouse.move(5, 5);
+    await page.waitForFunction((selector) => !document.querySelector(selector).classList.contains("pointed"), wrapper, { timeout: 3_000 }).catch(() => {});
+    const away = await badgeOf(wrapper);
+    await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.waitForFunction((selector) => document.querySelector(selector).classList.contains("pointed"), wrapper, { timeout: 3_000 }).catch(() => {});
+    const over = await badgeOf(wrapper);
+    await page.screenshot({ path: join(OUT, `hf3-badge-hover-${theme}.png`) });
+    return { away, over, surface: (await colorOf(page, "--surface")).rgb, muted: (await colorOf(page, "--muted")).rgb };
+  };
+  const tinted = (seen) => seen.away.background === seen.muted && seen.over.background === seen.over.loc && seen.over.background !== seen.muted && seen.over.color === seen.surface && seen.over.opacity === seen.away.opacity;
+  const onFile = await hoverBadge(face(id), label, "light");
+  t.check("접힌 파일 상자에 커서를 올리면 배지의 바탕이 줄 수 숫자의 색이 되고 글자는 화면 바탕색 그대로다", tinted(onFile), `바탕 ${onFile.away.background} → ${onFile.over.background}, 줄 수 숫자 ${onFile.over.loc}`);
+  await page.mouse.move(5, 5);
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  const onDark = await hoverBadge(face(id), label, "dark");
+  t.check("어두운 화면에서도 같고 색은 어두운 화면의 줄 수 숫자 색이다", tinted(onDark) && onDark.over.background !== onFile.over.background, `바탕 ${onDark.away.background} → ${onDark.over.background}`);
+  await page.mouse.move(5, 5);
+  await page.getByRole("button", { name: "밝은 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme !== "dark");
   await page.mouse.move(label.x + label.width / 2, label.y + label.height / 2);
   await page.waitForFunction(() => !(document.querySelector(".tooltip")?.textContent ?? "").includes("안에 든"), null, { timeout: 3_000 }).catch(() => {});
   const name = await tipText(page);
@@ -1276,6 +1304,13 @@ async function badgeTip(t, page) {
   await page.mouse.move(5, 5);
   await page.waitForFunction(() => document.querySelector(".tooltip") === null, null, { timeout: 3_000 }).catch(() => {});
   t.check("노드 밖으로 나가면 말풍선이 사라진다", (await count(page, ".tooltip")) === 0);
+  // load가 펼쳐 둔 폴더 하나를 파일트리의 폴더 행으로 접어 접힌 폴더 상자의 배지를 본다.
+  await page.click('.tree-row.tree-dir[data-node="parser"]');
+  await page.waitForSelector(`${face("parser")} .badge-inside`, { timeout: 30_000 });
+  await rest(page);
+  const onFolder = await hoverBadge(face("parser"), await rectOf(page, `${face("parser")} .node-label`), "light-folder");
+  t.check("접힌 폴더 상자에 커서를 올리면 배지의 바탕이 파일 상자의 줄 수 숫자와 같은 색이 된다", onFolder.away.background === onFolder.muted && onFolder.over.background === onFile.over.loc && onFolder.over.color === onFolder.surface, `바탕 ${onFolder.away.background} → ${onFolder.over.background}`);
+  await page.mouse.move(5, 5);
 }
 
 /**
