@@ -2,8 +2,10 @@
 import { create } from "zustand";
 import { getUnused } from "../api/client";
 import type { Unused } from "../api/types";
+import { useCompare } from "./compare";
 
-export type OverlayKind = "cycles" | "unused";
+/** compare는 시점 비교이고 `useCompare`의 `confirm`이 켠다. */
+export type OverlayKind = "cycles" | "unused" | "compare";
 
 export interface OverlayStore {
   /** 켠 분석 표시. 분석 표시가 없으면 null이다. */
@@ -16,7 +18,7 @@ export interface OverlayStore {
   load(): void;
   /** 받은 미사용 후보를 담는다. */
   mark(unused: Unused): void;
-  /** 분석 표시를 켜거나 바꾼다. null이면 끈다. */
+  /** 분석 표시를 켜거나 바꾼다. null이면 끈다. 시점 비교가 켜져 있는데 다른 값으로 바꾸면 비교를 끈다(`useCompare`의 `clear`). */
   set(kind: OverlayKind | null): void;
 }
 
@@ -28,5 +30,10 @@ export const useOverlay = create<OverlayStore>()((put, get) => ({
     getUnused().then(get().mark, () => undefined);
   },
   mark: (unused) => put({ unused: new Set(unused.candidates), definitions: unused.definitions }),
-  set: (kind) => put({ kind }),
+  set: (kind) => {
+    put({ kind });
+    if (kind !== "compare" && useCompare.getState().result !== null) {
+      void useCompare.getState().clear();
+    }
+  },
 }));

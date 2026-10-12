@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture } from "../fixture";
-import { HALF } from "../flow";
+import { compared } from "../compare";
+import { compareFixture, repoFixture } from "../fixture";
+import { DIM, HALF } from "../flow";
 import type { Layout } from "../layout";
 import { drawn } from "../scope";
 import { edgeViews } from "../view";
@@ -33,5 +34,30 @@ describe("flowEdges", () => {
     const drawnLine = flowEdges(lines, new Set([view.key]), new Set()).find((edge) => edge.id === view.key)!;
     expect(view).toMatchObject({ tone: "muted", opacity: HALF });
     expect(drawnLine.data).toMatchObject({ pointed: true, tone: "muted", opacity: 1 });
+  });
+});
+
+describe("flowEdges: 시점 비교", () => {
+  const { graph } = compareFixture;
+  const compare = compared(graph, compareFixture);
+  const seen = shown(graph, { ...toggles, collapsed: new Set(), flow: null, lit: null, compare });
+  const places = new Map([...seen.nodes].map((id, i) => [id, { x: i * 100, y: 0, width: 40, height: 20 }] as const));
+  const all = edgeViews(drawn(graph, seen, null, null, null, compare.gone.edges), { positions: new Map(), sizes: new Map(), boxes: places, routes: new Map(), lane: 12 }, nodeIndex(graph));
+  const key = "agg|pkg.old|pkg.mod";
+
+  it("삭제된 관계만 든 선은 마우스를 올려도 진하기를 올리지 않고 점을 그릴 곳을 받는다", () => {
+    const view = all.views.find((v) => v.key === key)!;
+    expect(view).toMatchObject({ gone: true, tone: "muted", opacity: DIM });
+    const line = flowEdges(all, new Set([key]), new Set()).find((edge) => edge.id === key)!;
+    expect(line.data).toMatchObject({ pointed: true, tone: "muted", opacity: DIM });
+    const stem = all.trunks.find((trunk) => trunk.keys.includes(key) && trunk.end === "in");
+    expect((line.data as { dot: unknown }).dot).toEqual(view.mark ?? stem?.mark ?? null);
+    expect((line.data as { dot: unknown }).dot).not.toBeNull();
+  });
+
+  it("삭제된 관계가 없는 선은 점을 받지 않는다", () => {
+    const lines = flowEdges(all, new Set(), new Set()).filter((edge) => edge.type === "orthogonal" && edge.id !== key);
+    expect(lines.length).toBeGreaterThan(5);
+    expect(lines.every((edge) => (edge.data as { dot: unknown }).dot === null)).toBe(true);
   });
 });

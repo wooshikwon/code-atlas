@@ -4,11 +4,12 @@ import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type { CSSProperties } from "react";
 import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
+import type { Lines } from "../compare";
 import { faceId, layerOf, type Part } from "../layers";
-import { ASIDE_GAP, BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, labelOf, type Box, type RouteEnd } from "../layout";
+import { ASIDE_GAP, BADGE_OVERHANG, boxCaption, CIRCLE_GAP, DIFF_GAP, DIFF_SPACE, diffTexts, END_GAP, END_NAMES, END_PAD, labelOf, type Box, type RouteEnd } from "../layout";
 import { kilo, valueAside } from "../names";
 import { lifted } from "../scope";
-import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, entryTip, globalTip, sizeTip } from "../tips";
+import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, diffTip, entryTip, globalTip, sizeTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
@@ -42,6 +43,11 @@ export interface AtlasNodeData extends Record<string, unknown> {
   unused: boolean;
   /** 접힌 파일 상자와 접힌 폴더 상자 아래에 적는 미사용 후보 수. 미사용 후보 표시를 껐으면 0이다. */
   candidates: number;
+  /**
+   * 시점 비교가 켜져 있으면 그 노드의 표시이고 꺼져 있으면 null이다. lines는 이름표 뒤에 적는 줄 수이고 바뀐 줄이 없으면 null이다.
+   * gone은 삭제된 노드이거나 기준 시점에만 있던 노드여서 흐린 단계로 그리는지다. 비교가 켜져 있는 동안에는 변경 표시를 그리지 않는다.
+   */
+  compare: { lines: Lines | null; gone: boolean } | null;
 }
 
 export type AtlasFlowNode = Node<AtlasNodeData>;
@@ -117,6 +123,7 @@ export function pressable(data: AtlasNodeData, target: EventTarget): boolean {
 /**
  * 마우스를 올린 노드 id의 React Flow 노드를 선의 hover처럼 진하기를 한 단계 올린(`scope.ts`의 `lifted`) 목록. 노드의 진하기는 muted 잉크
  * 테두리에 그 노드의 불투명도이므로 흐린 노드는 불투명도만 한 단계 오르고, 불투명도 100%인 노드는 테두리가 본문 잉크가 된다.
+ * 시점 비교에서 흐린 단계로 그리는 노드(`compare.gone`)는 진하기를 올리지 않는다.
  * 굵은 이름표와 옅은 빛은 `POINTED` 클래스가 진하기와 관계없이 준다. 펼친 파일 상자와 폴더 영역은 머리 줄을 그리는 글자 요소만 바꾼다.
  * 안에 보이는 자식이 없는 잎 노드는 두 요소에 확대 비율(`grown`)을 `--grow-x`·`--grow-y`로 넣고, styles.css가 그 비율로 노드를 키운다.
  * 다른 노드는 같은 객체를 그대로 돌려주므로 다시 그리지 않는다.
@@ -131,7 +138,8 @@ export function pointing<D extends AtlasNodeData>(nodes: Node<D>[], id: string |
     if (node.id !== face && (node.id !== id || container)) {
       return node;
     }
-    const { tone, opacity } = lifted({ tone: "muted", opacity: Number(node.style?.opacity ?? 1) });
+    const shade = { tone: "muted" as const, opacity: Number(node.style?.opacity ?? 1) };
+    const { tone, opacity } = node.data.compare?.gone === true ? shade : lifted(shade);
     const scale = node.data.expanded ? null : grown(node.width ?? 0, node.height ?? 0);
     const grow = scale === null || !Number.isFinite(scale.x + scale.y) ? {} : { "--grow-x": scale.x, "--grow-y": scale.y };
     return { ...node, className: tone === "strong" ? `${POINTED} tone-strong` : POINTED, style: { ...node.style, opacity, ...grow } };
@@ -161,6 +169,7 @@ export function Handles({ data }: { data: AtlasNodeData }) {
  * 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을, 마지막 커밋 뒤에 바뀐 노드는 `data-change`를,
  * 강조하는 경로 위의 노드는 `data-route`를 받는다.
  * 순환 아이콘을 다는 상자는 `data-cycle`을, 미사용 후보 표시가 표시하는 후보는 `data-unused`를 받는다.
+ * 시점 비교에서 흐린 단계로 그리는 노드는 `data-gone`을 받는다. change는 `shownChange`를 지난 값이다.
  */
 export function nodeProps(base: string, data: AtlasNodeData, change: Change | null) {
   return {
@@ -171,7 +180,13 @@ export function nodeProps(base: string, data: AtlasNodeData, change: Change | nu
     "data-route": data.route ?? undefined,
     "data-cycle": data.cycle !== null ? "" : undefined,
     "data-unused": data.unused ? "" : undefined,
+    "data-gone": data.compare?.gone === true ? "" : undefined,
   };
+}
+
+/** 노드에 그리는 변경 상태. 시점 비교가 켜져 있는 동안에는 마지막 커밋 뒤의 변경 상태 change를 그리지 않는다. */
+export function shownChange(data: AtlasNodeData, change: Change | null): Change | null {
+  return data.compare === null ? change : null;
 }
 
 /** 진입점 표지인 굵은 체크의 윤곽. 12px 칸에 그린다. */
@@ -207,14 +222,30 @@ export function CycleMark({ tip }: { tip?: string }) {
   );
 }
 
-/** 이름표. 강조하는 경로의 출발 노드와 도착 노드는 이름표 뒤에 표지를 적는다. 표지의 폭은 layout.ts가 노드 크기에 더한다. */
+/** 시점 비교에서 이름 뒤에 적는 줄 수. 추가된 줄 수와 삭제된 줄 수 가운데 0이 아닌 쪽만 적는다. gap은 이름과의 간격이다. */
+export function Diff({ lines, gap = DIFF_GAP }: { lines: Lines; gap?: number }) {
+  const { added, deleted } = diffTexts(lines);
+  return (
+    <span className="node-diff" style={{ marginLeft: gap, gap: DIFF_SPACE }} data-tip={diffTip(lines)}>
+      {added !== null && <span className="diff-added">{added}</span>}
+      {deleted !== null && <span className="diff-deleted">{deleted}</span>}
+    </span>
+  );
+}
+
+/**
+ * 이름표. 시점 비교에서 바뀐 줄이 있는 노드는 이름표 뒤에 줄 수를, 강조하는 경로의 출발 노드와 도착 노드는 표지를 적는다.
+ * 줄 수와 표지의 폭은 layout.ts가 노드 크기에 더한다.
+ */
 export function Label({ data, bold = false }: { data: AtlasNodeData; bold?: boolean }) {
+  const lines = data.compare?.lines ?? null;
   return (
     <>
       <span className={bold ? "node-label node-label-bold" : "node-label"}>
         {data.cycle !== null && <CycleMark tip={cycleTip(data.node, data.cycle)} />}
         {data.node.entry && <EntryMark node={data.node} className="node-entry" />}
         {labelOf(data.node)}
+        {lines !== null && <Diff lines={lines} />}
       </span>
       {data.route !== null && data.route !== "via" && (
         <span className="route-end" style={{ marginLeft: END_GAP, padding: `0 ${END_PAD}px` }}>

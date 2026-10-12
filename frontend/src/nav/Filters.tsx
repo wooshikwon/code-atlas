@@ -3,13 +3,13 @@
 import { useRef, useState } from "react";
 import { useBranch } from "../state/changes";
 import { useCycles } from "../state/cycles";
-import { useOverlay, type OverlayKind } from "../state/overlay";
+import { useOverlay } from "../state/overlay";
 import { pinned, useAtlas, type Depth } from "../state/store";
-import { changed, filterTip, OVERLAY_NAMES } from "./settings";
+import { changed, filterTip, OVERLAY_NAMES, type FilterOverlay } from "./settings";
 import { useDismiss } from "./menu";
 
 const NONE = "없음";
-const KINDS: (OverlayKind | null)[] = [null, "cycles", "unused"];
+const KINDS: (FilterOverlay | null)[] = [null, "cycles", "unused"];
 
 /** 분석 표시를 고르는 행. 이름 오른쪽에 순환 묶음 수와 미사용 후보 수를 적는다. */
 function OverlayOptions() {
@@ -17,7 +17,7 @@ function OverlayOptions() {
   const unused = useOverlay((s) => s.unused.size);
   const set = useOverlay((s) => s.set);
   const groups = useCycles()?.groups.length ?? 0;
-  const counts: Record<OverlayKind, string> = { cycles: `묶음 ${groups}`, unused: `${unused}개` };
+  const counts: Record<FilterOverlay, string> = { cycles: `묶음 ${groups}`, unused: `${unused}개` };
   return (
     <div className="filter-overlays" role="radiogroup" aria-label="분석 표시">
       <span className="filter-label">분석 표시</span>

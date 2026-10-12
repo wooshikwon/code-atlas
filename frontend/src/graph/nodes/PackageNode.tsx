@@ -1,7 +1,7 @@
 import type { NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { useFolderChange } from "../../state/changes";
-import { Badges, Below, Handles, Label, nodeProps, sameNode, type AtlasFlowNode } from "./common";
+import { Badges, Below, Handles, Label, nodeProps, sameNode, shownChange, type AtlasFlowNode } from "./common";
 
 /**
  * 접힌 폴더는 폴더 경로를 가운데 적은 상자다. 펼친 폴더는 안의 상자를 감싸는 영역이고 머리 줄에 폴더 경로를 적으며,
@@ -11,10 +11,10 @@ import { Badges, Below, Handles, Label, nodeProps, sameNode, type AtlasFlowNode 
  * 펼친 영역 모두 왼쪽 위 모서리에 도는 원을 단다.
  */
 export const PackageNode = memo(function PackageNode({ data }: NodeProps<AtlasFlowNode>) {
-  const change = useFolderChange(data.node.id);
+  const change = shownChange(data, useFolderChange(data.node.id));
   if (data.expanded) {
     return (
-      <div className={`node-region node-${data.part}`}>
+      <div className={`node-region node-${data.part}`} data-gone={data.compare?.gone === true ? "" : undefined}>
         <Handles data={data} />
         {data.part === "face" && (
           <>

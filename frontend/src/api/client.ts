@@ -2,14 +2,17 @@
 import type {
   ApiErrorBody,
   Changes,
+  Comparison,
   Definition,
   Explanation,
   Explanations,
   FileText,
   Graph,
+  History,
   Hover,
   MadeSummary,
   Repo,
+  Stat,
   Status,
   Summaries,
   SummaryStatus,
@@ -27,8 +30,9 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, signal?: AbortSignal, method = "GET"): Promise<T> {
-  const response = await fetch(path, { signal, method });
+async function request<T>(path: string, signal?: AbortSignal, method = "GET", body?: unknown): Promise<T> {
+  const sent = body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const response = await fetch(path, { signal, method, ...sent });
   if (response.ok) {
     return (await response.json()) as T;
   }
@@ -63,13 +67,17 @@ export function getGraph(): Promise<Graph> {
 
 const files = new Map<string, Promise<FileText>>();
 
-/** 코드 뷰어와 정보 상자가 같은 파일을 한 번만 받는다. 실패한 요청은 기억하지 않는다. */
-export function getFile(path: string): Promise<FileText> {
-  let file = files.get(path);
+/**
+ * 코드 뷰어와 정보 상자가 같은 파일을 한 번만 받는다. 실패한 요청은 기억하지 않는다. at은 커밋 해시이고 그 커밋의 본문을 받는다.
+ * at이 없으면 작업 중인 상태의 본문이다.
+ */
+export function getFile(path: string, at?: string): Promise<FileText> {
+  const key = at === undefined ? path : `${at}:${path}`;
+  let file = files.get(key);
   if (file === undefined) {
-    file = request<FileText>(`/api/file?path=${encodeURIComponent(path)}`);
-    file.catch(() => files.delete(path));
-    files.set(path, file);
+    file = request<FileText>(`/api/file?path=${encodeURIComponent(path)}${at === undefined ? "" : `&at=${at}`}`);
+    file.catch(() => files.delete(key));
+    files.set(key, file);
   }
   return file;
 }
@@ -133,4 +141,19 @@ export function getChanges(): Promise<Changes> {
 /** 분석을 끝낼 때 판정한 미사용 후보 */
 export function getUnused(): Promise<Unused> {
   return request("/api/unused");
+}
+
+/** 커밋 그래프의 줄. skip번째 줄부터 limit줄을 받는다. */
+export function getHistory(skip: number, limit: number): Promise<History> {
+  return request(`/api/history?skip=${skip}&limit=${limit}`);
+}
+
+/** 두 시점의 기준과 대상, 바뀐 파일 수와 줄 수. a와 b의 순서는 뜻이 없다. */
+export function getStat(a: string, b: string): Promise<Stat> {
+  return request(`/api/compare/stat?a=${a}&b=${b}`);
+}
+
+/** 두 시점을 견준 결과. 서버가 두 시점의 분석을 끝낸 뒤에 응답한다. base와 target은 `getStat`이 돌려준 값이다. */
+export function postCompare(base: string, target: string): Promise<Comparison> {
+  return request("/api/compare", undefined, "POST", { base, target });
 }

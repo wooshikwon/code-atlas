@@ -1,9 +1,11 @@
 // 분석 상태. 서버의 `/api/status`를 주기마다 받아 분석의 단계와 진행 수, 분석 뒤 바뀐 파일을 담고, 서버의 판 번호가 화면이 그린
-// 판 번호와 달라지면 분석 결과를 받아 그린다. 분석 단계가 무엇을 하는지는 모르고 단계의 이름과 수만 적는다.
+// 판 번호와 달라지면 분석 결과를 받아 그린다. 시점 비교가 켜져 있는 동안에는 그래프를 바꾸지 않고, 대상이 작업 중인 상태인 비교만
+// 다시 받는다. 분석 단계가 무엇을 하는지는 모르고 단계의 이름과 수만 적는다.
 import { create } from "zustand";
 import { forgetFiles, getGraph, getRepo, getStatus, getTree, getUnused } from "../api/client";
-import type { Phase, Status } from "../api/types";
+import { WORKTREE, type Phase, type Status } from "../api/types";
 import { useChanges } from "./changes";
+import { useCompare } from "./compare";
 import { useExplanations } from "./explanations";
 import { useOverlay } from "./overlay";
 import { useAtlas } from "./store";
@@ -42,6 +44,12 @@ export function phaseText(status: Status): string {
   return status.total > 0 ? `${name} ${status.done.toLocaleString("en-US")} / ${status.total.toLocaleString("en-US")}` : name;
 }
 
+/** 비교할 시점을 분석하는 동안 비교 버튼에 적는 글: `분석 중 120 / 333`. 수를 아직 세지 않으면 `분석 중`이다. */
+export function comparingText(status: Status | null): string {
+  const compare = status?.compare ?? null;
+  return compare === null || compare.total === 0 ? "분석 중" : `분석 중 ${compare.done.toLocaleString("en-US")} / ${compare.total.toLocaleString("en-US")}`;
+}
+
 /** 진행률(0~1). 수를 세지 않는 단계는 null이다. */
 export function progressOf(status: Status): number | null {
   return status.total > 0 ? Math.min(status.done / status.total, 1) : null;
@@ -67,8 +75,8 @@ export interface StatusStore {
    */
   load(): Promise<void>;
   /**
-   * 상태를 받고, 분석하는 동안에는 0.5초마다, 그 밖에는 2초마다 다시 받는다. 창이 보이지 않으면 멈추고 다시 보이면 바로 받는다.
-   * 돌려주는 함수가 다시 받기를 멈춘다.
+   * 상태를 받고, 분석하는 동안과 비교할 시점을 분석하는 동안에는 0.5초마다, 그 밖에는 2초마다 다시 받는다. 비교할 시점의 분석이
+   * 시작되면 바로 받는다. 창이 보이지 않으면 멈추고 다시 보이면 바로 받는다. 돌려주는 함수가 다시 받기를 멈춘다.
    */
   watch(): () => void;
 }
@@ -77,10 +85,11 @@ export const useStatus = create<StatusStore>()((set, get) => {
   let last: Promise<void> = Promise.resolve();
 
   /**
-   * 분석 결과를 받아 그린다. 처음에는 저장해 둔 보기 설정대로 레포를 열고, 그 뒤에는 보던 화면을 새 그래프에 맞춘다.
-   * 그리지 못하면 거짓을 돌려준다.
+   * 판 번호가 revision인 분석 결과를 받아 그린다. 처음에는 저장해 둔 보기 설정대로 레포를 열고, 그 뒤에는 보던 화면을 새 그래프에 맞춘다.
+   * 시점 비교가 켜져 있으면 그래프를 받지 않는다. 대상이 작업 중인 상태인 비교는 그 판으로 다시 받고, 대상이 커밋인 비교는 그대로 둔다.
+   * 그리지 못했거나 그리지 않았으면 거짓을 돌려준다.
    */
-  const draw = async (first: boolean): Promise<boolean> => {
+  const draw = async (first: boolean, revision: number): Promise<boolean> => {
     if (first) {
       await useAtlas.getState().load();
       if (useAtlas.getState().repo === null) {
@@ -90,15 +99,26 @@ export const useStatus = create<StatusStore>()((set, get) => {
       useSummaries.getState().list();
       return true;
     }
+    const compared = useCompare.getState().result;
+    if (compared !== null && compared.target !== WORKTREE) {
+      return false;
+    }
     // 그래프와 미사용 후보를 함께 받아 한 번에 담는다. 그래프가 새 분석 결과의 배치를 한 번만 계산한다.
-    const [repo, graph, tree, unused] = await Promise.all([getRepo(), getGraph(), getTree(), getUnused().catch(() => null)]);
+    const received = compared === null ? await Promise.all([getRepo(), getGraph(), getTree(), getUnused().catch(() => null)]) : null;
     forgetFiles();
     useSummaries.getState().forget();
     useSummaries.getState().list();
     useExplanations.getState().forget();
-    useAtlas.getState().refresh(repo, graph, tree);
-    if (unused !== null) {
-      useOverlay.getState().mark(unused);
+    if (received === null) {
+      if (compared!.revision !== revision) {
+        await useCompare.getState().renew();
+      }
+    } else {
+      const [repo, graph, tree, unused] = received;
+      useAtlas.getState().refresh(repo, graph, tree);
+      if (unused !== null) {
+        useOverlay.getState().mark(unused);
+      }
     }
     await useChanges.getState().load();
     return true;
@@ -110,7 +130,7 @@ export const useStatus = create<StatusStore>()((set, get) => {
       if (JSON.stringify(status) !== JSON.stringify(get().status)) {
         set({ status });
       }
-      if (status.revision > 0 && status.revision !== get().shown && (await draw(get().shown === 0))) {
+      if (status.revision > 0 && status.revision !== get().shown && (await draw(get().shown === 0, status.revision))) {
         set({ shown: status.revision });
       }
     } catch {
@@ -138,16 +158,23 @@ export const useStatus = create<StatusStore>()((set, get) => {
           .then(() => {
             if (!stopped && !document.hidden && timer === null) {
               const status = get().status;
-              timer = window.setTimeout(tick, status === null || running(status) ? RUNNING_INTERVAL : WATCH_INTERVAL);
+              const fast = status === null || running(status) || useCompare.getState().running;
+              timer = window.setTimeout(tick, fast ? RUNNING_INTERVAL : WATCH_INTERVAL);
             }
           });
       };
       const seen = () => (document.hidden ? pause() : tick());
       document.addEventListener("visibilitychange", seen);
+      const unsubscribe = useCompare.subscribe((now, before) => {
+        if (now.running && !before.running && !stopped && !document.hidden) {
+          tick();
+        }
+      });
       tick();
       return () => {
         stopped = true;
         pause();
+        unsubscribe();
         document.removeEventListener("visibilitychange", seen);
       };
     },

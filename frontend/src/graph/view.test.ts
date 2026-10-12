@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { repoFixture, routeFixture } from "./fixture";
+import { compared } from "./compare";
+import { compareFixture, repoFixture, routeFixture } from "./fixture";
 import { DIM, flow } from "./flow";
 import { lit, route } from "./route";
 import { sideRoute, type Layout } from "./layout";
 import { drawn } from "./scope";
-import { edgeViews, emphasized, letteredBoxes, NO_TRUNKS, ownNumbers, parentFirst, roundedPath, trunkShade, trunkViews, type EdgeView } from "./view";
+import { edgeViews, emphasized, letteredBoxes, MARK_BACK, MARK_SIZE, NO_TRUNKS, ownNumbers, parentFirst, roundedPath, trunkShade, trunkViews, type EdgeView } from "./view";
 import { hidden, nodeIndex, shown, type Shown } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
@@ -161,6 +162,7 @@ describe("edgeViews: 올린 상자 안으로 들어가는 경로", () => {
     edges: [repoFixture.edges[0]],
     route: null,
     via: false,
+    gone: false,
   };
   const laid = (boxes: [string, ReturnType<typeof box>][], trunk: [number, number][]): Layout => ({
     positions: new Map(),
@@ -281,7 +283,7 @@ describe("edgeViews: 강조하는 경로", () => {
 describe("trunkViews", () => {
   const view = (key: string, target: string, points: [number, number][], more: Partial<EdgeView> = {}): EdgeView => {
     const path = points.map(([x, y]) => ({ x, y }));
-    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, sites: 1, kinds: { call: 1 }, route: null, via: false, joins: true, below: false, into: null, branch: path, trunks: NO_TRUNKS, ...more };
+    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, sites: 1, kinds: { call: 1 }, route: null, via: false, joins: true, below: false, into: null, branch: path, trunks: NO_TRUNKS, gone: false, mark: null, ...more };
   };
   /** 세 선이 x=100의 세로선에 차례로 붙어 (120, 50)으로 들어간다. c는 아래에서 올라온다. */
   const a = view("a", "t", [[0, 0], [100, 0], [100, 50], [120, 50]]);
@@ -443,5 +445,83 @@ describe("trunkViews", () => {
     expect(emphasized(a, { pointed: false, cycle: true })).toBe(true);
     expect(emphasized({ ...a, route: "call" }, none)).toBe(true);
     expect(emphasized({ ...a, tone: "strong" }, none)).toBe(true);
+  });
+});
+
+describe("삭제된 관계만 든 선의 빨강 점", () => {
+  const view = (key: string, target: string, points: [number, number][], more: Partial<EdgeView> = {}): EdgeView => {
+    const path = points.map(([x, y]) => ({ x, y }));
+    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, sites: 1, kinds: { call: 1 }, route: null, via: false, joins: true, below: false, into: null, branch: path, trunks: NO_TRUNKS, gone: false, mark: null, ...more };
+  };
+  const lost = (key: string, target: string, points: [number, number][]) => view(key, target, points, { sites: 0, kinds: {}, gone: true, opacity: DIM });
+  /** 세 선이 x=100의 세로선에 차례로 붙어 (120, 50)으로 들어간다. */
+  const paths: Record<string, [number, number][]> = {
+    a: [[0, 0], [100, 0], [100, 50], [120, 50]],
+    b: [[0, 20], [100, 20], [100, 50], [120, 50]],
+    c: [[0, 90], [100, 90], [100, 50], [120, 50]],
+  };
+  const boxOf = (at: { x: number; y: number }, half: number) => ({ left: at.x - half, right: at.x + half, top: at.y - half, bottom: at.y + half });
+
+  it("따로 들어가는 선은 들어오는 합계를 적는 화살촉 앞에 점을 놓고 수를 적지 않는다", () => {
+    const alone = lost("g", "t", [[0, 50], [120, 50]]);
+    const { views, trunks, blocked } = trunkViews([alone], []);
+    expect(trunks).toEqual([]);
+    expect(views[0]).toMatchObject({ gone: true, into: null, mark: { x: 120 - 13 - 2 - MARK_SIZE / 2, y: 50 } });
+    expect(blocked.solid).toContainEqual({ x: views[0].mark!.x - 3.5, y: 46.5, width: 7, height: 7 });
+    const counted = trunkViews([view("n", "t", [[0, 50], [120, 50]], { sites: 2 })], []).views[0];
+    expect(counted.mark).toBeNull();
+    expect(counted.into!.x).toBeLessThan(views[0].mark!.x);
+    expect(ownNumbers(trunkViews([alone], []), [alone]).size).toBe(0);
+  });
+
+  it("든 선이 모두 삭제된 관계만 든 선인 들어오는 줄기는 합계 대신 점 하나를 놓고 선마다의 점은 없다", () => {
+    const { views, trunks } = trunkViews([lost("a", "t", paths.a), lost("b", "t", paths.b), lost("c", "t", paths.c)], []);
+    expect(trunks).toHaveLength(1);
+    expect(trunks[0]).toMatchObject({ sites: 0, at: null, mark: { x: 120 - 13 - 2 - 3.5, y: 50 } });
+    expect(views.map((v) => v.mark)).toEqual([null, null, null]);
+  });
+
+  it("지금 있는 관계가 든 선과 합류하는 선은 그 선만 지나는 가지의 끝에서 9px 앞에 점을 놓고 줄기의 합계는 그 선을 세지 않는다", () => {
+    const before = trunkViews([view("a", "t", paths.a, { sites: 2 }), view("b", "t", paths.b)], []);
+    const after = trunkViews([view("a", "t", paths.a, { sites: 2 }), view("b", "t", paths.b), lost("c", "t", paths.c)], []);
+    expect(after.trunks[0]).toMatchObject({ sites: 3, at: before.trunks[0].at, mark: null });
+    const marks = new Map(after.views.map((v) => [v.key, v.mark]));
+    expect(marks.get("a")).toBeNull();
+    expect(marks.get("b")).toBeNull();
+    expect(marks.get("c")).toEqual({ x: 100, y: 50 + MARK_BACK });
+  });
+
+  it("지금 있는 관계가 든 선 하나와 합류한 줄기는 그 선이 따로 들어갈 때처럼 수가 1 이하면 합계를 적지 않는다", () => {
+    const one = trunkViews([view("a", "t", paths.a), lost("c", "t", paths.c)], []).trunks[0];
+    expect(one).toMatchObject({ sites: 1, at: null, mark: null });
+    const alone = trunkViews([view("a", "t", paths.a, { sites: 4 })], []).views[0];
+    const four = trunkViews([view("a", "t", paths.a, { sites: 4 }), lost("c", "t", paths.c)], []).trunks[0];
+    expect(four).toMatchObject({ sites: 4, at: alone.into, mark: null });
+  });
+
+  it("점은 화살촉, 합류점, 노드의 글자를 그리는 칸과 겹치지 않는다", () => {
+    const { views, trunks } = trunkViews([view("a", "t", paths.a), view("b", "t", paths.b), lost("c", "t", paths.c)], []);
+    const dot = boxOf(views.find((v) => v.key === "c")!.mark!, MARK_SIZE / 2 + 0.75);
+    for (const joint of trunks[0].joints) {
+      const round = boxOf(joint, 2.5);
+      expect(dot.left >= round.right || round.left >= dot.right || dot.top >= round.bottom || round.top >= dot.bottom).toBe(true);
+    }
+    const lone = trunkViews([lost("g", "t", [[0, 50], [120, 50]])], []).views[0].mark!;
+    expect(lone.x + MARK_SIZE / 2 + 0.75).toBeLessThanOrEqual(120 - 13);
+    const lettered = { x: 120, y: 40, width: 60, height: 20 };
+    expect(lone.x + MARK_SIZE / 2 + 0.75).toBeLessThanOrEqual(lettered.x);
+  });
+
+  it("그린 선에서 삭제된 관계만 든 선은 gone이고 삭제된 선이 섞인 선의 수는 비교를 켜기 전과 같다", () => {
+    const { graph } = compareFixture;
+    const compare = compared(graph, compareFixture);
+    const visible = shown(graph, { ...toggles, collapsed: new Set(), flow: null, lit: null, compare });
+    const after = new Map(edgeViews(drawn(graph, visible, null, null, null, compare.gone.edges), lineLayout(visible), nodeIndex(graph)).views.map((v) => [v.key, v]));
+    const before = views(null);
+    expect(after.get("agg|pkg.old|pkg.mod")).toMatchObject({ gone: true, sites: 0, into: null });
+    expect(after.get("agg|pkg.old|pkg.mod")!.mark).not.toBeNull();
+    for (const [key, line] of before) {
+      expect(after.get(key)).toMatchObject({ sites: line.sites, kinds: line.kinds, gone: false, mark: null });
+    }
   });
 });

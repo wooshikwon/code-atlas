@@ -3327,3 +3327,43 @@ ol.summary-list {
   overflow-wrap: anywhere;
   text-align: center;
 }
+
+/* 시점 비교의 그래프 표시. 이름 옆 줄 수는 이름표보다 작은 글자로 추가된 줄을 줄 수의 teal로, 삭제된 줄을 critical에 본문 잉크를 섞은 빨강으로 적고
+   노드의 불투명도를 함께 받는다. 글자 크기는 layout.ts의 DIFF_FONT와 같고 이름과의 간격과 두 수 사이의 간격은 컴포넌트가 넣는다.
+   삭제된 관계만 든 선의 빨강 점은 critical로 채우고 화면 바탕색 테두리로 선을 끊으며 선의 불투명도를 함께 받는다. */
+.node-diff {
+  display: inline-flex;
+  flex: none;
+  font-size: 10px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.diff-added,
+.line-change[data-kind="added"] {
+  color: var(--loc);
+}
+
+.diff-deleted,
+.line-change[data-kind="deleted"] {
+  color: color-mix(in srgb, var(--ink) 25%, var(--critical));
+}
+
+.edge-gone {
+  fill: var(--critical);
+  stroke: var(--surface);
+  stroke-width: 1.5px;
+}
+
+/* 선의 말풍선의 변경 칸과 범례의 줄 수 견본 */
+.line-change {
+  font-weight: 600;
+}
+
+.legend-diff {
+  display: inline-flex;
+  gap: 4px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}

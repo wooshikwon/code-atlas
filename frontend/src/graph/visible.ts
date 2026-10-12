@@ -1,5 +1,6 @@
 // 토글·접은 폴더·흐름·강조하는 경로에서 화면에 보이는 노드를 정하고, 보이지 않는 노드를 보이는 가장 가까운 조상으로 올린다.
 import type { AtlasNode, Graph } from "../api/types";
+import type { Compared } from "./compare";
 import type { Flow } from "./flow";
 import type { Lit } from "./route";
 
@@ -238,6 +239,8 @@ export function drawnOut(graph: Graph, flow: Flow | null, lit: Lit | null): Set<
  *   밖과 이어진 자식이 하나도 없는 파일 상자는 모든 자식을 그린다.
  * - 펼침 이상인 파일 상자의 클래스는 그려지면 메서드를 모두 그린다. 접힌 파일 상자의 클래스는 꺼낸 메서드만 그린다.
  * - 강조하는 경로 lit이 있으면 흐름을 보지 않는다. 경로 위 노드를 품은 접은 폴더는 펼친 것으로 다루고, 파일 상자는 모두 접힘이다.
+ * - 시점 비교 compare가 있으면 손잡이가 묶는 자식을 대상 시점의 그래프로 판정하고, 삭제된 정의를 손잡이에 넣지 않는다. 삭제된 정의는
+ *   꺼낸 자식이거나, 파일 상자가 펼침 이상이고 삭제된 선이 파일 밖과 이어져 있거나 그 상자에 손잡이가 없을 때, 전부 펼침일 때 그린다.
  * marked는 미사용 후보 표시를 켰을 때의 미사용 후보이고 candidates는 분석 표시와 무관한 미사용 후보 전체다.
  */
 export function shown(
@@ -251,11 +254,13 @@ export function shown(
     unpacked?: Set<string>;
     marked?: Set<string>;
     candidates?: Set<string>;
+    compare?: Compared | null;
   },
 ): Shown {
   const nodes = nodeIndex(graph);
   const off = hidden(graph, opts);
-  const { lit, unpacked = new Set<string>(), marked = new Set<string>(), candidates = new Set<string>() } = opts;
+  const { lit, unpacked = new Set<string>(), marked = new Set<string>(), candidates = new Set<string>(), compare = null } = opts;
+  const lost = compare?.gone.nodes ?? new Set<string>();
   const flow = lit === null ? opts.flow : null;
   const collapsed = new Set(opts.collapsed);
   for (const id of lit?.nodes ?? []) {
@@ -269,7 +274,9 @@ export function shown(
       children.set(node.parent, [...(children.get(node.parent) ?? []), node]);
     }
   }
-  const inside = inward(graph, off);
+  const inside = inward(compare?.live ?? graph, off);
+  /** 파일 상자마다 삭제된 선까지 세어 밖과 이어진 자식 */
+  const reaching = lost.size === 0 ? null : outward(graph, off);
   const pulled = drawnOut(graph, flow, lit);
   /** 노드와 그 안에 든 노드 가운데 set에 든 수 */
   const countIn = (node: AtlasNode, set: Set<string>): number =>
@@ -287,16 +294,17 @@ export function shown(
   };
   const visit = (box: AtlasNode) => {
     result.nodes.add(box.id);
-    const kids = children.get(box.id) ?? [];
+    const all = children.get(box.id) ?? [];
     if (box.kind === "package") {
       if (!collapsed.has(box.id)) {
-        kids.filter((kid) => UNIT_KINDS.has(kid.kind)).forEach(visit);
+        all.filter((kid) => UNIT_KINDS.has(kid.kind)).forEach(visit);
       }
       return;
     }
-    if (kids.length === 0) {
+    if (all.length === 0) {
       return;
     }
+    const kids = all.filter((kid) => !lost.has(kid.id));
     const opened = flow?.file === box.id;
     const full = opened && unpacked.has(box.id);
     const packed = inside.get(box.id);
@@ -317,10 +325,14 @@ export function shown(
         unused: inner.reduce((sum, kid) => sum + countIn(kid, candidates), 0),
       });
     }
-    for (const kid of full ? kids : drawn) {
+    const erased = all.filter(
+      (kid) => lost.has(kid.id) && (full || pulled.has(kid.id) || (opened && (inner.length === 0 || reaching?.get(box.id)?.has(kid.id) === true))),
+    );
+    const placed = [...(full ? kids : drawn), ...erased];
+    for (const kid of placed) {
       addDefinition(kid, opened);
     }
-    if (full || drawn.length > 0) {
+    if (full || placed.length > 0) {
       result.open.add(box.id);
     }
   };

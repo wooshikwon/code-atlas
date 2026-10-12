@@ -1,5 +1,6 @@
 // 열 번호, 열 안 순서, 연결 묶음, "연결 없음" 선반을 정한다. 그래프와 두 토글에서만 계산하므로 선택과 접은 폴더에 따라 바뀌지 않는다.
 import type { AtlasNode, Graph } from "../api/types";
+import type { Compared } from "./compare";
 import { hidden, nodeIndex } from "./visible";
 
 export interface Columns {
@@ -113,12 +114,19 @@ function assign(ids: string[], pairs: [string, string][], entries: Set<string>):
   return column;
 }
 
+type Toggles = { showTests: boolean; showExternal: boolean };
+
 /**
  * 부모 노드마다 그 자식의 열과 순서를 정한다. 선은 양 끝을 형제가 될 때까지 올려 쓰고, 함수 안 import는 열 배정에서 뺀다.
  * 최상위 단위는 함수 안 import까지 포함한 선으로 연결 묶음을 나누고, 선이 없는 단위를 선반에 모은다.
  * 안의 노드 사이에만 선이 있는 폴더는 단위 하나짜리 연결 묶음이다.
+ * 시점 비교 compare가 있으면 대상 시점의 그래프로 열과 순서를 정한 뒤 삭제된 노드를 더한다(`withGone`).
  */
-export function columns(graph: Graph, opts: { showTests: boolean; showExternal: boolean }): Columns {
+export function columns(graph: Graph, opts: Toggles, compare: Compared | null = null): Columns {
+  return compare === null ? arranged(graph, opts) : withGone(graph, opts, compare, arranged(compare.live, opts));
+}
+
+function arranged(graph: Graph, opts: Toggles): Columns {
   const nodes = nodeIndex(graph);
   const off = hidden(graph, opts);
   const children = new Map<string | null, AtlasNode[]>();
@@ -202,5 +210,121 @@ export function columns(graph: Graph, opts: { showTests: boolean; showExternal: 
   const shelf = units
     .filter((id) => !linked.has(id))
     .sort((a, b) => (name(a) < name(b) ? -1 : name(a) > name(b) ? 1 : a < b ? -1 : 1));
+  return { column, order, components, shelf };
+}
+
+/**
+ * 대상 시점의 열과 순서 base에 흐린 단계로 그리는 노드(삭제된 노드와 기준 시점에만 있던 노드)를 더한다. 대상 시점 노드의 열 번호와
+ * 형제 사이의 상대 순서는 base 그대로다.
+ * - 순서: 삭제된 정의는 `slot`을 줄 번호로 써서 소스 정의 순서에 끼우고, 삭제된 파일과 폴더는 형제 순서(폴더, 파일, 이름순)에 끼운다.
+ * - 열: 형제 가운데 그 노드로 선을 보내는 노드의 열에 1을 더한 값 가운데 가장 큰 값이다. 들어오는 선이 없으면 형제의 첫 열이고,
+ *   첫 열은 진입점 단위가 있는 묶음에서 1, 없는 묶음에서 0이다. 함수 안 import는 쓰지 않는다.
+ * - 최상위 단위: 선으로 이어진 대상 시점 단위의 연결 묶음에 들고, 그런 단위가 없으면 더한 단위끼리 묶음을 이루거나 선반에 놓인다.
+ */
+function withGone(graph: Graph, opts: Toggles, compare: Compared, base: Columns): Columns {
+  const nodes = nodeIndex(graph);
+  const off = hidden(graph, opts);
+  const lost = graph.nodes.filter((n) => compare.gone.nodes.has(n.id) && !off.has(n.id));
+  if (lost.length === 0) {
+    return base;
+  }
+  const added = new Set(lost.map((n) => n.id));
+  const slotted = (node: AtlasNode): AtlasNode => {
+    const slot = compare.slots.get(node.id);
+    return slot === undefined ? node : { ...node, range: [slot, slot] };
+  };
+
+  const lists = new Map<string | null, AtlasNode[]>();
+  for (const node of compare.live.nodes) {
+    if (base.order.has(node.id)) {
+      lists.set(node.parent, [...(lists.get(node.parent) ?? []), node]);
+    }
+  }
+  for (const list of lists.values()) {
+    list.sort((a, b) => base.order.get(a.id)! - base.order.get(b.id)!);
+  }
+  for (const node of lost.map(slotted).sort(siblingOrder)) {
+    const list = lists.get(node.parent) ?? [];
+    const at = list.findIndex((other) => siblingOrder(node, slotted(other)) < 0);
+    list.splice(at < 0 ? list.length : at, 0, nodes.get(node.id)!);
+    lists.set(node.parent, list);
+  }
+  const order = new Map<string, number>();
+  for (const list of lists.values()) {
+    list.forEach((node, i) => order.set(node.id, i));
+  }
+
+  /** 더한 노드마다 그 노드로 선을 보내는 형제, 더한 최상위 단위마다 선으로 이어진 최상위 단위 */
+  const sources = new Map<string, Set<string>>();
+  const linked = new Map<string, Set<string>>();
+  for (const edge of graph.edges) {
+    const pair = off.has(edge.source) || off.has(edge.target) ? null : siblings(nodes, edge.source, edge.target);
+    if (pair === null || (!added.has(pair[0]) && !added.has(pair[1]))) {
+      continue;
+    }
+    if (nodes.get(pair[0])!.parent === null) {
+      linked.set(pair[0], (linked.get(pair[0]) ?? new Set()).add(pair[1]));
+      linked.set(pair[1], (linked.get(pair[1]) ?? new Set()).add(pair[0]));
+    }
+    if (!edge.deferred && added.has(pair[1])) {
+      sources.set(pair[1], (sources.get(pair[1]) ?? new Set()).add(pair[0]));
+    }
+  }
+
+  const components = base.components.map((ids) => [...ids]);
+  const home = new Map<string, string[]>();
+  components.forEach((ids) => ids.forEach((id) => home.set(id, ids)));
+  const tops = lost.filter((n) => n.parent === null).map((n) => n.id);
+  for (let moved = true; moved; ) {
+    moved = false;
+    for (const id of tops) {
+      const near = home.has(id) ? undefined : [...(linked.get(id) ?? [])].find((other) => home.has(other));
+      if (near !== undefined) {
+        home.get(near)!.push(id);
+        home.set(id, home.get(near)!);
+        moved = true;
+      }
+    }
+  }
+  const shelf = [...base.shelf];
+  for (const id of tops) {
+    if (home.has(id)) {
+      continue;
+    }
+    const members = new Set([id]);
+    for (const member of members) {
+      [...(linked.get(member) ?? [])].filter((other) => added.has(other) && !home.has(other)).forEach((other) => members.add(other));
+    }
+    if (members.size === 1) {
+      shelf.push(id);
+      home.set(id, [id]);
+      continue;
+    }
+    const ids = [...members];
+    components.push(ids);
+    ids.forEach((member) => home.set(member, ids));
+  }
+  components.forEach((ids) => ids.sort((a, b) => order.get(a)! - order.get(b)!));
+  const name = (id: string) => nodes.get(id)!.name;
+  shelf.sort((a, b) => (name(a) < name(b) ? -1 : name(a) > name(b) ? 1 : a < b ? -1 : 1));
+
+  const entries = entryUnits(compare.live, off);
+  const column = new Map(base.column);
+  const open = new Set<string>();
+  const columnOf = (id: string): number => {
+    const found = column.get(id);
+    if (found !== undefined) {
+      return found;
+    }
+    open.add(id);
+    const parent = nodes.get(id)!.parent;
+    const group = parent === null ? home.get(id)! : (lists.get(parent) ?? []).map((n) => n.id);
+    const before = [...(sources.get(id) ?? [])].filter((source) => group.includes(source) && !open.has(source));
+    const value = before.length === 0 ? (group.some((other) => entries.has(other)) ? 1 : 0) : 1 + Math.max(...before.map(columnOf));
+    open.delete(id);
+    column.set(id, value);
+    return value;
+  };
+  lost.forEach((node) => columnOf(node.id));
   return { column, order, components, shelf };
 }

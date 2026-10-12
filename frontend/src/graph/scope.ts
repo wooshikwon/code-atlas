@@ -19,10 +19,15 @@ export interface DrawnEdge {
   source: string;
   target: string;
   group: EdgeGroup;
-  /** 합친 원래 선의 sites 가운데 세는 관계(`COUNTED_KINDS`)의 수. 선 위의 수와 도착 노드 앞의 합계로 적는다. */
+  /**
+   * 합친 원래 선의 sites 가운데 세는 관계(`COUNTED_KINDS`)의 수. 선 위의 수와 도착 노드 앞의 합계로 적는다.
+   * 시점 비교에서 삭제된 선의 sites는 weight와 kinds에 세지 않는다.
+   */
   weight: number;
   /** 합친 원래 선의 종류마다 sites 수 */
   kinds: Partial<Record<EdgeKind, number>>;
+  /** 합친 원래 선이 모두 시점 비교에서 삭제된 선이다. 선택·흐름·hover와 무관하게 muted에 흐린 단계로 그린다. */
+  gone: boolean;
   tone: Tone;
   opacity: number;
   /** 합친 선이 모두 함수 안 import다. */
@@ -98,19 +103,32 @@ function shadeOf(edges: AtlasEdge[], flow: Flow | null, member: (id: string) => 
   };
 }
 
-/** 원래 선 edges를 선 하나로 합친다. edges가 비면 분류는 실행이고 무게는 0이다. */
-function merge(key: EdgeKey, source: string, target: string, edges: AtlasEdge[], shade: Drawing): DrawnEdge {
+/** 삭제된 선이 없는 그래프의 `drawn`·`picked`·`arriving`이 받는 삭제된 선의 키 */
+const NO_KEYS = new Set<EdgeKey>();
+
+/**
+ * 원래 선 edges를 선 하나로 합친다. edges가 비면 분류는 실행이고 무게는 0이다. off는 시점 비교에서 삭제된 선의 키이고,
+ * 무게와 종류마다의 수는 삭제되지 않은 선만 센다. 삭제된 선만 합친 선은 shade 대신 muted에 흐린 단계를 받는다.
+ */
+function merge(key: EdgeKey, source: string, target: string, edges: AtlasEdge[], shade: Drawing, off: Set<EdgeKey>): DrawnEdge {
   const kinds: DrawnEdge["kinds"] = {};
   let group = edges[0]?.group ?? "run";
   let weight = 0;
+  let live = 0;
   for (const edge of edges) {
-    weight += COUNTED_KINDS.includes(edge.kind) ? edge.sites.length : 0;
-    kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
     if (GROUP_ORDER.indexOf(edge.group) < GROUP_ORDER.indexOf(group)) {
       group = edge.group;
     }
+    if (off.size > 0 && off.has(edgeKey(edge))) {
+      continue;
+    }
+    live += 1;
+    weight += COUNTED_KINDS.includes(edge.kind) ? edge.sites.length : 0;
+    kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
   }
-  return { key, source, target, group, weight, kinds, ...shade, via: false, deferred: edges.length > 0 && edges.every((e) => e.deferred), edges };
+  const gone = edges.length > 0 && live === 0;
+  const drawing: Drawing = gone ? { tone: "muted", opacity: EDGE_OPACITY.rest, route: shade.route } : shade;
+  return { key, source, target, group, weight, kinds, ...drawing, gone, via: false, deferred: edges.length > 0 && edges.every((e) => e.deferred), edges };
 }
 
 /**
@@ -126,8 +144,8 @@ function strides(graph: Graph, lit: Lit): DrawnEdge[] {
     const edge = graph.edges.find((e) => e.source === source && e.target === target && e.kind === kind);
     result.push(
       edge === undefined
-        ? merge(stepKey(source, target), source, target, [], shade(kind))
-        : merge(edgeKey(edge), source, target, [edge], shade(kind)),
+        ? merge(stepKey(source, target), source, target, [], shade(kind), NO_KEYS)
+        : merge(edgeKey(edge), source, target, [edge], shade(kind), NO_KEYS),
     );
   }
   return result;
@@ -144,9 +162,10 @@ function strides(graph: Graph, lit: Lit): DrawnEdge[] {
  * 경로의 걸음마다 선 하나를 strong에 불투명도 1로, 접힌 상자 사이의 선을 muted에 흐린 단계(`EDGE_OPACITY.rest`)로 그린다.
  * lit이 없으면 고른 노드에 닿는 선(고른 노드와 그 자손의 경계를 넘는 선)은 strong에 불투명도 1,
  * 흐름에 든 노드 사이의 선은 muted에 불투명도 1, 그 밖의 선은 muted에 흐린 단계다. 고른 노드가 없으면
- * 모두 muted에 중간 단계(`EDGE_OPACITY.idle`)다.
+ * 모두 muted에 중간 단계(`EDGE_OPACITY.idle`)다. off는 시점 비교에서 삭제된 선의 키이고, 삭제된 선만 합친 선은 어느 단계에서도
+ * muted에 흐린 단계다.
  */
-export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: string | null, lit: Lit | null): DrawnEdge[] {
+export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: string | null, lit: Lit | null, off: Set<EdgeKey> = NO_KEYS): DrawnEdge[] {
   if (lit !== null) {
     flow = null;
     hover = null;
@@ -205,9 +224,9 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
   const result: DrawnEdge[] = [];
   for (const { source, target, edges, lifted } of pairs.values()) {
     if (lifted) {
-      result.push(merge(aggKey(source, target), source, target, edges, shade(edges)));
+      result.push(merge(aggKey(source, target), source, target, edges, shade(edges), off));
     } else {
-      result.push(...edges.map((e) => merge(edgeKey(e), source, target, [e], shade([e]))));
+      result.push(...edges.map((e) => merge(edgeKey(e), source, target, [e], shade([e]), off)));
     }
   }
   return lit === null ? result : [...result, ...strides(graph, lit)];
@@ -217,14 +236,14 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
  * 선 키가 가리키는 선과 그 선에 합친 원래 선. 집계 선은 `drawn`이 그 키로 합친 선이고, 마우스를 올려야 그려지는
  * 집계 선은 양 끝에 마우스를 올린 것으로 보고 찾는다. 집계 선이 아닌 키는 원래 선 하나다. 없으면 null이다.
  */
-export function picked(graph: Graph, shown: Shown, flow: Flow | null, key: EdgeKey): DrawnEdge | null {
+export function picked(graph: Graph, shown: Shown, flow: Flow | null, key: EdgeKey, off: Set<EdgeKey> = NO_KEYS): DrawnEdge | null {
   const [tag, source, target] = key.split("|");
   if (tag !== "agg") {
     const edge = graph.edges.find((e) => edgeKey(e) === key);
-    return edge === undefined ? null : merge(key, edge.source, edge.target, [edge], shadeOf([edge], null, () => false));
+    return edge === undefined ? null : merge(key, edge.source, edge.target, [edge], shadeOf([edge], null, () => false), off);
   }
   for (const hover of [null, source, target]) {
-    const found = drawn(graph, shown, flow, hover, null).find((e) => e.key === key);
+    const found = drawn(graph, shown, flow, hover, null, off).find((e) => e.key === key);
     if (found !== undefined) {
       return found;
     }
@@ -254,14 +273,14 @@ export function along(nodes: Map<string, AtlasNode>, keys: EdgeKey[], edge: Atla
 
 /**
  * 그린 선 edges 가운데 지나온 선 via에 드는 원래 선을 하나라도 합친 선을 가장 진한 단계(strong에 불투명도 1)로 올리고 via 표시를 단다.
- * 지나온 선의 도착 폴더를 펼쳐 선이 갈라졌으면 갈라진 선이 모두 표시를 받는다.
+ * 지나온 선의 도착 폴더를 펼쳐 선이 갈라졌으면 갈라진 선이 모두 표시를 받는다. 시점 비교에서 삭제된 선만 합친 선은 올리지 않는다.
  */
 export function followed(edges: DrawnEdge[], nodes: Map<string, AtlasNode>, via: EdgeKey[] | null): DrawnEdge[] {
   if (via === null) {
     return edges;
   }
   return edges.map((edge) =>
-    edge.edges.some((e) => along(nodes, via, e)) ? { ...edge, tone: "strong", opacity: EDGE_OPACITY.full, via: true } : edge,
+    !edge.gone && edge.edges.some((e) => along(nodes, via, e)) ? { ...edge, tone: "strong", opacity: EDGE_OPACITY.full, via: true } : edge,
   );
 }
 
@@ -272,6 +291,6 @@ export function trunkTarget(key: EdgeKey): string | null {
 }
 
 /** 노드 target으로 들어오는 그린 선. 함수 안 import만 합친 선은 줄기에 들지 않으므로 뺀다. */
-export function arriving(graph: Graph, shown: Shown, flow: Flow | null, target: string): DrawnEdge[] {
-  return drawn(graph, shown, flow, null, null).filter((edge) => edge.target === target && !edge.deferred);
+export function arriving(graph: Graph, shown: Shown, flow: Flow | null, target: string, off: Set<EdgeKey> = NO_KEYS): DrawnEdge[] {
+  return drawn(graph, shown, flow, null, null, off).filter((edge) => edge.target === target && !edge.deferred);
 }

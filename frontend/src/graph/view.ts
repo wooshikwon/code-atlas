@@ -21,6 +21,7 @@ import {
   type Box,
   type Layout,
   type Point,
+  type Size,
 } from "./layout";
 import type { StepKind } from "./route";
 import { aggKey, darkness, type DrawnEdge, type EdgeKey, type Shade, type Tone } from "./scope";
@@ -58,6 +59,14 @@ export type EdgeView = {
   branch: Point[];
   /** 이 선이 든 줄기의 키. in은 도착 노드 앞의 줄기, out은 출발 노드 뒤의 줄기이고 들지 않았으면 null이다. */
   trunks: Record<End, EdgeKey | null>;
+  /** 시점 비교에서 삭제된 관계만 든 선이다. sites가 0이어서 수를 적지 않는다. */
+  gone: boolean;
+  /**
+   * 삭제된 관계만 든 선이 수 대신 빨강 점을 놓는 가운데 점. 따로 들어가는 선은 화살촉 앞(into를 적는 곳)이고, 지금 있는 관계가 든 선과
+   * 한 줄기로 합류하는 선은 그 선만 지나는 가지의 끝에서 `MARK_BACK`만큼 앞이다. 든 선이 모두 삭제된 관계만 든 선인 줄기에 들었으면
+   * 줄기가 점을 그리므로 null이다.
+   */
+  mark: Point | null;
 };
 
 /** 어느 줄기에도 들지 않은 선의 `EdgeView.trunks` */
@@ -90,11 +99,13 @@ export type TrunkView = {
   group: EdgeGroup;
   /** 줄기에 든 선 가운데 강조하는 경로의 걸음이 있다 */
   route: boolean;
+  /** 든 선이 모두 삭제된 관계만 든 선인 들어오는 줄기가 합계 대신 빨강 점을 놓는 가운데 점(at을 적는 곳). 그 밖의 줄기는 null이다. */
+  mark: Point | null;
 };
 
 /** 숫자가 닿으면 안 되는 곳 */
 interface Blocked {
-  /** 노드의 글자를 그리는 칸, 합류점, 갈림점, 도착 노드 앞의 들어오는 합계 */
+  /** 노드의 글자를 그리는 칸, 합류점, 갈림점, 도착 노드 앞의 들어오는 합계, 삭제된 관계만 든 선의 빨강 점 */
   solid: Box[];
   /** 선분의 사각형과 그 선분을 그리는 선이나 줄기의 키. 높이 `ROW`의 줄마다 그 줄에 걸친 선분을 모은다. */
   rows: Map<number, { box: Box; owner: EdgeKey }[]>;
@@ -329,6 +340,8 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       below,
       branch: points,
       trunks: NO_TRUNKS,
+      gone: edge.gone,
+      mark: null,
     });
   }
   return trunkViews(views, letteredBoxes(layout, nodes));
@@ -406,14 +419,27 @@ function numberBox(at: Point, count: number): Box {
   return { x: at.x - width / 2, y: at.y - NUMBER_HEIGHT / 2, width, height: NUMBER_HEIGHT };
 }
 
+/** 삭제된 관계만 든 선의 빨강 점의 지름과, 합류점에서 가지를 따라 점의 가운데까지 띄우는 거리 */
+export const MARK_SIZE = 7;
+export const MARK_BACK = 9;
+
+/** 가운데 점이 at인 빨강 점이 차지하는 사각형 */
+function markBox(at: Point): Box {
+  return { x: at.x - MARK_SIZE / 2, y: at.y - MARK_SIZE / 2, width: MARK_SIZE, height: MARK_SIZE };
+}
+
+/** 도착 노드로 들어오는 합계 count가 차지하는 크기 */
+function numberSize(count: number): Size {
+  return { width: numberWidth(String(count).length), height: NUMBER_HEIGHT };
+}
+
 /**
- * 도착 노드로 들어오는 합계 count를 적는 가운데 점. 늘 보이는 수는 이 합계 하나이고, 경로의 마지막 구간 위에서 끝점으로부터
- * clear(화살촉의 길이)와 숫자 둘레의 폭만큼 띄운 화살촉 앞에 적는다.
+ * 도착 노드 앞에 크기 size인 표시(들어오는 합계나 빨강 점)를 놓는 가운데 점. 경로의 마지막 구간 위에서 끝점으로부터
+ * clear(화살촉의 길이)와 숫자 둘레의 폭만큼 띄운 화살촉 앞이다. 늘 보이는 수는 이 합계 하나다.
  */
-function beforeEnd(points: Point[], clear: number, count: number): Point {
+function beforeEnd(points: Point[], clear: number, size: Size): Point {
   const [before, end] = points.slice(-2);
-  const size = before.y === end.y ? numberWidth(String(count).length) : NUMBER_HEIGHT;
-  return toward(end, before, clear + NUMBER_PAD + size / 2);
+  return toward(end, before, clear + NUMBER_PAD + (before.y === end.y ? size.width : size.height) / 2);
 }
 
 /** 선분을 찾는 격자의 줄 높이 */
@@ -427,7 +453,7 @@ function overlap(a: Box, b: Box): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
-/** 선과 줄기가 그리는 선분, 노드의 글자를 그리는 칸 lettered, 합류점, 갈림점, 들어오는 합계를 숫자가 닿으면 안 되는 곳으로 모은다. */
+/** 선과 줄기가 그리는 선분, 노드의 글자를 그리는 칸 lettered, 합류점, 갈림점, 들어오는 합계, 빨강 점을 숫자가 닿으면 안 되는 곳으로 모은다. */
 function blockedOf(views: EdgeView[], trunks: TrunkView[], lettered: Box[]): Blocked {
   const solid = [...lettered];
   const rows: Blocked["rows"] = new Map();
@@ -445,11 +471,17 @@ function blockedOf(views: EdgeView[], trunks: TrunkView[], lettered: Box[]): Blo
     if (view.into !== null) {
       solid.push(numberBox(view.into, view.sites));
     }
+    if (view.mark !== null) {
+      solid.push(markBox(view.mark));
+    }
   }
   for (const trunk of trunks) {
     trunk.pieces.forEach((piece) => draw(piece, trunk.key));
     if (trunk.at !== null) {
       solid.push(numberBox(trunk.at, trunk.sites));
+    }
+    if (trunk.mark !== null) {
+      solid.push(markBox(trunk.mark));
     }
     const radius = JOINT_RADIUS + (trunk.end === "out" ? FORK_RIM / 2 : 0);
     solid.push(...trunk.joints.map((joint) => ({ x: joint.x - radius, y: joint.y - radius, width: 2 * radius, height: 2 * radius })));
@@ -569,6 +601,10 @@ function bundles(views: EdgeView[], end: End, taken: Map<EdgeKey, number>): { tr
         lengths.set(view.key, reach);
       });
       const sites = tree.reduce((sum, m) => sum + m.view.sites, 0);
+      /** 삭제된 관계만 든 선을 뺀 선의 수. 그런 선이 하나만 남은 줄기는 따로 들어가는 선처럼 sites 수가 1 이하면 합계를 적지 않는다. */
+      const live = tree.filter((m) => !m.view.gone).length;
+      const counted = live === tree.length || live > 1 || sites >= 2;
+      const before = (size: Size) => beforeEnd(pieces[0], ARROW_LENGTH, size);
       trunks.push({
         key,
         end,
@@ -578,9 +614,10 @@ function bundles(views: EdgeView[], end: End, taken: Map<EdgeKey, number>): { tr
         keys: tree.map((m) => m.view.key),
         far: new Set(tree.map((m) => (end === "in" ? m.view.source : m.view.target))).size,
         sites,
-        at: end === "in" ? beforeEnd(pieces[0], ARROW_LENGTH, sites) : null,
+        at: end === "in" && live > 0 && counted ? before(numberSize(sites)) : null,
         group: tree.map((m) => m.view.group).reduce((a, b) => (GROUP_ORDER.indexOf(b) < GROUP_ORDER.indexOf(a) ? b : a)),
         route: tree.some((m) => m.view.route !== null),
+        mark: end === "in" && live === 0 ? before({ width: MARK_SIZE, height: MARK_SIZE }) : null,
       });
     });
   }
@@ -592,7 +629,7 @@ function bundles(views: EdgeView[], end: End, taken: Map<EdgeKey, number>): { tr
  * 출발 노드 뒤에서 `bundles`로 묶는다. ELK가 포트로 합친 경로와 ELK 밖에서 정한 경로(`alongRoute`, `sideRoute`)를 같은 방법으로 다룬다.
  * 들어오는 줄기를 먼저 떼므로 두 줄기가 모두 지나는 구간은 들어오는 줄기에 든다. 도착 노드 앞의 들어오는 합계는 들어오는 줄기에 든 선이면
  * 줄기가, 따로 들어가는 선이면 그 선이 적는다. 두 노드 아래로 돌아가는 함수 안 import 선은 적지 않는다. lettered는 노드의 글자를 그리는 칸이다.
- * 합류점과 같은 점인 갈림점은 뺀다.
+ * 합류점과 같은 점인 갈림점은 뺀다. 삭제된 관계만 든 선은 수 대신 빨강 점을 놓을 곳(`EdgeView.mark`, `TrunkView.mark`)을 받는다.
  */
 export function trunkViews(views: EdgeView[], lettered: Box[]): Lines {
   const into = bundles(views, "in", new Map());
@@ -600,14 +637,23 @@ export function trunkViews(views: EdgeView[], lettered: Box[]): Lines {
   const spot = (point: Point) => `${Math.round(point.x)}|${Math.round(point.y)}`;
   const joined = new Set(into.trunks.flatMap((trunk) => trunk.joints.map(spot)));
   const forks = out.trunks.map((trunk) => ({ ...trunk, joints: trunk.joints.filter((fork) => !joined.has(spot(fork))) }));
+  const marked = new Set(into.trunks.filter((trunk) => trunk.mark !== null).map((trunk) => trunk.key));
   const parted = views.map((view) => {
     const trunks = { in: into.keys.get(view.key) ?? null, out: out.keys.get(view.key) ?? null };
     const counted = view.sites >= 2 && !view.below;
+    const branch = trunks.in === null && trunks.out === null ? view.points : stretch(view.points, lengthOf(view.points) - (out.lengths.get(view.key) ?? 0), into.lengths.get(view.key) ?? 0);
+    const mark = (): Point | null => {
+      if (!view.gone || marked.has(trunks.in ?? "")) {
+        return null;
+      }
+      return trunks.in === null ? beforeEnd(view.points, ARROW_LENGTH, { width: MARK_SIZE, height: MARK_SIZE }) : along(branch, Math.max(0, lengthOf(branch) - MARK_BACK));
+    };
     return {
       ...view,
       trunks,
-      branch: trunks.in === null && trunks.out === null ? view.points : stretch(view.points, lengthOf(view.points) - (out.lengths.get(view.key) ?? 0), into.lengths.get(view.key) ?? 0),
-      into: trunks.in === null && counted ? beforeEnd(view.points, ARROW_LENGTH, view.sites) : null,
+      branch,
+      into: trunks.in === null && counted ? beforeEnd(view.points, ARROW_LENGTH, numberSize(view.sites)) : null,
+      mark: mark(),
     };
   });
   const trunks = [...forks, ...into.trunks];

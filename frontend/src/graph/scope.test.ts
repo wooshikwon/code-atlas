@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
-import { repoFixture, routeFixture, variableFixture } from "./fixture";
+import { compared } from "./compare";
+import { compareFixture, repoFixture, routeFixture, variableFixture } from "./fixture";
 import { DIM, HALF, flow } from "./flow";
 import { lit, route } from "./route";
 import { along, arriving, drawn, endsOf, followed, lifted, picked, trunkTarget, type DrawnEdge } from "./scope";
@@ -368,5 +369,46 @@ describe("읽음·바꿈 선", () => {
   it("함수에서 변수로 가는 선의 무게는 읽은 곳의 수다", () => {
     const line = at("app:run").find((edge) => edge.source === "app:run" && edge.target === "conf:PRESETS")!;
     expect(line).toMatchObject({ weight: 2, kinds: { read: 2 } });
+  });
+});
+
+describe("drawn: 시점 비교", () => {
+  const { graph } = compareFixture;
+  const compare = compared(graph, compareFixture);
+  const none = hidden(graph, toggles);
+  const at = (selection: string | null, hover: string | null = null) => {
+    const focus = selection === null ? null : flow(graph, selection, 2, none);
+    const visible = shown(graph, { ...toggles, collapsed: new Set(), flow: focus, lit: null, compare });
+    return new Map(drawn(graph, visible, focus, hover, null, compare.gone.edges).map((edge) => [edge.key, edge]));
+  };
+
+  it("삭제된 선이 섞인 선은 삭제되지 않은 선만 세어 무게와 종류마다의 수가 비교를 켜기 전과 같다", () => {
+    const before = draw(null);
+    const after = at(null);
+    for (const [key, edge] of before) {
+      expect(after.get(key)).toMatchObject({ weight: edge.weight, kinds: edge.kinds, tone: edge.tone, opacity: edge.opacity, gone: false });
+    }
+    expect(after.get("agg|cli|main")!.edges.map((e) => `${e.source}|${e.target}`)).toContain("cli:main|main:helper");
+    expect([...after.keys()].filter((key) => !before.has(key))).toEqual(["agg|pkg.old|pkg.mod"]);
+  });
+
+  it("삭제된 선만 합친 선은 무게가 0이고, 고른 노드에 닿거나 마우스를 올린 노드에 닿아도 muted에 흐린 단계다", () => {
+    expect(at(null).get("agg|pkg.old|pkg.mod")).toMatchObject({ gone: true, weight: 0, kinds: {}, tone: "muted", opacity: DIM });
+    const picked = at("pkg.mod:Store.save");
+    expect(picked.get("pkg.mod:Store.save|pkg.mod:drop|call")).toMatchObject({ gone: true, tone: "muted", opacity: DIM });
+    expect(picked.get("pkg.mod:Store.save|pkg.mod:parse|call")).toMatchObject({ gone: false, tone: "strong", opacity: 1 });
+    expect(at("cli:main", "main:helper").get("cli:main|main:helper|call")).toMatchObject({ gone: true, tone: "muted", opacity: DIM });
+    expect(at("pkg.mod:drop").get("pkg.mod:drop|main:helper|call")).toMatchObject({ gone: true, tone: "muted", opacity: DIM });
+  });
+
+  it("지나온 선에 들어도 삭제된 선만 합친 선은 올리지 않는다", () => {
+    const edges = followed([...at("cli:main").values()], nodeIndex(graph), ["cli:main|main:helper|call", "cli:main|main:run|call"]);
+    expect(edges.filter((e) => e.via).map((e) => e.key)).toEqual(["cli:main|main:run|call"]);
+    expect(edges.find((e) => e.key === "cli:main|main:helper|call")).toMatchObject({ tone: "muted", opacity: DIM });
+  });
+
+  it("삭제된 선의 키를 넘기지 않으면 모든 선을 센다", () => {
+    const visible = shown(graph, { ...toggles, collapsed: new Set(), flow: null, lit: null, compare });
+    expect(drawn(graph, visible, null, null, null).find((e) => e.key === "agg|pkg.old|pkg.mod")).toMatchObject({ gone: false, weight: 2 });
   });
 });

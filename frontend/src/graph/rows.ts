@@ -3,9 +3,11 @@
 // 단계는 파일과 함수 두 가지다. 고른 노드가 함수(클래스, 메서드, 변수)면 그 노드에 닿는 선을 실제 함수 사이의 관계로,
 // 파일이면 상대 끝을 파일로 풀고, 고른 노드가 없거나 고른 노드에 닿지 않는 선은 화면에 그린 양 끝을 그대로 적는다.
 // 줄의 끝이 클래스·함수·메서드·변수면 기준 파일(`baseOf`)에서 갈라지는 곳부터의 경로를 이름 앞에 적는다(`definedName`).
-import type { AtlasEdge, AtlasNode, EdgeKind } from "../api/types";
+// 시점 비교가 켜져 있으면 줄마다 그 줄에 든 관계의 변경 내용(`RowTally`)을 담고, 수만 달라진 관계는 관계 칸에 기준 시점의 수를 함께 적는다.
+import type { AtlasEdge, AtlasNode, Comparison, EdgeKind } from "../api/types";
+import { rowChange, type Lines } from "./compare";
 import { titleOf } from "./layout";
-import { nameOf, relationsOf, STEP_NAMES } from "./names";
+import { kindsOf, nameOf, relationOf, relationsOf, STEP_NAMES } from "./names";
 import { aggKey, edgeKey, type DrawnEdge, type EdgeKey } from "./scope";
 import { unitOf, within } from "./visible";
 
@@ -27,6 +29,58 @@ export interface LineRow {
   keys: EdgeKey[] | null;
   /** 관계 칸을 눌러 코드 줄 목록을 여는 선의 키. 원래 선 하나로 된 줄은 그 선이고 그 밖의 줄은 화면의 선이다. 코드 줄이 없으면 null이다. */
   list: EdgeKey | null;
+  /** 시점 비교가 켜져 있을 때만 담는, 변경 칸에 적는 값 */
+  change?: RowTally;
+}
+
+/** 말풍선 한 줄에 든 원래 선 가운데 추가된 선, 삭제된 선, 양쪽 시점에 있는 선의 수 */
+export interface RowTally {
+  added: number;
+  deleted: number;
+  kept: number;
+}
+
+export const CHANGE_NAMES = { added: "신규", deleted: "삭제", kept: "유지" } as const;
+
+/**
+ * 변경 칸에 적는 글의 토막. 든 선이 모두 추가된 선이면 `신규`, 모두 삭제된 선이면 `삭제`, 추가되거나 삭제된 선이 없으면 `유지`다.
+ * 그 밖의 줄은 추가된 선과 삭제된 선의 수를 붙여 `신규 1`과 `삭제 1`로 적는다.
+ */
+export function changeParts(tally: RowTally): { kind: keyof typeof CHANGE_NAMES; text: string }[] {
+  if (tally.added === 0 && tally.deleted === 0) {
+    return [{ kind: "kept", text: CHANGE_NAMES.kept }];
+  }
+  const whole = tally.kept === 0 && (tally.added === 0 || tally.deleted === 0);
+  return (["added", "deleted"] as const)
+    .filter((kind) => tally[kind] > 0)
+    .map((kind) => ({ kind, text: whole ? CHANGE_NAMES[kind] : `${CHANGE_NAMES[kind]} ${tally[kind]}` }));
+}
+
+type Kinds = Partial<Record<EdgeKind, number>>;
+
+/** 원래 선 edges의 종류마다 sites 수 */
+function counts(edges: AtlasEdge[]): Kinds {
+  const kinds: Kinds = {};
+  for (const edge of edges) {
+    kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
+  }
+  return kinds;
+}
+
+/**
+ * 관계 칸의 글. before가 있으면 세는 관계 가운데 기준 시점의 수가 지금의 수 kinds와 다른 종류를 `호출 2곳 → 3곳`으로 적는다.
+ */
+function relationText(kinds: Kinds, before: Kinds | null): string {
+  const counted = kindsOf({ ...before, ...kinds }, true);
+  if (before === null || counted.length === 0) {
+    return relationsOf(kinds);
+  }
+  return counted
+    .map((kind) => {
+      const [was, now] = [before[kind] ?? 0, kinds[kind] ?? 0];
+      return was === now ? relationOf(kind, now) : `${relationOf(kind, was)} → ${now}곳`;
+    })
+    .join(" · ");
 }
 
 const DEFINITIONS = new Set<AtlasNode["kind"]>(["function", "method", "class", "dataclass", "variable"]);
@@ -51,9 +105,10 @@ export function stageOf(nodes: Map<string, AtlasNode>, focus: string | null, lin
  *   누를 수 없는 안내 줄 하나로 낸다.
  * - 파일 단계: 고른 파일 쪽 끝은 화면에 그린 노드를, 상대 끝은 그 정의가 든 파일을 적어 상대 파일마다 한 줄로 묶는다.
  * - 그 밖: 화면에 그린 양 끝 한 줄이다. 실행 선이 없는 경로의 이음은 관계 대신 걸음의 이름을 적는다.
- * 줄은 원래 선이 그래프에 나오는 순서다.
+ * 줄은 원래 선이 그래프에 나오는 순서다. changes는 시점 비교의 선마다의 변경 내용이고 비교가 꺼져 있으면 null이다. 비교가 켜져 있으면
+ * 관계 칸은 삭제되지 않은 선의 수를 적고, 삭제된 선만 든 줄은 기준 시점의 수를 적는다.
  */
-export function rowsOf(nodes: Map<string, AtlasNode>, focus: string | null, line: RowLine): LineRow[] {
+export function rowsOf(nodes: Map<string, AtlasNode>, focus: string | null, line: RowLine, changes: Comparison["edges"] | null = null): LineRow[] {
   const stage = stageOf(nodes, focus, line);
   const inside = focus !== null && within(nodes, line.source, focus);
   const ends = (edge: AtlasEdge): [string, string] => {
@@ -64,6 +119,18 @@ export function rowsOf(nodes: Map<string, AtlasNode>, focus: string | null, line
       return inside ? [line.source, unitOf(nodes, edge.target)] : [unitOf(nodes, edge.source), line.target];
     }
     return [line.source, line.target];
+  };
+  /** 원래 선 edges를 묶은 줄의 관계 칸과 변경 칸 */
+  const told = (edges: AtlasEdge[]): Pick<LineRow, "relation" | "change"> => {
+    if (changes === null) {
+      return { relation: relationsOf(counts(edges)) };
+    }
+    const { added, deleted, before } = rowChange(edges, changes);
+    const live = edges.filter((edge) => changes[edgeKey(edge)]?.change !== "deleted");
+    return {
+      relation: relationText(counts(live.length > 0 ? live : edges), live.length > 0 ? before : null),
+      change: { added, deleted, kept: edges.length - added - deleted },
+    };
   };
   const groups = new Map<string, { source: string; target: string; edges: AtlasEdge[] }>();
   const defined = (edge: AtlasEdge) => !BOXES.has(nodes.get(edge.source)?.kind) && !BOXES.has(nodes.get(edge.target)?.kind);
@@ -77,20 +144,17 @@ export function rowsOf(nodes: Map<string, AtlasNode>, focus: string | null, line
   if (groups.size === 0) {
     /** 실행 선이 없는 경로의 이음 */
     const bare = line.route !== null && Object.keys(line.kinds).length === 0;
-    const relation = bare ? STEP_NAMES[line.route!] : relationsOf(line.kinds);
-    return [{ line: line.key, source: line.source, target: line.target, relation, keys: stage === "function" ? null : [line.key], list: bare ? null : line.key }];
+    const whole = line.edges.length === 0 ? { relation: relationsOf(line.kinds), ...(changes === null ? {} : { change: { added: 0, deleted: 0, kept: 0 } }) } : told(line.edges);
+    const relation = bare ? STEP_NAMES[line.route!] : whole.relation;
+    return [{ line: line.key, source: line.source, target: line.target, ...whole, relation, keys: stage === "function" ? null : [line.key], list: bare ? null : line.key }];
   }
   return [...groups.values()].map(({ source, target, edges }) => {
-    const kinds: Partial<Record<EdgeKind, number>> = {};
-    for (const edge of edges) {
-      kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
-    }
     const whole = source === line.source && target === line.target;
     return {
       line: line.key,
       source,
       target,
-      relation: relationsOf(kinds),
+      ...told(edges),
       keys: stage === "function" ? edges.map(edgeKey) : whole ? [line.key] : [aggKey(source, target)],
       list: !whole && edges.length === 1 ? edgeKey(edges[0]) : line.key,
     };
@@ -102,6 +166,8 @@ export interface CellName {
   path: string;
   name: string;
   full: string;
+  /** 시점 비교에서 이름 뒤에 작게 적는 그 노드의 줄 수. 바뀐 줄이 없거나 비교가 꺼져 있으면 없다. */
+  lines?: Lines;
 }
 
 /**

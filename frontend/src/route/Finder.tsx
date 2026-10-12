@@ -2,10 +2,12 @@
 // 출발 칸과 도착 칸이 차면 찾은 경로를 숫자 버튼으로 나열하고, 고른 경로의 단계 목록과 경로 전체 보기 버튼, 고정 안내,
 // 끄기 버튼을 그린다.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { liveGraph } from "../graph/compare";
 import { useFlight } from "../graph/flight";
 import { PATH_LIMIT } from "../graph/route";
 import { hidden, nodeIndex } from "../graph/visible";
 import { build } from "../search/index";
+import { useCompare } from "../state/compare";
 import { pinned, useAtlas } from "../state/store";
 import { EndField } from "./EndField";
 import { emptyText, pickTip, stepCount, stepRows } from "./words";
@@ -28,11 +30,15 @@ export function Finder() {
   const clearFinder = useAtlas((s) => s.clearFinder);
   const { fit } = useFlight();
   const nodes = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
-  /** 출발 칸과 도착 칸의 검색 색인. 변수는 경로의 끝점이 아니므로 뺀다. */
-  const entries = useMemo(
-    () => (graph === null ? [] : build(graph, hidden(graph, { showTests, showExternal })).filter((entry) => entry.kind !== "variable")),
-    [graph, showTests, showExternal],
-  );
+  const result = useCompare((s) => s.result);
+  /** 출발 칸과 도착 칸의 검색 색인. 변수는 경로의 끝점이 아니므로 빼고, 시점 비교에서 삭제된 노드는 대상 시점에 없으므로 뺀다. */
+  const entries = useMemo(() => {
+    if (graph === null) {
+      return [];
+    }
+    const live = liveGraph(graph, result);
+    return build(live, hidden(live, { showTests, showExternal })).filter((entry) => entry.kind !== "variable");
+  }, [graph, result, showTests, showExternal]);
 
   /** 고정 중에 막힌 액션이 불리면 안내 줄을 FLASH_MS 동안 뒤집는다. */
   const [flash, setFlash] = useState(false);

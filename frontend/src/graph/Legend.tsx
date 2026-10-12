@@ -1,12 +1,15 @@
 // 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 일곱 개와 이름표 옆 표시와 상자의 배지, 선 모양 세 개와 갈림·합류, 찾은 경로의 선,
 // 변경 표시 두 색을 보여 주고, 선 모양에 마우스를 올리면 그 분류에 드는 선 종류를 말풍선에 적는다. 분석 표시를 켜면 켠 표시의 견본과 뜻을 끝에 덧붙인다.
+// 시점 비교가 켜져 있으면 그리지 않는 변경 표시 두 색을 빼고 이름 옆 줄 수, 삭제된 연결, 삭제된 정의와 파일의 견본 세 줄을 덧붙인다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
 import { useOverlay, type OverlayKind } from "../state/overlay";
 import { useAtlas } from "../state/store";
-import { FORK_RIM, JOINT_RADIUS } from "./layout";
+import { DIM } from "./flow";
+import { diffTexts, FORK_RIM, JOINT_RADIUS } from "./layout";
 import { EDGE_KIND_NAMES, GROUP_KINDS, GROUP_NAMES } from "./names";
 import { CycleMark, ENTRY_PATH } from "./nodes/common";
+import { MARK_SIZE } from "./view";
 
 const SHAPES = [
   { key: "package", name: "접힌 폴더" },
@@ -63,8 +66,44 @@ function Shape({ kind }: { kind: string }) {
   }
 }
 
-/** 켠 분석 표시의 견본과 뜻. 순환은 critical 색 import 선과 순환 아이콘, 미사용은 점선 테두리다. */
+/** 범례의 이름 옆 줄 수 견본 */
+const DIFF_SAMPLE = diffTexts({ added: 12, deleted: 3 });
+
+/** 시점 비교의 견본 세 줄: 이름 옆 줄 수, 삭제된 관계만 든 흐린 선과 빨강 점, 흐린 단계로 남는 삭제된 정의와 파일 */
+function Compare() {
+  return (
+    <>
+      <li className="legend-overlay" data-kind="compare">
+        <span className="legend-diff">
+          <span className="diff-added">{DIFF_SAMPLE.added}</span>
+          <span className="diff-deleted">{DIFF_SAMPLE.deleted}</span>
+        </span>
+        이름 옆 수: 추가된 줄 · 삭제된 줄
+      </li>
+      <li className="legend-overlay" data-kind="compare">
+        <svg width={30} height={16}>
+          <g opacity={DIM}>
+            <path d="M2,8 L27,8" className="legend-edge tone-muted" markerEnd="url(#arrow-run-muted)" />
+            <circle cx={12} cy={8} r={MARK_SIZE / 2} className="edge-gone" />
+          </g>
+        </svg>
+        삭제된 연결: 기준 시점에만 있던 관계의 선. 숫자 대신 빨강 점
+      </li>
+      <li className="legend-overlay" data-kind="compare">
+        <svg width={30} height={16}>
+          <circle cx={15} cy={8} r={6} className="legend-node" opacity={DIM} />
+        </svg>
+        삭제된 정의와 파일: 흐린 단계로 남고 이름 옆 수도 함께 흐려진다
+      </li>
+    </>
+  );
+}
+
+/** 켠 분석 표시의 견본과 뜻. 순환은 critical 색 import 선과 순환 아이콘, 미사용은 점선 테두리, 시점 비교는 `Compare`의 세 줄이다. */
 function Overlay({ kind }: { kind: OverlayKind }) {
+  if (kind === "compare") {
+    return <Compare />;
+  }
   return kind === "cycles" ? (
     <li className="legend-overlay" data-kind={kind}>
       <svg width={30} height={16}>
@@ -140,7 +179,7 @@ export function Legend() {
           </svg>
           찾은 경로
         </li>
-        {CHANGES.map(({ change, name }) => (
+        {overlay !== "compare" && CHANGES.map(({ change, name }) => (
           <li key={change} data-change={change}>
             <svg width={30} height={16}>
               <rect x={1} y={2} width={3} height={12} className="legend-change-bar" />

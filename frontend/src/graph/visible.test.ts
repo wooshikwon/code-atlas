@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { node as made, repoFixture, routeFixture, variableFixture } from "./fixture";
+import { compared } from "./compare";
+import { compareFixture, node as made, repoFixture, routeFixture, variableFixture } from "./fixture";
 import { flow } from "./flow";
 import { lit, route } from "./route";
 import { drawnOut, folderLines, hidden, insideCounts, inward, lift, nodeIndex, outward, packedIn, shown, unresolvedWithin, writtenBy } from "./visible";
@@ -428,5 +429,52 @@ describe("변수 노드", () => {
     const result = at("conf:PRESETS", { showTests: false, showExternal: false });
     expect(result.nodes.has("app:run")).toBe(true);
     expect(result.nodes.has("conf:Preset")).toBe(true);
+  });
+});
+
+describe("shown: 시점 비교", () => {
+  const { graph } = compareFixture;
+  const compare = compared(graph, compareFixture);
+  const none = hidden(graph, toggles);
+  const at = (selection: string | null, unpacked: string[] = []) =>
+    shown(graph, { ...toggles, collapsed: new Set(), unpacked: new Set(unpacked), flow: selection === null ? null : flow(graph, selection, 2, none), lit: null, compare });
+  const before = (selection: string | null, unpacked: string[] = []) =>
+    shown(repoFixture, { ...toggles, collapsed: new Set(), unpacked: new Set(unpacked), flow: selection === null ? null : flow(repoFixture, selection, 2, off), lit: null });
+  const lost = (result: ReturnType<typeof shown>) => [...result.nodes].filter((id) => compare.gone.nodes.has(id)).sort();
+
+  it("삭제된 파일은 상자로 그리고 삭제된 정의는 파일 상자가 접혀 있으면 그리지 않는다", () => {
+    expect(lost(at(null))).toEqual(["pkg.old"]);
+    expect(at(null).open.size).toBe(0);
+  });
+
+  it("펼친 파일 상자는 삭제된 선이 파일 밖과 이어진 삭제된 정의를 그리고, 손잡이는 비교를 켜기 전과 같은 자식을 묶는다", () => {
+    const opened = at("pkg.mod");
+    expect(lost(opened)).toEqual(["pkg.mod:drop", "pkg.old"]);
+    expect(opened.packs).toEqual(before("pkg.mod").packs);
+    expect(opened.packs.get("pkg.mod")?.ids).toEqual(["pkg.mod:Row", "pkg.mod:parse"]);
+  });
+
+  it("대상 시점의 노드는 비교를 켜기 전과 같은 것을 그린다", () => {
+    for (const [selection, unpacked] of [[null, []], ["pkg.mod", []], ["pkg.mod", ["pkg.mod"]], ["main:run", []], ["cli", []]] as const) {
+      const live = [...at(selection, [...unpacked]).nodes].filter((id) => !compare.gone.nodes.has(id)).sort();
+      expect(live).toEqual([...before(selection, [...unpacked]).nodes].sort());
+    }
+  });
+
+  it("파일 밖과 이어지지 않은 삭제된 정의는 손잡이가 있는 상자에서 전부 펼침 단계에만 그리고 손잡이의 수에 들지 않는다", () => {
+    const inner = made("pkg.mod:stale", "function", "pkg.mod", { path: "pkg/mod.py", range: [60, 62] });
+    const more = { nodes: [...graph.nodes, inner], edges: graph.edges };
+    const result = { ...compareFixture, graph: more, nodes: { ...compareFixture.nodes, "pkg.mod:stale": { change: "deleted" as const, added: 0, deleted: 3, slot: 51 } } };
+    const view = (unpacked: string[]) =>
+      shown(more, { ...toggles, collapsed: new Set(), unpacked: new Set(unpacked), flow: flow(more, "pkg.mod", 2, none), lit: null, compare: compared(more, result) });
+    expect(view([]).nodes.has("pkg.mod:stale")).toBe(false);
+    expect(view([]).packs.get("pkg.mod")).toMatchObject({ ids: ["pkg.mod:Row", "pkg.mod:parse"], definitions: 2 });
+    expect(view(["pkg.mod"]).nodes.has("pkg.mod:stale")).toBe(true);
+  });
+
+  it("고른 삭제된 노드와 고른 노드의 흐름에 든 삭제된 노드는 꺼내 그린다", () => {
+    expect(lost(at("pkg.mod:Store.save"))).toEqual(["pkg.mod:drop", "pkg.old"]);
+    expect(lost(at("pkg.old:legacy"))).toEqual(["pkg.old", "pkg.old:legacy"]);
+    expect(lost(at("pkg.old"))).toEqual(["pkg.old", "pkg.old:legacy"]);
   });
 });

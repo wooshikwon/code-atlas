@@ -3,7 +3,8 @@ import type { ElkNode } from "elkjs/lib/elk-api";
 import { describe, expect, it } from "vitest";
 import type { AtlasNode, Graph } from "../api/types";
 import { columns } from "./columns";
-import { repoFixture, routeFixture, variableFixture } from "./fixture";
+import { compared } from "./compare";
+import { compareFixture, repoFixture, routeFixture, variableFixture } from "./fixture";
 import { flow } from "./flow";
 import {
   arrange,
@@ -545,5 +546,73 @@ describe("변수 노드의 배치", () => {
     expect(packLabel({ ...pack, variables: 0 }, false)).toBe("내부 함수 1개");
     const input = elkGraphs(variableFixture, visible, variableCols, measure, new Map());
     expect(input.packs.get("conf")!.width).toBe(measure("내부 함수 1개 · 변수 3개") + 12);
+  });
+});
+
+describe("시점 비교의 배치", async () => {
+  const { graph } = compareFixture;
+  const compare = compared(graph, compareFixture);
+  const all = nodeIndex(graph);
+  const lanes = columns(graph, toggles, compare);
+  const seen = (selection: string | null, unpacked: string[] = []) =>
+    shown(graph, { ...toggles, collapsed: new Set(), unpacked: new Set(unpacked), flow: selection === null ? null : flow(graph, selection, 2, hidden(graph, toggles)), lit: null, compare });
+  const input = (selection: string | null, unpacked: string[] = []) => elkGraphs(graph, seen(selection, unpacked), lanes, measure, new Map(), compare);
+  const diff = (text: string) => Math.ceil((measure(text) * 10) / 12);
+
+  it("바뀐 줄이 있는 노드는 이름표 뒤 줄 수의 폭만큼 넓고, 접힌 파일 상자와 바뀐 줄이 없는 노드는 크기가 같다", () => {
+    const before = elkGraphs(repoFixture, shownFor("pkg.mod", [], ["pkg.mod"]), cols, measure, new Map());
+    const after = input("pkg.mod", ["pkg.mod"]);
+    const size = (from: typeof after, id: string) => {
+      const node = find(from.components[0], id)!;
+      return [node.width, node.height];
+    };
+    expect(size(after, "pkg.mod:parse")).toEqual([size(before, "pkg.mod:parse")[0]! + 5 + diff("+3") + diff("−1") + 4, 18]);
+    expect(size(after, "pkg.mod:drop")).toEqual([16 + CIRCLE_GAP + measure("drop()") + 5 + diff("−7"), 18]);
+    expect(size(after, "pkg.mod:Row")).toEqual(size(before, "pkg.mod:Row"));
+    expect(size(after, "main")).toEqual([320, 40]);
+    expect(size(after, "pkg.old")).toEqual([320, 40]);
+    const folded = (from: typeof after) => find(from.components[0], "app")!.width!;
+    const closed = shown(graph, { ...toggles, collapsed: new Set(["app"]), flow: null, lit: null, compare });
+    const shut = shown(repoFixture, { ...toggles, collapsed: new Set(["app"]), flow: null, lit: null });
+    expect(folded(elkGraphs(graph, closed, lanes, measure, new Map(), compare))).toBe(folded(elkGraphs(repoFixture, shut, cols, measure, new Map())) + 5 + diff("+7"));
+  });
+
+  it("삭제된 노드를 형제 순서에 끼워 넣고 대상 시점 노드의 열 번호와 순서는 비교를 켜기 전과 같다", () => {
+    const before = elkGraphs(repoFixture, shownFor("pkg.mod", [], ["pkg.mod"]), cols, measure, new Map());
+    const after = input("pkg.mod", ["pkg.mod"]);
+    const placed = (from: typeof after, id: string, only: (kid: string) => boolean) =>
+      kidsOf(find(from.components[0], id))!.filter((kid) => only(kid.id)).map((kid) => `${kid.id}@${kid.layoutOptions?.["elk.partitioning.partition"]}`);
+    const live = (id: string) => !compare.gone.nodes.has(id);
+    for (const box of ["pkg", "pkg.mod", "pkg.mod:Store"]) {
+      expect(placed(after, box, live)).toEqual(placed(before, box, () => true));
+    }
+    expect(after.components[0].children!.map((kid) => kid.id)).toEqual(before.components[0].children!.map((kid) => kid.id));
+    expect(placed(after, "pkg.mod", () => true).at(-1)).toBe("pkg.mod:drop@1");
+    expect(placed(after, "pkg", () => true)).toEqual(["pkg.mod@0", "pkg.old@0", "pkg.util@0"]);
+  });
+
+  it("양 끝이 같은 열인 삭제된 선만 든 쌍은 ELK에 넘기지 않고, 삭제된 선이 섞인 쌍은 넘긴다", () => {
+    const after = input(null);
+    const declared = (find(after.components[0], "pkg")!.edges ?? []).map((edge) => edge.id);
+    expect(lanes.column.get("pkg.old")).toBe(lanes.column.get("pkg.mod"));
+    expect(declared).not.toContain("agg|pkg.old|pkg.mod");
+    expect((after.components[0].edges ?? []).map((edge) => edge.id)).toContain("agg|pkg|main");
+    const opened = input("pkg.mod");
+    expect((find(opened.components[0], "pkg.mod")!.edges ?? []).map((edge) => edge.id)).toContain("agg|pkg.mod:Store|pkg.mod:drop");
+  });
+
+  it("비교를 켜도 대상 시점 노드의 열 순서와 열 안 y 순서가 같고 삭제된 노드에 상자가 놓인다", async () => {
+    for (const [selection, unpacked] of [[null, []], ["pkg.mod", ["pkg.mod"]]] as const) {
+      const before = await arrange(elkGraphs(repoFixture, shownFor(selection, [], [...unpacked]), cols, measure, new Map()), run);
+      const after = await arrange(input(selection, [...unpacked]), run);
+      const ids = [...before.boxes.keys()];
+      expect(arrangement(after, ids)).toBe(arrangement(before, ids));
+      expect(after.boxes.has("pkg.old")).toBe(true);
+    }
+    const opened = await arrange(input("pkg.mod", ["pkg.mod"]), run);
+    const [parse, drop] = [opened.boxes.get("pkg.mod:parse")!, opened.boxes.get("pkg.mod:drop")!];
+    expect(drop.x).toBe(parse.x);
+    expect(drop.y).toBeGreaterThan(parse.y);
+    expect(all.get("pkg.mod:drop")!.parent).toBe("pkg.mod");
   });
 });

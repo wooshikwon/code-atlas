@@ -191,6 +191,8 @@ export function callEdges(calls: Calls, center: string, layout: Layout): Lines {
       below: false,
       branch: points,
       trunks: NO_TRUNKS,
+      gone: false,
+      mark: null,
     });
   }
   return trunkViews(views, [...layout.boxes.values()]);
