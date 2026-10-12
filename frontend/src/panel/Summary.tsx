@@ -56,13 +56,15 @@ interface SummaryProps {
 
 export function Summary({ node, split }: SummaryProps) {
   const auto = useAtlas((s) => s.autoSummary);
+  const unread = useSummaries((s) => s.states[node] === undefined);
   const state = useSummaries((s) => s.states[node]) ?? READING;
   const read = useSummaries((s) => s.read);
   const make = useSummaries((s) => s.make);
   const open = useAtlas((s) => s.summaryOpen);
   const toggle = useAtlas((s) => s.toggleSummary);
 
-  useEffect(() => read(node), [node, read]);
+  // 읽지 않은 노드면 읽는다. 취소한 요청의 노드는 읽지 않은 노드로 돌아가므로 고른 채로도 다시 읽는다.
+  useEffect(() => read(node), [node, read, unread]);
 
   /** "자동 요약"이 켜져 있으면 요약이 없는 노드와 요약을 만든 뒤 바뀐 노드의 요약을 만든다. */
   const waiting = auto && (state.phase === "empty" || (state.phase === "done" && state.stale && state.available));

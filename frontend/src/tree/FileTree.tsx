@@ -85,7 +85,7 @@ export function FileTree() {
 
   /**
    * index번째 행의 노드 메뉴를 열고, 열었으면 참을 돌려준다. at은 누른 화면 좌표이고, 키보드로 열어 null이면 그 행의 이름 아래에 연다.
-   * 폴더 행과 노드가 없는 행은 메뉴가 없다.
+   * 노드가 없는 행은 메뉴가 없다.
    */
   const menuAt = (index: number, at: { x: number; y: number } | null): boolean => {
     const node = list[index]?.node ?? null;

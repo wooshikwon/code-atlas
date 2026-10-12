@@ -24,13 +24,14 @@ vi.mock("../api/client", () => ({
 const { makingKey, makingOf, MAX_REQUESTS, useSummaries } = await import("./summaries");
 
 const store = () => useSummaries.getState();
+const IDLE = { total: 0, ended: 0, failed: 0, held: false, cancelled: false };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeEach(() => {
   reads.length = 0;
   makes.length = 0;
   lists.length = 0;
-  useSummaries.setState({ states: {}, leads: {}, waiting: [], sent: 0 });
+  useSummaries.setState({ states: {}, leads: {}, waiting: [], sent: 0, batch: IDLE });
 });
 
 describe("read", () => {
@@ -111,6 +112,82 @@ describe("make", () => {
     reads[0].resolve({ summary: null, stale: false, available: true, reason: null });
     await settle();
     expect(store().states.a).toEqual({ phase: "making" });
+  });
+});
+
+describe("batch", () => {
+  it("묶음이 시작된 뒤 요청한 수와 끝난 수, 만들지 못한 수를 세고, 요청이 모두 끝나면 0으로 돌아간다", async () => {
+    for (const node of ["a", "b", "c", "d"]) {
+      store().make(node, false);
+    }
+    expect(store().batch).toEqual({ total: 4, ended: 0, failed: 0, held: true, cancelled: false });
+    makes[0].resolve({ summary: "a의 요지" });
+    makes[1].reject(new Error("실패"));
+    await settle();
+    expect(store().batch).toEqual({ total: 4, ended: 2, failed: 1, held: true, cancelled: false });
+    store().make("e", false);
+    expect(store().batch).toEqual({ total: 5, ended: 2, failed: 1, held: true, cancelled: false });
+    for (const index of [2, 3]) {
+      makes[index].resolve({ summary: "요지" });
+    }
+    await settle();
+    expect(store().batch).toEqual({ total: 5, ended: 4, failed: 1, held: true, cancelled: false });
+    makes[4].resolve({ summary: "요지" });
+    await settle();
+    expect(store().batch).toEqual(IDLE);
+  });
+
+  it("차례를 기다린 요청이 없는 묶음은 held가 거짓이다", async () => {
+    store().make("a", false);
+    store().make("b", false);
+    expect(store().batch).toEqual({ total: 2, ended: 0, failed: 0, held: false, cancelled: false });
+    makes[0].resolve({ summary: "요지" });
+    await settle();
+    store().make("c", false);
+    expect(store().batch).toEqual({ total: 3, ended: 1, failed: 0, held: false, cancelled: false });
+    store().make("d", false);
+    expect(store().batch.held).toBe(true);
+  });
+});
+
+describe("cancel", () => {
+  it("차례를 기다리는 요청만 빼고, 뺀 노드의 요약 상태는 요청하기 전으로 돌아가며, 보낸 요청은 끝까지 간다", async () => {
+    const kept = { phase: "done" as const, summary: "옛 요지", available: true, stale: true };
+    useSummaries.setState({ states: { c: kept, e: { phase: "empty" } }, leads: { c: "옛 요지" } });
+    store().read("f");
+    for (const node of ["a", "b", "c", "d", "e", "f"]) {
+      store().make(node, node === "c");
+    }
+    expect(makes.map((m) => m.node)).toEqual(["a", "b"]);
+    expect(makingOf(makingKey(store()))).toEqual(["a", "b", "c", "d", "e", "f"]);
+    store().cancel();
+    expect(store().waiting).toEqual([]);
+    expect(store().states).toEqual({ a: { phase: "making" }, b: { phase: "making" }, c: kept, e: { phase: "empty" } });
+    expect(store().leads).toEqual({ c: "옛 요지" });
+    expect(store().batch).toEqual({ total: 2, ended: 0, failed: 0, held: true, cancelled: true });
+    makes[0].resolve({ summary: "a의 요지" });
+    await settle();
+    expect(store().batch).toEqual({ total: 2, ended: 1, failed: 0, held: true, cancelled: true });
+    makes[1].reject(new Error("실패"));
+    await settle();
+    expect(makes).toHaveLength(2);
+    expect(store().states.a).toMatchObject({ phase: "done" });
+    expect(store().states.b).toMatchObject({ phase: "failed" });
+    expect(store().sent).toBe(0);
+    expect(store().batch).toEqual(IDLE);
+  });
+
+  it("취소한 노드는 다시 요청하면 대기열에 들어가고, 읽어 둔 요약을 버린 뒤에 취소하면 읽지 않은 노드로 돌아간다", async () => {
+    useSummaries.setState({ states: { c: { phase: "empty" } } });
+    for (const node of ["a", "b", "c"]) {
+      store().make(node, false);
+    }
+    store().forget();
+    store().cancel();
+    expect(store().states).toEqual({ a: { phase: "making" }, b: { phase: "making" } });
+    store().make("c", false);
+    expect(store().waiting.map((w) => w.node)).toEqual(["c"]);
+    expect(store().batch).toEqual({ total: 3, ended: 0, failed: 0, held: true, cancelled: true });
   });
 });
 

@@ -18,15 +18,16 @@ function modOnly(event: KeyboardEvent): boolean {
   return mod && !event.shiftKey && !event.altKey;
 }
 
-/** 포커스가 Monaco나 글자 입력 칸에 있는지. 그 안에서는 Alt+←·Alt+→가 낱말 사이를 옮기는 키다. */
+/**
+ * 포커스가 글자 입력 칸에 있는지. 그 안에서는 Alt+←·Alt+→가 낱말 사이를 옮기는 키다. 코드 뷰어는 읽기 전용이므로 Monaco가 본문의
+ * 키 입력을 받으려고 둔 요소(`.inputarea`, `.native-edit-context`)는 입력 칸이 아니고, 찾기 창처럼 Monaco 안에 뜬 입력 칸은 입력 칸이다.
+ */
 function typing(): boolean {
   const element = document.activeElement;
   return (
     element instanceof HTMLElement &&
-    (element.closest(".monaco-editor") !== null ||
-      element instanceof HTMLTextAreaElement ||
-      (element instanceof HTMLInputElement && element.type === "text") ||
-      element.isContentEditable)
+    !element.matches(".monaco-editor .inputarea, .monaco-editor .native-edit-context") &&
+    (element instanceof HTMLTextAreaElement || (element instanceof HTMLInputElement && element.type === "text") || element.isContentEditable)
   );
 }
 
@@ -53,7 +54,9 @@ export function bind(handlers: KeyHandlers): () => void {
       if (typing()) {
         return;
       }
+      // 코드 뷰어의 본문에 포커스가 있으면 Monaco가 같은 키로 커서를 낱말만큼 옮기므로 이벤트를 Monaco로 보내지 않는다.
       event.preventDefault();
+      event.stopPropagation();
       (key === "ArrowLeft" ? handlers.back : handlers.forward)();
     } else if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && (key === "[" || key === "]")) {
       event.preventDefault();

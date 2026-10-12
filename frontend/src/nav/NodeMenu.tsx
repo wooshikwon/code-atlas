@@ -1,10 +1,10 @@
 // 노드의 우클릭 메뉴. 그래프의 노드와 파일트리의 행이 `useNodeMenu`의 show로 열고 App이 한 번 그린다. 항목은 그 노드의 LLM 요약
-// 요청이다(`ask.ts`). 메뉴를 열거나 항목을 골라도 선택과 화면, 탐색 이력은 바뀌지 않고, 경로 고정 중에도 열린다.
+// 요청이고 폴더는 안에 든 파일의 요약 요청이다(`ask.ts`). 메뉴를 열거나 항목을 골라도 선택과 화면, 탐색 이력은 바뀌지 않고, 경로 고정 중에도 열린다.
 // 메뉴에서 요청한 요약을 만들지 못하면 관계 그래프 영역 위쪽에 까닭을 적는다.
 import { useMemo } from "react";
 import { create } from "zustand";
 import { titleOf } from "../graph/layout";
-import { nodeIndex } from "../graph/visible";
+import { hidden, nodeIndex } from "../graph/visible";
 import { useAtlas } from "../state/store";
 import { useSummaries } from "../state/summaries";
 import { asksOf } from "./ask";
@@ -15,7 +15,7 @@ interface NodeMenuStore {
   at: { node: string; x: number; y: number; first: boolean } | null;
   /** 메뉴에서 요약을 요청한 노드 가운데 아직 만드는 중이거나 만들지 못한 노드 */
   asked: string[];
-  /** 요약 항목이 있는 노드면 메뉴를 열고 참을 돌려준다. 폴더와 외부 노드는 열지 않는다. */
+  /** 요약 항목이 있는 노드면 메뉴를 열고 참을 돌려준다. 외부 노드는 열지 않는다. */
   show(node: string, x: number, y: number, first: boolean): boolean;
   close(): void;
   /** 노드의 요약을 요청한다. 정보 패널의 요약 요청과 같은 저장소 액션을 부른다. */
@@ -30,8 +30,8 @@ export const useNodeMenu = create<NodeMenuStore>()((set, get) => ({
   at: null,
   asked: [],
   show: (node, x, y, first) => {
-    const graph = useAtlas.getState().graph;
-    if (graph === null || asksOf(graph, useSummaries.getState(), node).length === 0) {
+    const { graph, showTests, showExternal } = useAtlas.getState();
+    if (graph === null || asksOf(graph, useSummaries.getState(), hidden(graph, { showTests, showExternal }), node).length === 0) {
       return false;
     }
     set({ at: { node, x, y, first } });
@@ -52,20 +52,22 @@ export function NodeMenu() {
   const at = useNodeMenu((s) => s.at);
   const close = useNodeMenu((s) => s.close);
   const graph = useAtlas((s) => s.graph);
+  const showTests = useAtlas((s) => s.showTests);
+  const showExternal = useAtlas((s) => s.showExternal);
   const states = useSummaries((s) => s.states);
   const leads = useSummaries((s) => s.leads);
   const items = useMemo(
     (): MenuItem[] =>
       at === null || graph === null
         ? []
-        : asksOf(graph, { states, leads }, at.node).map((ask) => ({
+        : asksOf(graph, { states, leads }, hidden(graph, { showTests, showExternal }), at.node).map((ask) => ({
             key: ask.key,
             label: ask.label,
             disabled: ask.disabled,
             node: at.node,
             run: () => useNodeMenu.getState().ask(ask.nodes, ask.refresh),
           })),
-    [at, graph, states, leads],
+    [at, graph, showTests, showExternal, states, leads],
   );
   if (at === null || items.length === 0) {
     return null;

@@ -21,10 +21,12 @@ export function globalTip(node: AtlasNode): string {
   return names.length === 0 ? "모듈 변수 변경: global 문으로 모듈 변수를 바꾼다" : `모듈 변수 변경: global 문으로 ${names.join(", ")}을 바꾼다`;
 }
 
-/** LLM 요약을 만드는 중인 노드의 도는 원. 상자는 안에 든 노드의 요청까지 센다. */
+/** LLM 요약을 만드는 중인 노드의 도는 원. 파일 상자는 안에 든 노드의 요청까지 세고, 요약이 없는 폴더는 안에 든 노드의 요청만 센다. */
 export function busyTip(node: AtlasNode, count: number): string {
-  const inside = node.kind === "module" || node.kind === "package" ? " · 이 상자와 안에 든 노드" : "";
-  return `LLM 요약을 만드는 중 ${count}개${inside}`;
+  if (node.kind === "package") {
+    return `LLM 요약을 만드는 중 · 안에 든 노드 남은 ${count}개`;
+  }
+  return `LLM 요약을 만드는 중 ${count}개${node.kind === "module" ? " · 이 상자와 안에 든 노드" : ""}`;
 }
 
 /** 이름표 옆 줄 수 숫자 */
