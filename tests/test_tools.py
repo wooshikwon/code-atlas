@@ -4,6 +4,7 @@ import sys
 import time
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -51,11 +52,19 @@ def make_venv(folder: Path) -> str:
 
 @pytest.fixture
 def machine(tmp_path, monkeypatch):
-    """`PATH`가 빈 폴더 하나이고 알려진 위치가 임시 폴더 아래인 환경. `PATH`의 폴더와 알려진 위치의 폴더를 돌려준다."""
+    """`PATH`가 빈 폴더 하나이고 알려진 위치가 임시 폴더 아래인 환경. `PATH`의 폴더와 알려진 위치의 폴더를 돌려준다.
+
+    임시 홈 폴더를 이 계정의 홈 폴더로 알려, 가짜 `claude`를 실행해도 되는 환경으로 만든다.
+    """
     on_path, known = tmp_path / "path", tmp_path / "known"
     on_path.mkdir()
+    (on_path / tools.KEYCHAIN_COMMAND).write_text("")
+    account = SimpleNamespace(pw_dir=str(tmp_path / "home"), pw_name="tester")
+    monkeypatch.setattr(tools.pwd, "getpwuid", lambda uid: account)
     monkeypatch.setenv("PATH", str(on_path))
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HOME", account.pw_dir)
+    monkeypatch.setenv("USER", account.pw_name)
+    monkeypatch.delenv(tools.NO_CLAUDE_ENV)
     monkeypatch.setattr(
         tools,
         "PLACES",
@@ -220,6 +229,48 @@ def test_claude_reports_the_login_and_asks_once(machine, monkeypatch):
     script(on_path / "claude", VERSION + "/bin/sleep 30\n")
     monkeypatch.setattr(tools, "CLAUDE_TIMEOUT", 1.0)
     assert tools.claude().note == "Claude Code CLI가 응답하지 않는다"
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (lambda patch, home: patch.setenv(tools.NO_CLAUDE_ENV, "1"), "환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있다"),
+        (lambda patch, home: patch.setattr(tools.shellenv, "_reading", object()), "로그인 셸의 환경을 읽는 중이다"),
+        (lambda patch, home: patch.delenv("HOME"), "환경의 HOME이 이 계정의 홈 폴더({home})가 아니다"),
+        (lambda patch, home: patch.setenv("HOME", "/tmp"), "환경의 HOME이 이 계정의 홈 폴더({home})가 아니다"),
+        (lambda patch, home: patch.setenv("USER", "other"), "환경의 USER가 이 계정의 이름(tester)이 아니다"),
+        (lambda patch, home: patch.setenv("PATH", f"{home}/nowhere"), "환경의 PATH에 security가 없다"),
+    ],
+    ids=["꺼 둠", "로그인 셸을 읽는 중", "HOME 없음", "다른 HOME", "다른 USER", "security 없는 PATH"],
+)
+def test_claude_is_not_run_in_an_environment_that_differs_from_the_login(machine, tmp_path, monkeypatch, change, reason):
+    on_path, known = machine
+    monkeypatch.setattr(tools.sys, "platform", "darwin")
+    cli = script(on_path / "claude", VERSION + LOGGED_IN)
+    script(known / "claude", VERSION + LOGGED_IN)
+    assert tools.claude().path == cli and len(runs(cli)) == 2
+
+    change(monkeypatch, tmp_path / "home")
+    detail = f"확인하지 못함: {reason.format(home=tmp_path / 'home')}"
+    found = tools.claude()
+    assert (found.path, found.version, found.note) == (None, None, None)
+    assert found.attempts == [Attempt(ENV, None, False, detail)]
+    assert tools.attempt("claude", cli) == Attempt(SAVED, cli, False, detail)
+    assert len(runs(cli)) == 2 and runs(known / "claude") == []  # 찾아 둔 경로도 다른 위치의 후보도 실행하지 않는다
+
+
+def test_a_test_without_a_fake_claude_runs_no_claude():
+    found = tools.claude()
+    assert found.path is None and tools.PLACES["claude"] == ()
+    assert found.attempts == [Attempt(ENV, None, False, "확인하지 못함: 환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있다")]
+    assert not any(os.path.exists(os.path.join(folder, "claude")) for folder in os.environ["PATH"].split(os.pathsep))
+
+
+def test_claude_without_user_in_the_environment_runs_as_the_account(machine, monkeypatch):
+    on_path, _ = machine
+    cli = script(on_path / "claude", VERSION + LOGGED_IN)
+    monkeypatch.delenv("USER")
+    assert tools.claude().path == cli
 
 
 def test_python_is_found_in_the_virtual_environments_of_the_repo(repo):

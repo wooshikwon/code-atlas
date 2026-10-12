@@ -180,7 +180,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 
 정보 패널의 LLM 요약 칸은 고른 파일·클래스·함수의 설명을 요지, 하는 일, 앞뒤 흐름 세 부분으로 보여 준다. 변수는 요약하지 않는다. 요지는 굵고 크게, 구역 제목은 굵게 그리고, 백틱으로 감싼 식별자와 `파일 경로::정의 이름` 표기는 옅은 바탕의 등폭 글자(코드 칩)로 그린다. 그래프에 있는 정의의 표기는 글자가 파란색인 칩이고 누르면 그 노드를 고른다. 목록 기호로 시작하는 줄은 목록으로, `**`로 감싼 글은 굵게, 코드 울타리 사이의 줄은 코드 블록으로 그린다. 코드 분석 창도 같은 방식으로 그린다. 코드 뷰어가 함께 열려 있으면 요약 칸은 처음에 패널 높이의 4분의 1까지만 쓰고 넘치는 글은 칸 안에서 스크롤한다. 요약 칸과 코드 뷰어 사이의 경계선을 끌어 정한 높이는 다음에 열 때도 유지한다. 설명은 이 컴퓨터에 설치된 Claude Code CLI를 `claude -p`로 불러 만들고, Claude Code에 로그인한 구독 계정을 쓰므로 API 키가 필요 없다.
 
-1. Claude Code CLI를 설치한다(npm으로는 `npm install -g @anthropic-ai/claude-code`). code-atlas는 `claude` 실행 파일을 `PATH`에서 찾고, 없으면 `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.volta/bin`, `~/.asdf/shims`, `~/.nvm/versions/node/*/bin`(Node 판이 높은 순서)에서 찾는다. 후보마다 `claude --version`을 실행해 통과한 것만 쓴다.
+1. Claude Code CLI를 설치한다(npm으로는 `npm install -g @anthropic-ai/claude-code`). code-atlas는 `claude` 실행 파일을 `PATH`에서 찾고, 없으면 `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.volta/bin`, `~/.asdf/shims`, `~/.nvm/versions/node/*/bin`(Node 판이 높은 순서)에서 찾는다. 후보마다 `claude --version`을 실행해 통과한 것만 쓰고, 찾았을 때 `claude auth status`를 한 번 실행해 로그인 여부를 읽는다. Claude Code CLI는 자격 증명을 읽을 때 환경의 `HOME`·`USER`·`PATH`를 쓰므로, code-atlas는 `HOME`이 이 계정의 홈 폴더이고 `USER`가 이 계정의 이름이며(없어도 된다) macOS에서 `PATH`에 `security`가 있는 환경에서만 `claude`를 실행한다. 그 밖의 환경과 환경 변수 `CODE_ATLAS_NO_CLAUDE`에 값을 둔 실행에서는 `claude`를 실행하지 않고 요약 기능을 끈다.
 2. 터미널에서 `claude auth login`을 실행해 Claude 구독 계정으로 로그인한다.
 3. `claude auth status`가 `"loggedIn": true`를 출력하는지 확인한다.
 4. code-atlas를 실행해 노드를 고르고 요약 칸의 "요약 생성"을 누른다.
@@ -279,7 +279,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 .venv/bin/pytest
 ```
 
-`tests/test_lsp.py`·`tests/test_graph.py`·`tests/test_refresh.py`·`tests/test_runner.py`·`tests/test_api.py`·`tests/test_cli.py`·`tests/test_unused.py`·`tests/test_cycles.py`는 code-atlas 가상환경의 basedpyright를 실제로 띄운다. LLM 요약과 도구 찾기 테스트는 가짜 `claude`를 쓰고, `tests/conftest.py`가 `PATH`와 알려진 위치에서 이 컴퓨터의 `claude`를 빼므로 실제 CLI를 부르지 않는다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다. 분석 캐시는 임시 폴더에 두므로 테스트는 `~/.cache/code-atlas`에 쓰지 않는다.
+`tests/test_lsp.py`·`tests/test_graph.py`·`tests/test_refresh.py`·`tests/test_runner.py`·`tests/test_api.py`·`tests/test_cli.py`·`tests/test_unused.py`·`tests/test_cycles.py`는 code-atlas 가상환경의 basedpyright를 실제로 띄운다. LLM 요약과 도구 찾기 테스트는 가짜 `claude`를 쓰고, `tests/conftest.py`가 `PATH`와 알려진 위치에서 이 컴퓨터의 `claude`를 빼고 `CODE_ATLAS_NO_CLAUDE`를 켜므로 실제 CLI를 부르지 않는다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다. 분석 캐시는 임시 폴더에 두므로 테스트는 `~/.cache/code-atlas`에 쓰지 않는다.
 
 화면을 고칠 때는 백엔드를 띄운 채 `frontend/`에서 `npm run dev`를 실행한다. Vite 개발 서버가 `/api`를 `localhost:8766`으로 넘긴다. `npm run typecheck`로 타입을 검사하고, `npm test`로 화면 없이 계산하는 모듈을 고정 그래프에서 확인한다. 대상은 저장소와 경로 고정, 분석 표시, 변경 내용, 분석 상태, 요약과 코드 분석의 요청(`state/`), 보이는 노드와 펼침 단계·흐름·그릴 선·열 배정·배치·선 경로와 줄기·숫자의 위치·커서 밑의 선·배치 움직임·화면 이동·리니지 뷰·경로·순환 묶음·분석 표시·배지 말풍선의 글(`graph/`), 경로 탐색 창의 글(`route/words`), 기본값과 다른 보기 설정(`nav/settings`), 정보 패널 사각형·연 파일·설명 나누기·정보 구역의 값(`panel/`), 검색 색인(`search/`), 파일트리 행(`tree/`)이다.
 

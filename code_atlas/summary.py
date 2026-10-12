@@ -774,14 +774,11 @@ async def _run(cli: str, args: tuple[str, ...], stdin: str, timeout: float) -> t
 async def unavailable() -> str | None:
     """Claude Code CLI를 부를 수 없는 까닭. 부를 수 있으면 None이다.
 
-    찾은 CLI를 쓰지 못하는 까닭(로그인돼 있지 않다)이 있으면 찾은 값을 버려, 다음에 물을 때 다시 확인하게 한다.
+    로그인 여부는 `tools.claude`가 찾을 때 확인해 둔 값이고 물을 때마다 CLI를 실행하지 않는다.
     """
     if await asyncio.to_thread(find_cli) is None:
         return "Claude Code CLI를 찾지 못했다"
-    note = tools.claude().note
-    if note is not None:
-        tools.fresh(tools.CLAUDE.name)
-    return note
+    return tools.claude().note
 
 
 async def answering() -> tuple[bool, float, str]:

@@ -130,6 +130,11 @@ def start() -> None:
     _reading.start()
 
 
+def reading() -> bool:
+    """`start`가 시작한 읽기를 `adopt`가 아직 받지 않았다."""
+    return _reading is not None
+
+
 def adopt() -> ShellEnv | None:
     """`start`가 시작한 읽기를 기다리고, 읽었으면 이 프로세스의 환경을 그 값으로 통째로 바꾼다. 시작한 적이 없으면 None이다."""
     global _reading

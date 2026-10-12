@@ -9,7 +9,7 @@ from contextlib import closing
 
 import pytest
 
-from code_atlas import summary
+from code_atlas import summary, tools
 from code_atlas.model import Edge, Node, SiteRef
 from code_atlas.summary import Cache, Made, Summaries, SummaryError, Usage
 
@@ -48,6 +48,8 @@ def fake_cli(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("RECORD", str(record))
+    monkeypatch.delenv(tools.NO_CLAUDE_ENV)
+    monkeypatch.setattr(tools, "_claude_refused", lambda: None)
 
     def install(body: str):
         script = bin_dir / "claude"
@@ -161,6 +163,20 @@ async def test_unavailable_reasons(fake_cli):
     assert await summary.unavailable() == "Claude Code에 로그인돼 있지 않다"
     fake_cli(OK)
     assert await summary.unavailable() is None
+
+
+@pytest.mark.asyncio
+async def test_unavailable_asks_the_login_once_however_often_it_is_asked(fake_cli, tmp_path):
+    counted = 'echo "$1" >> "$RECORD/calls"\n'
+    fake_cli(counted + LOGGED_OUT)
+    for _ in range(5):
+        assert await summary.unavailable() == "Claude Code에 로그인돼 있지 않다"
+    assert (tmp_path / "record" / "calls").read_text().split() == ["auth"]
+
+    tools.fresh("claude")  # 화면의 `다시 확인`
+    fake_cli(counted + OK)
+    assert await summary.unavailable() is None and await summary.unavailable() is None
+    assert (tmp_path / "record" / "calls").read_text().split() == ["auth", "auth"]
 
 
 def test_cache_get_and_put(tmp_path):

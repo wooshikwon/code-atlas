@@ -27,12 +27,17 @@ def cache_dir(tmp_path_factory):
 
 @pytest.fixture(scope="session", autouse=True)
 def no_real_claude():
-    """시험은 이 컴퓨터에 설치된 `claude`를 실행하지 않는다. 알려진 위치와 `PATH`에서 `claude`가 든 폴더를 뺀다."""
+    """시험은 이 컴퓨터에 설치된 `claude`를 실행하지 않는다.
+
+    알려진 위치와 `PATH`에서 `claude`가 든 폴더를 빼고, 시험이 띄우는 프로세스까지 `CODE_ATLAS_NO_CLAUDE`로 막는다.
+    가짜 `claude`를 쓰는 시험은 자기 fixture에서 이 변수를 지운다.
+    """
     from code_atlas import tools
 
     folders = os.environ.get("PATH", "").split(os.pathsep)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(tools, "PLACES", {**tools.PLACES, "claude": ()})
+        patch.setenv(tools.NO_CLAUDE_ENV, "1")
         patch.setenv("PATH", os.pathsep.join(f for f in folders if not os.path.exists(os.path.join(f, "claude"))))
         yield
 

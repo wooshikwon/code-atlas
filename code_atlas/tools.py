@@ -15,6 +15,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import pwd
 import re
 import signal
 import subprocess
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import shellenv
 from .collect import disk_path
 
 if TYPE_CHECKING:
@@ -43,6 +45,11 @@ PROBE_TIMEOUT = 5.0
 MANAGER_TIMEOUT = 10.0
 
 STATUS_ARGS = ("auth", "status", "--json")
+# 값이 있으면 `claude`를 어떤 인자로도 실행하지 않는다.
+NO_CLAUDE_ENV = "CODE_ATLAS_NO_CLAUDE"
+UNCHECKED = "확인하지 못함"
+# Claude Code CLI가 macOS에서 자격 증명을 읽고 쓸 때 `PATH`에서 이름으로 찾아 실행하는 명령
+KEYCHAIN_COMMAND = "security"
 NOT_LOGGED_IN = "Claude Code에 로그인돼 있지 않다"
 NOT_ANSWERING = "Claude Code CLI가 응답하지 않는다"
 
@@ -324,6 +331,27 @@ GIT = _Tool("git", ("--version",), GIT_TIMEOUT, _version)
 PYTHON = _Tool("python", ("-c", _PROBE), PROBE_TIMEOUT, _interpreter)
 
 
+def _claude_refused() -> str | None:
+    """지금 환경에서 `claude`를 실행하지 않는 까닭. 실행해도 되면 None이다.
+
+    Claude Code CLI는 자격 증명을 키체인 항목 하나에 두고, 계정 이름을 `USER`에서, 설정 폴더를 `HOME`에서 읽으며,
+    `security`를 `PATH`에서 찾는다. 이 값이 사용자의 로그인 환경과 다른 프로세스가 CLI를 실행하면 CLI가 다른 항목을
+    읽거나 쓰므로, 로그인 환경과 같다고 확인한 환경에서만 실행한다.
+    """
+    if os.environ.get(NO_CLAUDE_ENV):
+        return f"환경 변수 {NO_CLAUDE_ENV}가 켜져 있다"
+    if shellenv.reading():
+        return "로그인 셸의 환경을 읽는 중이다"
+    account = pwd.getpwuid(os.getuid())
+    if os.environ.get("HOME") != account.pw_dir:
+        return f"환경의 HOME이 이 계정의 홈 폴더({account.pw_dir})가 아니다"
+    if os.environ.get("USER", account.pw_name) != account.pw_name:
+        return f"환경의 USER가 이 계정의 이름({account.pw_name})이 아니다"
+    if sys.platform == "darwin" and next(_on_path(KEYCHAIN_COMMAND), None) is None:
+        return f"환경의 PATH에 {KEYCHAIN_COMMAND}가 없다"
+    return None
+
+
 def _login(found: Found) -> None:
     """`claude auth status`로 로그인 여부와 로그인 방법을 읽어 `note`와 `auth`에 적는다."""
     try:
@@ -428,8 +456,16 @@ def _use(settings: Settings | None) -> None:
 
 
 def claude(settings: Settings | None = None) -> Found:
-    """Claude Code CLI. 찾은 뒤 로그인 여부를 확인해 `note`와 `auth`에 적는다."""
+    """Claude Code CLI. 찾은 뒤 로그인 여부를 확인해 `note`와 `auth`에 적는다.
+
+    `_claude_refused`가 까닭을 내는 환경에서는 후보를 실행하지 않고, 그 까닭을 적은 기록 하나와 경로 없는 결과를 낸다.
+    `claude auth status`는 찾을 때 한 번만 실행한다. 다시 실행하는 때는 `fresh`를 부른 뒤와 실행 파일이 바뀐 뒤다.
+    """
     _use(settings)
+    refused = _claude_refused()
+    if refused is not None:
+        fresh(CLAUDE.name)
+        return Found(CLAUDE.name, None, None, None, [Attempt(ENV, None, False, f"{UNCHECKED}: {refused}")])
     return _find(CLAUDE, _named("claude"), finish=_login)
 
 
@@ -463,6 +499,9 @@ def python(repo: Path, given: str | None = None, settings: Settings | None = Non
 
 def attempt(tool: str, path: str) -> Attempt:
     """사용자가 직접 고른 `claude`·`git` 실행 파일 하나를 확인 명령으로 실행한 기록."""
+    refused = _claude_refused() if tool == CLAUDE.name else None
+    if refused is not None:
+        return Attempt(SAVED, path, False, f"{UNCHECKED}: {refused}")
     return _try({CLAUDE.name: CLAUDE, GIT.name: GIT}[tool], SAVED, os.path.abspath(os.path.expanduser(path)), "/")[0]
 
 
