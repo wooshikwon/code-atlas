@@ -497,27 +497,32 @@ async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
         await app.state.running
-        nodes = ["app.core:helper", "app.core:run_engine", "app.core:Engine.start"]
-        gone = [asyncio.Event() for _ in nodes]
-        posts = [
-            asyncio.create_task(call(app, "POST", "/api/summary", {"node": node}, left))
-            for node, left in zip(nodes, gone)
-        ]
+        names = {
+            "app.core:helper": "app/core.py::helper",
+            "app.core:run_engine": "app/core.py::run_engine",
+            "app.core:Engine.start": "app/core.py::Engine.start",
+        }
+        gone = {node: asyncio.Event() for node in names}
+        posts = {node: asyncio.create_task(call(app, "POST", "/api/summary", {"node": node}, gone[node])) for node in names}
         while len(made) < 2:
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.1)
-        assert made == ["app/core.py::helper", "app/core.py::run_engine"]
+        # 세 요청 가운데 어느 둘이 먼저 동시 실행 자리를 얻는지는 정해져 있지 않다.
+        assert len(made) == 2
+        left, kept = (node for node in names if names[node] in made)
+        (late,) = (node for node in names if names[node] not in made)
+        started = list(made)
 
-        gone[0].set()
-        gone[2].set()
-        assert (await posts[0])[0] == (await posts[2])[0] == 499
+        gone[left].set()
+        gone[late].set()
+        assert (await posts[left])[0] == (await posts[late])[0] == 499
         release.set()
-        assert await posts[1] == (200, {"summary": "app/core.py::run_engine 요약", "usage": None})
+        assert await posts[kept] == (200, {"summary": f"{names[kept]} 요약", "usage": None})
         await asyncio.sleep(0.1)
-        assert made == ["app/core.py::helper", "app/core.py::run_engine"]
-        _, cached = await call(app, "GET", "/api/summary", {"node": nodes[0]})
-        assert cached["summary"] == "app/core.py::helper 요약"
-        _, skipped = await call(app, "GET", "/api/summary", {"node": nodes[2]})
+        assert made == started
+        _, cached = await call(app, "GET", "/api/summary", {"node": left})
+        assert cached["summary"] == f"{names[left]} 요약"
+        _, skipped = await call(app, "GET", "/api/summary", {"node": late})
         assert skipped["summary"] is None
 
 
