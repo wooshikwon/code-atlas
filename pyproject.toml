@@ -27,3 +27,7 @@ packages = ["code_atlas"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: 시험 함수나 function 범위 fixture가 언어 서버나 code-atlas 서버 프로세스를 띄우거나, 띄운 프로세스가 1초 이상의 시간 제한에 걸리기를 기다린다",
+]

@@ -113,6 +113,7 @@ EDITS = {
 }
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("edit", EDITS.values(), ids=EDITS.keys())
 @pytest.mark.asyncio
 async def test_incremental_results_equal_a_full_analysis(sample_repo, tmp_path, edit):
@@ -218,6 +219,7 @@ def variables(analyzed) -> tuple[list, list]:
     return nodes, [e for e in found["edges"] if e["source"] in ids or e["target"] in ids]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("edit", VARIABLE_EDITS.values(), ids=VARIABLE_EDITS.keys())
 @pytest.mark.asyncio
 async def test_variable_nodes_and_edges_equal_a_full_analysis(sample_repo, tmp_path, edit):
@@ -237,6 +239,7 @@ async def test_variable_nodes_and_edges_equal_a_full_analysis(sample_repo, tmp_p
     assert len(live.asked) - asked_first < len(full.asked)
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_script_naming_a_variable_marks_its_module_as_the_entry(sample_repo, tmp_path):
     store = Cache(sample_repo, tmp_path / "cache")
@@ -309,6 +312,7 @@ def routes(analyzed) -> dict[str, list[tuple[str, str | None, str]]]:
     }
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("edit", ROUTE_EDITS.values(), ids=ROUTE_EDITS.keys())
 @pytest.mark.asyncio
 async def test_routes_equal_a_full_analysis(sample_repo, tmp_path, edit):
@@ -396,6 +400,7 @@ EXTERNAL_EDITS = {
 }
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("edit", EXTERNAL_EDITS.values(), ids=EXTERNAL_EDITS.keys())
 @pytest.mark.asyncio
 async def test_external_verdicts_follow_the_repo_definitions(external_repo, tmp_path, edit):
@@ -433,6 +438,7 @@ KEPT_VERDICTS = {
 }
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(("edit", "kept"), KEPT_VERDICTS.values(), ids=KEPT_VERDICTS.keys())
 @pytest.mark.asyncio
 async def test_edits_that_only_move_types_keep_the_edges_and_some_external_verdicts(external_repo, edit, kept):
@@ -447,6 +453,7 @@ async def test_edits_that_only_move_types_keep_the_edges_and_some_external_verdi
     assert sorted(differ) == sorted(kept)
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_draft_leaves_the_sites_of_a_changed_file_unresolved(sample_repo, tmp_path):
     store = Cache(sample_repo, tmp_path / "cache")
@@ -464,6 +471,7 @@ async def test_draft_leaves_the_sites_of_a_changed_file_unresolved(sample_repo, 
     assert kept == [s for s in done.analysis.sites if s.path == "src/app/models.py"]
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_reopening_from_the_cache_asks_nothing_and_starts_no_session(sample_repo, tmp_path):
     store = Cache(sample_repo, tmp_path / "cache")
@@ -620,6 +628,7 @@ async def test_unreadable_cache_rows_are_analyzed_again(sample_repo, tmp_path):
     assert second.asked == first.asked  # 판정을 한 행이라도 읽지 못하면 그 시점의 판정을 쓰지 않는다
 
 
+@pytest.mark.slow
 def test_broken_cache_file_and_unusable_cache_folder_still_analyze(sample_repo, tmp_path, monkeypatch):
     folder = tmp_path / "cache"
     monkeypatch.setattr(cache, "CACHE_DIR", folder)

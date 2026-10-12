@@ -63,6 +63,7 @@ def test_reads_between_the_marks_when_the_shell_prints_a_banner_and_colors(shell
     assert got.ok and got.env["FROM_SHELL"] == "셸이 더한 값" and got.env["PATH"] == os.environ["PATH"]
 
 
+@pytest.mark.slow
 def test_a_shell_that_does_not_end_is_ended_after_the_time_limit(shell):
     path = shell(HANGING)
     started = time.monotonic()

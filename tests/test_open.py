@@ -103,6 +103,7 @@ async def test_server_without_a_repo_is_idle_and_answers_409_to_reads(tmp_path):
     assert not (tmp_path / "config").exists()
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_two_repos_opened_in_turn_never_mix_their_answers(sample_repo, external_repo, tmp_path):
     async with served(tmp_path, sample_repo) as (alone, _):
@@ -148,6 +149,7 @@ async def test_two_repos_opened_in_turn_never_mix_their_answers(sample_repo, ext
         assert (await client.get("/api/graph")).status_code == 409
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_opening_another_repo_cancels_the_running_analysis(sample_repo, external_repo, tmp_path, monkeypatch):
     wait_ready = lsp.Session.wait_ready
@@ -174,6 +176,7 @@ async def test_opening_another_repo_cancels_the_running_analysis(sample_repo, ex
         assert (await client.get("/api/repo")).json()["name"] == "external_repo"
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_reload_waiting_for_the_analysis_ends_with_409_when_the_repo_is_closed(sample_repo, tmp_path, monkeypatch):
     async with served(tmp_path, sample_repo) as (app, client):
@@ -196,6 +199,7 @@ async def test_reload_waiting_for_the_analysis_ends_with_409_when_the_repo_is_cl
         assert (answer.status_code, answer.json()) == (409, {"error": "레포를 닫아 분석을 멈췄습니다"})
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_switching_while_comparing_leaves_no_exported_folder(history_repo, sample_repo, tmp_path, monkeypatch):
     repo, at = history_repo
@@ -235,6 +239,7 @@ async def test_switching_while_comparing_leaves_no_exported_folder(history_repo,
     assert not folder.exists()
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_open_that_fails_keeps_the_open_repo(sample_repo, external_repo, tmp_path):
     empty = tmp_path / "empty"
@@ -275,6 +280,7 @@ async def test_open_that_fails_keeps_the_open_repo(sample_repo, external_repo, t
         assert listed[0]["opened"] >= listed[1]["opened"]
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_repos_lists_what_was_opened_and_forgets_on_request(sample_repo, external_repo, tmp_path):
     async with served(tmp_path) as (app, client):

@@ -122,22 +122,15 @@ def test_error_of_broken_file_is_kept(opened, sample_repo, tmp_path):
     assert store.facts("src/app/torn.py", "h1") == stored["src/app/torn.py"]
 
 
-def test_other_analyzer_version_empties_the_file(opened, saved, sample_repo, monkeypatch):
+@pytest.mark.parametrize(("version", "key"), [("ANALYZER_VERSION", "analyzer"), ("SCHEMA_VERSION", "schema")])
+def test_other_version_empties_the_file(opened, saved, sample_repo, monkeypatch, version, key):
     store, stored, _ = saved
-    monkeypatch.setattr(cache, "ANALYZER_VERSION", cache.ANALYZER_VERSION + 1)
+    monkeypatch.setattr(cache, version, getattr(cache, version) + 1)
     reopened = opened(sample_repo, store.path.parent)
     assert reopened.path == store.path
     assert reopened.answers("worktree", ENV) == {}
     assert all(reopened.facts(path, "h1") is None for path in stored)
-    assert rows(reopened, "SELECT value FROM meta WHERE key = 'analyzer'") == [(str(cache.ANALYZER_VERSION),)]
-
-
-def test_other_schema_version_empties_the_file(opened, saved, sample_repo, monkeypatch):
-    store, stored, _ = saved
-    monkeypatch.setattr(cache, "SCHEMA_VERSION", cache.SCHEMA_VERSION + 1)
-    reopened = opened(sample_repo, store.path.parent)
-    assert reopened.answers("worktree", ENV) == {}
-    assert all(reopened.facts(path, "h1") is None for path in stored)
+    assert rows(reopened, f"SELECT value FROM meta WHERE key = '{key}'") == [(str(getattr(cache, version)),)]
 
 
 def test_other_environment_drops_answers_only(saved):

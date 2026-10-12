@@ -289,6 +289,7 @@ def test_position_outside_analysis_is_404(client, route, path):
     assert "error" in response.json()
 
 
+@pytest.mark.slow
 def test_stopped_session_is_reopened(client, monkeypatch):
     state = client.app.state.workspace
     deadline = time.monotonic() + 10
@@ -336,6 +337,7 @@ READS = [
 ]
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_server_answers_before_the_analysis_and_counts_revisions(sample_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
@@ -382,6 +384,7 @@ async def test_server_answers_before_the_analysis_and_counts_revisions(sample_re
         assert (await call(app, "GET", "/api/status", {}))[1]["lsp"] == "ready"
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_resolve_phase_reports_the_requests_sent(sample_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
@@ -398,6 +401,7 @@ async def test_resolve_phase_reports_the_requests_sent(sample_repo, tmp_path, mo
     assert [done for done, _ in resolving] == sorted(done for done, _ in resolving)
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_shutdown_during_the_analysis_ends_the_session_and_closes_the_cache(sample_repo, tmp_path, monkeypatch):
     async def held(self, probe):
@@ -418,6 +422,7 @@ async def test_shutdown_during_the_analysis_ends_the_session_and_closes_the_cach
         store._db.execute("SELECT 1")
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_failed_first_analysis_keeps_the_server_up(sample_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
@@ -438,6 +443,7 @@ async def test_failed_first_analysis_keeps_the_server_up(sample_repo, tmp_path, 
         assert (status["phase"], status["revision"], status["error"]) == ("ready", 1, None)
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_cached_repo_opens_as_a_draft_and_is_replaced_after_asking(sample_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
@@ -528,6 +534,7 @@ async def call(app, method: str, path: str, params: dict, gone: asyncio.Event | 
     return status[0], json.loads(b"".join(body))
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects(sample_repo, tmp_path, monkeypatch):
     made: list[str] = []
@@ -824,6 +831,7 @@ def guided(module_repo, tmp_path, monkeypatch):
         yield analysed(client), guide, calls
 
 
+@pytest.mark.slow
 def test_summary_reports_unreadable_style_guide_and_reads_it_for_every_request(guided):
     client, guide, calls = guided
     node = {"node": "app.core:helper"}
@@ -873,6 +881,7 @@ def test_summary_of_unknown_or_codeless_node_is_404(client, generated, method, n
     assert generated == []
 
 
+@pytest.mark.slow
 def test_changes_mark_changed_definitions_and_stale_files(changed, git_repo):
     body = changed.get("/api/changes").json()
     assert (body["git"], body["branch"]) == (True, "main")
@@ -915,6 +924,7 @@ def test_changes_mark_changed_definitions_and_stale_files(changed, git_repo):
     assert "엔진 시작" in changed.get("/api/file", params={"path": "src/app/cli.py"}).json()["text"]
 
 
+@pytest.mark.slow
 def test_files_changed_after_analysis_stay_stale_after_commit(changed, git_repo):
     app = git_repo / "src" / "app"
     (app / "models.py").write_text("LIMIT = 3\n" + (app / "models.py").read_text())
@@ -954,6 +964,7 @@ def add_function(repo) -> None:
     core.write_text(core.read_text() + "\n\ndef added():\n    return helper(1)\n")
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_reload_replaces_the_analysis_and_keeps_the_session(sample_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
@@ -988,6 +999,7 @@ async def test_reload_replaces_the_analysis_and_keeps_the_session(sample_repo, t
     assert first.stopped and group_ended(first.client._server.pid)
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_status_counts_files_whose_content_changed_since_the_analysis(sample_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
@@ -1041,6 +1053,7 @@ async def test_status_counts_files_whose_content_changed_since_the_analysis(samp
         assert await stale() == {"count": 0, "paths": []}
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_reloads_asked_together_analyze_once(sample_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
@@ -1066,6 +1079,7 @@ async def test_reloads_asked_together_analyze_once(sample_repo, tmp_path, monkey
         assert len(runs) == 3 and app.state.workspace.revision == 3
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_failed_reload_keeps_the_previous_analysis(sample_repo, tmp_path, monkeypatch):
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
@@ -1187,6 +1201,7 @@ def test_stat_of_bad_moments(history_client, a, b, code):
     assert client.post("/api/compare", json={"base": "0" * 40, "target": "worktree"}).status_code == 404
 
 
+@pytest.mark.slow
 def test_compare_with_the_worktree_adds_deleted_nodes_edges_and_files(history_client):
     client, at = history_client
     counted = stat(client, at["edit"], "worktree")
@@ -1237,6 +1252,7 @@ def test_compare_with_the_worktree_adds_deleted_nodes_edges_and_files(history_cl
     assert compared(client, at["edit"], "worktree") == body
 
 
+@pytest.mark.slow
 def test_file_at_a_compared_commit(history_client):
     client, at = history_client
     compared(client, at["edit"], "worktree")
@@ -1253,6 +1269,7 @@ def test_file_at_a_compared_commit(history_client):
     assert client.get("/api/file", params={"path": PRICING, "at": at["topic"]}).status_code == 404  # 비교에 쓰지 않은 커밋
 
 
+@pytest.mark.slow
 def test_file_at_a_commit_dropped_from_memory_is_read_again(history_client):
     client, at = history_client
     compared(client, at["base"], "worktree")
@@ -1262,6 +1279,7 @@ def test_file_at_a_commit_dropped_from_memory_is_read_again(history_client):
     assert old.status_code == 200 and "legacy_total" in old.json()["text"]
 
 
+@pytest.mark.slow
 def test_compare_of_two_commits_judges_definitions_and_edges(history_client):
     client, at = history_client
     counted = stat(client, at["base"], at["edit"])
@@ -1288,6 +1306,7 @@ def test_compare_of_two_commits_judges_definitions_and_edges(history_client):
     assert "src/shop/stock.py" in rows(body["tree"]["entries"])
 
 
+@pytest.mark.slow
 def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch):
     client, at = history_client
     calls: list[str] = []
@@ -1342,6 +1361,7 @@ def test_compare_routes_outside_git(client):
     assert client.app.state.workspace.snapshots is None
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_compare_task_reports_progress_joins_and_gives_way(history_repo, tmp_path, monkeypatch):
     import httpx
@@ -1401,6 +1421,7 @@ async def test_compare_task_reports_progress_joins_and_gives_way(history_repo, t
     assert not folder.exists()
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_worktree_compare_waits_for_the_reload(history_repo, tmp_path, monkeypatch):
     import httpx

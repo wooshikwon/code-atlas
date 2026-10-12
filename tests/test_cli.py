@@ -72,6 +72,7 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     ("mode", "signals"),
     [("hang", 1), ("hang", 2), ("serve", 1), ("analyze", 1)],
@@ -92,9 +93,10 @@ def test_sigint_ends_the_server_and_the_language_server(sample_repo, tmp_path, m
         pid = int(server.stdout.readline().split()[1])
         if mode == "serve":
             assert server.stdout.readline().startswith("노드 ")
-        for _ in range(signals):
+        for sent in range(signals):
+            if sent:
+                time.sleep(0.3)
             server.send_signal(signal.SIGINT)
-            time.sleep(0.3)
         server.wait(timeout=5)
     finally:
         server.kill()
@@ -106,6 +108,7 @@ def test_sigint_ends_the_server_and_the_language_server(sample_repo, tmp_path, m
         assert "Traceback" not in errors
 
 
+@pytest.mark.slow
 def test_analyze_prints_the_unused_count_only_in_the_summary(sample_repo, capsys):
     assert cli.main(["analyze", str(sample_repo), "--python", sys.executable]) == 0
     summary = capsys.readouterr().out.splitlines()
@@ -164,6 +167,7 @@ def fetch(url: str, method: str = "GET", origin: str | None = None) -> tuple[int
         return error.code, dict(error.headers), json.loads(error.read() or "null")
 
 
+@pytest.mark.slow
 def test_hosted_server_prints_its_address_and_ends_when_stdin_closes(tmp_path):
     server = hosted(tmp_path, "serve")
     try:
@@ -185,6 +189,7 @@ def test_hosted_server_prints_its_address_and_ends_when_stdin_closes(tmp_path):
         server.communicate()
 
 
+@pytest.mark.slow
 def test_hosted_server_ends_with_a_request_waiting_and_leaves_no_language_server(sample_repo, tmp_path):
     server = hosted(tmp_path, "later", str(sample_repo), "--python", sys.executable)
     try:
@@ -216,6 +221,7 @@ def test_hosted_server_ends_with_a_request_waiting_and_leaves_no_language_server
     assert group_ended(pid)
 
 
+@pytest.mark.slow
 def test_language_server_ends_by_itself_after_the_server_is_killed(sample_repo, tmp_path):
     server = hosted(tmp_path, "serve", str(sample_repo), "--python", sys.executable)
     try:
@@ -231,10 +237,3 @@ def test_language_server_ends_by_itself_after_the_server_is_killed(sample_repo, 
     finally:
         server.kill()
         server.communicate()
-
-
-def test_serve_parser_takes_no_repo_and_the_hosted_options():
-    bare = cli._serve_parser().parse_args([])
-    assert (bare.repo, bare.hosted, bare.origin, bare.port) == (None, False, None, cli.PORT)
-    args = cli._serve_parser().parse_args(["--hosted", "--port", "0", "--origin", ORIGIN])
-    assert (args.repo, args.hosted, args.origin, args.port) == (None, True, ORIGIN, 0)

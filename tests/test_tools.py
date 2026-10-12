@@ -133,6 +133,7 @@ def test_a_candidate_that_fails_the_check_command_does_not_pass(machine):
     assert runs(failing) == ["--version"] and runs(silent) == ["--version"]  # 파일이 있다는 것만으로 통과시키지 않는다
 
 
+@pytest.mark.slow
 def test_a_candidate_that_does_not_end_in_time_is_ended_and_the_next_is_tried(machine, monkeypatch):
     on_path, known = machine
     slow = script(on_path / "git", "/bin/sleep 30\n")
@@ -213,6 +214,7 @@ def test_claude_in_version_managers_is_found_newest_first(machine):
     assert tools.claude().path == str(known / "node" / "v20.1.0" / "bin" / "claude")
 
 
+@pytest.mark.slow
 def test_claude_reports_the_login_and_asks_once(machine, monkeypatch):
     on_path, _ = machine
     cli = script(on_path / "claude", VERSION + LOGGED_IN)
@@ -233,6 +235,7 @@ def test_claude_reports_the_login_and_asks_once(machine, monkeypatch):
     assert (tools.claude().note, tools.claude().code) == ("Claude Code CLI가 응답하지 않습니다", "not_answering")
 
 
+@pytest.mark.slow
 def test_a_process_past_its_time_limit_gets_sigterm_and_is_killed_only_after_the_grace(machine, monkeypatch):
     on_path, known = machine
     saves = script(on_path / "git", 'trap \'echo saved > "$0.saved"; exit 0\' TERM\n/bin/sleep 30 &\nwait\n')
@@ -519,6 +522,7 @@ def test_interpreters_route_and_the_answer_check(served, machine, tmp_path, monk
     assert asked["ok"] is False and "종료 코드 7" in asked["detail"] and "망에 닿지 못했다" in asked["detail"]
 
 
+@pytest.mark.slow
 def test_opening_repos_runs_claude_twice_in_all(served, machine, sample_repo):
     client, _ = served
     on_path, _ = machine

@@ -10,6 +10,8 @@ from test_api import analysed
 from code_atlas import api, git, summary
 from code_atlas.api import create_app
 
+pytestmark = pytest.mark.slow
+
 ORDERS = "src/shop/orders.py"
 
 

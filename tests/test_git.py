@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+from functools import partial
 
 import pytest
 from conftest import FIXTURE, git
@@ -235,7 +236,7 @@ def test_slow_git_is_none(git_repo, tmp_path, monkeypatch, only_on_path):
     fake.write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then echo "git version 0.0.0"; exit 0; fi\nexec sleep 5\n')
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", str(fake.parent), prepend=":")
-    monkeypatch.setattr(reader, "GIT_TIMEOUT", 0.2)
+    monkeypatch.setattr(reader, "_run", partial(reader._run, timeout=0.2))
     assert tools.git().path == str(fake)
     assert status(git_repo) is None
 

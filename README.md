@@ -307,10 +307,19 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 
 ```bash
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest
+.venv/bin/pytest                          # 빠른 실행: 표식 slow가 붙은 테스트를 뺀다
+.venv/bin/pytest -m "slow or not slow"    # 전체 실행
+.venv/bin/pytest -m slow                  # 느린 테스트만
 ```
 
-`tests/test_lsp.py`·`tests/test_graph.py`·`tests/test_refresh.py`·`tests/test_runner.py`·`tests/test_api.py`·`tests/test_cli.py`·`tests/test_unused.py`·`tests/test_cycles.py`는 code-atlas 가상환경의 basedpyright를 실제로 띄운다. LLM 요약과 도구 찾기 테스트는 가짜 `claude`를 쓰고, `tests/conftest.py`가 `PATH`와 알려진 위치에서 이 컴퓨터의 `claude`를 빼고 `CODE_ATLAS_NO_CLAUDE`를 켜므로 실제 CLI를 부르지 않는다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다. 분석 캐시는 임시 폴더에 두므로 테스트는 `~/.cache/code-atlas`에 쓰지 않는다.
+`pyproject.toml`의 `addopts`가 `-m 'not slow'`이므로 옵션 없이 돌리면 느린 테스트가 빠진다. 파일이나 테스트 이름을 지정해 느린 테스트를 돌릴 때도 `-m "slow or not slow"`를 함께 준다. 505개 가운데 397개가 빠른 실행에, 108개가 `slow`에 든다.
+
+- **`slow`의 기준**: 테스트 함수나 function 범위 fixture가 basedpyright 언어 서버를 띄우거나, code-atlas 서버를 별도 프로세스로 띄우거나, 띄운 프로세스가 1초 이상의 시간 제한에 걸리기를 기다리면 `slow`를 붙인다. module·session 범위 fixture가 언어 서버를 한 번 띄워 여러 테스트가 함께 읽는 분석 결과(`analyzed`, `judged`, `cycle`, `client`, `init_client`, `history_client`)만 쓰는 테스트는 빠른 실행에 든다. 파일의 테스트가 모두 해당하면 `pytestmark`로, 일부만 해당하면 테스트마다 `@pytest.mark.slow`로 붙인다.
+- **빠른 실행이 확인하는 것**: 수집, 추출, 해석 규칙, 그래프, 미사용 후보, 순환, 라우트, 분석 캐시, 가짜 세션으로 도는 증분 분석, 시점 비교, git 읽기, 도구 찾기, 설정, 로그인 셸 환경, LLM 요약의 프롬프트와 캐시, 고정 레포를 한 번 연 서버의 읽기 API.
+- **전체 실행이 더 확인하는 것**: 실제 언어 서버로 견주는 증분 분석과 전체 분석의 일치, 커밋 시점 분석, 레포 열기·바꾸기·닫기, 다시 분석, 언어 서버와 서버 프로세스의 종료, 시간 제한에 걸린 도구의 종료.
+- **전체를 돌리는 때**: `analyze.py`·`lsp.py`·`runner.py`·`snapshot.py`·`api.py`·`cli.py`·`opening.py`를 고쳤을 때, `tests/conftest.py`나 고정 레포를 고쳤을 때, 브랜치를 합치기 전에 한 번 돌린다. 그 밖의 수정은 빠른 실행과 고친 모듈의 테스트 파일로 확인한다.
+
+LLM 요약과 도구 찾기 테스트는 가짜 `claude`를 쓰고, `tests/conftest.py`가 `PATH`와 알려진 위치에서 이 컴퓨터의 `claude`를 빼고 `CODE_ATLAS_NO_CLAUDE`를 켜므로 실제 CLI를 부르지 않는다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다. 이력 고정 레포는 세션에 한 번 만들고 테스트마다 `.git`까지 복사해 쓴다. 분석 캐시는 임시 폴더에 두므로 테스트는 `~/.cache/code-atlas`에 쓰지 않는다.
 
 화면을 고칠 때는 백엔드를 띄운 채 `frontend/`에서 `npm run dev`를 실행한다. Vite 개발 서버가 `/api`를 `localhost:8766`으로 넘긴다. `npm run typecheck`로 타입을 검사하고, `npm test`로 화면 없이 계산하는 모듈을 고정 그래프에서 확인한다. 대상은 저장소와 경로 고정, 분석 표시, 변경 내용, 분석 상태, 요약과 코드 분석의 요청(`state/`), 보이는 노드와 펼침 단계·흐름·그릴 선·열 배정·배치·선 경로와 줄기·숫자의 위치·커서 밑의 선·배치 움직임·화면 이동·리니지 뷰·경로·순환 묶음·분석 표시·배지 말풍선의 글(`graph/`), 경로 탐색 창의 글(`route/words`), 기본값과 다른 보기 설정(`nav/settings`), 정보 패널 사각형·연 파일·설명 나누기·정보 구역의 값(`panel/`), 검색 색인(`search/`), 파일트리 행(`tree/`)이다.
 

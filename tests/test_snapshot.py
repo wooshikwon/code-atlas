@@ -34,6 +34,13 @@ async def worktree(repo: Path, store: Cache | None = None):
         return await refresh(repo, sys.executable, live, cache=store)
 
 
+@pytest.fixture(scope="module")
+def current(module_history):
+    """모듈의 시험이 함께 읽는, `module_history`의 작업 중인 상태를 캐시 없이 분석한 결과. 시험은 이 결과를 고치지 않는다."""
+    repo, _ = module_history
+    return asyncio.run(worktree(repo))
+
+
 async def full(repo: Path, commit: str, dest: Path):
     """그 커밋을 꺼낸 폴더를 캐시와 앞 결과 없이 통째로 분석한 결과."""
     git.export(repo, commit, dest)
@@ -41,6 +48,7 @@ async def full(repo: Path, commit: str, dest: Path):
         return await refresh(dest, sys.executable, live)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("label", LABELS)
 @pytest.mark.asyncio
 async def test_incremental_and_cached_results_equal_a_full_analysis(history_repo, tmp_path, monkeypatch, label):
@@ -65,6 +73,7 @@ async def test_incremental_and_cached_results_equal_a_full_analysis(history_repo
     assert folders(reopened.directory) == []
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_cached_snapshot_survives_a_changed_worktree(history_repo, tmp_path, monkeypatch):
     repo, at = history_repo
@@ -93,6 +102,7 @@ def recorded_refresh(monkeypatch) -> list:
     return used
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_snapshot_without_a_cache_or_a_usable_result_is_analyzed_whole(history_repo, tmp_path, monkeypatch):
     repo, at = history_repo
@@ -103,10 +113,10 @@ async def test_snapshot_without_a_cache_or_a_usable_result_is_analyzed_whole(his
     assert judged(found) == judged(expected) and used == [None]
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
-async def test_nearest_result_is_the_base_of_the_increment(history_repo, tmp_path, monkeypatch):
-    repo, at = history_repo
-    current = await worktree(repo)
+async def test_nearest_result_is_the_base_of_the_increment(module_history, current, tmp_path, monkeypatch):
+    repo, at = module_history
     snapshots = Snapshots(repo, sys.executable, None, tmp_path / "out")
     base = await snapshots.at(at["base"], [current])
     used = recorded_refresh(monkeypatch)
@@ -117,10 +127,10 @@ async def test_nearest_result_is_the_base_of_the_increment(history_repo, tmp_pat
     assert used == [base, current]
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
-async def test_same_commit_is_analyzed_once_and_two_commits_are_held(history_repo, tmp_path, monkeypatch):
-    repo, at = history_repo
-    current = await worktree(repo)
+async def test_same_commit_is_analyzed_once_and_two_commits_are_held(module_history, current, tmp_path, monkeypatch):
+    repo, at = module_history
     exported: list[str] = []
     real = git.export
 
@@ -141,10 +151,10 @@ async def test_same_commit_is_analyzed_once_and_two_commits_are_held(history_rep
     assert folders(snapshots.directory) == []
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
-async def test_failed_and_cancelled_analysis_leave_no_folder(history_repo, tmp_path, monkeypatch):
-    repo, at = history_repo
-    current = await worktree(repo)
+async def test_failed_and_cancelled_analysis_leave_no_folder(module_history, current, tmp_path, monkeypatch):
+    repo, at = module_history
     snapshots = Snapshots(repo, sys.executable, None, tmp_path / "out")
     with pytest.raises(OSError):
         await snapshots.at("0" * 40, [current])
@@ -208,6 +218,7 @@ async def test_default_folder_is_under_the_analysis_cache(history_repo):
     assert Snapshots(repo, sys.executable, None).directory.parent.parent == cache.CACHE_DIR / "snapshots"
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_analysis_leaves_the_repo_as_it_was(history_repo, tmp_path):
     from test_git import git_files
@@ -227,10 +238,10 @@ async def test_analysis_leaves_the_repo_as_it_was(history_repo, tmp_path):
     assert sorted((str(p), p.stat().st_mtime_ns) for p in repo.rglob("*") if ".git" not in p.parts) == listing
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
-async def test_summary_prompts_of_a_snapshot_equal_those_of_the_same_code_in_the_worktree(history_repo, tmp_path):
-    repo, at = history_repo
-    current = await worktree(repo)
+async def test_summary_prompts_of_a_snapshot_equal_those_of_the_same_code_in_the_worktree(module_history, current, tmp_path):
+    repo, at = module_history
     past = await Snapshots(repo, sys.executable, None, tmp_path / "out").at(at["edit"], [current])
     clean = tmp_path / "clean"
     build(clean)
@@ -248,6 +259,7 @@ async def test_summary_prompts_of_a_snapshot_equal_those_of_the_same_code_in_the
     assert to_dict(past.analysis)["nodes"] == to_dict(same.analysis)["nodes"]
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_location_in_the_original_repo_is_left_unresolved(tmp_path):
     """가상환경이 원본 레포의 소스 폴더를 `.pth`로 걸어 두면 꺼낸 폴더에 없는 모듈을 언어 서버가 원본에서 찾는다."""
