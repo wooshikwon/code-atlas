@@ -6,6 +6,7 @@ import { GraphView } from "./graph/GraphView";
 import { Progress } from "./graph/Progress";
 import { Tooltip } from "./graph/Tooltip";
 import { fitTarget, stageOf } from "./graph/viewport";
+import { Entries } from "./nav/Entries";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
 import { bind } from "./nav/keys";
@@ -53,6 +54,7 @@ function Toolbar() {
         <button className="toolbar-button" onClick={forward} disabled={!canForward || pin} data-tip="앞으로" aria-label="앞으로">
           →
         </button>
+        <Entries />
         <Trail />
       </div>
       <div className="toolbar-tools">

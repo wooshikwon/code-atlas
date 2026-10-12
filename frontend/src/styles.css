@@ -383,9 +383,13 @@ ul {
   min-width: 0;
 }
 
-/* 상단 줄은 뒤로·앞으로 버튼과 탐색 경로를 담은 .toolbar-nav와 필터 버튼, 화면 맞춤, 화면 색, 새로고침 버튼을 담은 .toolbar-tools로 나뉜다.
-   줄 폭이 모자라면 탐색 경로가 줄어든다. */
+/* 상단 줄은 뒤로·앞으로 버튼, 진입점 버튼, 탐색 경로를 담은 .toolbar-nav와 필터 버튼, 화면 맞춤, 화면 색, 새로고침 버튼을 담은 .toolbar-tools로 나뉜다.
+   줄 폭이 모자라면 탐색 경로가 줄어든다. 줄 폭에 따라 틈과 진입점 버튼을 줄이므로(아래 @container) 줄을 크기 컨테이너로 두고,
+   컨테이너가 만드는 겹침 맥락 안의 필터 창이 정보 패널 위에 그려지게 줄을 메뉴 층에 둔다. */
 .toolbar {
+  position: relative;
+  z-index: var(--z-menu);
+  container: toolbar / inline-size;
   display: flex;
   flex: none;
   align-items: center;
@@ -526,6 +530,67 @@ ul {
 
 .toolbar-toggle input[type="range"] {
   width: 72px;
+}
+
+/* 진입점 버튼. 테두리와 바탕 없이 글자와 아래 화살표만 그린다. 글자는 본문 잉크와 muted 잉크를 반씩 섞은 색이고(밝은 화면 바탕에서
+   대비 8:1), 커서를 올리거나 메뉴를 펴면 본문 잉크가 된다. 진입점이 없으면 누를 수 없는 버튼의 색인 muted 잉크로 적는다. */
+.toolbar-entries {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  color: color-mix(in srgb, var(--ink) 50%, var(--muted));
+  white-space: nowrap;
+}
+
+.toolbar-entries:hover:enabled,
+.toolbar-entries[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+.toolbar-entries:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.toolbar-entries-arrow {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 진입점 버튼과 탐색 경로 사이의 세로선 */
+.toolbar-entries + .toolbar-trail {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+/* 좁은 상단 줄. 줄에 늘 그리는 요소의 폭은 499px다: 양끝 여백 16, 오른쪽 칸의 버튼 네 개와 바뀐 파일 수 270, 뒤로·앞으로 버튼 59,
+   진입점 버튼 57, 세로선과 그 여백 13, 틈 일곱 개 84. 여기에 탐색 경로가 `… >`와 마지막 단계의 글자 서너 자를 적는 46px를 더한
+   545px보다 줄이 좁으면 진입점 버튼은 수를 감추고 세로선을 지우며 틈을 12px에서 4px로 줄인다. 줄인 틈 여섯 개가 48px이고
+   진입점 글자와 화살표, 그 틈이 49px여서 탐색 경로의 폭은 진입점 버튼이 없을 때와 1px 안에서 같다. */
+@container toolbar (max-width: 545px) {
+  .toolbar-nav,
+  .toolbar-tools {
+    gap: 4px;
+  }
+
+  /* 두 칸 사이의 틈은 컨테이너인 줄이 정하므로 오른쪽 칸을 당겨 줄인다. */
+  .toolbar-tools {
+    margin-left: -8px;
+  }
+
+  .toolbar-entries-count {
+    display: none;
+  }
+
+  .toolbar-entries + .toolbar-trail {
+    padding-left: 0;
+    border-left: none;
+  }
 }
 
 .toolbar-button {
@@ -1671,8 +1736,10 @@ ul {
   font-weight: 600;
 }
 
-/* 여러 선이 함께 지나는 구간을 눌렀을 때 누른 자리에 고정하는 선 목록. 말풍선과 같은 색이고 항목을 누를 수 있다. */
-.line-menu {
+/* 여러 선이 함께 지나는 구간을 눌렀을 때 누른 자리에 고정하는 선 목록과, 상단 줄의 진입점 목록·노드의 우클릭 메뉴(.menu).
+   말풍선과 같은 색이고 항목을 누를 수 있다. */
+.line-menu,
+.menu {
   position: fixed;
   z-index: var(--z-tooltip);
   max-height: 50vh;
@@ -1688,7 +1755,8 @@ ul {
   line-height: 1.5;
 }
 
-.line-menu-item {
+.line-menu-item,
+.menu-item {
   display: block;
   width: 100%;
   padding: 1px 8px;
@@ -1697,8 +1765,36 @@ ul {
   white-space: pre;
 }
 
-.line-menu-item:hover {
+.line-menu-item:hover,
+.menu-item[data-active] {
   background: var(--active-bg);
+}
+
+/* 메뉴는 화면 좌표로 옮겨 그리고(MenuList), 화면 높이 안에서 스크롤한다. 항목의 글자가 폭을 넘으면 말줄임으로 줄인다. */
+.menu {
+  top: 0;
+  left: 0;
+  max-width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  outline: none;
+  user-select: none;
+}
+
+.menu-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.menu-item[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: default;
+}
+
+.menu-item .entry-icon {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -2px;
 }
 
 /* 앱의 말풍선. 칸 바탕과 경계선의 색을 써서 밝은 화면과 어두운 화면을 따른다. 긴 글은 폭 안에서 줄을 바꾼다. */
@@ -2291,33 +2387,6 @@ ol.summary-list {
 .filter-branch {
   color: var(--muted);
   white-space: nowrap;
-}
-
-.filter-entry-list {
-  margin: 0 -4px;
-  padding: 0;
-  list-style: none;
-}
-
-.filter-entry {
-  display: block;
-  width: 100%;
-  padding: 2px 8px;
-  overflow: hidden;
-  border-radius: 3px;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.filter-entry .entry-icon {
-  display: inline-block;
-  margin-right: 4px;
-  vertical-align: -2px;
-}
-
-.filter-entry:hover {
-  background: var(--hover-bg);
 }
 
 .overlay-option {

@@ -2993,7 +2993,8 @@ async function toolbar(t, page) {
       options: [...section("보기 설정").querySelectorAll(".overlay-option")].map((option) => option.dataset.kind),
       stats: [...section("레포 정보").querySelectorAll(".filter-stats")].map((line) => line.textContent),
       branch: section("레포 정보").querySelector(".filter-branch")?.textContent ?? null,
-      entries: [...section("레포 정보").querySelectorAll(".filter-entry")].map((item) => item.dataset.node),
+      entries: root.querySelectorAll('[data-node], [role="menuitem"]').length,
+      text: root.textContent,
     };
   });
   t.check(
@@ -3010,7 +3011,7 @@ async function toolbar(t, page) {
       (reply.git && reply.branch !== null ? panel.branch === `브랜치 ${reply.branch}` : panel.branch === null),
     `${panel.stats.join(" / ")} / ${panel.branch}`,
   );
-  t.check(`레포 정보 구역이 진입점 ${entries.length}개의 이름을 적는다`, entries.length > 0 && same([...panel.entries].sort(), [...entries].sort()), panel.entries.join(", "));
+  t.check("필터 창에 진입점 목록이 없다", entries.length > 0 && panel.entries === 0 && !panel.text.includes("진입점"), `노드 항목 ${panel.entries}개`);
   await t.shot();
 
   // 보기 설정을 바꿔도 창이 닫히지 않고 필터 버튼이 바꾼 설정의 수를 적는다.
@@ -3038,11 +3039,10 @@ async function toolbar(t, page) {
   });
   await rest(page);
 
-  // 진입점 이름을 고르면 그 노드로 가고 창이 닫힌다. 창 밖을 누르거나 Esc를 눌러도 창만 닫힌다.
-  await page.click(".filter-button");
-  await page.click(`.filter-entry[data-node="${entries.at(-1)}"]`);
+  // 노드를 고른 채로 창 밖을 누르거나 Esc를 누르면 창만 닫힌다.
+  await page.click(".toolbar-entries");
+  await page.click(`.menu-item[data-node="${entries.at(-1)}"]`);
   await waitSelected(page, entries.at(-1)).catch(() => {});
-  t.check("진입점 이름을 고르면 그래프가 그 노드를 선택하고 창이 닫힌다", (await selectedOf(page)) === entries.at(-1) && (await count(page, ".filter-panel")) === 0, `선택 ${await selectedOf(page)}`);
   await page.click(".filter-button");
   await page.waitForSelector(".filter-panel", { timeout: 5_000 }).catch(() => {});
   await page.keyboard.press("Escape");
@@ -7466,6 +7466,258 @@ async function entryMark(t, page) {
   await page.screenshot({ path: HF3("entry-mark-dark") });
 }
 
+/** 진입점 버튼의 글자, 테두리 폭과 바탕, 글자 색, 상단 줄 왼쪽 칸에서 앞뒤에 놓인 요소 */
+const entriesButton = (page) =>
+  page.evaluate(() => {
+    const button = document.querySelector(".toolbar-entries");
+    const style = getComputedStyle(button);
+    const rect = button.getBoundingClientRect();
+    return {
+      text: button.getAttribute("aria-label"),
+      shown: [...button.children].filter((child) => child.getBoundingClientRect().width > 0).length,
+      borders: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth].map(parseFloat),
+      background: style.backgroundColor,
+      shadow: style.boxShadow,
+      color: style.color,
+      arrow: button.querySelector("svg path") !== null,
+      before: button.previousElementSibling?.getAttribute("aria-label") ?? null,
+      after: button.nextElementSibling?.className ?? null,
+      nav: button.parentElement.className,
+      expanded: button.getAttribute("aria-expanded"),
+      disabled: button.disabled,
+      rect: { left: rect.left, right: rect.right, bottom: rect.bottom },
+    };
+  });
+
+/** 편 메뉴의 역할과 항목, 활성 항목, 화면 사각형 */
+const listOf = (page) =>
+  page.evaluate(() => {
+    const menu = document.querySelector(".menu");
+    if (menu === null) {
+      return null;
+    }
+    const rect = menu.getBoundingClientRect();
+    const items = [...menu.querySelectorAll(".menu-item")];
+    const active = menu.querySelector("[data-active]");
+    return {
+      role: menu.getAttribute("role"),
+      label: menu.getAttribute("aria-label"),
+      roles: [...new Set(items.map((item) => item.getAttribute("role")))],
+      items: items.map((item) => ({ key: item.dataset.key, node: item.dataset.node ?? null, text: item.textContent, disabled: item.getAttribute("aria-disabled") === "true", icon: item.querySelector("svg.entry-icon") !== null })),
+      active: active?.dataset.key ?? null,
+      activeShown: active === null || (active.getBoundingClientRect().top >= rect.top - 1 && active.getBoundingClientRect().bottom <= rect.bottom + 1),
+      pointed: menu.getAttribute("aria-activedescendant") === (active?.id ?? null),
+      focused: document.activeElement === menu,
+      scrolls: menu.scrollHeight > menu.clientHeight,
+      rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+      inside: rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight,
+      style: (({ backgroundColor, color, borderTopColor }) => ({ backgroundColor, color, borderTopColor }))(getComputedStyle(menu)),
+    };
+  });
+
+/** 말풍선과 선 목록이 쓰는 칸 바탕색, 본문 잉크, 경계선 색을 브라우저가 계산한 값 */
+const menuTokens = (page) =>
+  page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.style.cssText = "background: var(--panel-bg); color: var(--ink); border: 1px solid var(--line)";
+    document.body.append(probe);
+    const { backgroundColor, color, borderTopColor } = getComputedStyle(probe);
+    probe.remove();
+    return { backgroundColor, color, borderTopColor };
+  });
+
+/**
+ * 상단 줄의 진입점 버튼. 테두리와 바탕이 없는 글자 버튼이고 누르면 글자 아래로 메뉴가 내려온다. 필터 창에는 진입점이 없다.
+ * 사진은 `hf3-entry-{이름}.png`로 남긴다.
+ */
+async function entry(t, page) {
+  const graph = await api("/api/graph");
+  const entries = graph.nodes.filter((n) => n.entry && !n.test);
+  const title = (n) => (n.kind === "module" ? `${n.id.replaceAll(".", "/")}.py` : null);
+  await load(page);
+  const ink = await colorOf(page, "--ink");
+  const idle = await entriesButton(page);
+  t.check(
+    `상단 줄 왼쪽 칸의 앞으로 버튼과 탐색 경로 사이에 "진입점 ${entries.length}"과 아래 화살표를 적은 버튼이 있다`,
+    idle.text === `진입점 ${entries.length}` && idle.arrow && idle.before === "앞으로" && idle.after === "toolbar-trail" && idle.nav === "toolbar-nav",
+    `"${idle.text}", 앞 ${idle.before}, 뒤 ${idle.after}`,
+  );
+  await page.hover(".toolbar-entries");
+  const hovered = await entriesButton(page);
+  const bare = (button) => button.borders.every((width) => width === 0) && button.background === "rgba(0, 0, 0, 0)" && button.shadow === "none";
+  t.check(
+    "버튼은 테두리와 바탕이 없고, 커서를 올려도 상자가 생기지 않고 글자만 본문 잉크로 진해진다",
+    bare(idle) && bare(hovered) && idle.color !== ink.rgb && hovered.color === ink.rgb,
+    `평소 ${idle.color}, 올렸을 때 ${hovered.color}, 테두리 ${hovered.borders.join("/")}, 바탕 ${hovered.background}`,
+  );
+  await page.mouse.move(5, 5);
+  await page.screenshot({ path: HF3("entry-button") });
+
+  await page.click(".toolbar-entries");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  const opened = await listOf(page);
+  const button = await entriesButton(page);
+  t.check(
+    "버튼을 누르면 글자 바로 아래로 진입점 이름의 메뉴가 내려온다",
+    opened !== null &&
+      button.expanded === "true" &&
+      near(opened.rect.left, button.rect.left) &&
+      opened.rect.top >= button.rect.bottom &&
+      opened.rect.top - button.rect.bottom < 12 &&
+      same(opened.items.map((item) => item.node), entries.map((n) => n.id)) &&
+      opened.items.every((item, i) => item.icon && (title(entries[i]) === null || item.text === title(entries[i]))),
+    opened === null ? "메뉴 없음" : `항목 ${opened.items.map((item) => item.text).join(", ")}, 버튼 아래 ${Math.round(opened.rect.top - button.rect.bottom)}px`,
+  );
+  const tokens = await menuTokens(page);
+  t.check(
+    "메뉴는 role=menu와 menuitem이고 말풍선·선 목록과 같은 칸 바탕색, 경계선, 본문 잉크를 쓴다",
+    opened?.role === "menu" && opened.label === "진입점" && same(opened.roles, ["menuitem"]) && same(opened.style, tokens),
+    JSON.stringify(opened?.style),
+  );
+  await page.screenshot({ path: HF3("entry-open-light") });
+
+  // 필터 창에는 진입점이 없고, 필터 버튼을 누르면 메뉴가 닫힌다.
+  await page.click(".filter-button");
+  await page.waitForSelector(".filter-panel", { timeout: 5_000 }).catch(() => {});
+  const filters = await page.evaluate(() => document.querySelector(".filter-panel")?.textContent ?? "");
+  t.check("메뉴 밖의 필터 버튼을 누르면 메뉴가 닫히고, 필터 창에는 진입점이 없다", (await count(page, ".menu")) === 0 && filters !== "" && !filters.includes("진입점"), filters.slice(0, 60));
+  await page.screenshot({ path: HF3("entry-filters") });
+  await page.click(".filter-button");
+
+  // 고르기
+  const target = entries.at(-1);
+  await page.click(".toolbar-entries");
+  await page.click(`.menu-item[data-node="${target.id}"]`);
+  await waitSelected(page, target.id).catch(() => {});
+  t.check("이름을 고르면 그래프가 그 노드를 고르고 화면을 옮긴 뒤 메뉴가 닫힌다", (await selectedOf(page)) === target.id && (await count(page, ".menu")) === 0 && (await entriesButton(page)).expanded === "false", `선택 ${await selectedOf(page)}`);
+
+  // 키보드
+  await page.focus(".toolbar-entries");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  const byKey = await listOf(page);
+  await page.keyboard.press("ArrowDown");
+  const second = await listOf(page);
+  await page.keyboard.press("End");
+  const last = await listOf(page);
+  await page.keyboard.press("Home");
+  const home = await listOf(page);
+  t.check(
+    "Enter로 열면 첫 항목이 활성 항목이고 아래 화살표, End, Home이 활성 항목을 옮긴다",
+    byKey?.focused === true && byKey.pointed && byKey.active === entries[0].id && second.active === entries[Math.min(1, entries.length - 1)].id && last.active === entries.at(-1).id && home.active === entries[0].id,
+    [byKey?.active, second?.active, last?.active, home?.active].join(" → "),
+  );
+  await page.keyboard.press("Escape");
+  const escaped = { menu: await count(page, ".menu"), selected: await selectedOf(page), focus: await page.evaluate(() => document.activeElement?.className ?? "") };
+  t.check("Esc는 메뉴만 닫고 선택을 그대로 두며 초점을 버튼에 돌려준다", escaped.menu === 0 && escaped.selected === target.id && escaped.focus === "toolbar-entries", JSON.stringify(escaped));
+  const ring = await page.evaluate(() => {
+    const style = (selector) => {
+      const element = document.querySelector(selector);
+      return { visible: element.matches(":focus-visible"), outline: getComputedStyle(element).outlineStyle };
+    };
+    const own = style(".toolbar-entries");
+    document.querySelector('.toolbar-button[aria-label="앞으로"]').disabled = false;
+    return { own };
+  });
+  await page.keyboard.press("Shift+Tab");
+  const other = await page.evaluate(() => ({ label: document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.className, outline: getComputedStyle(document.activeElement).outlineStyle }));
+  t.check("키보드 초점을 받은 진입점 버튼은 다른 상단 줄 버튼과 같은 초점 테두리를 그린다", ring.own.visible && ring.own.outline !== "none" && ring.own.outline === other.outline, `진입점 ${ring.own.outline}, ${other.label} ${other.outline}`);
+  await page.focus(".toolbar-entries");
+  await page.keyboard.press("ArrowDown");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  await page.keyboard.press("Enter");
+  await waitSelected(page, entries[0].id).catch(() => {});
+  t.check("버튼에서 아래 화살표로 열고 Enter로 고르면 활성 항목의 노드를 고른다", (await selectedOf(page)) === entries[0].id && (await count(page, ".menu")) === 0, `선택 ${await selectedOf(page)}`);
+  await page.click(".toolbar-entries");
+  await page.click(".toolbar-trail", { position: { x: 2, y: 2 } });
+  t.check("메뉴 밖을 누르면 메뉴가 닫히고 선택이 그대로다", (await count(page, ".menu")) === 0 && (await selectedOf(page)) === entries[0].id, `선택 ${await selectedOf(page)}`);
+
+  // 어두운 화면
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  await page.click(".toolbar-entries");
+  const dark = await listOf(page);
+  const darkTokens = await menuTokens(page);
+  t.check("어두운 화면의 메뉴는 어두운 칸 바탕색에 밝은 글자다", same(dark?.style, darkTokens) && dark.style.backgroundColor !== opened.style.backgroundColor && bare(await entriesButton(page)), JSON.stringify(dark?.style));
+  await page.screenshot({ path: HF3("entry-open-dark") });
+  await page.keyboard.press("Escape");
+
+  // 창 폭 720px
+  await page.setViewportSize({ width: 720, height: 900 });
+  await rest(page);
+  await page.click(".toolbar-entries");
+  const narrow = await page.evaluate(() => {
+    const toolbar = document.querySelector(".toolbar");
+    const rect = document.querySelector(".toolbar-entries").getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return { fits: toolbar.scrollWidth <= toolbar.clientWidth, height: toolbar.getBoundingClientRect().height, hit: hit?.closest(".toolbar-entries") !== null, right: rect.right <= window.innerWidth };
+  });
+  const narrowMenu = await listOf(page);
+  t.check(
+    "창 폭 720px에서 상단 줄이 한 줄에 들어가고 진입점 버튼이 눌리며 메뉴가 창 안에 열린다",
+    narrow.fits && narrow.height < 40 && narrow.hit && narrow.right && narrowMenu?.inside === true,
+    `상단 줄 높이 ${narrow.height}, 넘침 없음 ${narrow.fits}, 메뉴 창 안 ${narrowMenu?.inside}`,
+  );
+  await page.screenshot({ path: HF3("entry-720") });
+  await page.keyboard.press("Escape");
+  await page.setViewportSize(VIEW);
+
+  // 진입점이 없는 레포: /api/graph의 진입점 표시를 모두 지워 연다.
+  const isGraph = (at) => at.pathname === "/api/graph";
+  await page.route(isGraph, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, json: { ...body, nodes: body.nodes.map((n) => ({ ...n, entry: false })) } });
+  });
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  const none = await entriesButton(page);
+  const muted = await colorOf(page, "--muted");
+  await page.click(".toolbar-entries", { force: true });
+  t.check("진입점이 없으면 버튼이 \"진입점 0\"을 muted 잉크로 적고 눌러도 메뉴가 열리지 않는다", none.text === "진입점 0" && none.disabled && none.color === muted.rgb && (await count(page, ".menu")) === 0, `"${none.text}" ${none.color}`);
+  await page.screenshot({ path: HF3("entry-none") });
+  await page.unroute(isGraph);
+
+  // 진입점이 많은 레포: 낮은 창에서 메뉴가 창 안에서 스크롤하고, 함수 진입점을 고르면 그 노드가 표지를 달고 그려진다.
+  if (wideUrl === null) {
+    t.skip("진입점이 많으면 메뉴가 화면 안에서 스크롤한다", "sync-engine의 진입점은 두 개다 — --wide-url을 주지 않았다");
+    return;
+  }
+  const wide = (await api("/api/graph", wideUrl)).nodes.filter((n) => n.entry && !n.test);
+  await page.setViewportSize({ width: VIEW.width, height: 260 });
+  await page.goto(wideUrl);
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  await page.click(".toolbar-entries");
+  await page.keyboard.press("ArrowUp");
+  const long = await listOf(page);
+  t.check(
+    `진입점 ${wide.length}개의 메뉴는 높이 260px 창 안에 열려 안에서 스크롤하고, 위 화살표로 간 마지막 항목이 보인다`,
+    long !== null && long.items.length === wide.length && long.inside && long.scrolls && long.active === wide.at(-1).id && long.activeShown,
+    long === null ? "메뉴 없음" : `항목 ${long.items.length}개, 창 안 ${long.inside}, 스크롤 ${long.scrolls}, 활성 ${long.active}${long.activeShown ? "" : "(메뉴 밖)"}`,
+  );
+  await page.screenshot({ path: HF3("entry-long") });
+  await page.keyboard.press("Escape");
+  await page.setViewportSize(VIEW);
+  const fn = wide.find((n) => n.kind === "function");
+  if (fn === undefined) {
+    t.skip("함수 진입점을 고르면 그 노드가 표지를 달고 그려진다", "함수 진입점이 없다");
+    return;
+  }
+  await page.click(".toolbar-entries");
+  await page.click(`.menu-item[data-node="${fn.id}"]`);
+  await waitSelected(page, fn.id).catch(() => {});
+  const drawn = await page.evaluate((sel) => {
+    const label = document.querySelector(`${sel} .node-label`);
+    const wrapper = document.querySelector(sel);
+    const loc = document.querySelector(`${sel} .loc`);
+    return label === null ? null : { mark: label.querySelector(".entry-mark svg path") !== null, inside: (loc ?? label).getBoundingClientRect().right <= wrapper.getBoundingClientRect().right + 0.5 };
+  }, face(fn.id));
+  t.check("함수 진입점을 메뉴에서 고르면 그 함수 노드가 체크 표지를 달고 이름표와 줄 수가 노드 폭 안에 그려진다", (await selectedOf(page)) === fn.id && drawn?.mark === true && drawn.inside, JSON.stringify(drawn));
+  await page.screenshot({ path: HF3("entry-function") });
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -7477,6 +7729,7 @@ const SCENARIOS = [
   ["edge", edge],
   ["badge-tip", badgeTip],
   ["entry-mark", entryMark],
+  ["entry", entry],
   ["tips", tips],
   ["minimap", minimap],
   ["region", region],
