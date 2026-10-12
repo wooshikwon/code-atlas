@@ -69,7 +69,7 @@ def test_a_shell_that_does_not_end_is_ended_after_the_time_limit(shell):
     got = shellenv.read(timeout=1.5)
     assert 1.5 <= time.monotonic() - started < 8
     assert (got.ok, got.env) == (False, None)
-    assert got.detail == "로그인 셸(zsh)이 1.5초 안에 환경을 알려 주지 않았다. 앱이 받은 환경과 알려진 설치 위치에서 도구를 찾는다"
+    assert got.detail == "로그인 셸(zsh)이 1.5초 안에 환경을 알려 주지 않았습니다. 앱이 받은 환경과 알려진 설치 위치에서 도구를 찾습니다"
     assert group_ended(int(Path(f"{path}.pid").read_text()))
 
 
@@ -77,7 +77,7 @@ def test_a_shell_that_fails_gives_its_exit_code_and_last_line(shell):
     shell(FAILING)
     got = shellenv.read()
     assert (got.ok, got.env) == (False, None)
-    assert got.detail == "로그인 셸의 출력에서 환경을 읽지 못했다(종료 코드 3): 설정 파일을 읽지 못했다"
+    assert got.detail == "로그인 셸의 출력에서 환경을 읽지 못했습니다(종료 코드 3): 설정 파일을 읽지 못했다"
 
 
 def test_a_process_the_shell_leaves_behind_does_not_hold_the_reading(shell):
@@ -91,11 +91,11 @@ def test_a_shell_that_is_not_supported_is_not_started(shell):
     path = shell("echo run > \"$0.ran\"\n", name="tcsh")
     got = shellenv.read()
     assert (got.ok, got.env, got.seconds) == (False, None, 0.0)
-    assert got.detail == "로그인 셸 tcsh은 환경을 읽지 않는다. zsh, bash, fish를 읽는다"
+    assert got.detail == "로그인 셸 tcsh은 환경을 읽지 않습니다. zsh, bash, fish를 읽습니다"
     assert not Path(f"{path}.ran").exists()
 
     shell.use(str(path.parent / "gone" / "zsh"))
-    assert shellenv.read().detail.startswith("로그인 셸(zsh)을 띄우지 못했다")
+    assert shellenv.read().detail.startswith("로그인 셸(zsh)을 띄우지 못했습니다")
 
 
 @pytest.mark.parametrize(

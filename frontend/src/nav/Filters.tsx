@@ -51,7 +51,7 @@ function Interpreter({ close }: { close: () => void }) {
   if (root === null) {
     return null;
   }
-  const path = python === null ? "찾지 못했다" : python.startsWith(`${root}/`) ? python.slice(root.length + 1) : python;
+  const path = python === null ? "찾지 못함" : python.startsWith(`${root}/`) ? python.slice(root.length + 1) : python;
   return (
     <>
       <span className="filter-python">
@@ -139,7 +139,7 @@ export function Filters() {
               <input type="checkbox" checked={showExternal} onChange={toggleExternal} disabled={pin} />
               외부 노드
             </label>
-            <label className="toolbar-toggle" data-tip="노드를 고르면 캐시에 없는 LLM 요약을 만든다">
+            <label className="toolbar-toggle" data-tip="노드를 고르면 캐시에 없는 LLM 요약을 만듭니다">
               <input type="checkbox" checked={autoSummary} onChange={toggleAutoSummary} />
               자동 요약
             </label>

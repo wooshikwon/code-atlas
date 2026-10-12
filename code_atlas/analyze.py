@@ -106,8 +106,8 @@ def require_python(repo: str | Path, python: str | None) -> str:
         return found.path
     tried = "".join(f"\n  {attempt.path or attempt.source}: {attempt.detail}" for attempt in found.attempts)
     if python is None:
-        raise PythonNotFound(f"{repo}에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.{tried}")
-    raise PythonNotFound(f"--python에 준 경로를 실행할 수 없다: {python}. 인터프리터의 실행 파일 경로를 지정한다.{tried}")
+        raise PythonNotFound(f"{repo}에서 가상환경을 찾지 못했습니다. --python으로 인터프리터 경로를 지정해 주세요.{tried}")
+    raise PythonNotFound(f"--python에 준 경로를 실행할 수 없습니다: {python}. 인터프리터의 실행 파일 경로를 지정해 주세요.{tried}")
 
 
 def _imported_module(site: Site) -> str:

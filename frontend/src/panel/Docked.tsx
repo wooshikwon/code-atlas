@@ -27,7 +27,7 @@ export function Docked() {
       data-docked=""
       style={height === null ? undefined : ({ "--panel-height": `${height}px`, "--summary-min": `${MIN_SUMMARY}px`, "--code-min": `${MIN_CODE}px` } as CSSProperties)}
     >
-      {height !== null && <PanelBody frame={ref} tip="더블클릭하면 요약 칸이 기본 높이로 돌아간다" />}
+      {height !== null && <PanelBody frame={ref} tip="더블클릭하면 요약 칸이 기본 높이로 돌아갑니다" />}
     </div>
   );
 }

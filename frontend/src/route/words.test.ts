@@ -11,28 +11,28 @@ const found = (from: string, to: string) => route(routeFixture, from, to, off);
 describe("emptyText", () => {
   it("미확인 호출이 없으면 닿는 함수 수와 미확인 호출이 없음을 적는다", () => {
     expect(emptyText(found("flow.sink:emit", "flow.walk:begin"), nodes)).toEqual([
-      "실행 선으로 이어지는 경로가 없다",
-      "출발에서 닿는 함수는 1개이고 그 안에 대상을 확인하지 못한 호출(?)은 없다",
+      "실행 선으로 이어지는 경로가 없습니다",
+      "출발에서 닿는 함수는 1개이고 그 안에 대상을 확인하지 못한 호출(?)은 없습니다",
     ]);
   });
 
   it("미확인 호출이 있으면 닿는 함수 수와 미확인 호출 수를 적는다", () => {
     expect(emptyText(found("flow.build:Base.run", "flow.walk:begin"), nodes)).toEqual([
-      "실행 선으로 이어지는 경로가 없다",
-      "출발에서 닿는 함수 4개 안에 대상을 확인하지 못한 호출(?)이 1곳 있다. 그 호출을 거쳐 실제로는 닿을 수 있다",
+      "실행 선으로 이어지는 경로가 없습니다",
+      "출발에서 닿는 함수 4개 안에 대상을 확인하지 못한 호출(?)이 1곳 있습니다. 그 호출을 거쳐 실제로는 닿을 수 있습니다",
     ]);
   });
 
   it("반대 방향에 경로가 있으면 한 줄을 덧붙인다", () => {
     expect(emptyText(found("flow.walk:finish", "flow.walk:begin"), nodes)).toEqual([
-      "실행 선으로 이어지는 경로가 없다",
-      "출발에서 닿는 함수 1개 안에 대상을 확인하지 못한 호출(?)이 3곳 있다. 그 호출을 거쳐 실제로는 닿을 수 있다",
-      "반대 방향에는 경로가 있다",
+      "실행 선으로 이어지는 경로가 없습니다",
+      "출발에서 닿는 함수 1개 안에 대상을 확인하지 못한 호출(?)이 3곳 있습니다. 그 호출을 거쳐 실제로는 닿을 수 있습니다",
+      "반대 방향에는 경로가 있습니다",
     ]);
   });
 
   it("출발과 도착이 같거나 한쪽이 다른 쪽을 품으면 같은 곳이라고만 적는다", () => {
-    const same = ["출발과 도착이 같은 곳이다"];
+    const same = ["출발과 도착이 같은 곳입니다"];
     expect(emptyText(found("flow.walk:begin", "flow.walk:begin"), nodes)).toEqual(same);
     expect(emptyText(found("flow.walk", "flow.walk:finish"), nodes)).toEqual(same);
     expect(emptyText(found("flow.build:Engine.__init__", "flow.build:Engine"), nodes)).toEqual(same);

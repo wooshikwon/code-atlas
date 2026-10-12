@@ -100,7 +100,7 @@ export function SummaryNotice() {
     }
     return [...failed].map(([error, ids]) => {
       const node = nodes?.get(ids[0]);
-      return ids.length === 1 ? `LLM 요약을 만들지 못했다 · ${node === undefined ? ids[0] : titleOf(node)}: ${error}` : `LLM 요약 ${ids.length}개를 만들지 못했다 · ${error}`;
+      return ids.length === 1 ? `LLM 요약을 만들지 못했습니다 · ${node === undefined ? ids[0] : titleOf(node)}: ${error}` : `LLM 요약 ${ids.length}개를 만들지 못했습니다 · ${error}`;
     });
   }, [asked, states, graph]);
   if (lines.length === 0) {

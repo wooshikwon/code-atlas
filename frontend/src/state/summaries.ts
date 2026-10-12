@@ -147,7 +147,7 @@ export const useSummaries = create<SummaryStore>()((set, get) => {
           if (cached.summary !== null) {
             put(node, { phase: "done", summary: cached.summary, available: cached.available, stale: cached.stale, usage: null });
           } else if (!cached.available) {
-            put(node, { phase: "unavailable", reason: cached.reason ?? "Claude Code CLI를 부르지 못한다", code: cached.code });
+            put(node, { phase: "unavailable", reason: cached.reason ?? "Claude Code CLI를 부르지 못합니다", code: cached.code });
           } else {
             put(node, { phase: "empty" });
           }

@@ -27,8 +27,8 @@ const PHASE_NAMES: Record<Phase, string> = {
   resolve: "호출 대상 확인",
   build: "그래프 조립",
   ready: "분석 끝",
-  failed: "분석하지 못했다",
-  idle: "연 레포가 없다",
+  failed: "분석하지 못했습니다",
+  idle: "연 레포가 없습니다",
 };
 
 /** 서버가 분석하는 중이다. 상태를 아직 받지 못했거나 연 레포가 없으면 거짓이다. */

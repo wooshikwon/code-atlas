@@ -90,16 +90,16 @@ def _read(timeout: float) -> ShellEnv:
         return ShellEnv(shell, env is not None, detail, round(time.monotonic() - started, 2), env)
 
     if name not in SHELLS:
-        return result(f"로그인 셸 {name}은 환경을 읽지 않는다. {', '.join(SHELLS)}를 읽는다")
+        return result(f"로그인 셸 {name}은 환경을 읽지 않습니다. {', '.join(SHELLS)}를 읽습니다")
     mark = uuid.uuid4().hex
     try:
         code, out, err = _run(shell, shlex.join([sys.executable, "-I", "-c", _PRINT, mark]), timeout)
     except OSError as exc:
-        return result(f"로그인 셸({name})을 띄우지 못했다: {exc.strerror or exc}")
+        return result(f"로그인 셸({name})을 띄우지 못했습니다: {exc.strerror or exc}")
     if code is None:
         return result(
-            f"로그인 셸({name})이 {timeout:g}초 안에 환경을 알려 주지 않았다. "
-            "앱이 받은 환경과 알려진 설치 위치에서 도구를 찾는다"
+            f"로그인 셸({name})이 {timeout:g}초 안에 환경을 알려 주지 않았습니다. "
+            "앱이 받은 환경과 알려진 설치 위치에서 도구를 찾습니다"
         )
     parts = out.split(mark)
     try:
@@ -108,7 +108,7 @@ def _read(timeout: float) -> ShellEnv:
         env = None
     if not isinstance(env, dict):
         said = _last_line(err)
-        return result(f"로그인 셸의 출력에서 환경을 읽지 못했다(종료 코드 {code})" + (f": {said}" if said else ""))
+        return result(f"로그인 셸의 출력에서 환경을 읽지 못했습니다(종료 코드 {code})" + (f": {said}" if said else ""))
     for key in (*_OWN, *_QUIET):
         env.pop(key, None)
         if key in os.environ:

@@ -110,7 +110,7 @@ export function SummaryQueue() {
         </div>
       )}
       {waiting > 0 && (
-        <button className="summary-queue-cancel" data-tip={`아직 서버로 보내지 않은 요청 ${waiting}개를 뺀다`} onClick={cancel}>
+        <button className="summary-queue-cancel" data-tip={`아직 보내지 않은 요청 ${waiting}개를 뺍니다`} onClick={cancel}>
           취소
         </button>
       )}

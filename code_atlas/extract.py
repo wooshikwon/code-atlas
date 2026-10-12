@@ -915,7 +915,7 @@ def extract(
     except SyntaxError as exc:
         error = f"{exc.msg} (줄 {exc.lineno})"
     except RecursionError:
-        error = "식이 너무 깊다"
+        error = "식이 너무 깊습니다"
     facts = _Extractor(file, text, ast.Module(body=[], type_ignores=[]), repo_names, repo_variables).run()
     facts.error = error
     return facts

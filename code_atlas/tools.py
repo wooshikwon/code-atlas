@@ -81,13 +81,13 @@ NO_CLAUDE_ENV = "CODE_ATLAS_NO_CLAUDE"
 UNCHECKED = "확인하지 못함"
 # Claude Code CLI가 macOS에서 자격 증명을 읽고 쓸 때 `PATH`에서 이름으로 찾아 실행하는 명령
 KEYCHAIN_COMMAND = "security"
-NOT_LOGGED_IN = "Claude Code에 로그인돼 있지 않다"
-NOT_ANSWERING = "Claude Code CLI가 응답하지 않는다"
+NOT_LOGGED_IN = "Claude Code에 로그인돼 있지 않습니다"
+NOT_ANSWERING = "Claude Code CLI가 응답하지 않습니다"
 
 # Xcode Command Line Tools가 없으면 실행할 때 설치 창을 띄우는 macOS의 껍데기 파일
 CLT_STUBS = frozenset({"/usr/bin/git", "/usr/bin/python3"})
 XCODE_SELECT = "/usr/bin/xcode-select"
-NO_CLT_DETAIL = "Xcode Command Line Tools가 없다"
+NO_CLT_DETAIL = "Xcode Command Line Tools가 없습니다"
 
 # 출처 ③의 알려진 위치. `*`가 든 경로는 판 번호가 높은 순서로 편다.
 PLACES: dict[str, tuple[str, ...]] = {
@@ -272,7 +272,7 @@ def _try(tool: _Tool, source: str, path: str, cwd: str) -> tuple[Attempt, dict[s
     if not os.path.exists(path):
         return failed(MISSING, "없는 파일")
     if not os.path.isfile(path):
-        return failed(NOT_FILE, "파일이 아니다")
+        return failed(NOT_FILE, "파일이 아닙니다")
     if not os.access(path, os.X_OK):
         return failed(NOT_EXECUTABLE, "실행 권한 없음")
     if sys.platform == "darwin" and os.path.realpath(path) in CLT_STUBS and not _has_clt():
@@ -284,14 +284,14 @@ def _try(tool: _Tool, source: str, path: str, cwd: str) -> tuple[Attempt, dict[s
         else:
             code, out, err = _execute([path, *tool.args], tool.timeout, cwd)
     except subprocess.TimeoutExpired:
-        return failed(TIMEOUT, f"{tool.timeout:g}초 안에 끝나지 않았다")
+        return failed(TIMEOUT, f"{tool.timeout:g}초 안에 끝나지 않았습니다")
     except OSError as exc:
-        return failed(SPAWN_FAILED, f"실행하지 못했다: {exc.strerror or exc}")
+        return failed(SPAWN_FAILED, f"실행하지 못했습니다: {exc.strerror or exc}")
     if code != 0:
         return failed(FAILED, _failure(code, err))
     fields = tool.read(out)
     if fields is None:
-        return failed(UNREADABLE, "확인 명령의 출력을 읽지 못했다")
+        return failed(UNREADABLE, "확인 명령의 출력을 읽지 못했습니다")
     return Attempt(source, path, True, str(fields["version"])), fields
 
 
@@ -441,15 +441,15 @@ def _claude_refused() -> tuple[str, str] | None:
     refused = None
     account = pwd.getpwuid(os.getuid())
     if os.environ.get(NO_CLAUDE_ENV):
-        refused = DISABLED, f"환경 변수 {NO_CLAUDE_ENV}가 켜져 있다"
+        refused = DISABLED, f"환경 변수 {NO_CLAUDE_ENV}가 켜져 있습니다"
     elif shellenv.reading():
-        refused = SHELL_PENDING, "로그인 셸의 환경을 읽는 중이다"
+        refused = SHELL_PENDING, "로그인 셸의 환경을 읽는 중입니다"
     elif os.environ.get("HOME") != account.pw_dir:
-        refused = HOME_MISMATCH, f"환경의 HOME이 이 계정의 홈 폴더({account.pw_dir})가 아니다"
+        refused = HOME_MISMATCH, f"환경의 HOME이 이 계정의 홈 폴더({account.pw_dir})가 아닙니다"
     elif os.environ.get("USER", account.pw_name) != account.pw_name:
-        refused = USER_MISMATCH, f"환경의 USER가 이 계정의 이름({account.pw_name})이 아니다"
+        refused = USER_MISMATCH, f"환경의 USER가 이 계정의 이름({account.pw_name})이 아닙니다"
     elif sys.platform == "darwin" and next(_on_path(KEYCHAIN_COMMAND), None) is None:
-        refused = NO_KEYCHAIN_COMMAND, f"환경의 PATH에 {KEYCHAIN_COMMAND}가 없다"
+        refused = NO_KEYCHAIN_COMMAND, f"환경의 PATH에 {KEYCHAIN_COMMAND}가 없습니다"
     return (refused[0], f"{UNCHECKED}: {refused[1]}") if refused is not None else None
 
 
@@ -515,15 +515,15 @@ def _ask(command: tuple[str, ...], cwd: str) -> tuple[str | None, str, str]:
     shown = " ".join(command)
     exe = next(_on_path(command[0]), None)
     if exe is None:
-        return None, MANAGER_MISSING, f"PATH에 {command[0]}가 없다"
+        return None, MANAGER_MISSING, f"PATH에 {command[0]}가 없습니다"
     try:
         code, out, err = _execute([exe, *command[1:]], MANAGER_TIMEOUT, cwd)
     except subprocess.TimeoutExpired:
-        return None, MANAGER_FAILED, f"`{shown}` 명령이 {MANAGER_TIMEOUT:g}초 안에 끝나지 않았다"
+        return None, MANAGER_FAILED, f"`{shown}` 명령이 {MANAGER_TIMEOUT:g}초 안에 끝나지 않았습니다"
     except OSError as exc:
-        return None, MANAGER_FAILED, f"`{shown}` 명령을 실행하지 못했다: {exc.strerror or exc}"
+        return None, MANAGER_FAILED, f"`{shown}` 명령을 실행하지 못했습니다: {exc.strerror or exc}"
     if code != 0:
-        return None, MANAGER_FAILED, f"`{shown}` 명령이 실패했다({_failure(code, err)})"
+        return None, MANAGER_FAILED, f"`{shown}` 명령이 실패했습니다({_failure(code, err)})"
     return out, OK, ""
 
 
@@ -539,7 +539,7 @@ def _managed(root: Path) -> Iterator[_Candidate]:
         folders = prefixes(root, out)
         if not folders:
             shown = " ".join(command)
-            yield _Candidate(KNOWN, None, f"{marker}: `{shown}` 명령이 이 레포의 환경을 알려 주지 않았다", MANAGER_NO_ENV)
+            yield _Candidate(KNOWN, None, f"{marker}: `{shown}` 명령이 이 레포의 환경을 알려 주지 않았습니다", MANAGER_NO_ENV)
         for folder in folders:
             yield _Candidate(KNOWN, os.path.join(folder, "bin", "python"))
 

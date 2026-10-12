@@ -197,7 +197,7 @@ function ClaudeRow({ found }: { found: Found }) {
       refused={refused}
       before={
         state.kind === "ready" && (
-          <button className="summary-action" disabled={answer === "asking"} data-tip="claude -p에 한 낱말을 답하게 하는 요청 하나를 보낸다" onClick={() => void ask()}>
+          <button className="summary-action" disabled={answer === "asking"} data-tip="claude -p에 한 낱말을 답하게 하는 요청 하나를 보냅니다" onClick={() => void ask()}>
             응답 확인
           </button>
         )
@@ -244,7 +244,7 @@ function PythonRow({ found }: { found: Found | null }) {
   const root = useAtlas((s) => s.repo?.root ?? null);
   const busy = useTools((s) => s.busy);
   if (found === null || root === null) {
-    return <Row tool="python" name="레포의 Python" ok state="연 레포가 없다" facts={[]} path={null} />;
+    return <Row tool="python" name="레포의 Python" ok state="연 레포 없음" facts={[]} path={null} />;
   }
   return (
     <Row
@@ -261,7 +261,7 @@ function PythonRow({ found }: { found: Found | null }) {
         </button>
       }
     >
-      {found.code !== "ok" && <span className="tools-trouble">{nameOf(root)}의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다</span>}
+      {found.code !== "ok" && <span className="tools-trouble">{nameOf(root)}의 Python 인터프리터를 찾지 못했습니다. 이 레포의 패키지가 설치된 인터프리터를 골라 주세요</span>}
       {found.prefix !== null && (
         <span className="tools-prefix">
           sys.prefix
@@ -292,7 +292,7 @@ export function Tools() {
       {about !== null && <p className="ask-note tools-about">{aboutLine(about)}</p>}
       {error !== null && (
         <p className="ask-error" role="alert">
-          환경을 읽지 못했다: {error}
+          환경을 읽지 못했습니다: {error}
         </p>
       )}
       {tools === null

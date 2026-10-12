@@ -308,10 +308,10 @@ def export(root: Path, commit: str, dest: Path) -> None:
     읽지 못하면 `OSError`다.
     """
     if disk_path(dest).is_relative_to(disk_path(root)):
-        raise ValueError(f"꺼낼 폴더가 레포 안이다: {dest}")
+        raise ValueError(f"꺼낼 폴더가 레포 안입니다: {dest}")
     out = _run(root, "archive", "--format=tar", commit, timeout=ARCHIVE_TIMEOUT)
     if out is None:
-        raise OSError(f"git archive가 커밋을 읽지 못했다: {commit}")
+        raise OSError(f"git archive가 커밋을 읽지 못했습니다: {commit}")
     dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(out)) as tar:
         for member in tar:

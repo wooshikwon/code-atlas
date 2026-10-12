@@ -368,7 +368,7 @@ async def test_server_answers_before_the_analysis_and_counts_revisions(sample_re
             "session": 1,
         }
         for method, path, params in READS:
-            assert await call(app, method, path, params) == (503, {"error": "분석 중이다"}), path
+            assert await call(app, method, path, params) == (503, {"error": "분석 중입니다"}), path
         assert seen == []
 
         release.set()
@@ -426,11 +426,11 @@ async def test_failed_first_analysis_keeps_the_server_up(sample_repo, tmp_path, 
         await asyncio.gather(app.state.workspace.running, return_exceptions=True)
         _, status = await call(app, "GET", "/api/status", {})
         assert (status["phase"], status["revision"]) == ("failed", 0)
-        assert "실행할 수 없다" in status["error"]
-        assert await call(app, "GET", "/api/graph", {}) == (503, {"error": "분석 중이다"})
+        assert "실행할 수 없습니다" in status["error"]
+        assert await call(app, "GET", "/api/graph", {}) == (503, {"error": "분석 중입니다"})
 
         code, body = await call(app, "POST", "/api/reload", {})
-        assert code == 500 and "실행할 수 없다" in body["error"]
+        assert code == 500 and "실행할 수 없습니다" in body["error"]
         app.state.workspace.runner.python = sys.executable
         code, body = await call(app, "POST", "/api/reload", {})
         _, status = await call(app, "GET", "/api/status", {})
@@ -830,7 +830,7 @@ def test_summary_reports_unreadable_style_guide_and_reads_it_for_every_request(g
     body = client.get("/api/summary", params=node).json()
     assert (body["summary"], body["available"]) == (None, False) and str(guide) in body["reason"]
     response = client.post("/api/summary", params=node)
-    assert response.status_code == 503 and "서술 규약 문서를 읽지 못했다" in response.json()["error"]
+    assert response.status_code == 503 and "서술 규약 문서를 읽지 못했습니다" in response.json()["error"]
     assert calls == []
 
     guide.write_text("문장은 서술어로 끝낸다.")
@@ -846,21 +846,21 @@ def test_summary_reports_unreadable_style_guide_and_reads_it_for_every_request(g
 
 def test_summary_reports_unavailable_cli(client, generated, monkeypatch):
     async def unavailable():
-        return "Claude Code CLI를 찾지 못했다"
+        return "Claude Code CLI를 찾지 못했습니다"
 
     monkeypatch.setattr(summary, "unavailable", unavailable)
     body = client.get("/api/summary", params={"node": "app.core:helper"}).json()
-    assert body == {"summary": None, "stale": False, "available": False, "reason": "Claude Code CLI를 찾지 못했다", "code": "not_found"}
+    assert body == {"summary": None, "stale": False, "available": False, "reason": "Claude Code CLI를 찾지 못했습니다", "code": "not_found"}
 
 
 def test_summary_failure_is_503(client, generated, monkeypatch):
     async def generate(system, prompt):
-        raise SummaryError("Claude Code CLI가 120초 안에 응답하지 않았다")
+        raise SummaryError("Claude Code CLI가 120초 안에 응답하지 않았습니다")
 
     monkeypatch.setattr(summary, "generate", generate)
     response = client.post("/api/summary", params={"node": "app.core:helper"})
     assert response.status_code == 503
-    assert response.json() == {"error": "Claude Code CLI가 120초 안에 응답하지 않았다"}
+    assert response.json() == {"error": "Claude Code CLI가 120초 안에 응답하지 않았습니다"}
     assert client.get("/api/summary", params={"node": "app.core:helper"}).json()["summary"] is None
 
 
@@ -1084,7 +1084,7 @@ async def test_failed_reload_keeps_the_previous_analysis(sample_repo, tmp_path, 
         with monkeypatch.context() as patch:
             patch.setattr(runner, "refresh", fail)
             status, body = await call(app, "POST", "/api/reload", {})
-        assert status == 500 and body == {"error": "다시 분석하지 못했다: 분석이 멈췄다"}
+        assert status == 500 and body == {"error": "다시 분석하지 못했습니다: 분석이 멈췄다"}
         assert state.graph is before and state.revision == 1
         _, status = await call(app, "GET", "/api/status", {})
         assert (status["phase"], status["error"]) == ("ready", None)
@@ -1392,7 +1392,7 @@ async def test_compare_task_reports_progress_joins_and_gives_way(history_repo, t
 
             monkeypatch.setattr(snapshot.Snapshots, "at", failing)
             failed = await client.post("/api/compare", json={"base": at["move"], "target": "worktree"})
-            assert failed.status_code == 500 and failed.json() == {"error": "비교하지 못했다: 분석이 멈췄다"}
+            assert failed.status_code == 500 and failed.json() == {"error": "비교하지 못했습니다: 분석이 멈췄다"}
             assert (await client.get("/api/status")).json()["compare"] is None
             monkeypatch.setattr(snapshot.Snapshots, "at", real)
             again = await client.post("/api/compare", json={"base": at["move"], "target": "worktree"})

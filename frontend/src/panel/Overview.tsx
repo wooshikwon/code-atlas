@@ -57,7 +57,7 @@ function Unused({ nodes }: { nodes: Map<string, AtlasNode> }) {
         미사용 후보 {count}개 · 정의 {definitions}개 가운데
       </p>
       <p className="overview-hint">
-        들어오는 실행·사용 선이 없는 함수·메서드·클래스다. 이름을 문자열로 부르는 동적 호출은 선으로 그리지 못하므로 실제로는 쓰일 수 있다.
+        들어오는 실행·사용 선이 없는 함수·메서드·클래스입니다. 이름을 문자열로 부르는 동적 호출은 선으로 그리지 못하므로 실제로는 쓰일 수 있습니다.
       </p>
       {files.map(([file, list]) => (
         <section key={file}>
@@ -79,12 +79,12 @@ function Unused({ nodes }: { nodes: Map<string, AtlasNode> }) {
 function Cycles({ nodes }: { nodes: Map<string, AtlasNode> }) {
   const groups = useCycles()?.groups ?? [];
   if (groups.length === 0) {
-    return <p className="overview-count">순환 묶음이 없다</p>;
+    return <p className="overview-count">순환 묶음이 없습니다</p>;
   }
   return (
     <>
       <p className="overview-count">순환 묶음 {groups.length}개</p>
-      <p className="overview-hint">묶음에 든 파일은 import를 따라가면 자기에게 돌아온다. 함수 안에서 하는 import는 세지 않는다.</p>
+      <p className="overview-hint">묶음에 든 파일은 import를 따라가면 자기에게 돌아옵니다. 함수 안에서 하는 import는 세지 않습니다.</p>
       {groups.map((group, i) => (
         <section key={group[0]}>
           <h4 className="overview-file">
@@ -141,7 +141,7 @@ function Compared({ nodes }: { nodes: Map<string, AtlasNode> }) {
         바뀐 정의 {count}개 · 파일 {files.length}개
       </p>
       <p className="overview-hint">
-        기준 {pointName(result.base)} · 대상 {pointName(result.target)}. 두 시점 사이에 줄이 바뀐 함수·클래스·변수다. 행을 누르면 그 노드를 고른다.
+        기준 {pointName(result.base)} · 대상 {pointName(result.target)}. 두 시점 사이에 줄이 바뀐 함수·클래스·변수입니다. 행을 누르면 그 노드를 고릅니다.
       </p>
       {files.map(({ file, list }) => (
         <section key={file.path}>

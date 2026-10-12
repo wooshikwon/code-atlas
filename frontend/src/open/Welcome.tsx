@@ -56,7 +56,7 @@ export function Welcome() {
             <button className="toolbar-button welcome-pick" disabled={busy} onClick={() => void browse()}>
               폴더 열기…
             </button>
-            <p className="welcome-hint">Python 레포의 폴더를 이 창에 끌어다 놓아도 열린다</p>
+            <p className="welcome-hint">Python 레포의 폴더를 이 창에 끌어다 놓아도 열립니다</p>
           </>
         ) : (
           <PathField autoFocus />
@@ -87,7 +87,7 @@ export function Starting({ backend }: { backend: Backend }) {
   if (backend.phase === "stopped") {
     return (
       <div className="progress" role="alert">
-        <div className="progress-phase">분석 프로세스가 멈췄다{backend.code === null ? "" : ` (종료 코드 ${backend.code})`}</div>
+        <div className="progress-phase">분석이 멈췄습니다{backend.code === null ? "" : ` (종료 코드 ${backend.code})`}</div>
         {backend.detail !== "" && <div className="progress-error">{backend.detail}</div>}
         <button className="toolbar-button progress-retry" onClick={() => void host.restartBackend()}>
           다시 시작

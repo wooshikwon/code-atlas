@@ -102,7 +102,7 @@ export function Header({ item, nodes }: HeaderProps) {
           </span>
         )}
       </div>
-      {item.type === "repo" && <div className="info-panel-hint">파일을 고르면 정보를, 함수를 고르면 코드를 보여 준다</div>}
+      {item.type === "repo" && <div className="info-panel-hint">파일을 고르면 정보를, 함수를 고르면 코드를 보여 줍니다</div>}
       {item.type === "node" && <Ends node={item.node} />}
     </>
   );

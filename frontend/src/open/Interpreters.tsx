@@ -13,12 +13,12 @@ import { sourceName } from "../state/tools";
  */
 function headline(path: string, found: Found): string {
   if (found.path !== null) {
-    return `${nameOf(path)}의 Python 인터프리터를 고른다. 지금은 ${found.path}`;
+    return `${nameOf(path)}의 Python 인터프리터를 골라 주세요. 지금은 ${found.path}`;
   }
   const saved = found.attempts.find((attempt) => attempt.source === "saved" && !attempt.ok);
   return saved === undefined
-    ? `${nameOf(path)}의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다`
-    : `저장해 둔 인터프리터를 실행하지 못했다: ${saved.path} (${saved.detail})`;
+    ? `${nameOf(path)}의 Python 인터프리터를 찾지 못했습니다. 이 레포의 패키지가 설치된 인터프리터를 골라 주세요`
+    : `저장해 둔 인터프리터를 실행하지 못했습니다: ${saved.path} (${saved.detail})`;
 }
 
 /** 시도 기록 한 줄. 출처, 경로, 결과 세 칸이다. 결과는 통과했으면 판 번호이고 아니면 통과하지 못한 까닭이다. */
@@ -69,7 +69,7 @@ export function Interpreters({ step }: { step: Extract<Step, { kind: "ask-python
           찾는 중
         </p>
       ) : step.candidates.length === 0 ? (
-        <p className="ask-note">찾은 인터프리터가 없다</p>
+        <p className="ask-note">찾은 인터프리터가 없습니다</p>
       ) : (
         <ul className="ask-options">
           {step.candidates.map((found) => (

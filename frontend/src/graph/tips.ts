@@ -8,7 +8,7 @@ import type { Pack } from "./visible";
 
 export const ENTRY_TIP = "진입점: 실행을 시작하는 코드";
 /** 상단 줄의 진입점 버튼. 진입점의 뜻 아래에 API 엔드포인트로 알아보는 것과 주소의 한계를 적는다. */
-export const ENTRIES_TIP = `${ENTRY_TIP}\nAPI 엔드포인트: FastAPI·Starlette·Flask의 라우트 데코레이터가 붙은 함수 · 다른 파일에서 붙인 앞 주소는 적지 않는다`;
+export const ENTRIES_TIP = `${ENTRY_TIP}\nAPI 엔드포인트: FastAPI·Starlette·Flask의 라우트 데코레이터가 붙은 함수 · 다른 파일에서 붙인 앞 주소는 적지 않습니다`;
 
 export const CHANGE_TIPS: Record<Change, string> = {
   modified: "수정: 마지막 커밋 뒤 바뀜",
@@ -17,7 +17,7 @@ export const CHANGE_TIPS: Record<Change, string> = {
 
 /** 접힌 상자의 오른쪽 위 배지. 파일 상자는 안에 든 함수·클래스 수, 폴더 상자는 안에 든 파일 수다. */
 export function insideTip(node: AtlasNode, count: number): string {
-  return node.kind === "package" ? `안에 든 파일 ${count}개 · 펼치면 보인다` : `안에 든 함수·클래스 ${count}개 · 고르면 보인다`;
+  return node.kind === "package" ? `안에 든 파일 ${count}개` : `안에 든 함수·클래스 ${count}개`;
 }
 
 /** 시점 비교에서 이름 옆에 적는 줄 수. 0인 쪽은 적지 않는다. */
@@ -28,7 +28,7 @@ export function diffTip(lines: Lines): string {
 
 /** 모듈 변수 변경 배지 `g`. names는 그 함수에서 나가는 바꿈 선의 도착 변수 이름이다. */
 export function globalTip(names: string[]): string {
-  return names.length === 0 ? "모듈 변수 변경: 모듈 변수를 바꾼다" : `모듈 변수 변경: ${names.join(", ")}을 바꾼다`;
+  return names.length === 0 ? "모듈 변수 변경: 모듈 변수를 바꿉니다" : `모듈 변수 변경: ${names.join(", ")}을 바꿉니다`;
 }
 
 /** LLM 요약을 만드는 중인 노드의 도는 원. 파일 상자는 안에 든 노드의 요청까지 세고, 요약이 없는 폴더는 안에 든 노드의 요청만 센다. */
@@ -84,17 +84,17 @@ export function packTip(pack: Pick<Pack, "definitions" | "variables">, names: st
 export function cycleTip(node: AtlasNode, groups: string[][]): string {
   const inside = node.kind === "package" ? " · 이 폴더 안의 파일이 든 묶음" : "";
   if (groups.length === 1) {
-    return `순환 묶음: 파일 ${groups[0].length}개가 서로를 import해 돌아온다${inside}\n${listed(groups[0])}`;
+    return `순환 묶음: 파일 ${groups[0].length}개가 서로를 import해 돌아옵니다${inside}\n${listed(groups[0])}`;
   }
   return [`순환 묶음 ${groups.length}개${inside}`, ...groups.map((files) => `파일 ${files.length}개: ${listed(files)}`)].join("\n");
 }
 
-export const UNUSED_TIP = "미사용 후보 · 들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다";
+export const UNUSED_TIP = "미사용 후보 · 들어오는 실행·사용 선이 없습니다 · 동적 호출이면 실제로는 쓰일 수 있습니다";
 
 /** 접힌 상자 아래 글자의 미사용 후보 수. 상자 안의 후보를 합친 수다. */
 export function candidatesTip(node: AtlasNode, count: number): string {
   const inside = node.kind === "package" ? "이 폴더 안의 정의에서 합친 수" : "이 파일 안의 정의에서 합친 수";
-  return `미사용 후보 ${count}개 · ${inside}\n들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다`;
+  return `미사용 후보 ${count}개 · ${inside}\n들어오는 실행·사용 선이 없습니다 · 동적 호출이면 실제로는 쓰일 수 있습니다`;
 }
 
 /**

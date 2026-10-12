@@ -19,11 +19,11 @@ const BROKEN = new Set<string>(["not_file", "not_executable", "timeout", "spawn_
 
 /** 로그인 환경과 같다고 확인하지 못해 `claude`를 실행하지 않은 경우와 그때 적는 문장 */
 const UNCHECKED: Record<string, string> = {
-  disabled: "환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있어 Claude Code를 실행하지 않는다. 변수를 지우고 Atlas를 다시 띄운다",
-  shell_pending: "로그인 셸의 환경을 읽는 중이라 Claude Code를 아직 확인하지 않았다. 잠시 뒤 다시 확인한다",
-  home_mismatch: "환경의 HOME이 이 계정의 홈 폴더가 아니라 Claude Code를 실행하지 않는다. 로그인한 계정의 환경에서 Atlas를 다시 띄운다",
-  user_mismatch: "환경의 USER가 이 계정의 이름이 아니라 Claude Code를 실행하지 않는다. 로그인한 계정의 환경에서 Atlas를 다시 띄운다",
-  no_keychain_command: "환경의 PATH에 security가 없어 Claude Code를 실행하지 않는다. PATH에 /usr/bin을 넣고 Atlas를 다시 띄운다",
+  disabled: "환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있어 Claude Code를 실행하지 않습니다. 변수를 지우고 Atlas를 다시 띄워 주세요",
+  shell_pending: "로그인 셸의 환경을 읽는 중이라 Claude Code를 아직 확인하지 않았습니다. 잠시 뒤 다시 확인해 주세요",
+  home_mismatch: "환경의 HOME이 이 계정의 홈 폴더가 아니라 Claude Code를 실행하지 않습니다. 로그인한 계정의 환경에서 Atlas를 다시 띄워 주세요",
+  user_mismatch: "환경의 USER가 이 계정의 이름이 아니라 Claude Code를 실행하지 않습니다. 로그인한 계정의 환경에서 Atlas를 다시 띄워 주세요",
+  no_keychain_command: "환경의 PATH에 security가 없어 Claude Code를 실행하지 않습니다. PATH에 /usr/bin을 넣고 Atlas를 다시 띄워 주세요",
 };
 
 /**
@@ -75,13 +75,13 @@ export function claudeLine(state: ClaudeState, said: string): string | null {
     case "ready":
       return null;
     case "missing":
-      return "Claude Code CLI를 찾지 못했다";
+      return "Claude Code CLI를 찾지 못했습니다";
     case "broken":
-      return `Claude Code CLI를 실행하지 못했다: ${state.path} (${state.detail})`;
+      return `Claude Code CLI를 실행하지 못했습니다: ${state.path} (${state.detail})`;
     case "logged-out":
-      return "Claude Code에 로그인돼 있지 않다";
+      return "Claude Code에 로그인돼 있지 않습니다";
     case "silent":
-      return "Claude Code CLI가 로그인 여부를 묻는 명령에 답하지 않았다. 잠시 뒤 다시 확인한다";
+      return "Claude Code CLI가 로그인 여부를 묻는 명령에 답하지 않았습니다. 잠시 뒤 다시 확인해 주세요";
     case "unchecked":
       return state.line;
     case "other":
@@ -97,13 +97,13 @@ export function gitLine(found: Found): string | null {
     return null;
   }
   if (code === "not_found") {
-    return "git을 찾지 못했다. 변경 표시와 시점 비교를 끈다";
+    return "git을 찾지 못했습니다. 변경 표시와 시점 비교를 끕니다";
   }
   if (code === "no_clt") {
-    return "Xcode Command Line Tools가 없다. 터미널에서 xcode-select --install을 실행한 뒤 다시 확인한다";
+    return "Xcode Command Line Tools가 없습니다. 터미널에서 xcode-select --install을 실행한 뒤 다시 확인해 주세요";
   }
   if (BROKEN.has(code) && tried !== undefined && tried.path !== null) {
-    return `git을 실행하지 못했다: ${tried.path} (${tried.detail}). 변경 표시와 시점 비교를 끈다`;
+    return `git을 실행하지 못했습니다: ${tried.path} (${tried.detail}). 변경 표시와 시점 비교를 끕니다`;
   }
   return saidOf(found);
 }
@@ -111,14 +111,14 @@ export function gitLine(found: Found): string | null {
 /** 로그인 셸의 환경을 읽은 결과를 적는 문장. shell이 null이면 터미널에서 띄운 실행이다. */
 export function shellLine(shell: ShellEnv | null): string {
   if (shell === null) {
-    return "터미널에서 띄웠으므로 그 터미널의 환경에서 도구를 찾는다";
+    return "터미널에서 띄웠으므로 그 터미널의 환경에서 도구를 찾습니다";
   }
-  return shell.ok ? `환경을 ${shell.seconds}초에 읽었다` : shell.detail;
+  return shell.ok ? `환경을 ${shell.seconds}초에 읽었습니다` : shell.detail;
 }
 
 /** `응답 확인`의 결과를 적는 문장 */
 export function answerLine(answer: Answer): string {
-  return answer.ok ? `claude -p가 ${answer.seconds}초에 답했다` : `claude -p가 답하지 않았다: ${answer.detail}`;
+  return answer.ok ? `claude -p가 ${answer.seconds}초에 답했습니다` : `claude -p가 답하지 않았습니다: ${answer.detail}`;
 }
 
 /** 앱의 판을 적는 줄. 빌드 명령으로 만든 앱이면 커밋 해시의 앞 7자와 빌드한 날이 앞에 온다. */

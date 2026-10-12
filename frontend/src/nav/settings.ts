@@ -31,5 +31,5 @@ export function changed(settings: ViewSettings): string[] {
 
 /** 필터 버튼의 말풍선 글 */
 export function filterTip(names: string[]): string {
-  return names.length === 0 ? "필터 · 보기 설정이 모두 기본값이다" : ["필터 · 기본값과 다른 보기 설정", ...names].join("\n");
+  return names.length === 0 ? "필터 · 보기 설정이 모두 기본값입니다" : ["필터 · 기본값과 다른 보기 설정", ...names].join("\n");
 }

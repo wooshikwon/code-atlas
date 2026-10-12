@@ -29,7 +29,7 @@ export function Recent() {
               <span className="recent-path" data-full={repo.root}>
                 <bdi>{repo.root}</bdi>
               </span>
-              <span className="recent-day">{repo.exists ? dayOf(repo) : "폴더가 없다"}</span>
+              <span className="recent-day">{repo.exists ? dayOf(repo) : "폴더 없음"}</span>
             </button>
             <button className="recent-forget" data-tip="목록에서 지우기" aria-label={`${repo.name} 목록에서 지우기`} onClick={() => void forget(repo.root)}>
               ×

@@ -140,9 +140,9 @@ describe("choose", () => {
   it("고른 인터프리터로 열지 못하면 같은 단계에 까닭을 적는다", async () => {
     vi.mocked(postProbe).mockResolvedValue(probe({ python: missing }));
     await store().choose("/repos/shop");
-    vi.mocked(postOpen).mockRejectedValue(new Error("Python 인터프리터가 아니다: /bin/ls (종료 코드 2)"));
+    vi.mocked(postOpen).mockRejectedValue(new Error("Python 인터프리터가 아닙니다: /bin/ls (종료 코드 2)"));
     await store().choose("/repos/shop", { asIs: true, python: "/bin/ls" });
-    expect(store().step).toEqual({ kind: "ask-python", path: "/repos/shop", found: missing, candidates: [system], error: "Python 인터프리터가 아니다: /bin/ls (종료 코드 2)" });
+    expect(store().step).toEqual({ kind: "ask-python", path: "/repos/shop", found: missing, candidates: [system], error: "Python 인터프리터가 아닙니다: /bin/ls (종료 코드 2)" });
     expect(page.reload).not.toHaveBeenCalled();
   });
 
@@ -169,9 +169,9 @@ describe("choose", () => {
     expect(store().step).toEqual({ kind: "opening", path: "/repos/shop" });
     arrive({ found: [system] });
     await chosen;
-    refuse(new Error("Python 인터프리터가 아니다: /bin/ls (종료 코드 2)"));
+    refuse(new Error("Python 인터프리터가 아닙니다: /bin/ls (종료 코드 2)"));
     await opened;
-    expect(store().step).toEqual({ kind: "ask-python", path: "/repos/shop", found: missing, candidates: [system], error: "Python 인터프리터가 아니다: /bin/ls (종료 코드 2)" });
+    expect(store().step).toEqual({ kind: "ask-python", path: "/repos/shop", found: missing, candidates: [system], error: "Python 인터프리터가 아닙니다: /bin/ls (종료 코드 2)" });
   });
 
   it("찾는 동안 창을 닫으면 늦게 온 목록으로 창을 다시 띄우지 않는다", async () => {
@@ -200,9 +200,9 @@ describe("choose", () => {
   });
 
   it("판정이나 열기가 실패하면 까닭을 적는다", async () => {
-    vi.mocked(postProbe).mockRejectedValue(new Error("폴더를 읽지 못했다: Permission denied"));
+    vi.mocked(postProbe).mockRejectedValue(new Error("폴더를 읽지 못했습니다: Permission denied"));
     await store().choose("/private");
-    expect(store().step).toEqual({ kind: "failed", path: "/private", error: "폴더를 읽지 못했다: Permission denied" });
+    expect(store().step).toEqual({ kind: "failed", path: "/private", error: "폴더를 읽지 못했습니다: Permission denied" });
 
     vi.mocked(postProbe).mockResolvedValue(probe());
     vi.mocked(postOpen).mockRejectedValue(new Error("폴더가 없다: /repos/shop"));

@@ -613,7 +613,7 @@ const insideOf = (graph, id, tests = false) => {
 };
 /** 배지의 말풍선(`graph/tips.ts`의 `insideTip`) */
 const insideTipOf = (graph, id, tests = false) =>
-  graph.nodes.find((n) => n.id === id).kind === "package" ? `안에 든 파일 ${insideOf(graph, id, tests)}개 · 펼치면 보인다` : `안에 든 함수·클래스 ${insideOf(graph, id, tests)}개 · 고르면 보인다`;
+  graph.nodes.find((n) => n.id === id).kind === "package" ? `안에 든 파일 ${insideOf(graph, id, tests)}개` : `안에 든 함수·클래스 ${insideOf(graph, id, tests)}개`;
 /** 안쪽 자식 ids를 묶은 손잡이의 글 머리(`graph/tips.ts`의 `packCount`): `내부 함수 14개`, `내부 함수 14개 · 변수 5개`, `내부 변수 3개` */
 const packWords = (graph, ids) => {
   const variables = ids.filter((id) => graph.nodes.find((n) => n.id === id).kind === "variable").length;
@@ -1494,7 +1494,7 @@ async function portraitPanel(t, page) {
   const held = await sizes();
   t.check(
     "머리 줄은 끌리지 않고 말풍선이 더블클릭의 동작만 적는다",
-    sameRect(held.panel, start.panel) && tip === "더블클릭하면 요약 칸이 기본 높이로 돌아간다" && (await page.evaluate(() => getComputedStyle(document.querySelector(".info-panel-head")).cursor)) === "default",
+    sameRect(held.panel, start.panel) && tip === "더블클릭하면 요약 칸이 기본 높이로 돌아갑니다" && (await page.evaluate(() => getComputedStyle(document.querySelector(".info-panel-head")).cursor)) === "default",
     `${rectText(start.panel)} → ${rectText(held.panel)}, 말풍선 "${tip}"`,
   );
   const lower = await pull(100);
@@ -2077,7 +2077,7 @@ async function badgeTip(t, page) {
   const id = counted.id.replace(/#face$/, "");
   const inside = await over(`${face(id)} .badge-inside`);
   t.check(
-    "접힌 파일 상자의 배지에 올리면 말풍선이 안에 든 함수·클래스 수와 보는 방법을 적는다",
+    "접힌 파일 상자의 배지에 올리면 말풍선이 안에 든 함수·클래스 수를 적는다",
     counted.text === String(insideOf(graph, id)) && inside === insideTipOf(graph, id),
     inside.replaceAll("\n", " / "),
   );
@@ -4224,7 +4224,7 @@ async function toolbar(t, page) {
   const idle = await filterTipOf(page);
   t.check(
     "필터 창이 닫힌 채로 열리고, 보기 설정이 모두 기본값이면 필터 버튼에 수가 없고 말풍선이 그 사실을 적는다",
-    (await count(page, ".filter-panel")) === 0 && (groups > 0 || ((await count(page, ".filter-count")) === 0 && same(idle, ["필터 · 보기 설정이 모두 기본값이다"]))),
+    (await count(page, ".filter-panel")) === 0 && (groups > 0 || ((await count(page, ".filter-count")) === 0 && same(idle, ["필터 · 보기 설정이 모두 기본값입니다"]))),
     idle.join(" / "),
   );
 
@@ -4443,7 +4443,7 @@ async function reloadScenario(t, page) {
   let failing = false;
   await page.route(
     (at) => at.pathname === "/api/reload",
-    (route) => (failing ? route.fulfill({ status: 500, json: { error: "다시 분석하지 못했다: 분석이 멈췄다" } }) : void posts.push(route)),
+    (route) => (failing ? route.fulfill({ status: 500, json: { error: "다시 분석하지 못했습니다: 분석이 멈췄다" } }) : void posts.push(route)),
   );
   /** 새로고침을 누르고 분석이 끝나 새 배치가 멈출 때까지 기다린다. */
   const refresh = async () => {
@@ -4622,7 +4622,7 @@ async function reloadScenario(t, page) {
     await page.click(".reload-error").catch(() => {});
     t.check(
       "다시 분석하지 못하면 선택과 그래프를 그대로 두고 까닭을 적으며, 그 글을 누르면 닫힌다",
-      error === "다시 분석하지 못했다: 분석이 멈췄다" && kept && (await count(page, ".reload-error")) === 0,
+      error === "다시 분석하지 못했습니다: 분석이 멈췄다" && kept && (await count(page, ".reload-error")) === 0,
       `${error}`,
     );
   } finally {
@@ -4837,7 +4837,7 @@ async function progress(t, page) {
   const tip = await tipText(page);
   t.check(
     "새로고침 버튼이 도는 원을 그리고 접근성 이름이 단계 이름을, 말풍선이 진행 수를 적으며, 눌러도 요청을 보내지 않는다",
-    resolve.button.text === "새로고침 · 호출 대상 확인" && resolve.button.spin && !resolve.button.mark && resolve.button.busy === "true" && tip === "레포를 분석하는 중 · 끝나면 그래프를 그린다\n호출 대상 확인 12,000 / 19,292" && posts.length === 0,
+    resolve.button.text === "새로고침 · 호출 대상 확인" && resolve.button.spin && !resolve.button.mark && resolve.button.busy === "true" && tip === "레포를 분석하는 중\n호출 대상 확인 12,000 / 19,292" && posts.length === 0,
     `버튼 "${resolve.button.text}", 말풍선 ${tip.replaceAll("\n", " / ")}, POST ${posts.length}번`,
   );
   await page.mouse.move(0, 0);
@@ -4880,7 +4880,7 @@ async function progress(t, page) {
 /** 첫 분석을 하지 못한 화면. 까닭과 다시 분석하는 버튼을 보고, 버튼을 누르면 분석을 다시 해 그래프가 그려지는지 본다. */
 async function progressFailed(t, page) {
   const fake = await fakeStatus(page);
-  const reason = "/repo에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.";
+  const reason = "/repo에서 가상환경을 찾지 못했습니다. --python으로 인터프리터 경로를 지정해 주세요.";
   /** 다시 분석하는 요청. 붙잡아 두었다가 서버로 보낸다. */
   const posts = [];
   await page.route((at) => at.pathname === "/api/reload", (route) => void posts.push(route));
@@ -4890,7 +4890,7 @@ async function progressFailed(t, page) {
   const failed = await waitingOf(page);
   t.check(
     "첫 분석을 하지 못하면 진행 표시 대신 까닭과 \"다시 분석\" 버튼을 그린다",
-    failed.alert && failed.phase === "분석하지 못했다" && failed.error === reason && failed.retry === "다시 분석" && failed.share === null && failed.filled === null,
+    failed.alert && failed.phase === "분석하지 못했습니다" && failed.error === reason && failed.retry === "다시 분석" && failed.share === null && failed.filled === null,
     `"${failed.phase}", "${failed.error}", 버튼 "${failed.retry}"`,
   );
   t.check(
@@ -4987,7 +4987,7 @@ async function staleScenario(t, page) {
     );
     t.check(
       "바뀐 파일이 없으면 점이 없고 말풍선이 새로고침과 단축키, 하는 일을 적는다",
-      !calm.stale && calm.dot === null && same(calmTip, [`새로고침 ${MOD_R}`, "레포를 다시 분석해 그래프를 바꾸고 보던 화면은 그대로 둔다"]),
+      !calm.stale && calm.dot === null && same(calmTip, [`새로고침 ${MOD_R}`, "레포를 다시 분석해 그래프를 바꾸고 보던 화면은 그대로 둡니다"]),
       calmTip.join(" / "),
     );
     await snap("idle");
@@ -5554,7 +5554,7 @@ async function finderSearch(t, page) {
   const more = await page.evaluate(() => document.querySelector(".finder-more")?.textContent ?? "");
   t.check('여섯째 경로가 있으면 "경로가 더 있다"를 적는다', route.more === more.includes("경로가 더 있다") && route.more, more);
   const notice = await page.evaluate(() => document.querySelector(".finder-pinned")?.innerText.replaceAll("\n", " ") ?? "");
-  t.check('결과 아래에 "경로 고정 중 · 경로 밖은 눌리지 않는다"와 끄기 버튼이 있다', notice.includes("경로 고정 중 · 경로 밖은 눌리지 않는다") && notice.includes("끄기"), notice);
+  t.check('결과 아래에 "경로 고정 중 · 경로 밖은 눌리지 않습니다"와 끄기 버튼이 있다', notice.includes("경로 고정 중 · 경로 밖은 눌리지 않습니다") && notice.includes("끄기"), notice);
   await page.screenshot({ path: join(OUT, "s3-finder-search-result.png") });
 
   // 칸 안의 Esc는 입력만 닫고 창과 고정을 그대로 둔다.
@@ -5925,11 +5925,11 @@ async function finderNone(t, page) {
   await rest(page);
   const lines = await page.evaluate(() => [...document.querySelectorAll(".finder-empty p")].map((p) => p.textContent));
   const reach = route.unresolved === 0
-    ? `출발에서 닿는 함수는 ${route.reach}개이고 그 안에 대상을 확인하지 못한 호출(?)은 없다`
-    : `출발에서 닿는 함수 ${route.reach}개 안에 대상을 확인하지 못한 호출(?)이 ${route.unresolved}곳 있다. 그 호출을 거쳐 실제로는 닿을 수 있다`;
+    ? `출발에서 닿는 함수는 ${route.reach}개이고 그 안에 대상을 확인하지 못한 호출(?)은 없습니다`
+    : `출발에서 닿는 함수 ${route.reach}개 안에 대상을 확인하지 못한 호출(?)이 ${route.unresolved}곳 있습니다. 그 호출을 거쳐 실제로는 닿을 수 있습니다`;
   t.check(
     "경로가 없으면 그 사실과 출발에서 닿는 함수 수·미확인 호출 수, 반대 방향에 경로가 있음을 적는다",
-    route.paths.length === 0 && same(lines, ["실행 선으로 이어지는 경로가 없다", reach, "반대 방향에는 경로가 있다"]),
+    route.paths.length === 0 && same(lines, ["실행 선으로 이어지는 경로가 없습니다", reach, "반대 방향에는 경로가 있습니다"]),
     lines.join(" / "),
   );
   t.check(
@@ -5952,7 +5952,7 @@ async function finderNone(t, page) {
   await page.waitForSelector(".finder-empty", { timeout: 10_000 }).catch(() => {});
   await page.waitForSelector(".graph:not([data-pinned])", { timeout: 10_000 }).catch(() => {});
   const inside = await page.evaluate(() => [...document.querySelectorAll(".finder-empty p")].map((p) => p.textContent));
-  t.check("도착이 출발을 품은 파일이면 \"출발과 도착이 같은 곳이다\"만 적는다", same(inside, ["출발과 도착이 같은 곳이다"]) && !(await pinnedOf(page)), inside.join(" / "));
+  t.check("도착이 출발을 품은 파일이면 \"출발과 도착이 같은 곳입니다\"만 적는다", same(inside, ["출발과 도착이 같은 곳입니다"]) && !(await pinnedOf(page)), inside.join(" / "));
 }
 
 async function finderPin(t, page) {
@@ -6263,7 +6263,7 @@ async function finderEnds(t, page) {
   const swapped = routeOf(graph, "date_engine", "arbiter");
   t.check(
     "맞바꾸면 경로가 없어 고정이 풀리고 경로 없음 문구가 보인다",
-    swapped.paths.length === 0 && !(await pinnedOf(page)) && (await count(page, ".edge[data-route]")) === 0 && (await page.evaluate(() => document.querySelector(".finder-empty-title")?.textContent)) === "실행 선으로 이어지는 경로가 없다",
+    swapped.paths.length === 0 && !(await pinnedOf(page)) && (await count(page, ".edge[data-route]")) === 0 && (await page.evaluate(() => document.querySelector(".finder-empty-title")?.textContent)) === "실행 선으로 이어지는 경로가 없습니다",
     await page.evaluate(() => document.querySelector(".finder-empty")?.innerText.replaceAll("\n", " / ") ?? ""),
   );
   await page.click(".finder-button");
@@ -6591,7 +6591,7 @@ async function cyclesScenario(t, page) {
     `${overview.count}: ${overview.rows.join(", ")}`,
   );
   const tip = await tipOver(page, `${face("a.one")} .cycle-mark`);
-  t.check("순환 아이콘에 올리면 묶음의 파일 수와 이름을 적는다", tip.startsWith("순환 묶음: 파일 3개가 서로를 import해 돌아온다") && tip.includes("one.py"), tip.replaceAll("\n", " / "));
+  t.check("순환 아이콘에 올리면 묶음의 파일 수와 이름을 적는다", tip.startsWith("순환 묶음: 파일 3개가 서로를 import해 돌아옵니다") && tip.includes("one.py"), tip.replaceAll("\n", " / "));
   await page.mouse.move(5, 5);
   await page.click(".legend-button");
   const legend = await page.evaluate(() => document.querySelector(".legend-overlay")?.textContent ?? "");
@@ -8707,9 +8707,9 @@ async function badge(t, page) {
     (await count(page, ".badge-unresolved")) === 0 && (await count(page, ".node-below")) === 0 && !(await page.evaluate(() => document.querySelector(".react-flow__viewport").textContent.includes("?"))),
   );
   const tip = await tipOver(page, `${face(FILE)} .badge-inside`);
-  t.check("파일 상자의 배지에 올리면 안에 든 함수·클래스 수를 적는다", tip === `안에 든 함수·클래스 ${want(FILE)}개 · 고르면 보인다`, tip);
+  t.check("파일 상자의 배지에 올리면 안에 든 함수·클래스 수를 적는다", tip === `안에 든 함수·클래스 ${want(FILE)}개`, tip);
   const folderTip = await tipOver(page, `${face("parser")} .badge-inside`);
-  t.check("폴더 상자의 배지에 올리면 안에 든 파일 수를 적는다", folderTip === `안에 든 파일 ${want("parser")}개 · 펼치면 보인다`, folderTip);
+  t.check("폴더 상자의 배지에 올리면 안에 든 파일 수를 적는다", folderTip === `안에 든 파일 ${want("parser")}개`, folderTip);
   await t.shot();
 
   const sum = (id) => graph.nodes.filter((n) => !n.test && (n.id === id || n.id.startsWith(`${id}:`) || n.id.startsWith(`${id}.`))).reduce((total, n) => total + n.unresolved, 0);
@@ -11179,12 +11179,12 @@ async function menu(t, page) {
   await page.click('.menu-item[data-key="one"]');
   await page.waitForTimeout(200);
   posts.at(-1).done = true;
-  await posts.at(-1).fail("Claude Code에 로그인돼 있지 않다");
+  await posts.at(-1).fail("Claude Code에 로그인돼 있지 않습니다");
   await page.waitForSelector(".summary-notice", { timeout: 5_000 }).catch(() => {});
   const notice = await page.evaluate(() => document.querySelector(".summary-notice")?.textContent ?? "");
   t.check(
     "파일트리의 파일 행에서 요청한 요약을 만들지 못하면 그래프 영역 위쪽에 그 노드의 이름과 까닭을 적는다",
-    notice === `LLM 요약을 만들지 못했다 · ${other.id.replaceAll(".", "/")}.py: Claude Code에 로그인돼 있지 않다` && same(await stateOf(), before),
+    notice === `LLM 요약을 만들지 못했습니다 · ${other.id.replaceAll(".", "/")}.py: Claude Code에 로그인돼 있지 않습니다` && same(await stateOf(), before),
     notice,
   );
   await page.screenshot({ path: HF3("menu-failed") });
@@ -12756,7 +12756,7 @@ async function varWrite(t, page) {
   await waitSelected(page, write.source);
   await rest(page);
   const tip = (await count(page, `${face(write.source)} .badge-global`)) === 0 ? "" : await tipOver(page, `${face(write.source)} .badge-global`);
-  t.check(`${write.source}에 g 배지가 있고 말풍선이 바꾸는 변수 ${names.join(", ")}을 적는다`, tip === `모듈 변수 변경: ${names.join(", ")}을 바꾼다`, tip);
+  t.check(`${write.source}에 g 배지가 있고 말풍선이 바꾸는 변수 ${names.join(", ")}을 적는다`, tip === `모듈 변수 변경: ${names.join(", ")}을 바꿉니다`, tip);
   await page.mouse.move(1, 1);
   const kinds = kindsOf([write]);
   const over = await lineOver(page, write.source, write.target, "write");
@@ -13972,7 +13972,7 @@ async function openBlocked(t, page) {
   const blocked = await askOf(page);
   t.check(
     "파이썬 파일이 없는 폴더를 고르면 열지 못한다는 창이 뜬다",
-    blocked.modal && blocked.title === `파이썬 파일이 없는 폴더는 열지 못한다: ${dirs.empty}` && same(blocked.buttons, ["닫기"]) && blocked.focused === "닫기",
+    blocked.modal && blocked.title === `파이썬 파일이 없는 폴더는 열지 못합니다: ${dirs.empty}` && same(blocked.buttons, ["닫기"]) && blocked.focused === "닫기",
     blocked.title,
   );
   await t.shot();
@@ -13983,7 +13983,7 @@ async function openBlocked(t, page) {
   await typePath(page, missing);
   await page.waitForSelector(".ask");
   const none = await askOf(page);
-  t.check("없는 폴더를 고르면 찾지 못했다는 창이 뜬다", none.title === `폴더를 찾지 못했다: ${missing}`, none.title);
+  t.check("없는 폴더를 고르면 찾지 못했다는 창이 뜬다", none.title === `폴더를 찾지 못했습니다: ${missing}`, none.title);
   await page.mouse.click(10, 10);
   await page.waitForSelector(".ask", { state: "detached" });
   t.check("창 밖을 누르면 창이 닫힌다", (await count(page, ".ask")) === 0);
@@ -13998,8 +13998,8 @@ async function openProject(t, page) {
   const asked = await askOf(page);
   t.check(
     "프로젝트의 하위 폴더를 고르면 조상 폴더의 이름을 적고 어느 쪽을 열지 묻는다",
-    asked.title === "pkg는 프로젝트 proj의 하위 폴더다" &&
-      same(asked.notes, ["하위 폴더만 열면 폴더 밖의 코드를 부르는 지점이 미확인으로 남는다."]) &&
+    asked.title === "pkg는 프로젝트 proj의 하위 폴더입니다" &&
+      same(asked.notes, ["하위 폴더만 열면 폴더 밖의 코드를 부르는 지점이 미확인으로 남습니다."]) &&
       same(asked.buttons, ["proj 열기", "이 폴더만 열기", "취소"]) &&
       asked.focused === "proj 열기",
     `${asked.title} — ${asked.buttons.join(", ")}`,
@@ -14025,7 +14025,7 @@ async function openNested(t, page) {
   const asked = await askOf(page);
   t.check(
     "프로젝트 둘을 품은 폴더를 고르면 하위 폴더 가운데 하나를 고르게 한다",
-    asked.title === "many는 프로젝트 2개를 품고 있다. 하나를 고른다" && same(asked.options, ["a", "b"]) && same(asked.buttons, ["이 폴더 그대로 열기", "취소"]),
+    asked.title === "many는 프로젝트 2개를 품고 있습니다. 하나를 골라 주세요" && same(asked.options, ["a", "b"]) && same(asked.buttons, ["이 폴더 그대로 열기", "취소"]),
     `${asked.title} — ${asked.options.join(", ")} — ${asked.buttons.join(", ")}`,
   );
   await t.shot();
@@ -14052,7 +14052,7 @@ async function openPython(t, page) {
   const candidates = await page.evaluate(() => [...document.querySelectorAll(".ask-option")].map((option) => option.dataset.python));
   t.check(
     "가상환경이 없는 레포를 고르면 인터프리터를 고르는 화면이 뜬다",
-    asked.title === "bare의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다" && asked.buttons.includes("이 경로로 열기") && asked.buttons.includes("취소"),
+    asked.title === "bare의 Python 인터프리터를 찾지 못했습니다. 이 레포의 패키지가 설치된 인터프리터를 골라 주세요" && asked.buttons.includes("이 경로로 열기") && asked.buttons.includes("취소"),
     asked.title,
   );
   t.check("이 기기에서 찾은 인터프리터를 판과 경로로 나열한다", candidates.length > 0 && asked.options.every((name) => /^Python \d+\.\d+/.test(name)), asked.options.join(", "));
@@ -14065,7 +14065,7 @@ async function openPython(t, page) {
   await page.keyboard.press("Enter");
   await page.waitForSelector(".ask-error");
   const refused = await askOf(page);
-  t.check("인터프리터가 아닌 파일을 고르면 같은 화면에 까닭을 적는다", refused.notes.some((note) => note.startsWith(`Python 인터프리터가 아니다: ${join(dirs.bare, "tool.py")}`)), refused.notes.join(" / "));
+  t.check("인터프리터가 아닌 파일을 고르면 같은 화면에 까닭을 적는다", refused.notes.some((note) => note.startsWith(`Python 인터프리터가 아닙니다: ${join(dirs.bare, "tool.py")}`)), refused.notes.join(" / "));
   await page.click(".ask-option >> nth=0");
   const root = await waitRepo(page, dirs.bare);
   const saved = (await api("/api/repos", openUrl)).repos.find((repo) => repo.root === dirs.bare)?.python;
@@ -14169,7 +14169,7 @@ async function openSwitch(t, page) {
   await page.click('#trail-repo [data-key="open"]');
   await page.waitForSelector(".ask .open-input");
   const typing = await askOf(page);
-  t.check("폴더 열기…를 고르면 브라우저는 경로 입력 창을 띄운다", typing.title === "열 레포 폴더의 경로를 적는다" && (await page.evaluate(() => document.activeElement === document.querySelector(".ask .open-input"))), typing.title);
+  t.check("폴더 열기…를 고르면 브라우저는 경로 입력 창을 띄운다", typing.title === "열 레포 폴더의 경로를 적어 주세요" && (await page.evaluate(() => document.activeElement === document.querySelector(".ask .open-input"))), typing.title);
   await page.keyboard.press("Escape");
   await page.waitForSelector(".ask", { state: "detached" });
   t.check("Esc가 경로 입력 창만 닫고 연 레포의 화면은 그대로다", same((await boxes(page)).map((box) => box.id).sort(), before) && (await api("/api/repo", openUrl)).root === dirs.shop);
@@ -14252,7 +14252,7 @@ async function answerTools(page, state) {
         const { path } = request.postDataJSON();
         if (!state.runnable.has(path)) {
           const attempt = tried("saved", path, false, "실행 권한 없음", "not_executable");
-          return route.fulfill({ status: 400, json: { error: `실행하지 못했다: ${path} (${attempt.detail})`, code: attempt.code, attempt } });
+          return route.fulfill({ status: 400, json: { error: `실행하지 못했습니다: ${path} (${attempt.detail})`, code: attempt.code, attempt } });
         }
         state.tools[tool] = toolFound(tool, { path, version: "9.9.9", source: "saved", attempts: [tried("saved", path, true, "9.9.9")], auth: tool === "claude" ? "claude.ai" : null });
       } else {
@@ -14334,7 +14334,7 @@ async function toolsList(t, page) {
   );
   t.check(
     "로그인 셸 행은 셸의 경로와 환경을 읽는 데 걸린 초를 적는다",
-    first.shell.state === "읽음" && first.shell.facts === "zsh" && first.shell.path === "/bin/zsh" && same(first.shell.notes, ["환경을 1.43초에 읽었다"]) && first.shell.buttons.length === 0,
+    first.shell.state === "읽음" && first.shell.facts === "zsh" && first.shell.path === "/bin/zsh" && same(first.shell.notes, ["환경을 1.43초에 읽었습니다"]) && first.shell.buttons.length === 0,
     JSON.stringify(first.shell),
   );
   t.check(
@@ -14344,7 +14344,7 @@ async function toolsList(t, page) {
   );
   t.check(
     "git 행은 상태, 판, 찾은 출처, 경로를 적고 연 레포가 없으면 Python 행은 그 사실만 적는다",
-    first.git.state === "찾음" && first.git.facts === "2.50.1 · 환경" && first.git.path === "/usr/bin/git" && first.python.state === "연 레포가 없다" && first.python.buttons.length === 0,
+    first.git.state === "찾음" && first.git.facts === "2.50.1 · 환경" && first.git.path === "/usr/bin/git" && first.python.state === "연 레포 없음" && first.python.buttons.length === 0,
     `${first.git.facts} / ${first.python.state}`,
   );
   t.check(
@@ -14390,7 +14390,7 @@ async function toolsList(t, page) {
   const answered = (await toolRows(page)).claude.notes;
   t.check(
     "응답 확인은 누를 때만 요청 하나를 보내고 걸린 초를 적는다",
-    asked === 0 && state.calls.filter((call) => call === "POST /claude/ask").length === 1 && same(answered, ["claude -p가 2.31초에 답했다"]) && askTip === "claude -p에 한 낱말을 답하게 하는 요청 하나를 보낸다",
+    asked === 0 && state.calls.filter((call) => call === "POST /claude/ask").length === 1 && same(answered, ["claude -p가 2.31초에 답했습니다"]) && askTip === "claude -p에 한 낱말을 답하게 하는 요청 하나를 보냅니다",
     `${answered.join(" / ")}, 말풍선 "${askTip}"`,
   );
   await page.mouse.move(1, 1);
@@ -14439,7 +14439,7 @@ async function toolsList(t, page) {
   }));
   t.check(
     "바꾸기를 누르면 필터 창이 닫히고 지금 쓰는 인터프리터를 적은 고르는 화면이 뜬다",
-    seeking.title === `shop의 Python 인터프리터를 고른다. 지금은 ${python}` && seeking.filter === 0,
+    seeking.title === `shop의 Python 인터프리터를 골라 주세요. 지금은 ${python}` && seeking.filter === 0,
     seeking.title,
   );
   t.check(
@@ -14478,7 +14478,7 @@ async function toolsMissing(t, page) {
   state.about = null;
   t.expected.push("404");
   /** 요약 칸이 받는 요약을 만들지 못하는 까닭 */
-  let reason = "Claude Code CLI를 찾지 못했다";
+  let reason = "Claude Code CLI를 찾지 못했습니다";
   /** 요약 칸이 까닭과 함께 받는 경우 */
   let code = "not_found";
   await answerTools(page, state);
@@ -14515,7 +14515,7 @@ async function toolsMissing(t, page) {
   const missing = await cell();
   t.check(
     "claude를 찾지 못하면 LLM 요약 칸이 까닭과 설치 명령, 복사 버튼, 환경 점검 버튼을 그린다",
-    same(missing.trouble, ["Claude Code CLI를 찾지 못했다"]) && same(missing.commands, [CLAUDE_INSTALL]) && same(missing.buttons, ["복사", "다시 확인", "환경 점검"]),
+    same(missing.trouble, ["Claude Code CLI를 찾지 못했습니다"]) && same(missing.commands, [CLAUDE_INSTALL]) && same(missing.buttons, ["복사", "다시 확인", "환경 점검"]),
     `${missing.trouble.join(" / ")} · ${missing.commands.join(" / ")} · ${missing.buttons.join(", ")}`,
   );
   t.check("요약 칸의 문구에 서버, 백엔드, sidecar라는 말이 없다", !FORBIDDEN.test(missing.text), missing.text.replace(/\s+/g, " "));
@@ -14527,7 +14527,7 @@ async function toolsMissing(t, page) {
   const lost = (await rows()).claude;
   t.check(
     "환경 점검 화면의 Claude Code 행이 같은 까닭과 설치 명령을 적고 시도한 후보 여섯 곳을 펴 둔다",
-    !lost.ok && lost.state === "찾지 못함" && same(lost.notes, ["Claude Code CLI를 찾지 못했다"]) && same(lost.commands, [CLAUDE_INSTALL]) && lost.attempts.length === 6 && lost.attempts.every((line) => line[2] === "없는 파일"),
+    !lost.ok && lost.state === "찾지 못함" && same(lost.notes, ["Claude Code CLI를 찾지 못했습니다"]) && same(lost.commands, [CLAUDE_INSTALL]) && lost.attempts.length === 6 && lost.attempts.every((line) => line[2] === "없는 파일"),
     `${lost.state} / ${lost.notes.join(" / ")} / 시도 ${lost.attempts.length}곳`,
   );
   t.check("찾지 못한 도구에는 응답 확인을 그리지 않는다", same(lost.buttons, ["다시 확인", "직접 고르기", "복사"]), lost.buttons.join(", "));
@@ -14535,7 +14535,7 @@ async function toolsMissing(t, page) {
   await page.screenshot({ path: TOOLS_SHOT("claude-missing") });
   await closeTools(page);
 
-  const brokenLine = "Claude Code CLI를 실행하지 못했다: /opt/homebrew/bin/claude (종료 코드 127: env: node: No such file or directory)";
+  const brokenLine = "Claude Code CLI를 실행하지 못했습니다: /opt/homebrew/bin/claude (종료 코드 127: env: node: No such file or directory)";
   code = "failed";
   state.tools.claude = toolFound("claude", {
     code,
@@ -14550,7 +14550,7 @@ async function toolsMissing(t, page) {
   );
   await closeTools(page);
 
-  reason = "Claude Code에 로그인돼 있지 않다";
+  reason = "Claude Code에 로그인돼 있지 않습니다";
   code = "not_logged_in";
   state.tools.claude = claudeFound({ note: reason, auth: null, code });
   const out = await recheck(reason);
@@ -14569,20 +14569,20 @@ async function toolsMissing(t, page) {
   await closeTools(page);
   await page.screenshot({ path: TOOLS_SHOT("summary-logged-out") });
 
-  reason = "Claude Code CLI가 응답하지 않는다";
+  reason = "Claude Code CLI가 응답하지 않습니다";
   code = "not_answering";
   state.tools.claude = claudeFound({ note: reason, auth: null, code });
-  const silentLine = "Claude Code CLI가 로그인 여부를 묻는 명령에 답하지 않았다. 잠시 뒤 다시 확인한다";
+  const silentLine = "Claude Code CLI가 로그인 여부를 묻는 명령에 답하지 않았습니다. 잠시 뒤 다시 확인해 주세요";
   const silent = await recheck(silentLine);
   t.check("로그인 여부를 묻는 명령이 답하지 않았으면 다시 확인하라고 명령 없이 적는다", same(silent.trouble, [silentLine]) && silent.commands.length === 0, silent.trouble.join(" / "));
 
   /** claude를 실행하지 않은 경우마다 화면이 적는 문장과 서버가 적는 글 */
   const unchecked = [
-    ["disabled", "환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있어 Claude Code를 실행하지 않는다. 변수를 지우고 Atlas를 다시 띄운다", "확인하지 못함: 환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있다"],
-    ["shell_pending", "로그인 셸의 환경을 읽는 중이라 Claude Code를 아직 확인하지 않았다. 잠시 뒤 다시 확인한다", "확인하지 못함: 로그인 셸의 환경을 읽는 중이다"],
-    ["user_mismatch", "환경의 USER가 이 계정의 이름이 아니라 Claude Code를 실행하지 않는다. 로그인한 계정의 환경에서 Atlas를 다시 띄운다", "확인하지 못함: 환경의 USER가 이 계정의 이름(me)이 아니다"],
-    ["no_keychain_command", "환경의 PATH에 security가 없어 Claude Code를 실행하지 않는다. PATH에 /usr/bin을 넣고 Atlas를 다시 띄운다", "확인하지 못함: 환경의 PATH에 security가 없다"],
-    ["home_mismatch", "환경의 HOME이 이 계정의 홈 폴더가 아니라 Claude Code를 실행하지 않는다. 로그인한 계정의 환경에서 Atlas를 다시 띄운다", "확인하지 못함: 환경의 HOME이 이 계정의 홈 폴더(/Users/me)가 아니다"],
+    ["disabled", "환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있어 Claude Code를 실행하지 않습니다. 변수를 지우고 Atlas를 다시 띄워 주세요", "확인하지 못함: 환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있습니다"],
+    ["shell_pending", "로그인 셸의 환경을 읽는 중이라 Claude Code를 아직 확인하지 않았습니다. 잠시 뒤 다시 확인해 주세요", "확인하지 못함: 로그인 셸의 환경을 읽는 중입니다"],
+    ["user_mismatch", "환경의 USER가 이 계정의 이름이 아니라 Claude Code를 실행하지 않습니다. 로그인한 계정의 환경에서 Atlas를 다시 띄워 주세요", "확인하지 못함: 환경의 USER가 이 계정의 이름(me)이 아니다"],
+    ["no_keychain_command", "환경의 PATH에 security가 없어 Claude Code를 실행하지 않습니다. PATH에 /usr/bin을 넣고 Atlas를 다시 띄워 주세요", "확인하지 못함: 환경의 PATH에 security가 없습니다"],
+    ["home_mismatch", "환경의 HOME이 이 계정의 홈 폴더가 아니라 Claude Code를 실행하지 않습니다. 로그인한 계정의 환경에서 Atlas를 다시 띄워 주세요", "확인하지 못함: 환경의 HOME이 이 계정의 홈 폴더(/Users/me)가 아니다"],
   ];
   const cells = [];
   for (const [each, line, detail] of unchecked) {
@@ -14615,7 +14615,7 @@ async function toolsMissing(t, page) {
   );
   await closeTools(page);
 
-  [reason, code] = ["서술 규약 문서를 읽지 못했다: /Users/me/style.md", "style_guide_unreadable"];
+  [reason, code] = ["서술 규약 문서를 읽지 못했습니다: /Users/me/style.md", "style_guide_unreadable"];
   state.tools.claude = claudeFound();
   const guide = await recheck(reason);
   t.check("claude를 쓸 수 있는데 요약을 만들지 못하면 받은 까닭과 두 버튼만 그린다", same(guide.trouble, [reason]) && guide.commands.length === 0 && same(guide.buttons, ["다시 확인", "환경 점검"]), guide.trouble.join(" / "));
@@ -14625,7 +14625,7 @@ async function toolsMissing(t, page) {
   await page.click('.tools-row[data-tool="claude"] button >> text=응답 확인');
   await page.waitForSelector('.tools-row[data-tool="claude"] [data-answer="failed"]');
   const refused = (await toolRows(page)).claude.notes;
-  t.check("응답 확인이 실패하면 claude -p가 답하지 않은 까닭을 적는다", same(refused, ["claude -p가 답하지 않았다: 종료 코드 1: Not logged in · Please run /login"]), refused.join(" / "));
+  t.check("응답 확인이 실패하면 claude -p가 답하지 않은 까닭을 적는다", same(refused, ["claude -p가 답하지 않았습니다: 종료 코드 1: Not logged in · Please run /login"]), refused.join(" / "));
 
   /** 환경 점검 화면의 다시 확인으로 값을 다시 받게 하고 행을 읽는다. */
   const again = async (tool, state_) => {
@@ -14646,7 +14646,7 @@ async function toolsMissing(t, page) {
     return note;
   };
 
-  const noGit = "git을 찾지 못했다. 변경 표시와 시점 비교를 끈다";
+  const noGit = "git을 찾지 못했습니다. 변경 표시와 시점 비교를 끕니다";
   state.tools.git = toolFound("git", { attempts: ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"].map((path) => tried("known", path, false, "없는 파일")) });
   const gitRow = await again("git", "찾지 못함");
   const gitNote = await filterNote();
@@ -14655,9 +14655,9 @@ async function toolsMissing(t, page) {
     !gitRow.ok && same(gitRow.notes, [noGit]) && gitRow.attempts.length === 3 && gitNote === noGit,
     `${gitRow.notes.join(" / ")} · 필터 창 "${gitNote}"`,
   );
-  const noClt = "Xcode Command Line Tools가 없다. 터미널에서 xcode-select --install을 실행한 뒤 다시 확인한다";
+  const noClt = "Xcode Command Line Tools가 없습니다. 터미널에서 xcode-select --install을 실행한 뒤 다시 확인해 주세요";
   state.tools.git = toolFound("git", {
-    attempts: [tried("known", "/opt/homebrew/bin/git", false, "없는 파일"), tried("known", "/usr/local/bin/git", false, "없는 파일"), tried("known", "/usr/bin/git", false, "Xcode Command Line Tools가 없다", "no_clt")],
+    attempts: [tried("known", "/opt/homebrew/bin/git", false, "없는 파일"), tried("known", "/usr/local/bin/git", false, "없는 파일"), tried("known", "/usr/bin/git", false, "Xcode Command Line Tools가 없습니다", "no_clt")],
     code: "no_clt",
   });
   await page.click('.tools-row[data-tool="python"] button >> text=다시 확인');
@@ -14666,7 +14666,7 @@ async function toolsMissing(t, page) {
   const cltNote = await filterNote();
   t.check("Xcode Command Line Tools가 없으면 두 곳이 설치 명령을 적는다", same(cltRow.notes, [noClt]) && cltNote === noClt, `${cltRow.notes.join(" / ")} · 필터 창 "${cltNote}"`);
 
-  const brokenGit = "git을 실행하지 못했다: /Users/me/bin/git (종료 코드 1: dyld: Library not loaded). 변경 표시와 시점 비교를 끈다";
+  const brokenGit = "git을 실행하지 못했습니다: /Users/me/bin/git (종료 코드 1: dyld: Library not loaded). 변경 표시와 시점 비교를 끕니다";
   state.tools.git = toolFound("git", { code: "failed", attempts: [tried("saved", "/Users/me/bin/git", false, "종료 코드 1: dyld: Library not loaded", "failed"), tried("known", "/usr/bin/git", false, "없는 파일")] });
   await page.click('.tools-row[data-tool="python"] button >> text=다시 확인');
   await page.waitForFunction((want) => document.querySelector('.tools-row[data-tool="git"] .tools-trouble')?.textContent === want, brokenGit, { timeout: 5_000 }).catch(() => {});
@@ -14679,9 +14679,9 @@ async function toolsMissing(t, page) {
   );
 
   const shells = [
-    ["읽지 못함", { shell: "/bin/zsh", ok: false, seconds: 10.02, detail: "로그인 셸(zsh)이 10초 안에 환경을 알려 주지 않았다. 앱이 받은 환경과 알려진 설치 위치에서 도구를 찾는다" }],
-    ["읽지 못함", { shell: "/bin/zsh", ok: false, seconds: 0.41, detail: "로그인 셸의 출력에서 환경을 읽지 못했다(종료 코드 1): zsh: command not found: brew" }],
-    ["읽지 못함", { shell: "/bin/tcsh", ok: false, seconds: 0, detail: "로그인 셸 tcsh은 환경을 읽지 않는다. zsh, bash, fish를 읽는다" }],
+    ["읽지 못함", { shell: "/bin/zsh", ok: false, seconds: 10.02, detail: "로그인 셸(zsh)이 10초 안에 환경을 알려 주지 않았습니다. 앱이 받은 환경과 알려진 설치 위치에서 도구를 찾습니다" }],
+    ["읽지 못함", { shell: "/bin/zsh", ok: false, seconds: 0.41, detail: "로그인 셸의 출력에서 환경을 읽지 못했습니다(종료 코드 1): zsh: command not found: brew" }],
+    ["읽지 못함", { shell: "/bin/tcsh", ok: false, seconds: 0, detail: "로그인 셸 tcsh은 환경을 읽지 않습니다. zsh, bash, fish를 읽습니다" }],
   ];
   const seen = [];
   for (const [, shell] of shells) {
@@ -14697,14 +14697,14 @@ async function toolsMissing(t, page) {
   );
   state.tools.shell = null;
   const cli = await again("shell", "읽지 않음");
-  t.check("터미널에서 띄운 실행은 로그인 셸을 읽지 않는다고 적는다", cli.ok && same(cli.notes, ["터미널에서 띄웠으므로 그 터미널의 환경에서 도구를 찾는다"]) && cli.path === null, cli.notes.join(" / "));
+  t.check("터미널에서 띄운 실행은 로그인 셸을 읽지 않는다고 적는다", cli.ok && same(cli.notes, ["터미널에서 띄웠으므로 그 터미널의 환경에서 도구를 찾습니다"]) && cli.path === null, cli.notes.join(" / "));
 
   const gone = state.tools.python.path;
   state.tools.python = toolFound("python", { attempts: [tried("env", gone, false, "없는 파일")] });
   const pythonRow = await again("python", "찾지 못함");
   t.check(
     "연 레포의 인터프리터가 없어지면 Python 행이 까닭과 시도한 경로를 적고 바꾸기를 둔다",
-    !pythonRow.ok && same(pythonRow.notes, ["shop의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다"]) && same(pythonRow.attempts, [["환경", gone, "없는 파일"]]) && pythonRow.buttons.includes("바꾸기"),
+    !pythonRow.ok && same(pythonRow.notes, ["shop의 Python 인터프리터를 찾지 못했습니다. 이 레포의 패키지가 설치된 인터프리터를 골라 주세요"]) && same(pythonRow.attempts, [["환경", gone, "없는 파일"]]) && pythonRow.buttons.includes("바꾸기"),
     `${pythonRow.notes.join(" / ")} · ${pythonRow.attempts.map((line) => line.join(" | ")).join(" / ")}`,
   );
   const all = await page.evaluate(() => document.querySelector(".ask").innerText);
@@ -14720,7 +14720,7 @@ async function toolsMissing(t, page) {
   const asked = await askOf(page);
   t.check(
     "레포의 Python을 찾지 못하면 인터프리터를 고르는 화면이 까닭과 찾은 인터프리터를 그린다",
-    asked.title === "bare의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다" && same(asked.options, ["Python 3.13.12"]),
+    asked.title === "bare의 Python 인터프리터를 찾지 못했습니다. 이 레포의 패키지가 설치된 인터프리터를 골라 주세요" && same(asked.options, ["Python 3.13.12"]),
     asked.title,
   );
   await page.screenshot({ path: TOOLS_SHOT("python-missing") });
@@ -14762,7 +14762,7 @@ async function toolsPick(t, page) {
   const refused = (await toolRows(page)).git;
   t.check(
     "확인을 통과하지 못한 경로는 저장하지 않고 그 행에 경로와 까닭을 적는다",
-    same(refused.notes, [`실행하지 못했다: ${notRunnable} (실행 권한 없음)`]) && refused.path === "/usr/bin/git" && !refused.buttons.includes("저장한 경로 지우기"),
+    same(refused.notes, [`실행하지 못했습니다: ${notRunnable} (실행 권한 없음)`]) && refused.path === "/usr/bin/git" && !refused.buttons.includes("저장한 경로 지우기"),
     refused.notes.join(" / "),
   );
   await page.screenshot({ path: TOOLS_SHOT("pick-refused") });

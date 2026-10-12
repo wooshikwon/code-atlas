@@ -42,12 +42,12 @@ describe("read", () => {
     expect(store().states.a).toEqual({ phase: "reading" });
     reads[0].resolve({ summary: "요지", stale: true, available: true, reason: null, code: null });
     reads[1].resolve({ summary: null, stale: false, available: true, reason: null, code: null });
-    reads[2].resolve({ summary: null, stale: false, available: false, reason: "Claude Code CLI를 찾지 못했다", code: "not_found" });
+    reads[2].resolve({ summary: null, stale: false, available: false, reason: "Claude Code CLI를 찾지 못했습니다", code: "not_found" });
     await settle();
     expect(store().states).toEqual({
       a: { phase: "done", summary: "요지", available: true, stale: true, usage: null },
       b: { phase: "empty" },
-      c: { phase: "unavailable", reason: "Claude Code CLI를 찾지 못했다", code: "not_found" },
+      c: { phase: "unavailable", reason: "Claude Code CLI를 찾지 못했습니다", code: "not_found" },
     });
   });
 
@@ -61,11 +61,11 @@ describe("read", () => {
     expect(reads).toHaveLength(2);
     store().make("a", false);
     store().read("a");
-    makes[0].reject(new Error("Claude Code CLI가 120초 안에 응답하지 않았다"));
+    makes[0].reject(new Error("Claude Code CLI가 120초 안에 응답하지 않았습니다"));
     await settle();
     store().read("a");
     expect(reads).toHaveLength(2);
-    expect(store().states.a).toEqual({ phase: "failed", error: "Claude Code CLI가 120초 안에 응답하지 않았다", refresh: false });
+    expect(store().states.a).toEqual({ phase: "failed", error: "Claude Code CLI가 120초 안에 응답하지 않았습니다", refresh: false });
   });
 });
 

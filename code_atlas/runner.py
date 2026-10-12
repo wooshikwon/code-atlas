@@ -120,7 +120,7 @@ class Runner:
             if not self._closed:
                 return session
             await self._sessions.aclose()
-        raise RuntimeError("닫은 레포의 세션은 띄우지 않는다")
+        raise RuntimeError("닫은 레포의 세션은 띄우지 않습니다")
 
     def _warm(self) -> None:
         """마지막 결과의 본문을 연 세션을 뒤에서 준비한다."""

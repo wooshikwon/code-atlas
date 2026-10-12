@@ -18,7 +18,7 @@ export function Floating() {
           : ({ left: rect.x, top: rect.y, width: rect.width, height: rect.height, "--panel-height": `${rect.height}px`, "--summary-min": `${MIN_SUMMARY}px`, "--code-min": `${MIN_CODE}px` } as CSSProperties)
       }
     >
-      {rect !== null && <PanelBody frame={ref} grip={grip("move")} reset={reset} tip="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다" />}
+      {rect !== null && <PanelBody frame={ref} grip={grip("move")} reset={reset} tip="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아갑니다" />}
       {DIRS.map((dir) => (
         <div key={dir} className="info-panel-resize" data-dir={dir} onPointerDown={grip(dir)} />
       ))}

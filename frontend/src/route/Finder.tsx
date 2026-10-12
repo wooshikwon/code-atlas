@@ -101,7 +101,7 @@ export function Finder() {
     <div className="finder" id="finder" ref={box} style={{ maxHeight: room ?? undefined }}>
       <div className="finder-head">
         <span>경로 찾기</span>
-        <span>실행 선을 따라간다</span>
+        <span>실행 선을 따라갑니다</span>
       </div>
       <div className="finder-ends">
         <div className="finder-fields">
@@ -158,15 +158,15 @@ export function Finder() {
           <div className="finder-foot">
             {route.more && (
               <span className="finder-more">
-                짧은 것부터 {PATH_LIMIT}개 · 경로가 더 있다
+                짧은 것부터 {PATH_LIMIT}개 · 경로가 더 있습니다
               </span>
             )}
-            <button type="button" className="finder-fit" data-tip="경로 위 노드가 모두 보이게 화면을 맞춘다" onClick={fitPath}>
+            <button type="button" className="finder-fit" data-tip="경로 위 노드가 모두 보이게 화면을 맞춥니다" onClick={fitPath}>
               경로 전체 보기
             </button>
           </div>
           <div className="finder-pinned" data-flash={flash ? "" : undefined}>
-            <span>경로 고정 중 · 경로 밖은 눌리지 않는다</span>
+            <span>경로 고정 중 · 경로 밖은 눌리지 않습니다</span>
             <button type="button" className="finder-clear" onClick={clearFinder}>
               끄기 ×
             </button>

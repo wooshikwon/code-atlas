@@ -31,7 +31,7 @@ export function RepoMenu() {
       .map(
         (repo): MenuItem => ({
           key: repo.root,
-          label: repo.exists ? repo.name : `${repo.name} · 폴더가 없다`,
+          label: repo.exists ? repo.name : `${repo.name} · 폴더 없음`,
           tip: repo.root,
           disabled: !repo.exists,
           run: () => void opening.choose(repo.root, { asIs: true }),

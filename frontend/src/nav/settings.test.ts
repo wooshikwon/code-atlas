@@ -6,7 +6,7 @@ const base = { depth: 2, overlay: null, showTests: false, showExternal: false, a
 describe("기본값과 다른 보기 설정", () => {
   it("모두 기본값이면 비어 있다", () => {
     expect(changed(base)).toEqual([]);
-    expect(filterTip([])).toBe("필터 · 보기 설정이 모두 기본값이다");
+    expect(filterTip([])).toBe("필터 · 보기 설정이 모두 기본값입니다");
   });
 
   it("흐름 단계, 분석 표시, 토글 세 개를 필터 창에 그리는 순서로 적는다", () => {

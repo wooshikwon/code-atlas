@@ -78,10 +78,10 @@ describe("make, remove", () => {
     expect(store().files["a.py"].map(noteKey)).toEqual(["1-1|", "2-4|"]);
     const usage = { input: 10, cache_write: 0, cache_read: 5, output: 3 };
     makes[0].resolve({ start: 2, end: 4, question: "", text: "설명", stale: false, usage });
-    makes[1].reject(new Error("Claude Code CLI가 120초 안에 응답하지 않았다"));
+    makes[1].reject(new Error("Claude Code CLI가 120초 안에 응답하지 않았습니다"));
     await settle();
     expect(store().files["a.py"]).toEqual([
-      { start: 1, end: 1, question: "", state: { phase: "failed", error: "Claude Code CLI가 120초 안에 응답하지 않았다", refresh: false } },
+      { start: 1, end: 1, question: "", state: { phase: "failed", error: "Claude Code CLI가 120초 안에 응답하지 않았습니다", refresh: false } },
       { start: 2, end: 4, question: "", state: { phase: "done", text: "설명", stale: false, usage } },
     ]);
   });

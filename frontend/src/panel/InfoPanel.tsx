@@ -324,7 +324,7 @@ export function PanelBody({ frame, grip, reset, tip }: PanelBodyProps) {
       {item.type === "repo" && <Overview nodes={index.nodes} />}
       {summarized && <Summary node={node.id} split={code === null || !summaryOpen ? null : split} />}
       {summarized && summaryOpen && code !== null && (
-        <div className="info-panel-divide" onPointerDown={part} onDoubleClick={() => setSplit(null)} data-tip="끌어서 요약 칸과 코드의 높이를 바꾸고, 더블클릭하면 기본 높이로 돌아간다" />
+        <div className="info-panel-divide" onPointerDown={part} onDoubleClick={() => setSplit(null)} data-tip="끌어서 요약 칸과 코드의 높이를 바꾸고, 더블클릭하면 기본 높이로 돌아갑니다" />
       )}
       {code !== null && <CodeView {...code} />}
     </>

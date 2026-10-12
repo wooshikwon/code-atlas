@@ -95,7 +95,7 @@ async def test_failed_first_run_is_failed_and_failed_reload_goes_back_to_ready(s
     missing = Runner(sample_repo, str(sample_repo / "no" / "python"))
     with pytest.raises(PythonNotFound):
         await missing.run()
-    assert missing.progress.phase == "failed" and "실행할 수 없다" in missing.error
+    assert missing.progress.phase == "failed" and "실행할 수 없습니다" in missing.error
     await missing.close()
 
     running = Runner(sample_repo, sys.executable)

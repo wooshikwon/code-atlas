@@ -8,8 +8,8 @@ const [file, folder, fn] = [nodes.get("main")!, nodes.get("pkg")!, nodes.get("ma
 
 describe("배지 말풍선", () => {
   it("접힌 상자의 배지는 파일 상자면 안에 든 함수·클래스 수, 폴더 상자면 안에 든 파일 수를 적는다", () => {
-    expect(insideTip(file, 9)).toBe("안에 든 함수·클래스 9개 · 고르면 보인다");
-    expect(insideTip(folder, 30)).toBe("안에 든 파일 30개 · 펼치면 보인다");
+    expect(insideTip(file, 9)).toBe("안에 든 함수·클래스 9개");
+    expect(insideTip(folder, 30)).toBe("안에 든 파일 30개");
   });
 
   it("손잡이는 안에서만 쓰이는 자식의 수와 이름을 적고 여섯 개부터는 줄인다", () => {
@@ -27,8 +27,8 @@ describe("배지 말풍선", () => {
   });
 
   it("모듈 변수 변경은 바꿈 선의 도착 변수 이름을 적는다", () => {
-    expect(globalTip(["counter", "REGISTRY"])).toBe("모듈 변수 변경: counter, REGISTRY을 바꾼다");
-    expect(globalTip([])).toBe("모듈 변수 변경: 모듈 변수를 바꾼다");
+    expect(globalTip(["counter", "REGISTRY"])).toBe("모듈 변수 변경: counter, REGISTRY을 바꿉니다");
+    expect(globalTip([])).toBe("모듈 변수 변경: 모듈 변수를 바꿉니다");
   });
 
   it("변수 노드의 말풍선은 값의 종류와 원소 수, 값의 글을 적고 글이 없으면 종류와 원소 수만 적는다", () => {
@@ -53,10 +53,10 @@ describe("배지 말풍선", () => {
   });
 
   it("순환 아이콘은 묶음의 파일 수와 이름을 적고 여섯 개부터는 줄인다", () => {
-    expect(cycleTip(file, [["a.py", "b.py", "c.py"]])).toBe("순환 묶음: 파일 3개가 서로를 import해 돌아온다\na.py, b.py, c.py");
+    expect(cycleTip(file, [["a.py", "b.py", "c.py"]])).toBe("순환 묶음: 파일 3개가 서로를 import해 돌아옵니다\na.py, b.py, c.py");
     const seven = ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py", "g.py"];
     expect(cycleTip(file, [seven]).split("\n")[1]).toBe("a.py, b.py, c.py, d.py, e.py 외 2개");
-    expect(cycleTip(folder, [["a.py", "b.py"]]).split("\n")[0]).toBe("순환 묶음: 파일 2개가 서로를 import해 돌아온다 · 이 폴더 안의 파일이 든 묶음");
+    expect(cycleTip(folder, [["a.py", "b.py"]]).split("\n")[0]).toBe("순환 묶음: 파일 2개가 서로를 import해 돌아옵니다 · 이 폴더 안의 파일이 든 묶음");
     expect(cycleTip(folder, [["a.py", "b.py"], ["c.py", "d.py", "e.py"]]).split("\n")).toEqual([
       "순환 묶음 2개 · 이 폴더 안의 파일이 든 묶음",
       "파일 2개: a.py, b.py",
@@ -71,7 +71,7 @@ describe("배지 말풍선", () => {
     expect(nodeTip("run_everything()", "설정을 읽어 엔진을 띄운다", true)!.split("\n")).toEqual([
       "run_everything()",
       "설정을 읽어 엔진을 띄운다",
-      "미사용 후보 · 들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다",
+      "미사용 후보 · 들어오는 실행·사용 선이 없습니다 · 동적 호출이면 실제로는 쓰일 수 있습니다",
     ]);
   });
 });

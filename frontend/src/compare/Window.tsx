@@ -138,7 +138,7 @@ function Opened() {
         ) : stat !== null ? (
           <Lines added={stat.added} deleted={stat.deleted} />
         ) : (
-          picked < 2 && <span className="compare-hint">비교할 줄 두 개를 고른다</span>
+          picked < 2 && <span className="compare-hint">비교할 줄 두 개를 골라 주세요</span>
         )}
         <span className="compare-gap" />
         {on && (

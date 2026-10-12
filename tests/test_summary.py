@@ -131,7 +131,7 @@ async def test_generate_times_out_and_ends_process(fake_cli, monkeypatch):
     fake_cli(SLOW)
     monkeypatch.setattr(summary, "GENERATE_TIMEOUT", 0.3)
     started = time.monotonic()
-    with pytest.raises(SummaryError, match="응답하지 않았다"):
+    with pytest.raises(SummaryError, match="응답하지 않았습니다"):
         await summary.generate("s", "p")
     assert time.monotonic() - started < 5
 
@@ -146,7 +146,7 @@ wait
 """
     )
     monkeypatch.setattr(summary, "GENERATE_TIMEOUT", 0.5)
-    with pytest.raises(SummaryError, match="응답하지 않았다"):
+    with pytest.raises(SummaryError, match="응답하지 않았습니다"):
         await summary.generate("s", "p")
     assert (record / "saved").read_text() == "saved\n"
     assert tools.CLAUDE_TURNS.enter()  # 끝난 호출이 차례를 돌려준다
@@ -184,21 +184,21 @@ async def test_generate_reports_nonzero_exit(fake_cli):
 @pytest.mark.asyncio
 async def test_generate_reports_logged_out(fake_cli):
     fake_cli(LOGGED_OUT)
-    with pytest.raises(SummaryError, match="로그인돼 있지 않다"):
+    with pytest.raises(SummaryError, match="로그인돼 있지 않습니다"):
         await summary.generate("s", "p")
 
 
 @pytest.mark.asyncio
 async def test_generate_without_cli(fake_cli):
-    with pytest.raises(SummaryError, match="찾지 못했다"):
+    with pytest.raises(SummaryError, match="찾지 못했습니다"):
         await summary.generate("s", "p")
 
 
 @pytest.mark.asyncio
 async def test_unavailable_reasons(fake_cli):
-    assert await summary.unavailable() == "Claude Code CLI를 찾지 못했다"
+    assert await summary.unavailable() == "Claude Code CLI를 찾지 못했습니다"
     fake_cli(LOGGED_OUT)
-    assert await summary.unavailable() == "Claude Code에 로그인돼 있지 않다"
+    assert await summary.unavailable() == "Claude Code에 로그인돼 있지 않습니다"
     fake_cli(OK)
     assert await summary.unavailable() is None
 
@@ -208,7 +208,7 @@ async def test_unavailable_asks_the_login_once_however_often_it_is_asked(fake_cl
     counted = 'echo "$1" >> "$RECORD/calls"\n'
     fake_cli(counted + LOGGED_OUT)
     for _ in range(5):
-        assert await summary.unavailable() == "Claude Code에 로그인돼 있지 않다"
+        assert await summary.unavailable() == "Claude Code에 로그인돼 있지 않습니다"
     assert (tmp_path / "record" / "calls").read_text().split() == ["auth"]
 
     tools.fresh("claude")  # 화면의 `다시 확인`
@@ -261,9 +261,9 @@ def test_system_prompt_holds_whole_style_guide_or_builtin(tmp_path):
 
 
 def test_system_prompt_reports_unreadable_style_guide(tmp_path):
-    with pytest.raises(SummaryError, match="읽지 못했다.*missing.md"):
+    with pytest.raises(SummaryError, match="읽지 못했습니다.*missing.md"):
         summary.system_prompt_of(tmp_path / "missing.md")
-    with pytest.raises(SummaryError, match="읽지 못했다"):
+    with pytest.raises(SummaryError, match="읽지 못했습니다"):
         summary.system_prompt_of(tmp_path)
     empty = tmp_path / "empty.md"
     empty.write_text(" \n")
@@ -627,9 +627,9 @@ async def test_style_guide_is_read_for_every_summary_and_changes_the_key(fake_cl
 async def test_unreadable_style_guide_makes_no_summary_and_gives_the_reason(fake_cli, tmp_path):
     record = fake_cli(OK)
     summaries = Summaries(tmp_path / "summaries.db", tmp_path / "missing.md")
-    assert "서술 규약 문서를 읽지 못했다" in await summaries.unavailable()
+    assert "서술 규약 문서를 읽지 못했습니다" in await summaries.unavailable()
     assert summaries.cached("def f(): ...") is None
-    with pytest.raises(SummaryError, match="서술 규약 문서를 읽지 못했다"):
+    with pytest.raises(SummaryError, match="서술 규약 문서를 읽지 못했습니다"):
         await summaries.make("def f(): ...")
     assert not (record / "runs").exists()
 
@@ -640,7 +640,7 @@ async def test_unreadable_style_guide_makes_no_summary_and_gives_the_reason(fake
 @pytest.mark.asyncio
 async def test_summaries_asks_login_until_available(fake_cli, tmp_path):
     summaries = Summaries(tmp_path / "summaries.db")
-    assert await summaries.unavailable() == "Claude Code CLI를 찾지 못했다"
+    assert await summaries.unavailable() == "Claude Code CLI를 찾지 못했습니다"
     fake_cli(OK)
     assert await summaries.unavailable() is None
     fake_cli(LOGGED_OUT)

@@ -180,7 +180,7 @@ def test_expression_too_deep_yields_module_only_with_an_error():
     text = "def lookup():\n    return " + " + ".join(["f()"] * 5000) + "\n"
     found = extract(file, text, frozenset())
     assert [n.id for n in found.nodes] == ["pkg.table"]
-    assert found.error == "식이 너무 깊다" and found.sites == []
+    assert found.error == "식이 너무 깊습니다" and found.sites == []
 
 
 def test_builtin_name_bound_in_the_file_is_not_prejudged(facts):

@@ -261,11 +261,11 @@ def system_prompt_of(style_guide: Path | None, kind: str = "node") -> str:
     try:
         text = style_guide.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        raise SummaryError(f"서술 규약 문서를 읽지 못했다: {style_guide} ({type(exc).__name__})") from exc
+        raise SummaryError(f"서술 규약 문서를 읽지 못했습니다: {style_guide} ({type(exc).__name__})") from exc
     if not text.strip():
-        raise SummaryError(f"서술 규약 문서가 비어 있다: {style_guide}")
+        raise SummaryError(f"서술 규약 문서가 비어 있습니다: {style_guide}")
     if len(text.encode()) > MAX_STYLE_GUIDE:
-        raise SummaryError(f"서술 규약 문서가 {MAX_STYLE_GUIDE // 1000}KB를 넘는다: {style_guide}")
+        raise SummaryError(f"서술 규약 문서가 {MAX_STYLE_GUIDE // 1000}KB를 넘습니다: {style_guide}")
     return f"{intro}\n{STYLE_GUIDE_HEAD}\n<서술 규약 문서>\n{text.strip()}\n</서술 규약 문서>\n\n{rules}"
 
 
@@ -728,7 +728,7 @@ def plain(result: str) -> str:
     """CLI가 낸 코드 범위 설명을 문단마다 한 줄로 맞춘다. 글이 비었으면 `SummaryError`를 낸다."""
     paragraphs = [line.strip() for line in result.strip().splitlines() if line.strip()]
     if not paragraphs:
-        raise SummaryError("Claude Code CLI가 낸 설명이 비어 있다")
+        raise SummaryError("Claude Code CLI가 낸 설명이 비어 있습니다")
     return "\n".join(paragraphs)
 
 
@@ -742,7 +742,7 @@ def shaped(result: str) -> str:
         elif line:
             parts[-1].append(line)
     if len(parts) != len(MARKS) + 1 or not all(parts):
-        raise SummaryError("Claude Code CLI가 낸 설명이 요지, 하는 일, 앞뒤 흐름 세 부분으로 나뉘지 않는다")
+        raise SummaryError("Claude Code CLI가 낸 설명이 요지, 하는 일, 앞뒤 흐름 세 부분으로 나뉘지 않습니다")
     lead, *bodies = ("\n".join(part) for part in parts)
     return "\n\n".join([" ".join(lead.split("\n")), *(f"{mark}\n{body}" for mark, body in zip(MARKS, bodies))])
 
@@ -792,7 +792,7 @@ async def unavailable() -> str | None:
     로그인 여부는 `tools.claude`가 찾을 때 확인해 둔 값이고 물을 때마다 CLI를 실행하지 않는다.
     """
     if await asyncio.to_thread(find_cli) is None:
-        return "Claude Code CLI를 찾지 못했다"
+        return "Claude Code CLI를 찾지 못했습니다"
     return tools.claude().note
 
 
@@ -821,14 +821,14 @@ async def _ask(system: str, prompt: str) -> Made:
     """`claude -p`에 시스템 프롬프트를 인자로, 프롬프트를 표준 입력으로 넘겨 CLI가 낸 글과 사용량을 받는다."""
     cli = await asyncio.to_thread(find_cli)
     if cli is None:
-        raise SummaryError("Claude Code CLI를 찾지 못했다")
+        raise SummaryError("Claude Code CLI를 찾지 못했습니다")
     try:
         returncode, out, err = await _run(cli, (*GENERATE_HEAD, system, *GENERATE_TAIL), prompt, GENERATE_TIMEOUT)
     except asyncio.TimeoutError:
-        raise SummaryError(f"Claude Code CLI가 {GENERATE_TIMEOUT:.0f}초 안에 응답하지 않았다") from None
+        raise SummaryError(f"Claude Code CLI가 {GENERATE_TIMEOUT:.0f}초 안에 응답하지 않았습니다") from None
     except OSError as exc:
         tools.fresh(tools.CLAUDE.name)
-        raise SummaryError(f"Claude Code CLI를 띄우지 못했다: {exc}") from exc
+        raise SummaryError(f"Claude Code CLI를 띄우지 못했습니다: {exc}") from exc
     try:
         body = json.loads(out)
         result, failed = str(body["result"]).strip(), bool(body["is_error"])
@@ -837,8 +837,8 @@ async def _ask(system: str, prompt: str) -> Made:
     if returncode != 0 or failed or not result:
         detail = result or (err.strip().splitlines() or [""])[-1][:200]
         if "Not logged in" in detail:
-            raise SummaryError("Claude Code에 로그인돼 있지 않다")
-        raise SummaryError(f"Claude Code CLI가 설명을 내지 못했다(종료 코드 {returncode}): {detail}")
+            raise SummaryError("Claude Code에 로그인돼 있지 않습니다")
+        raise SummaryError(f"Claude Code CLI가 설명을 내지 못했습니다(종료 코드 {returncode}): {detail}")
     return Made(result, usage_of(body))
 
 

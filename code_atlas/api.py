@@ -314,13 +314,13 @@ def create_app(
         """분석 결과를 읽는 경로의 공통 의존 함수. 연 레포를 돌려준다. 연 레포가 없으면 409를, 결과가 아직 없으면 503을 낸다."""
         state = opened()
         if state.revision == 0:
-            raise HTTPException(status_code=503, detail="분석 중이다")
+            raise HTTPException(status_code=503, detail="분석 중입니다")
         return state
 
     def opened() -> Workspace:
         state = app.state.workspace
         if state is None:
-            raise HTTPException(status_code=409, detail="연 레포가 없다")
+            raise HTTPException(status_code=409, detail="연 레포가 없습니다")
         return state
 
     ready = Depends(analysed)
@@ -350,11 +350,11 @@ def create_app(
 
     async def ask(state: Workspace, path: str, request: Callable[[Session], Awaitable[T]]) -> T:
         if path not in state.analyzed.texts:
-            raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
+            raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아닙니다: {path}")
         try:
             return await request(await state.runner.session())
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"언어 서버가 응답하지 않는다: {exc!r}") from exc
+            raise HTTPException(status_code=503, detail=f"언어 서버가 응답하지 않습니다: {exc!r}") from exc
 
     @app.exception_handler(HTTPException)
     def http_error(request: Request, exc: HTTPException) -> JSONResponse:
@@ -405,25 +405,25 @@ def create_app(
         try:
             return asdict(await asyncio.to_thread(opening.probe, folder.path, settings))
         except OSError as exc:
-            raise HTTPException(status_code=400, detail=f"폴더를 읽지 못했다: {exc}") from exc
+            raise HTTPException(status_code=400, detail=f"폴더를 읽지 못했습니다: {exc}") from exc
 
     def openable(target: Opening) -> tuple[Path, str]:
         """열 폴더의 루트와 확인을 통과한 인터프리터. 열지 못하는 폴더와 인터프리터는 까닭을 적은 400이다."""
         root = disk_path(Path(target.path).expanduser())
         try:
             if not root.is_dir():
-                raise HTTPException(status_code=400, detail=f"폴더가 없다: {root}")
+                raise HTTPException(status_code=400, detail=f"폴더가 없습니다: {root}")
             if not any_source(root):
-                raise HTTPException(status_code=400, detail=f"파이썬 파일이 없는 폴더는 열지 못한다: {root}")
+                raise HTTPException(status_code=400, detail=f"파이썬 파일이 없는 폴더는 열지 못합니다: {root}")
         except OSError as exc:
-            raise HTTPException(status_code=400, detail=f"폴더를 읽지 못했다: {exc}") from exc
+            raise HTTPException(status_code=400, detail=f"폴더를 읽지 못했습니다: {exc}") from exc
         tools.fresh(tools.PYTHON.name)
         found = tools.python(root, target.python, settings)
         if target.python is not None and found.source != tools.SAVED:
-            reason = next((attempt.detail for attempt in found.attempts if attempt.source == tools.SAVED), "실행하지 못했다")
-            raise HTTPException(status_code=400, detail=f"Python 인터프리터가 아니다: {target.python} ({reason})")
+            reason = next((attempt.detail for attempt in found.attempts if attempt.source == tools.SAVED), "실행하지 못했습니다")
+            raise HTTPException(status_code=400, detail=f"Python 인터프리터가 아닙니다: {target.python} ({reason})")
         if found.path is None:
-            raise HTTPException(status_code=400, detail=f"{root.name}의 Python 인터프리터를 찾지 못했다")
+            raise HTTPException(status_code=400, detail=f"{root.name}의 Python 인터프리터를 찾지 못했습니다")
         return root, found.path
 
     @app.post("/api/open")
@@ -483,7 +483,7 @@ def create_app(
         """직접 고르는 도구를 찾는 함수. 그 밖의 이름은 404다."""
         finders = {tools.CLAUDE.name: tools.claude, tools.GIT.name: tools.git}
         if tool not in finders:
-            raise HTTPException(status_code=404, detail=f"직접 고르는 도구가 아니다: {tool}")
+            raise HTTPException(status_code=404, detail=f"직접 고르는 도구가 아닙니다: {tool}")
         return finders[tool]
 
     @app.get("/api/tools")
@@ -507,12 +507,12 @@ def create_app(
         """직접 고른 실행 파일을 확인 명령으로 실행해 통과하면 저장한다. 통과하지 못하면 시도 기록을 적은 400이다."""
         find = named(tool)
         if settings is None:
-            raise HTTPException(status_code=400, detail="설정 파일을 쓰지 않는 실행이라 경로를 저장하지 못한다")
+            raise HTTPException(status_code=400, detail="설정 파일을 쓰지 않는 실행이라 경로를 저장하지 못합니다")
         tried = tools.attempt(tool, chosen.path)
         if not tried.ok:
             return JSONResponse(
                 status_code=400,
-                content={"error": f"실행하지 못했다: {tried.path} ({tried.detail})", "code": tried.code, "attempt": asdict(tried)},
+                content={"error": f"실행하지 못했습니다: {tried.path} ({tried.detail})", "code": tried.code, "attempt": asdict(tried)},
             )
         settings.keep_tool(tool, tried.path)
         tools.fresh(tool)
@@ -544,7 +544,7 @@ def create_app(
         기다리는 동안 레포를 닫으면 409를 돌려준다.
         """
         if state.closed:
-            raise HTTPException(status_code=409, detail="레포를 닫았다")
+            raise HTTPException(status_code=409, detail="레포를 닫았습니다")
         if state.revision == 0:
             if not state.running.done():
                 analysed()
@@ -558,9 +558,9 @@ def create_app(
         except asyncio.CancelledError:
             if not running.cancelled():
                 raise
-            raise HTTPException(status_code=409, detail="레포를 닫아 분석을 멈췄다") from None
+            raise HTTPException(status_code=409, detail="레포를 닫아 분석을 멈췄습니다") from None
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"다시 분석하지 못했다: {exc}") from exc
+            raise HTTPException(status_code=500, detail=f"다시 분석하지 못했습니다: {exc}") from exc
         return state.repo
 
     @app.get("/api/tree")
@@ -579,16 +579,16 @@ def create_app(
         if at is None or at == git.WORKTREE:
             analyzed: Analyzed = state.analyzed
         elif at not in state.seen:
-            raise HTTPException(status_code=404, detail=f"비교에 쓴 커밋이 아니다: {at}")
+            raise HTTPException(status_code=404, detail=f"비교에 쓴 커밋이 아닙니다: {at}")
         else:
             analyzed = snapshots(state).held(at) or await snapshots(state).at(at, [state.analyzed])
         if path not in analyzed.texts:
-            raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
+            raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아닙니다: {path}")
         return {"path": path, "text": analyzed.texts[path]}
 
     def snapshots(state: Workspace) -> Snapshots:
         if state.closed:
-            raise HTTPException(status_code=409, detail="레포를 닫았다")
+            raise HTTPException(status_code=409, detail="레포를 닫았습니다")
         if state.snapshots is None:
             state.snapshots = Snapshots(state.analyzed.files.root, state.runner.python, state.runner.cache)
         return state.snapshots
@@ -596,7 +596,7 @@ def create_app(
     def moment(name: str) -> str:
         """시점의 이름(40자 커밋 해시나 `worktree`)인지 확인한다."""
         if name != git.WORKTREE and _HASH.fullmatch(name) is None:
-            raise HTTPException(status_code=400, detail=f"시점의 이름이 아니다: {name}")
+            raise HTTPException(status_code=400, detail=f"시점의 이름이 아닙니다: {name}")
         return name
 
     def versioned(state: Workspace, *moments: str) -> tuple[Path, str]:
@@ -604,10 +604,10 @@ def create_app(
         root = state.analyzed.files.root
         head = git.head(root)
         if head is None:
-            raise HTTPException(status_code=404, detail="커밋이 있는 git 저장소가 아니다")
+            raise HTTPException(status_code=404, detail="커밋이 있는 git 저장소가 아닙니다")
         for name in moments:
             if name != git.WORKTREE and git.committed(root, name) is None:
-                raise HTTPException(status_code=404, detail=f"없는 커밋이다: {name}")
+                raise HTTPException(status_code=404, detail=f"없는 커밋입니다: {name}")
         return root, head
 
     def arranged(state: Workspace, a: str, b: str) -> tuple[str, str, str | None]:
@@ -617,7 +617,7 @@ def create_app(
         늘 대상이고 조상 관계는 지금 커밋으로 본다.
         """
         if a == b:
-            raise HTTPException(status_code=400, detail="같은 시점을 골랐다")
+            raise HTTPException(status_code=400, detail="같은 시점을 골랐습니다")
         root, head = versioned(state, a, b)
         picked = b if a == git.WORKTREE else a
         other = head if git.WORKTREE in (a, b) else b
@@ -628,7 +628,7 @@ def create_app(
             return other, picked, None
         fork = git.merge_base(root, picked, other)
         if fork is None:
-            raise HTTPException(status_code=400, detail="두 시점에 공통 조상이 없다")
+            raise HTTPException(status_code=400, detail="두 시점에 공통 조상이 없습니다")
         newer = max((picked, other), key=lambda commit: (git.committed(root, commit) or 0, commit))
         return fork, target or newer, fork
 
@@ -757,7 +757,7 @@ def create_app(
         """
         base, target = moment(ends.base), moment(ends.target)
         if base == git.WORKTREE or base == target:
-            raise HTTPException(status_code=400, detail="기준은 대상과 다른 커밋이어야 한다")
+            raise HTTPException(status_code=400, detail="기준은 대상과 다른 커밋이어야 합니다")
         await asyncio.to_thread(versioned, state, base, target)
         current = state.comparing
         if current is None or current[0] != (base, target) or current[1].done():
@@ -772,12 +772,12 @@ def create_app(
             if not current[1].cancelled():
                 raise
             if state.comparing is current:
-                raise HTTPException(status_code=409, detail="레포를 닫아 비교를 멈췄다") from None
-            raise HTTPException(status_code=409, detail="다른 두 시점의 비교가 시작되어 이 비교를 멈췄다") from None
+                raise HTTPException(status_code=409, detail="레포를 닫아 비교를 멈췄습니다") from None
+            raise HTTPException(status_code=409, detail="다른 두 시점의 비교가 시작되어 이 비교를 멈췄습니다") from None
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"비교하지 못했다: {exc}") from exc
+            raise HTTPException(status_code=500, detail=f"비교하지 못했습니다: {exc}") from exc
 
     @app.get("/api/hover")
     async def get_hover(path: str, line: int = Query(ge=1), col: int = Query(ge=0), state: Workspace = ready) -> dict:
@@ -796,7 +796,7 @@ def create_app(
         analyzed, nodes = shown(state)
         prompt = prompt_of(nodes, analyzed.analysis.edges, analyzed.texts, node_id)
         if prompt is None:
-            raise HTTPException(status_code=404, detail=f"요약할 노드가 아니다: {node_id}")
+            raise HTTPException(status_code=404, detail=f"요약할 노드가 아닙니다: {node_id}")
         return prompt
 
     @app.get("/api/summary")
@@ -825,7 +825,7 @@ def create_app(
             gone.cancel()
             task.cancel()
         if task not in done:
-            raise HTTPException(status_code=499, detail="호출자가 연결을 끊었다")
+            raise HTTPException(status_code=499, detail="호출자가 연결을 끊었습니다")
         try:
             return task.result()
         except SummaryError as exc:
@@ -843,7 +843,7 @@ def create_app(
         if all(value is None for value in given):
             return None
         if None in given or old_start > old_end:
-            raise HTTPException(status_code=422, detail="base, target, old_start, old_end를 함께 넘긴다")
+            raise HTTPException(status_code=422, detail="base, target, old_start, old_end를 함께 넘겨야 합니다")
         return old_start, old_end
 
     def explained(
@@ -867,7 +867,7 @@ def create_app(
             nodes, analyzed.analysis.edges, analyzed.texts, path, start, end, code, old, question or None
         )
         if prompt is None:
-            raise HTTPException(status_code=404, detail=f"설명할 코드 범위가 아니다: {path} {start}~{end}줄")
+            raise HTTPException(status_code=404, detail=f"설명할 코드 범위가 아닙니다: {path} {start}~{end}줄")
         root = state.repo["root"]
         if old is not None:
             name = asked_name(compared_name(base, target, path, old, (start, end)), question)
@@ -889,7 +889,7 @@ def create_app(
         latest = app.state.summaries.latest
         root = state.repo["root"]
         if path not in analyzed.texts and (base is None or target is None):
-            raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
+            raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아닙니다: {path}")
         found = []
         for kept in latest.listed(root, "range") if path in analyzed.texts else []:
             file, _, span = kept.name.partition("?")[0].rpartition(":")
@@ -936,7 +936,7 @@ def create_app(
         """
         old = between(base, target, old_start, old_end)
         if old is not None and code is None:
-            raise HTTPException(status_code=422, detail="두 시점의 비교에 묶는 범위는 표시 붙은 본문 code를 넘긴다")
+            raise HTTPException(status_code=422, detail="두 시점의 비교에 묶는 범위는 표시 붙은 본문 code를 넘겨야 합니다")
         asked = (question or "").strip()[:MAX_QUESTION]
         prompt, subject = explained(state, path, start, end, code, base, target, old, asked)
         explanation = await made(request, app.state.summaries.make(prompt, refresh, "range", subject))
@@ -1038,7 +1038,7 @@ def create_app(
         """dist 안의 파일을 돌려주고, 파일이 아닌 경로는 index.html로 넘긴다. /api 아래는 넘기지 않는다."""
         index = DIST_DIR / "index.html"
         if path == "api" or path.startswith("api/") or not index.is_file():
-            raise HTTPException(status_code=404, detail=f"없는 경로다: /{path}")
+            raise HTTPException(status_code=404, detail=f"없는 경로입니다: /{path}")
         target = (DIST_DIR / path).resolve()
         if target.is_file() and target.is_relative_to(DIST_DIR.resolve()):
             return FileResponse(target)

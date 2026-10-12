@@ -65,12 +65,12 @@ def test_require_python_finds_the_virtual_environment_and_names_what_it_tried(tm
     (repo / "broken" / "pyvenv.cfg").write_text("home = /nowhere\n")
     with pytest.raises(PythonNotFound) as missing:
         require_python(repo, None)
-    assert "가상환경을 찾지 못했다" in str(missing.value)
+    assert "가상환경을 찾지 못했습니다" in str(missing.value)
     assert f"{repo.resolve() / 'broken' / 'bin' / 'python'}: 없는 파일" in str(missing.value)
 
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(repo / ".venv")], check=True)
     assert require_python(repo, None) == str(repo.resolve() / ".venv" / "bin" / "python")
 
-    with pytest.raises(PythonNotFound, match="--python에 준 경로를 실행할 수 없다: /bin/ls") as given:
+    with pytest.raises(PythonNotFound, match="--python에 준 경로를 실행할 수 없습니다: /bin/ls") as given:
         require_python(repo, "/bin/ls")  # 준 값이 통과하지 못하면 레포의 가상환경으로 넘어가지 않는다
     assert "/bin/ls: 종료 코드 " in str(given.value)

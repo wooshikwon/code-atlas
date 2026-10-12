@@ -52,13 +52,13 @@ export function stepRows(route: Route, path: Path, nodes: Map<string, AtlasNode>
  */
 export function emptyText(route: Route, nodes: Map<string, AtlasNode>): string[] {
   if (within(nodes, route.from, route.to) || within(nodes, route.to, route.from)) {
-    return ["출발과 도착이 같은 곳이다"];
+    return ["출발과 도착이 같은 곳입니다"];
   }
   return [
-    "실행 선으로 이어지는 경로가 없다",
+    "실행 선으로 이어지는 경로가 없습니다",
     route.unresolved === 0
-      ? `출발에서 닿는 함수는 ${route.reach}개이고 그 안에 대상을 확인하지 못한 호출(?)은 없다`
-      : `출발에서 닿는 함수 ${route.reach}개 안에 대상을 확인하지 못한 호출(?)이 ${route.unresolved}곳 있다. 그 호출을 거쳐 실제로는 닿을 수 있다`,
-    ...(route.reverse ? ["반대 방향에는 경로가 있다"] : []),
+      ? `출발에서 닿는 함수는 ${route.reach}개이고 그 안에 대상을 확인하지 못한 호출(?)은 없습니다`
+      : `출발에서 닿는 함수 ${route.reach}개 안에 대상을 확인하지 못한 호출(?)이 ${route.unresolved}곳 있습니다. 그 호출을 거쳐 실제로는 닿을 수 있습니다`,
+    ...(route.reverse ? ["반대 방향에는 경로가 있습니다"] : []),
   ];
 }

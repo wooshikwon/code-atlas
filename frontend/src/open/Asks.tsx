@@ -46,7 +46,7 @@ function Body({ step }: { step: Step }) {
     case "blocked":
       return (
         <>
-          <Title>{step.reason === "missing" ? `폴더를 찾지 못했다: ${step.path}` : `파이썬 파일이 없는 폴더는 열지 못한다: ${step.path}`}</Title>
+          <Title>{step.reason === "missing" ? `폴더를 찾지 못했습니다: ${step.path}` : `파이썬 파일이 없는 폴더는 열지 못합니다: ${step.path}`}</Title>
           <div className="ask-buttons">
             <button className="toolbar-button" data-first onClick={cancel}>
               닫기
@@ -57,7 +57,7 @@ function Body({ step }: { step: Step }) {
     case "failed":
       return (
         <>
-          <Title>{nameOf(step.path)}를 열지 못했다</Title>
+          <Title>{nameOf(step.path)}를 열지 못했습니다</Title>
           <p className="ask-error">{step.error}</p>
           <div className="ask-buttons">
             <button className="toolbar-button" data-first onClick={cancel}>
@@ -70,9 +70,9 @@ function Body({ step }: { step: Step }) {
       return (
         <>
           <Title>
-            {nameOf(step.path)}는 프로젝트 {nameOf(step.project)}의 하위 폴더다
+            {nameOf(step.path)}는 프로젝트 {nameOf(step.project)}의 하위 폴더입니다
           </Title>
-          <p className="ask-note">하위 폴더만 열면 폴더 밖의 코드를 부르는 지점이 미확인으로 남는다.</p>
+          <p className="ask-note">하위 폴더만 열면 폴더 밖의 코드를 부르는 지점이 미확인으로 남습니다.</p>
           <div className="ask-buttons">
             <button className="toolbar-button" data-first data-full={step.project} onClick={() => void choose(step.project)}>
               {nameOf(step.project)} 열기
@@ -90,7 +90,7 @@ function Body({ step }: { step: Step }) {
       return (
         <>
           <Title>
-            {nameOf(step.path)}는 프로젝트 {step.nested.length}개를 품고 있다. 하나를 고른다
+            {nameOf(step.path)}는 프로젝트 {step.nested.length}개를 품고 있습니다. 하나를 골라 주세요
           </Title>
           <ul className="ask-options">
             {step.nested.map((name, index) => (
@@ -126,7 +126,7 @@ export function Asks() {
   if (typing) {
     return (
       <Ask close={cancel}>
-        <Title>열 레포 폴더의 경로를 적는다</Title>
+        <Title>열 레포 폴더의 경로를 적어 주세요</Title>
         <PathField autoFocus />
         <div className="ask-buttons">
           <button className="toolbar-button" onClick={cancel}>

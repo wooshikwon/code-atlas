@@ -155,7 +155,7 @@ function Ask({ left, top, width, send, close }: { left: number; top: number; wid
         rows={2}
         autoFocus
         value={text}
-        placeholder="질문을 적는다. 비우면 이 코드를 설명한다"
+        placeholder="질문을 적어 주세요. 비우면 이 코드를 설명합니다"
         aria-label="코드 분석 질문"
         onChange={(event) => setText(event.target.value)}
         onKeyDown={onKeyDown}

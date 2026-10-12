@@ -42,7 +42,7 @@ function briefOf(state: SummaryState): string {
     case "making":
       return "요약을 만드는 중";
     case "empty":
-      return "만든 요약이 없다";
+      return "만든 요약이 없습니다";
     case "failed":
       return state.error;
     case "unavailable":

@@ -97,7 +97,7 @@ async def test_server_without_a_repo_is_idle_and_answers_409_to_reads(tmp_path):
         assert (await client.get("/api/status")).json() == {**IDLE, "session": 1}
         for method, path, params in READS:
             answer = await client.request(method, path, params=params)
-            assert (answer.status_code, answer.json()) == (409, {"error": "연 레포가 없다"}), path
+            assert (answer.status_code, answer.json()) == (409, {"error": "연 레포가 없습니다"}), path
         assert (await client.get("/api/repos")).json() == {"repos": []}
         assert (await client.get("/api/status")).json()["session"] == 1
     assert not (tmp_path / "config").exists()
@@ -193,7 +193,7 @@ async def test_reload_waiting_for_the_analysis_ends_with_409_when_the_repo_is_cl
         monkeypatch.setattr(lsp.Session, "wait_ready", wait_ready)
         assert (await client.post("/api/close")).status_code == 200
         answer = await reloading
-        assert (answer.status_code, answer.json()) == (409, {"error": "레포를 닫아 분석을 멈췄다"})
+        assert (answer.status_code, answer.json()) == (409, {"error": "레포를 닫아 분석을 멈췄습니다"})
 
 
 @pytest.mark.asyncio
@@ -226,7 +226,7 @@ async def test_switching_while_comparing_leaves_no_exported_folder(history_repo,
 
         assert await opened(client, sample_repo) == 2
         stopped = await comparing
-        assert (stopped.status_code, stopped.json()) == (409, {"error": "레포를 닫아 비교를 멈췄다"})
+        assert (stopped.status_code, stopped.json()) == (409, {"error": "레포를 닫아 비교를 멈췄습니다"})
         assert not folder.exists()
         assert all(ended(session) for session in started)
         assert (await client.get("/api/status")).json()["compare"] is None
@@ -243,11 +243,11 @@ async def test_open_that_fails_keeps_the_open_repo(sample_repo, external_repo, t
     (external_repo / NO_PYTHON).write_text("")
     missing = str(tmp_path / "no" / "python")
     refused = [
-        ({"path": str(tmp_path / "gone")}, f"폴더가 없다: {disk_path(tmp_path) / 'gone'}"),
-        ({"path": str(sample_repo / "pyproject.toml")}, f"폴더가 없다: {disk_path(sample_repo) / 'pyproject.toml'}"),
-        ({"path": str(empty)}, f"파이썬 파일이 없는 폴더는 열지 못한다: {disk_path(empty)}"),
-        ({"path": str(external_repo)}, "external_repo의 Python 인터프리터를 찾지 못했다"),
-        ({"path": str(external_repo), "python": missing}, f"Python 인터프리터가 아니다: {missing} (없는 파일)"),
+        ({"path": str(tmp_path / "gone")}, f"폴더가 없습니다: {disk_path(tmp_path) / 'gone'}"),
+        ({"path": str(sample_repo / "pyproject.toml")}, f"폴더가 없습니다: {disk_path(sample_repo) / 'pyproject.toml'}"),
+        ({"path": str(empty)}, f"파이썬 파일이 없는 폴더는 열지 못합니다: {disk_path(empty)}"),
+        ({"path": str(external_repo)}, "external_repo의 Python 인터프리터를 찾지 못했습니다"),
+        ({"path": str(external_repo), "python": missing}, f"Python 인터프리터가 아닙니다: {missing} (없는 파일)"),
     ]
     async with served(tmp_path, sample_repo) as (app, client):
         graph = await analysed(app)
