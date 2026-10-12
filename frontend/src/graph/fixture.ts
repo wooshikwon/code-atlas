@@ -197,7 +197,7 @@ export const variableFixture: Graph = {
     node("tests.test_conf:test_clamp", "function", "tests.test_conf", { path: "tests/test_conf.py", test: true, range: [3, 6] }),
     node("conf:PRESETS", "variable", "conf", { path: "conf.py", range: [7, 12], loc: 6, value: { kind: "dict", size: 2, text: '{"fast": Preset("fast"), "slow": Preset("slow")}' } }),
     node("conf:LIMIT", "variable", "conf", { path: "conf.py", range: [14, 14], loc: 1, value: { kind: "int", size: null, text: "3" } }),
-    node("conf:DEFAULT", "variable", "conf", { path: "conf.py", range: [15, 15], loc: 1, value: { kind: "식", size: null, text: "LIMIT - 1" } }),
+    node("conf:DEFAULT", "variable", "conf", { path: "conf.py", range: [15, 15], loc: 1, value: { kind: "expr", size: null, text: "LIMIT - 1" } }),
     node("conf:_cache", "variable", "conf", { path: "conf.py", range: [16, 16], loc: 1, value: { kind: "dict", size: 0, text: "{}" } }),
     node("conf:logger", "variable", "conf", {
       path: "conf.py",

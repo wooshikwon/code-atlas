@@ -55,6 +55,7 @@ describe("변수 노드의 이름", () => {
     expect(valueAside(nodes.get("conf:PRESETS")!)).toBe("dict · 2개");
     expect(valueAside(nodes.get("conf:_cache")!)).toBe("dict · 0개");
     expect(valueAside(nodes.get("conf:LIMIT")!)).toBe("int");
+    expect(valueAside(nodes.get("conf:DEFAULT")!)).toBe("expr");
     expect(valueAside(nodes.get("conf:logger")!)).toBe("logging.getLogger(…)");
     expect(valueAside(nodes.get("conf:clamp")!)).toBe("");
   });

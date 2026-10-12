@@ -43,7 +43,7 @@ export interface Field {
 
 /** 모듈 변수의 첫 대입문이 담은 값의 요약 */
 export interface Value {
-  /** 값의 종류: `str`, `dict`, `TaskPreset(…)`, `식` */
+  /** 값의 종류: `str`, `dict`, `TaskPreset(…)`, `alias`, `type`, `expr` */
   kind: string;
   /** 컨테이너의 원소 수. 셀 수 없는 값은 null이다. */
   size: number | null;

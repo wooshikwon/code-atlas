@@ -36,6 +36,16 @@ _CONTAINERS: dict[type, str] = {
     ast.SetComp: "set",
     ast.Tuple: "tuple",
 }
+# 첨자를 붙이면 타입 식이 되는 `typing`·`collections.abc`의 이름과 내장 제네릭
+_TYPE_HEADS = frozenset(
+    "Literal Union Optional Callable Annotated Type ClassVar Final Required NotRequired Concatenate TypeGuard "
+    "List Dict Set FrozenSet Tuple DefaultDict OrderedDict Counter Deque ChainMap "
+    "Sequence MutableSequence Mapping MutableMapping Collection Container Iterable Iterator Generator "
+    "AsyncIterable AsyncIterator AsyncGenerator Awaitable Coroutine "
+    "list dict set frozenset tuple type".split()
+)
+# `|` 합의 한쪽에 있으면 그 합이 타입 식인 내장 자료형 이름
+_TYPE_NAMES = frozenset("int float complex bool str bytes bytearray object list dict set frozenset tuple type".split())
 _DEF_HEAD = re.compile(rb"(?:async\s+)?(?:def|class)\s+")
 _TEXT_LIMIT = 80
 
@@ -56,8 +66,15 @@ class DefInfo:
 class VarInfo:
     """모듈 수준에서 대입한 이름 하나. 위치의 열은 UTF-8 바이트 단위다.
 
-    value_kind는 값 식의 종류다. 상수는 자료형 이름, 컨테이너 표기와 컴프리헨션은 dict·list·set·tuple,
-    호출은 받는 식의 글에 `(…)`를 붙인 글, 그 밖은 `식`이다.
+    value_kind는 값 식의 종류이고 구문만 보고 아래 순서로 정한다.
+
+    1. 상수와 f-string은 자료형 이름, 컨테이너 표기와 컴프리헨션은 dict·list·set·tuple이다.
+    2. 호출은 받는 식의 글에 `(…)`를 붙인 글이다. 호출 뒤에 첨자나 연산이 붙은 식은 호출이 아니다.
+    3. `alias`는 이름 하나나 점으로 이은 이름이다(`make_forward_fn`, `OutputFormat.text`, `str`).
+    4. `type`은 바탕의 마지막 이름이 `_TYPE_HEADS`에 든 첨자 식(`Literal['a', 'b']`, `typing.Optional[int]`, `list[str]`)과,
+       그런 첨자 식이나 `None`, `_TYPE_NAMES`의 이름이 한쪽에라도 있고 모든 쪽이 이름·점으로 이은 이름·첨자 식·`None`·문자열인
+       `|` 합이다(`str | ComponentSpec`). 양쪽이 모두 그 밖의 이름인 합(`re.I | re.M`, `A | B`)은 타입 식인지 알 수 없으므로 `expr`이다.
+    5. `expr`은 그 밖의 식과 값 식 범위가 없는 대입이다.
     """
 
     node_id: str  # "{모듈 id}:{이름}"
@@ -148,6 +165,44 @@ def _size(e: ast.expr) -> int | None:
     return None
 
 
+def _is_dotted(e: ast.expr) -> bool:
+    while isinstance(e, ast.Attribute):
+        e = e.value
+    return isinstance(e, ast.Name)
+
+
+def _is_generic(e: ast.expr) -> bool:
+    """바탕의 마지막 이름이 `_TYPE_HEADS`에 든 첨자 식이다."""
+    return isinstance(e, ast.Subscript) and _is_dotted(e.value) and _last_name(e.value) in _TYPE_HEADS
+
+
+def _is_union(e: ast.expr) -> bool:
+    """타입 식임이 한쪽에서라도 확인되는 `|` 합이다."""
+    sides: list[ast.expr] = []
+    stack = [e]
+    while stack:
+        side = stack.pop()
+        if isinstance(side, ast.BinOp) and isinstance(side.op, ast.BitOr):
+            stack += [side.left, side.right]
+        else:
+            sides.append(side)
+    if len(sides) < 2:
+        return False
+    sure = False
+    for side in sides:
+        if isinstance(side, ast.Constant):
+            if side.value is not None and not isinstance(side.value, str):
+                return False
+            sure = sure or side.value is None
+        elif isinstance(side, ast.Subscript):
+            sure = sure or _is_generic(side)
+        elif _is_dotted(side):
+            sure = sure or (isinstance(side, ast.Name) and side.id in _TYPE_NAMES)
+        else:
+            return False
+    return sure
+
+
 def _value_kind(e: ast.expr) -> tuple[str, int | None]:
     """값 식의 (종류, 원소 수)."""
     if isinstance(e, ast.Constant):
@@ -159,7 +214,11 @@ def _value_kind(e: ast.expr) -> tuple[str, int | None]:
     if isinstance(e, ast.Call):
         only = e.args[0] if len(e.args) == 1 and not e.keywords else None
         return f"{_text(e.func)}(…)", _size(only) if only is not None else None
-    return "식", None
+    if _is_dotted(e):
+        return "alias", None
+    if _is_generic(e) or _is_union(e):
+        return "type", None
+    return "expr", None
 
 
 def _maker(e: ast.expr) -> tuple[int, int] | None:
@@ -198,7 +257,7 @@ def module_variables(tree: ast.Module, module_id: str) -> list[VarInfo]:
         for name in targets:
             info = found.get(name.id)
             if info is None:
-                kind, size = _value_kind(value) if value is not None else ("식", None)
+                kind, size = _value_kind(value) if value is not None else ("expr", None)
                 info = found[name.id] = VarInfo(
                     node_id=f"{module_id}:{name.id}",
                     name=name.id,

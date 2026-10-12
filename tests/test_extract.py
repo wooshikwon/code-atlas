@@ -252,7 +252,7 @@ def test_module_variables_and_their_values(facts):
     assert kinds["logger"] == ("logging.getLogger(…)", None)
     assert kinds["DEFAULTS"] == ("list", 2)
     assert kinds["total"] == ("int", None)
-    assert kinds["DOUBLE"] == ("식", None)
+    assert kinds["DOUBLE"] == ("expr", None)
     assert kinds["BANNER"] == ("str", None)
 
 
@@ -297,11 +297,50 @@ def test_variable_forms():
     file = SourceFile(path="src/pkg/m.py", module_id="pkg.m", test=False, is_init=False)
     found = {v.name: v for v in extract(file, VARIABLE_FORMS, frozenset()).variables}
     assert list(found) == ["HOME", "FROZEN", "first", "second", "ratio", "step", "fast"]  # `late`는 함수 이름과 같다
-    assert found["HOME"].maker == (3, 12) and found["HOME"].value_kind == "식"
+    assert found["HOME"].maker == (3, 12) and found["HOME"].value_kind == "expr"
     assert (found["FROZEN"].value_kind, found["FROZEN"].size) == ("frozenset(…)", 3)
-    assert (found["first"].value, found["first"].value_kind, found["first"].text) == (None, "식", "")
+    assert (found["first"].value, found["first"].value_kind, found["first"].text) == (None, "expr", "")
     assert (found["ratio"].range, found["ratio"].targets, found["ratio"].value) == ((6, 6), [(6, 0), (7, 0)], None)
     assert found["step"].range == (8, 9) and found["fast"].value_kind == "None"
+
+
+VALUE_KINDS = {
+    "alias": ["make_forward_fn", "OutputFormat.text", "str", "typing.Any"],
+    "type": [
+        "Literal['a', 'b']",
+        "typing.Optional[int]",
+        "Callable[[list[Base], Any], None]",
+        "list[str]",
+        "str | Spec",
+        "Spec | None",
+        "Spec | 'Later' | dict[str, int]",
+        "pkg.Spec | Other[int] | None",
+    ],
+    "expr": [
+        "A | B",
+        "re.I | re.M",
+        "Spec | 3",
+        "make() | None",
+        "TABLE['a']",
+        "Path(__file__).resolve().parents[2]",
+        "platform.system() == 'Darwin'",
+        "FIXTURES / 'recipes'",
+        "['models'] + list(TABLE.keys())",
+        "a if b else c",
+        "lambda x: x",
+        "-LIMIT",
+    ],
+    "str": ["f'{BASE}/x'"],
+    "Path(__file__).resolve(…)": ["Path(__file__).resolve()"],
+}
+
+
+def test_value_kinds_are_told_apart_by_syntax_alone():
+    file = SourceFile(path="src/pkg/m.py", module_id="pkg.m", test=False, is_init=False)
+    cases = [(kind, text) for kind, texts in VALUE_KINDS.items() for text in texts]
+    source = "".join(f"V{i} = {text}\n" for i, (_, text) in enumerate(cases))
+    found = [v.value_kind for v in extract(file, source, frozenset()).variables]
+    assert list(zip(found, (text for _, text in cases))) == cases
 
 
 def test_assigned_names_pair_with_the_variables():
