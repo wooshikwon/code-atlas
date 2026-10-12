@@ -5904,35 +5904,37 @@ async function arranging(t, page) {
   await settle(page);
 }
 
+/** 화면에서 이름표의 가운데가 그 노드로 눌리는 노드마다 종류, 불투명도, 이름표 가운데 점 */
+const hoverable = (page) =>
+  page.evaluate(() => {
+    const area = document.querySelector(".graph").getBoundingClientRect();
+    const covers = [...document.querySelectorAll(".info-panel, .dock-panels > *, .dock-buttons")].map((element) => element.getBoundingClientRect());
+    const kinds = ["node-region", "node-module-open", "node-module", "node-package", "node-class", "node-dataclass", "node-function"];
+    const list = [];
+    for (const face of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
+      const root = face.firstElementChild;
+      const label = face.querySelector(".node-label");
+      const kind = kinds.find((name) => root?.classList.contains(name));
+      if (kind === undefined || label === null || getComputedStyle(label).visibility !== "visible") {
+        continue;
+      }
+      const rect = label.getBoundingClientRect();
+      const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
+      const inside = x > area.left && x < area.right && y > area.top && y < area.bottom && covers.every((c) => x < c.left || x > c.right || y < c.top || y > c.bottom);
+      if (inside && face.contains(document.elementFromPoint(x, y))) {
+        list.push({ id: face.dataset.id.replace(/#face$/, ""), kind: kind.replace("node-", ""), opacity: Number(face.style.opacity), route: root.dataset.route ?? null, x, y });
+      }
+    }
+    return list;
+  });
+
 /**
  * 노드의 hover. 마우스를 올린 노드는 선의 hover처럼 가장 진한 단계(불투명도 1)로 그리고 이름표를 굵게, 모양에 옅은 빛을 준다.
- * 이름표와 상자의 위치·폭은 그대로이고, 옆 노드와 부모·자식 상자의 단계는 바뀌지 않는다.
+ * 배치가 정한 이름표와 상자의 위치·폭은 그대로이고, 옆 노드와 부모·자식 상자의 단계는 바뀌지 않는다. 커지는 길이는 `node-grow`가 본다.
  */
 async function nodeHover(t, page) {
-  /** 화면에서 이름표의 가운데가 그 노드로 눌리는 노드마다 종류, 불투명도, 이름표 가운데 점 */
-  const candidates = () =>
-    page.evaluate(() => {
-      const area = document.querySelector(".graph").getBoundingClientRect();
-      const covers = [...document.querySelectorAll(".info-panel, .dock-panels > *, .dock-buttons")].map((element) => element.getBoundingClientRect());
-      const kinds = ["node-region", "node-module-open", "node-module", "node-package", "node-class", "node-dataclass", "node-function"];
-      const list = [];
-      for (const face of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
-        const root = face.firstElementChild;
-        const label = face.querySelector(".node-label");
-        const kind = kinds.find((name) => root?.classList.contains(name));
-        if (kind === undefined || label === null || getComputedStyle(label).visibility !== "visible") {
-          continue;
-        }
-        const rect = label.getBoundingClientRect();
-        const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
-        const inside = x > area.left && x < area.right && y > area.top && y < area.bottom && covers.every((c) => x < c.left || x > c.right || y < c.top || y > c.bottom);
-        if (inside && face.contains(document.elementFromPoint(x, y))) {
-          list.push({ id: face.dataset.id.replace(/#face$/, ""), kind: kind.replace("node-", ""), opacity: Number(face.style.opacity), route: root.dataset.route ?? null, x, y });
-        }
-      }
-      return list;
-    });
-  /** 노드의 두 요소가 받은 불투명도와 클래스, 이름표의 외곽선·위치·폭, 모양의 빛, 상자의 사각형 */
+  const candidates = () => hoverable(page);
+  /** 노드의 두 요소가 받은 불투명도와 클래스, 이름표의 외곽선, 모양의 빛, 배치가 정한 이름표의 위치·폭과 React Flow 노드의 사각형 */
   const look = (id) =>
     page.evaluate((id) => {
       const body = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
@@ -5947,7 +5949,7 @@ async function nodeHover(t, page) {
         glow: getComputedStyle(body.firstElementChild).filter !== "none",
         shadow: getComputedStyle(label).textShadow !== "none",
         layers: `${body.style.zIndex},${face.style.zIndex}`,
-        place: [round(label.getBoundingClientRect()), round(body.getBoundingClientRect()), round((face.querySelector(".loc") ?? label).getBoundingClientRect())].join(" / "),
+        place: [`${label.offsetLeft},${label.offsetWidth}`, round(body.getBoundingClientRect()), `${(face.querySelector(".loc") ?? label).offsetLeft}`, `${body.style.transform}`].join(" / "),
       };
     }, id);
   const over = async (at) => {
@@ -5992,7 +5994,7 @@ async function nodeHover(t, page) {
       same(before.opacity, [at.opacity, at.opacity]) && same(on.opacity, [up.opacity, up.opacity]) && on.inked === (up.tone === "strong") && before.stroke === 0 && on.stroke > 0 && !before.glow && on.glow && same(after, before),
       `${at.id}: 불투명도 ${before.opacity} → ${on.opacity} → ${after.opacity}, 본문 잉크 테두리 ${on.inked}, 외곽선 ${before.stroke} → ${on.stroke}px, 빛 ${before.glow} → ${on.glow}`,
     );
-    t.check(`${name}: 이름표·상자·줄 수 숫자의 위치와 폭, 층이 그대로다`, on.place === before.place && on.layers === before.layers, `${before.place} → ${on.place}, 층 ${on.layers}`);
+    t.check(`${name}: 배치가 정한 이름표·상자·줄 수 숫자의 위치와 폭, 층이 그대로다`, on.place === before.place && on.layers === before.layers, `${before.place} → ${on.place}, 층 ${on.layers}`);
     t.check(`${name}: 옆 노드의 단계는 그대로다`, same(beside, aside), `${other.id} 불투명도 ${aside.opacity} → ${beside.opacity}`);
   }
 
@@ -6032,6 +6034,254 @@ async function nodeHover(t, page) {
     same(blocked.pointed, [false, false]) && blocked.opacity[0] === off.opacity && same(lit.pointed, [true, true]),
     `경로 밖 ${off.id} ${blocked.pointed} 불투명도 ${blocked.opacity}, 경로 위 ${onPath.id} ${lit.pointed}`,
   );
+}
+
+/** 마우스를 올린 잎 노드의 변이 바깥으로 나가는 길이(확대하기 전 px). nodes/common.tsx의 GROW와 같다. */
+const GROW = 2;
+
+/**
+ * 마우스를 올린 잎 노드가 올린 동안만 네 변이 `GROW`만큼 나가게 커지는지 본다. 접힌 파일 상자, 접힌 폴더 상자, 함수, 흐린 함수, 함수 시점 뷰의
+ * 노드에 차례로 올려 화면의 사각형을 재고, 펼친 파일 상자와 폴더 영역의 머리 줄, 화면 이동·배치 움직임·화면을 끄는 동안, 움직임을 줄이는 설정을 본다.
+ * 올리기 전과 올린 동안을 나란히 붙인 사진을 `hf4-grow-{이름}.png`로 남긴다.
+ */
+async function nodeGrow(t, page) {
+  const away = async () => {
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(400);
+  };
+  const over = async (at) => {
+    await page.mouse.move(at.x - 1, at.y);
+    await page.mouse.move(at.x, at.y);
+    await page.waitForTimeout(400);
+  };
+  /** 노드의 React Flow 노드(배치가 정한 위치와 크기)와 그 안의 바탕 요소·글자 요소·원이 화면에서 차지하는 사각형 */
+  const boxOf = (id) =>
+    page.evaluate((id) => {
+      const body = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+      const face = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}#face"]`);
+      const rect = (element) => {
+        const box = element.getBoundingClientRect();
+        return [box.left, box.top, box.right, box.bottom];
+      };
+      const shape = body.querySelector(".node-circle, .call-shape");
+      return {
+        placed: `${body.style.transform} ${body.style.width} ${body.style.height} / ${face.style.transform}`,
+        frame: rect(body),
+        body: rect(body.firstElementChild),
+        face: rect(face.firstElementChild),
+        shape: shape === null ? null : rect(shape),
+        pointed: face.classList.contains("pointed"),
+        duration: getComputedStyle(body.firstElementChild).transitionDuration,
+        hint: getComputedStyle(body.firstElementChild).willChange,
+      };
+    }, id);
+  /** 사각형 b의 네 변이 사각형 a에서 바깥으로 나간 길이(왼쪽, 위, 오른쪽, 아래) */
+  const outBy = (a, b) => [a[0] - b[0], a[1] - b[1], b[2] - a[2], b[3] - a[3]];
+  const text = (sides) => sides.map((n) => Math.round(n * 100) / 100).join(", ");
+  const all = (sides, want) => sides.every((side) => near(side, want, 0.1));
+  /** 올리기 전과 올린 동안의 노드 둘레를 나란히 붙여 남긴다. */
+  const shoot = async (name, id, at) => {
+    const frame = (await boxOf(id)).frame;
+    const clip = {
+      x: Math.max(0, Math.round(frame[0] - 70)),
+      y: Math.max(0, Math.round(frame[1] - 50)),
+      width: Math.min(520, Math.round(frame[2] - frame[0] + 140)),
+      height: Math.round(frame[3] - frame[1] + 100),
+    };
+    await away();
+    const before = await page.screenshot({ clip });
+    await over(at);
+    const after = await page.screenshot({ clip });
+    const sheet = await page.context().newPage();
+    await sheet.setViewportSize({ width: clip.width * 2 + 12, height: clip.height });
+    await sheet.setContent(
+      `<body style="margin:0;display:flex;gap:12px;background:#808080">${[before, after].map((image) => `<img src="data:image/png;base64,${image.toString("base64")}" width="${clip.width}" height="${clip.height}">`).join("")}</body>`,
+    );
+    await sheet.screenshot({ path: HF4(`grow-${name}`) });
+    await sheet.close();
+    await away();
+  };
+  /** 노드 item에 올렸다 떠나며 잰 사각형으로 확인 항목을 적고 한 변이 나간 길이(확대하기 전 px)를 돌려준다. */
+  const grows = async (name, item, picture) => {
+    const zoom = await zoomOf(page);
+    await away();
+    const before = await boxOf(item.id);
+    await over(item);
+    const on = await boxOf(item.id);
+    await away();
+    const after = await boxOf(item.id);
+    const [body, face] = [outBy(before.body, on.body), outBy(before.face, on.face)];
+    t.check(
+      `${name}에 마우스를 올리면 바탕 요소와 글자 요소의 네 변이 ${GROW}px(화면에서는 확대 비율을 곱한 ${Math.round(GROW * zoom * 100) / 100}px)씩 나가고 떠나면 돌아온다`,
+      on.pointed && all(body, GROW * zoom) && all(face, GROW * zoom) && same(after.body, before.body) && same(after.face, before.face),
+      `${item.id}: 바탕 요소 ${text(body)} / 글자 요소 ${text(face)}`,
+    );
+    t.check(`${name}: React Flow 노드의 위치와 크기는 올린 동안에도 그대로다`, on.placed === before.placed && same(on.frame, before.frame), on.placed);
+    if (on.shape !== null) {
+      const [width, height] = [on.shape[2] - on.shape[0], on.shape[3] - on.shape[1]];
+      t.check(`${name}: 커진 원의 폭과 높이가 같다`, near(width, height, 0.1) && height > before.shape[3] - before.shape[1], `${Math.round(width * 100) / 100} × ${Math.round(height * 100) / 100}px`);
+    }
+    if (picture !== null) {
+      await shoot(picture, item.id, item);
+    }
+    return { out: body[0] / zoom, on };
+  };
+  const theme = async (name) => {
+    await page.getByRole("button", { name: name === "dark" ? "어두운 화면" : "밝은 화면" }).click();
+    await page.waitForFunction((want) => document.documentElement.dataset.theme === want, name);
+  };
+
+  // 폴더를 접은 처음 화면: 접힌 파일 상자와 접힌 폴더 상자
+  await asidePanel(page);
+  await load(page, url, false);
+  await away();
+  const first = await hoverable(page);
+  const [file, folder] = [first.find((item) => item.kind === "module"), first.find((item) => item.kind === "package")];
+  const wide = await grows("접힌 파일 상자", file, "file");
+  if (folder === undefined) {
+    t.skip("접힌 폴더 상자에 마우스를 올리면 네 변이 나간다", "처음 화면에 접힌 폴더 상자가 없다");
+  } else {
+    await grows("접힌 폴더 상자", folder, "folder");
+  }
+  t.check("전환은 불투명도의 전환과 같은 200ms이고 will-change를 켜 두지 않는다", wide.on.duration === "0.2s" && wide.on.hint === "auto", `${wide.on.duration}, will-change ${wide.on.hint}`);
+
+  // 올린 채 화면 이동·배치 움직임 표시가 붙거나 화면을 끌면 원래 크기로 돌아간다.
+  const idle = await boxOf(file.id);
+  await over(file);
+  for (const [name, attribute] of [["화면 이동", "data-flying"], ["배치 움직임", "data-moving"]]) {
+    await page.evaluate((attribute) => document.querySelector(".graph").setAttribute(attribute, ""), attribute);
+    await page.waitForTimeout(400);
+    const held = await boxOf(file.id);
+    await page.evaluate((attribute) => document.querySelector(".graph").removeAttribute(attribute), attribute);
+    await page.waitForTimeout(400);
+    const back = await boxOf(file.id);
+    t.check(
+      `올린 채 관계 그래프 영역에 ${attribute}가 붙어 있는 동안(${name})에는 커지지 않고, 사라지면 다시 커진다`,
+      held.pointed && all(outBy(idle.body, held.body), 0) && all(outBy(idle.body, back.body), GROW * (await zoomOf(page))),
+      `붙은 동안 ${text(outBy(idle.body, held.body))}, 사라진 뒤 ${text(outBy(idle.body, back.body))}`,
+    );
+  }
+  await page.mouse.down();
+  await page.mouse.move(file.x + 40, file.y + 30, { steps: 4 });
+  await page.waitForTimeout(400);
+  const dragged = await boxOf(file.id);
+  const paneDragging = (await count(page, ".react-flow__pane.dragging")) === 1;
+  await page.mouse.up();
+  t.check(
+    "화면을 끄는 동안에는 커지지 않는다",
+    paneDragging && all(outBy(dragged.frame, dragged.body), 0),
+    `끄는 중 표시 ${paneDragging}, React Flow 노드에서 나간 길이 ${text(outBy(dragged.frame, dragged.body))}`,
+  );
+  await away();
+
+  // 움직임을 줄이는 설정에서는 전환 없이 바로 커진다.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const still = await hoverable(page);
+  const again = still.find((item) => item.id === file.id) ?? still.find((item) => item.kind === "module");
+  const rest = await boxOf(again.id);
+  await page.mouse.move(again.x, again.y);
+  await page.waitForFunction((id) => document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`).classList.contains("pointed"), again.id, { timeout: 3_000 });
+  const instant = await boxOf(again.id);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  t.check(
+    "움직임을 줄이는 설정에서는 전환 없이 바로 커진다",
+    instant.duration === "0s" && all(outBy(rest.body, instant.body), GROW * (await zoomOf(page))),
+    `전환 ${instant.duration}, 나간 길이 ${text(outBy(rest.body, instant.body))}`,
+  );
+  await away();
+
+  // 파일을 고른 화면: 함수 노드, 펼친 파일 상자의 머리 줄, 이웃과의 간격
+  await pick(page, FILE);
+  await away();
+  await settle(page);
+  const opened = await hoverable(page);
+  const inner = opened.filter((item) => item.kind === "function" && item.id.startsWith(`${FILE}:`));
+  const small = await grows("함수 노드", inner[0], "function");
+  t.check(
+    "넓은 파일 상자와 작은 함수 노드의 변이 확대하기 전 길이로 같은 만큼 나간다",
+    near(wide.out, small.out, 0.1),
+    `파일 상자 ${Math.round(wide.out * 100) / 100}px, 함수 ${Math.round(small.out * 100) / 100}px`,
+  );
+  await over(inner[0]);
+  const covered = await page.evaluate((id) => {
+    const own = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+    const grown = own.firstElementChild.getBoundingClientRect();
+    return [...document.querySelectorAll(".react-flow__node > .node-body:is(.node-function, .node-class, .node-dataclass)")]
+      .filter((other) => other.parentElement !== own)
+      .filter((other) => {
+        const rect = other.getBoundingClientRect();
+        return rect.left < grown.right && rect.right > grown.left && rect.top < grown.bottom && rect.bottom > grown.top;
+      })
+      .map((other) => other.parentElement.dataset.id);
+  }, inner[0].id);
+  await away();
+  t.check("커진 함수 노드가 이웃 노드와 겹치지 않는다", covered.length === 0, covered.join(", "));
+  const head = opened.find((item) => item.kind === "module-open" && item.id === FILE);
+  if (head === undefined) {
+    t.skip("펼친 파일 상자의 머리 줄에 올리면 상자가 커지지 않는다", "머리 줄의 이름표가 화면에 없다");
+  } else {
+    const before = await boxOf(head.id);
+    await over(head);
+    const on = await boxOf(head.id);
+    const child = await boxOf(inner[0].id);
+    await away();
+    t.check(
+      "펼친 파일 상자의 머리 줄에 올리면 상자와 안의 함수가 커지지 않는다",
+      on.pointed && same(on.body, before.body) && same(on.face, before.face) && all(outBy(child.frame, child.body), 0),
+      `${head.id}: 나간 길이 ${text(outBy(before.body, on.body))}`,
+    );
+  }
+
+  // 함수를 고른 화면: 흐린 함수 노드와 어두운 화면
+  await pick(page, FUNCTION);
+  await away();
+  await settle(page);
+  const faded = (await hoverable(page)).find((item) => item.kind === "function" && item.opacity === DIM);
+  if (faded === undefined) {
+    t.skip("흐린 함수 노드에 마우스를 올리면 네 변이 나간다", "이 화면에 이름표가 눌리는 흐린 함수 노드가 없다");
+  } else {
+    await grows("흐린 함수 노드", faded, "dim");
+    await theme("dark");
+    await grows("어두운 화면의 흐린 함수 노드", faded, "dark");
+    await theme("light");
+  }
+
+  // 펼친 폴더 영역의 머리 줄
+  await page.keyboard.press("Escape");
+  await settle(page);
+  const graph = await api("/api/graph");
+  const dir = graph.nodes.find((n) => n.kind === "package" && n.parent === null && !n.test);
+  if (dir === undefined) {
+    t.skip("펼친 폴더 영역의 머리 줄에 올리면 영역이 커지지 않는다", "소스 루트 바로 아래에 폴더가 없다");
+  } else {
+    await openFolder(page, dir.id);
+    await page.getByRole("button", { name: "화면 맞춤" }).click();
+    await away();
+    await settle(page);
+    const at = await page.evaluate((id) => {
+      const rect = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}#face"] .node-region-head .node-label`).getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }, dir.id);
+    const before = await boxOf(dir.id);
+    await over(at);
+    const on = await boxOf(dir.id);
+    await away();
+    t.check("펼친 폴더 영역의 머리 줄에 올리면 영역이 커지지 않는다", on.pointed && same(on.body, before.body) && same(on.face, before.face), `${dir.id}: 나간 길이 ${text(outBy(before.body, on.body))}`);
+  }
+
+  // 함수 시점 뷰의 노드
+  await pick(page, FILE);
+  await clickNode(page, FUNCTION, 2);
+  await page.waitForSelector(".node-call", { timeout: 30_000 });
+  await settle(page);
+  await away();
+  const call = await page.evaluate(() => {
+    const face = document.querySelector('.node-call[data-side="center"]').closest(".react-flow__node");
+    const rect = face.parentElement.querySelector(`[data-id="${CSS.escape(face.dataset.id.replace(/#face$/, ""))}#face"] .node-label`).getBoundingClientRect();
+    return { id: face.dataset.id.replace(/#face$/, ""), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  });
+  await grows("함수 시점 뷰의 노드", call, null);
+  await t.shot();
 }
 
 /**
@@ -8805,8 +9055,14 @@ async function panelHead(t, page) {
   const total = linksWords(fnLinks.out).total;
   await page.click('.info-row[data-row="out"] .info-link');
   await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
+  const heads = await count(page, ".info-panel-sites-head");
+  await spreadAll(page);
   const listed = await count(page, ".info-panel-site");
-  t.check("나가는 연결의 합계를 누르면 그 수만큼의 코드 줄 목록이 상대 노드마다 묶여 열린다", listed === total && (await count(page, ".info-panel-sites-name")) > 0, `코드 줄 ${listed}개, 합계 ${total}`);
+  t.check(
+    "나가는 연결의 합계를 누르면 상대 노드마다 묶음 줄 하나인 목록이 열리고, 묶음을 모두 펴면 코드 줄 수가 합계와 같다",
+    listed === total && heads === new Set(fnLinks.out.filter((e) => COUNTED.includes(e.kind)).map((e) => e.target)).size,
+    `묶음 줄 ${heads}개, 코드 줄 ${listed}개, 합계 ${total}`,
+  );
   await page.click(".info-panel-site >> nth=0");
   await page.waitForSelector(".info-panel .code .site-line, .info-panel .code [class*='highlight']", { timeout: 3_000 }).catch(() => {});
   t.check("코드 줄을 누르면 그 줄이 열린 줄로 표시된다", (await count(page, '.info-panel-site[aria-current="true"]')) === 1);
@@ -8819,6 +9075,7 @@ async function panelHead(t, page) {
   } else {
     await page.click('.info-row[data-row="out"] .info-more');
     await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
+    await spreadAll(page);
     t.check(
       "나가는 연결의 그 밖 묶음을 누르면 타입과 import 관계의 코드 줄 목록이 열린다",
       (await count(page, ".info-panel-site")) === others.rest && (await page.textContent('.info-row[data-row="out"] .info-more')) === others.more,
@@ -9006,6 +9263,220 @@ async function panelHead(t, page) {
   await page.click(`.tree-row.tree-file[data-node="${from}"]`);
   await waitSelected(page, from);
   t.check("노드를 고르면 폴더에 온 상태의 줄과 굵은 선이 사라진다", (await factsOf(page)).rows.every((row) => row.topic !== "연결") && (await viaLines(page)).every((line) => !line.via));
+  await t.shot();
+}
+
+/** 코드 뷰어 위의 칸 하나가 처음에 쓰는 높이의 상한을 패널 높이로 나눈 값(`--part-share`)과 코드 뷰어의 최소 높이(`MIN_CODE`) */
+const PART_SHARE = 0.25;
+const CODE_MIN = 96;
+/** 나가는 연결의 상대 노드가 많은 함수 */
+const LINKED = "arbiter:arbiter_sync";
+
+/** "정보" 구역의 코드 줄 목록. heads는 묶음 줄마다 이름, 관계 글, 코드 줄을 폈는지이고 inside는 목록이 "정보" 구역의 자손인지다. */
+const sitesOf = (page) =>
+  page.evaluate(() => {
+    const list = document.querySelector(".info-panel-sites");
+    const height = (selector) => document.querySelector(selector)?.getBoundingClientRect().height ?? 0;
+    return {
+      inside: list?.closest(".info-panel-facts") != null,
+      heads: [...document.querySelectorAll(".info-panel-sites-head")].map((head) => ({
+        name: head.querySelector(".info-panel-sites-name").textContent,
+        text: head.querySelector(".info-link").textContent,
+        spread: head.querySelector(".info-link").getAttribute("aria-expanded") === "true",
+      })),
+      sites: document.querySelectorAll(".info-panel-site").length,
+      height: list?.getBoundingClientRect().height ?? 0,
+      scrolls: list != null && list.scrollHeight > list.clientHeight && getComputedStyle(list).overflowY === "auto",
+      panel: height(".info-panel"),
+      summary: height(".info-panel-summary"),
+      code: height(".info-panel .code"),
+      pressed: [...document.querySelectorAll(".info-rows .info-link[aria-expanded='true']")].map((link) => link.closest(".info-row").dataset.row + (link.classList.contains("info-more") ? "-rest" : "")),
+    };
+  });
+
+/** 코드 줄 목록에서 접힌 묶음의 코드 줄을 모두 편다. */
+async function spreadAll(page) {
+  for (let left = await count(page, '.info-panel-sites-head .info-link[aria-expanded="false"]'); left > 0; left -= 1) {
+    await page.click('.info-panel-sites-head .info-link[aria-expanded="false"] >> nth=0');
+  }
+  await page.waitForTimeout(200);
+}
+
+/** "정보" 구역 안의 코드 줄 목록: 구역과 함께 접힘, 높이의 상한, 한 번에 하나, 묶음 줄을 본다. */
+async function factsList(t, page) {
+  await answerSummaryReads(page, () => ({ summary: longSummary(2), stale: false, available: true, reason: null }));
+  const graph = await api("/api/graph");
+  await load(page);
+  await pick(page, FILE);
+  await pick(page, LINKED);
+  await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+  await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 10_000 });
+  const links = crossing(graph, LINKED);
+  const counted = (edges) => edges.filter((e) => COUNTED.includes(e.kind));
+  const peers = (edges, end) => [...new Set(counted(edges).map((e) => e[end]))].map((id) => shortName(graph, id));
+  const shut = await sitesOf(page);
+
+  await page.click('.info-row[data-row="out"] .info-link');
+  await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
+  const out = await sitesOf(page);
+  t.check(
+    "나가는 연결의 합계를 누르면 상대 노드마다 한 줄인 목록이 정보 구역의 자손으로 열리고 코드 줄은 접혀 있다",
+    out.inside && same(out.heads.map((head) => head.name).sort(), peers(links.out, "target").sort()) && out.heads.every((head) => !head.spread && /\d(곳|줄)$/.test(head.text)) && out.sites === 0,
+    `정보 구역 안 ${out.inside}, 묶음 줄 ${out.heads.length}개, 코드 줄 ${out.sites}개, 첫 줄: ${out.heads[0]?.name} ${out.heads[0]?.text}`,
+  );
+  t.check("열린 목록의 합계에 aria-expanded와 밑줄이 붙는다", same(out.pressed, ["out"]) && (await factsOf(page)).rows.find((row) => row.id === "out").link.line === "underline", out.pressed.join(", "));
+  const cap = out.panel * PART_SHARE;
+  t.check(
+    "상대 노드가 많아도 목록의 높이가 패널 높이의 4분의 1을 넘지 않고 목록 안에서 스크롤되며 요약 칸은 그대로다",
+    out.height <= cap + 1 && out.scrolls && near(out.summary, shut.summary, 1) && out.code >= CODE_MIN,
+    `목록 ${out.height.toFixed(0)} (상한 ${cap.toFixed(0)}), 요약 칸 ${shut.summary.toFixed(0)} → ${out.summary.toFixed(0)}, 코드 뷰어 ${shut.code.toFixed(0)} → ${out.code.toFixed(0)}`,
+  );
+  await page.mouse.move(1, 1);
+  await page.screenshot({ path: HF4("facts-after") });
+
+  // 묶음 줄의 관계를 눌러 코드 줄을 편다
+  await page.focus(".info-panel-sites-head .info-link >> nth=0");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(".info-panel-site", { timeout: 5_000 }).catch(() => {});
+  const one = await sitesOf(page);
+  t.check("묶음 줄의 관계에 초점을 두고 Enter를 누르면 그 묶음의 코드 줄만 펴진다", one.heads[0].spread && one.heads.filter((head) => head.spread).length === 1 && one.sites > 0, `편 묶음 ${one.heads.filter((head) => head.spread).length}개, 코드 줄 ${one.sites}개`);
+  await page.click(".info-panel-site >> nth=0");
+  await page.waitForSelector(".info-panel .monaco-editor .code-range", { timeout: 30_000 }).catch(() => {});
+  t.check("코드 줄을 누르면 코드 뷰어가 그 줄을 열고 열린 줄로 표시한다", (await count(page, '.info-panel-site[aria-current="true"]')) === 1 && (await count(page, ".info-panel .monaco-editor .code-range")) > 0);
+  await spreadAll(page);
+  const all = await sitesOf(page);
+  t.check(
+    "묶음을 모두 펴면 코드 줄 수가 합계와 같고 목록의 높이는 상한 그대로다",
+    all.sites === linksWords(links.out).total && all.height <= cap + 1 && all.scrolls && all.code >= CODE_MIN,
+    `코드 줄 ${all.sites}개, 합계 ${linksWords(links.out).total}, 목록 ${all.height.toFixed(0)}, 코드 뷰어 ${all.code.toFixed(0)}`,
+  );
+
+  // 구역 접기
+  await page.click(".info-panel-facts .info-section-head");
+  await page.waitForTimeout(300);
+  const folded = await sitesOf(page);
+  t.check(
+    "정보 구역을 접으면 목록이 함께 사라지고 코드 뷰어가 그만큼 커진다",
+    (await count(page, ".info-panel-sites")) === 0 && (await factsOf(page)).brief.includes("나가는 연결") && folded.code > shut.code,
+    `코드 뷰어 ${all.code.toFixed(0)} → ${folded.code.toFixed(0)}, 한 줄: ${(await factsOf(page)).brief}`,
+  );
+  await page.mouse.move(1, 1);
+  await page.screenshot({ path: HF4("facts-folded") });
+  await page.click(".info-panel-facts .info-section-head");
+  await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
+  const unfolded = await sitesOf(page);
+  t.check(
+    "구역을 다시 펴면 열어 둔 목록과 편 묶음, 연 코드 줄이 그대로 돌아온다",
+    same(unfolded.pressed, ["out"]) && unfolded.sites === all.sites && unfolded.heads.every((head) => head.spread) && (await count(page, '.info-panel-site[aria-current="true"]')) === 1,
+    `열린 합계 ${unfolded.pressed.join(", ")}, 코드 줄 ${unfolded.sites}개`,
+  );
+
+  // 한 번에 하나
+  if (counted(links.into).length === 0) {
+    t.skip("들어오는 연결의 합계를 누르면 나가는 연결의 목록이 닫히고 들어오는 연결의 목록이 열린다", "고른 함수로 들어오는 세는 관계가 없다");
+  } else {
+    await page.click('.info-row[data-row="into"] .info-link');
+    await page.waitForTimeout(300);
+    const into = await sitesOf(page);
+    t.check(
+      "들어오는 연결의 합계를 누르면 나가는 연결의 목록이 닫히고 같은 곳에 들어오는 연결의 목록이 열린다",
+      (await count(page, ".info-panel-sites")) === 1 && same(into.pressed, ["into"]) && same(into.heads.map((head) => head.name).sort(), peers(links.into, "source").sort()) && into.sites === 0,
+      `열린 합계 ${into.pressed.join(", ")}, 묶음 줄 ${into.heads.map((head) => `${head.name} ${head.text}`).join(" / ")}`,
+    );
+    await page.click('.info-row[data-row="into"] .info-link');
+    await page.waitForTimeout(200);
+    t.check("열린 합계를 다시 누르면 목록이 닫힌다", (await count(page, ".info-panel-sites")) === 0 && (await sitesOf(page)).pressed.length === 0);
+  }
+  if (linksWords(links.out).rest === 0) {
+    t.skip("그 밖 묶음을 누르면 합계의 목록 대신 그 밖의 관계의 목록이 열린다", "고른 함수에서 나가는 import·타입 관계가 없다");
+  } else {
+    await page.click('.info-row[data-row="out"] .info-link');
+    await page.click('.info-row[data-row="out"] .info-more');
+    await page.waitForTimeout(300);
+    const rest = await sitesOf(page);
+    await spreadAll(page);
+    t.check(
+      "그 밖 묶음을 누르면 합계의 목록 대신 그 밖의 관계의 목록이 정보 구역 안에 열린다",
+      rest.inside && same(rest.pressed, ["out-rest"]) && (await count(page, ".info-panel-sites")) === 1 && (await sitesOf(page)).sites === linksWords(links.out).rest,
+      `열린 글 ${rest.pressed.join(", ")}, 묶음 줄 ${rest.heads.length}개, 코드 줄 ${(await sitesOf(page)).sites}개`,
+    );
+  }
+
+  // 어두운 화면, 낮은 패널
+  await page.click('.info-row[data-row="out"] .info-link');
+  await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
+  await page.click(".info-panel-sites-head .info-link >> nth=1");
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.mouse.move(1, 1);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: HF4("facts-dark") });
+  await page.getByRole("button", { name: "밝은 화면" }).click();
+  await spreadAll(page);
+  const tall = await sitesOf(page);
+  await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="s"]')), 0, -(tall.panel - 420));
+  await page.waitForTimeout(400);
+  const low = await sitesOf(page);
+  t.check(
+    "패널의 높이를 줄여도 목록은 줄어든 패널 높이의 4분의 1 안에서 스크롤되고 코드 뷰어가 최소 높이를 지킨다",
+    low.panel < tall.panel - 100 && low.height <= low.panel * PART_SHARE + 1 && low.scrolls && low.code >= CODE_MIN - 1 && (await factsOf(page)).rows.length > 0,
+    `패널 ${tall.panel.toFixed(0)} → ${low.panel.toFixed(0)}, 목록 ${low.height.toFixed(0)}, 요약 칸 ${low.summary.toFixed(0)}, 코드 뷰어 ${low.code.toFixed(0)}`,
+  );
+  await page.mouse.move(1, 1);
+  await page.screenshot({ path: HF4("facts-short-panel") });
+  await page.dblclick(".info-panel-head");
+  await settle(page);
+
+  // 묶음 줄의 이름을 눌러 그 노드로 간다
+  const first = (await sitesOf(page)).heads[0].name;
+  const target = counted(links.out).map((e) => e.target).find((id) => shortName(graph, id) === first);
+  await page.click(".info-panel-sites-name >> nth=0");
+  await waitSelected(page, target);
+  t.check(
+    "묶음 줄의 이름을 누르면 그 노드를 고르고, 노드가 바뀌면 열린 목록이 닫힌다",
+    (await selectedOf(page)) === target && (await factsOf(page)).name === first && (await count(page, ".info-panel-sites")) === 0 && (await sitesOf(page)).pressed.length === 0,
+    `선택 ${await selectedOf(page)}, 이름 줄 ${(await factsOf(page)).name}`,
+  );
+
+  // 파일 상자: 상대 노드가 든 파일마다 한 줄
+  await page.click(`.tree-row.tree-file[data-node="${FILE}"]`);
+  await waitSelected(page, FILE);
+  await page.click('.info-row[data-row="out"] .info-link');
+  await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
+  const fileOut = await sitesOf(page);
+  const texts = fileOut.heads.map((head) => head.text);
+  await spreadAll(page);
+  const fileAll = await sitesOf(page);
+  t.check(
+    "파일을 고르면 묶음 줄이 상대 파일마다 하나이고, 모두 펴도 목록이 상한 안에서 스크롤된다",
+    fileOut.heads.length > 0 && texts.every((text) => /\d곳$/.test(text)) && fileAll.sites === linksWords(crossing(graph, FILE).out).total && fileAll.height <= fileAll.panel * PART_SHARE + 1 && fileAll.scrolls,
+    `묶음 줄 ${fileOut.heads.map((head) => `${head.name} ${head.text}`).slice(0, 3).join(" / ")}, 코드 줄 ${fileAll.sites}개, 목록 ${fileAll.height.toFixed(0)}, 코드 뷰어 ${fileAll.code.toFixed(0)}`,
+  );
+  await page.mouse.move(1, 1);
+  await page.screenshot({ path: HF4("facts-file") });
+
+  // 폴더가 여러 겹인 레포의 큰 파일
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서 나가는 연결이 가장 많은 파일의 목록도 상한 안에서 스크롤된다", "--wide-url을 주지 않았다");
+  } else {
+    const wide = await api("/api/graph", wideUrl);
+    await openWide(page);
+    const rows = await page.evaluate(() => [...document.querySelectorAll(".tree-row.tree-file[data-node]")].map((row) => row.dataset.node));
+    const sized = rows.map((id) => ({ id, total: linksWords(crossing(wide, id).out).total })).sort((a, b) => b.total - a.total)[0];
+    await page.click(`.tree-row.tree-file[data-node="${sized.id}"]`);
+    await waitSelected(page, sized.id);
+    await page.waitForSelector(".info-panel .monaco-editor .line-numbers", { timeout: 30_000 });
+    await page.click('.info-row[data-row="out"] .info-link');
+    await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
+    await spreadAll(page);
+    const big = await sitesOf(page);
+    t.check(
+      "폴더가 여러 겹인 레포에서 나가는 연결이 가장 많은 파일의 목록도 상한 안에서 스크롤된다",
+      big.inside && big.sites === sized.total && big.height <= big.panel * PART_SHARE + 1 && big.scrolls && big.code >= CODE_MIN,
+      `${sized.id}: 묶음 줄 ${big.heads.length}개, 코드 줄 ${big.sites}개, 목록 ${big.height.toFixed(0)} (상한 ${(big.panel * PART_SHARE).toFixed(0)}), 코드 뷰어 ${big.code.toFixed(0)}`,
+    );
+    await page.mouse.move(1, 1);
+    await page.screenshot({ path: HF4("facts-wide") });
+  }
   await t.shot();
 }
 
@@ -10698,6 +11169,7 @@ const SCENARIOS = [
   ["arranging", arranging],
   ["node-hover", nodeHover],
   ["hover-step", hoverStep],
+  ["node-grow", nodeGrow],
   ["dim", dim],
   ["merge", merge],
   ["merge-out", mergeOut],
@@ -10722,6 +11194,7 @@ const SCENARIOS = [
   ["line-folder", lineFolder],
   ["line-bubble", lineBubble],
   ["panel-head", panelHead],
+  ["facts-list", factsList],
   ["motion", motion],
   ["folder-hold", folderHold],
   ["progress", progress],
@@ -10737,6 +11210,7 @@ const STAGE4 = new Set([
   "arranging",
   "node-hover",
   "hover-step",
+  "node-grow",
   "dim",
   "merge",
   "merge-out",
@@ -10761,6 +11235,7 @@ const STAGE4 = new Set([
   "line-folder",
   "line-bubble",
   "panel-head",
+  "facts-list",
   "motion",
   "folder-hold",
   "progress",

@@ -88,6 +88,18 @@ export function flowNodes<D extends AtlasNodeData>(items: Drawn<D>[], at: Map<st
  */
 export const POINTED = "pointed";
 
+/**
+ * 마우스를 올린 잎 노드의 변이 바깥으로 나가는 길이(확대하기 전 px). 마우스를 올린 선은 한쪽으로 0.5px씩 굵어지므로 그보다 눈에 띄게 크고,
+ * 위아래 이웃과의 간격(layout.ts의 `NODE_GAP`)의 절반인 12px보다 작아 이웃을 덮지 않는 범위에서 사진으로 고른 값이다. 비율이 아닌 길이로 두어
+ * 넓은 파일 상자와 작은 함수 노드가 같은 길이만큼 커진다.
+ */
+export const GROW = 2;
+
+/** 폭 width, 높이 height인 노드의 네 변이 `GROW`만큼 나가는 가로·세로 확대 비율 */
+export function grown(width: number, height: number): { x: number; y: number } {
+  return { x: (width + 2 * GROW) / width, y: (height + 2 * GROW) / height };
+}
+
 /** 노드 위의 요소 target이 눌리는 곳인지. 펼친 파일 상자와 폴더 영역은 머리 줄만 눌린다. */
 export function pressable(data: AtlasNodeData, target: EventTarget): boolean {
   const container = data.expanded && (data.node.kind === "module" || data.node.kind === "package");
@@ -98,6 +110,7 @@ export function pressable(data: AtlasNodeData, target: EventTarget): boolean {
  * 마우스를 올린 노드 id의 React Flow 노드를 선의 hover처럼 진하기를 한 단계 올린(`scope.ts`의 `lifted`) 목록. 노드의 진하기는 muted 잉크
  * 테두리에 그 노드의 불투명도이므로 흐린 노드는 불투명도만 한 단계 오르고, 불투명도 100%인 노드는 테두리가 본문 잉크가 된다.
  * 굵은 이름표와 옅은 빛은 `POINTED` 클래스가 진하기와 관계없이 준다. 펼친 파일 상자와 폴더 영역은 머리 줄을 그리는 글자 요소만 바꾼다.
+ * 안에 보이는 자식이 없는 잎 노드는 두 요소에 확대 비율(`grown`)을 `--grow-x`·`--grow-y`로 넣고, styles.css가 그 비율로 노드를 키운다.
  * 다른 노드는 같은 객체를 그대로 돌려주므로 다시 그리지 않는다.
  */
 export function pointing<D extends AtlasNodeData>(nodes: Node<D>[], id: string | null): Node<D>[] {
@@ -111,7 +124,9 @@ export function pointing<D extends AtlasNodeData>(nodes: Node<D>[], id: string |
       return node;
     }
     const { tone, opacity } = lifted({ tone: "muted", opacity: Number(node.style?.opacity ?? 1) });
-    return { ...node, className: tone === "strong" ? `${POINTED} tone-strong` : POINTED, style: { ...node.style, opacity } };
+    const scale = node.data.expanded ? null : grown(node.width ?? 0, node.height ?? 0);
+    const grow = scale === null || !Number.isFinite(scale.x + scale.y) ? {} : { "--grow-x": scale.x, "--grow-y": scale.y };
+    return { ...node, className: tone === "strong" ? `${POINTED} tone-strong` : POINTED, style: { ...node.style, opacity, ...grow } };
   });
 }
 

@@ -1308,6 +1308,34 @@ ul {
   text-shadow: 0 0 2px color-mix(in srgb, var(--ink) 45%, transparent);
 }
 
+/* 마우스를 올린 잎 노드는 올린 동안 네 변이 nodes/common.tsx의 GROW만큼 바깥으로 나가게 커진다. 노드의 폭과 높이에서 구한 가로·세로 확대 비율을
+   pointing이 --grow-x·--grow-y로 넣고, 바탕 요소와 글자 요소가 같은 비율을 받는다. 원과 함수 시점 뷰의 모양은 가로를 세로 비율에 맞춰
+   둥근 모양을 지킨다. React Flow 노드의 위치와 크기는 그대로여서 배치와 선은 바뀌지 않는다. 화면 이동, 배치 움직임, 화면을 끄는 동안에는
+   키우지 않는다. 펼친 상자와 폴더 영역은 비율을 받지 않는다. */
+.react-flow__node > :is(.node-body, .node-face),
+.react-flow__node :is(.node-circle, .call-shape) {
+  transition: transform 200ms ease-out;
+}
+
+.react-flow__node :is(.node-circle, .call-shape) {
+  transform-origin: left center;
+}
+
+.graph:not([data-flying], [data-moving]) .react-flow__pane:not(.dragging) .react-flow__node.pointed > :is(.node-body, .node-face) {
+  transform: scale(var(--grow-x, 1), var(--grow-y, 1));
+}
+
+.graph:not([data-flying], [data-moving]) .react-flow__pane:not(.dragging) .react-flow__node.pointed :is(.node-circle, .call-shape) {
+  transform: scaleX(calc(var(--grow-y, 1) / var(--grow-x, 1)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__node > :is(.node-body, .node-face),
+  .react-flow__node :is(.node-circle, .call-shape) {
+    transition: none;
+  }
+}
+
 /* 이름표는 확대 비율 구간에 따라 숨긴다. 40% 미만은 폴더·파일 이름만, 80% 미만은 클래스·데이터 클래스 이름까지 보인다.
    초점 상태에서 흐름에 든 노드와 선택한 노드가 든 파일 상자 안의 노드는 이름표가 확대 비율과 관계없이 보인다. */
 .graph[data-zoom="0"] :is(.node-class, .node-dataclass, .node-function):not([data-flow], [data-local]) :is(.node-label, .loc),
@@ -2001,7 +2029,9 @@ button.line-cell:focus-visible {
   pointer-events: none;
 }
 
+/* --part-share는 코드 뷰어 위의 칸 하나(LLM 요약 칸, "정보" 구역의 코드 줄 목록)가 처음에 쓰는 높이의 상한을 패널 높이로 나눈 값이다. */
 .info-panel {
+  --part-share: 0.25;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2122,15 +2152,24 @@ button.line-cell:focus-visible {
   text-overflow: ellipsis;
 }
 
-/* "정보" 구역. 주제 칸은 가장 긴 주제의 폭에 맞추고 내용 칸이 남은 폭을 쓴다. */
+/* "정보" 구역. 주제 칸은 가장 긴 주제의 폭에 맞추고 내용 칸이 남은 폭을 쓴다. 구역 머리와 줄 목록은 내용만큼 쓰고,
+   패널의 높이가 모자라면 그 아래의 코드 줄 목록이 줄어든다. */
 .info-panel-facts {
-  flex: none;
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
   padding: 7px 12px;
   border-top: 1px solid var(--line);
 }
 
+.info-panel-facts > * {
+  flex: none;
+}
+
 .info-rows {
   display: grid;
+  align-self: stretch;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 3px 14px;
   margin: 5px 0 0;
@@ -2169,7 +2208,7 @@ button.line-cell:focus-visible {
   text-underline-offset: 2px;
 }
 
-/* 코드 뷰어가 없으면 요약 칸이 패널의 남은 높이를 쓰고, 있으면 패널 높이의 4분의 1까지만 쓴다. 넘치는 설명은 칸 안에서 스크롤한다.
+/* 코드 뷰어가 없으면 요약 칸이 패널의 남은 높이를 쓰고, 있으면 패널 높이의 4분의 1(--part-share)까지만 쓴다. 넘치는 설명은 칸 안에서 스크롤한다.
    사용자가 경계선을 끌어 높이를 정했으면 요약 칸은 내용의 길이와 무관하게 그 높이를 쓴다. 접은 요약 칸은 구역 머리 한 줄만 쓴다. */
 .info-panel-summary {
   flex: 1 1 0;
@@ -2212,7 +2251,7 @@ button.line-cell:focus-visible {
 
 .info-panel-summary:has(~ .code) {
   flex: 0 1 auto;
-  max-height: 25%;
+  max-height: calc(var(--part-share) * 100%);
 }
 
 .info-panel-summary[data-sized] {
@@ -2347,33 +2386,68 @@ ol.summary-list {
   color: var(--ink);
 }
 
-.info-panel-sites {
+/* "정보" 구역의 줄 목록 아래에 그리는 코드 줄 목록. 내용만큼 쓰고 넘치는 줄은 목록 안에서 스크롤한다. 코드 뷰어가 함께 열려 있으면
+   LLM 요약 칸의 처음 높이와 같은 상한(패널 높이의 --part-share)까지만 쓰고, 목록이 열린 동안 코드 뷰어는 최소 높이(--code-min)를 지킨다. */
+.info-panel-facts > .info-panel-sites {
   flex: 0 1 auto;
+  align-self: stretch;
   min-height: 0;
-  padding: 4px 8px;
+  margin: 5px -4px 0;
+  padding: 3px 0 0;
   border-top: 1px solid var(--line);
-  overflow: auto;
+  line-height: 1.5;
+  overflow-y: auto;
 }
 
-/* 줄기를 골랐을 때 출발 노드마다 묶은 지점 목록의 묶음 이름 */
+.info-panel-facts:has(~ .code) > .info-panel-sites {
+  max-height: calc(var(--part-share) * var(--panel-height));
+}
+
+.info-panel-facts:has(> .info-panel-sites) ~ .code {
+  flex-shrink: 0;
+  min-height: var(--code-min);
+}
+
+/* 묶음 줄. 묶은 노드의 이름은 넘치면 줄이고, 그 묶음의 관계는 끝까지 적는다. */
+.info-panel-sites-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 0 4px;
+}
+
 .info-panel-sites-name {
-  padding: 4px 4px 1px;
-  font-weight: 600;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.info-panel-sites:has(~ .code) {
-  max-height: 40%;
+.info-panel-sites-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.info-panel-sites-head > .info-link {
+  flex: none;
 }
 
 .info-panel-site {
   display: block;
   width: 100%;
-  padding: 1px 4px;
+  padding: 0 4px;
   border-radius: 2px;
   overflow: hidden;
   text-align: left;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.info-panel-sites-head + ul .info-panel-site {
+  padding-left: 14px;
 }
 
 .info-panel-site:hover {
