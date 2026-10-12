@@ -5741,7 +5741,7 @@ async function mergeOut(t, page) {
   t.check(
     `선 ${spot.keys.length}개가 든 나가는 줄기의 출발 노드 쪽에 올리면 줄기와 그 선이 모두 본문 잉크로 다른 선 위의 층에 그려지고, 말풍선은 합계 줄 없이 선마다 한 줄이다`,
     stem.pointed && stem.tone === "strong" && stem.layer === "5" && same(await pointedLines(page), spot.keys) && (await linesOf(page)).filter((line) => line.pointed).every((line) => line.stroke === ink) &&
-      rows.length === spot.keys.length && rows.every((row) => / → .+ · \d+곳$/.test(row)),
+      rows.length === spot.keys.length && rows.every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
     rows.join(" / "),
   );
   t.check("나가는 줄기 위에는 수를 적지 않는다", (await count(page, '.edge-trunk[data-end="out"] text')) === 0);
@@ -6155,10 +6155,9 @@ async function packFile(t, page) {
   const handle = await rectOf(page, `.node-pack[data-box="${file.id}"]`);
   const drawnBoxes = await flowBoxes(page);
   const lowest = Math.max(...first.map((id) => drawnBoxes[id].y));
-  const leftmost = Math.min(...first.map((id) => drawnBoxes[id].x));
   t.check(
-    "손잡이는 첫 열의 맨 아래에 놓인다",
-    near(drawnBoxes[`${file.id}#pack`].x, leftmost) && drawnBoxes[`${file.id}#pack`].y > lowest,
+    "손잡이는 상자 안 왼쪽 아래, 그린 정의 아래에 놓인다",
+    near(drawnBoxes[`${file.id}#pack`].x, drawnBoxes[file.id].x + 16) && drawnBoxes[`${file.id}#pack`].y > lowest,
     `손잡이 (${Math.round(drawnBoxes[`${file.id}#pack`].x)}, ${Math.round(drawnBoxes[`${file.id}#pack`].y)})`,
   );
   await t.shot();
@@ -6974,7 +6973,9 @@ async function overlap(t, page) {
   await t.shot();
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
-  t.check("Esc는 목록을 먼저 닫고 선택을 바꾸지 않는다", (await menuOf(page)) === null && (await selectedOf(page)) === null && (await count(page, ".edge[data-pointed]")) === 0);
+  // 목록이 닫힌 뒤 커서 밑에 선이 있으면 그 선의 hover가 다시 뜬다.
+  const onLine = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest(".react-flow__edge") != null, [item.x + item.width / 2, item.y + item.height / 2]);
+  t.check("Esc는 목록을 먼저 닫고 선택을 바꾸지 않는다", (await menuOf(page)) === null && (await selectedOf(page)) === null && (onLine || (await count(page, ".edge[data-pointed]")) === 0), `커서 밑에 선 ${onLine}`);
 
   await page.mouse.click(spot.x, spot.y);
   await page.waitForSelector(".line-menu", { timeout: 3_000 }).catch(() => {});
