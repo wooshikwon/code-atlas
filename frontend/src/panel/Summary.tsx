@@ -53,13 +53,14 @@ function briefOf(state: SummaryState): string {
 }
 
 /**
- * 요약을 만들지 못하는 까닭. 환경 점검의 값에서 Claude Code를 쓰지 못하는 경우를 읽어 설치 명령이나 로그인하는 방법을 함께 적고,
- * 그 값을 아직 받지 않았거나 까닭이 Claude Code 밖에 있으면 서버가 적은 까닭만 적는다.
+ * 요약을 만들지 못하는 까닭. 서버가 까닭과 함께 준 경우(code)가 Claude Code의 것이면 설치 명령이나 로그인하는 방법을 함께 적고,
+ * 실행하지 못한 경로와 로그인에 쓸 경로는 환경 점검의 값에서 읽는다. 환경 점검의 값을 아직 받지 않았거나 화면이 모르는 경우면
+ * 서버가 적은 까닭만 적는다.
  */
-function Unavailable({ node, reason }: { node: string; reason: string }) {
+function Unavailable({ node, reason, code }: { node: string; reason: string; code: string | null }) {
   const claude = useTools((s) => s.tools?.claude ?? null);
   const busy = useTools((s) => s.busy);
-  const state = claude === null ? null : claudeState(claude);
+  const state = claude === null || code === null ? null : claudeState(code, claude);
 
   useEffect(() => {
     const tools = useTools.getState();
@@ -77,7 +78,7 @@ function Unavailable({ node, reason }: { node: string; reason: string }) {
 
   return (
     <div className="summary-unavailable">
-      {state === null || state.kind === "ready" ? <span className="tools-trouble">{reason}</span> : <ClaudeHelp state={state} />}
+      {state === null || state.kind === "ready" ? <span className="tools-trouble">{reason}</span> : <ClaudeHelp state={state} said={reason} />}
       <span className="summary-fixes">
         <button className="summary-action" disabled={busy} onClick={recheck}>
           다시 확인
@@ -157,7 +158,7 @@ export function Summary({ node, split }: SummaryProps) {
           </button>
         </>
       )}
-      {state.phase === "unavailable" && <Unavailable node={node} reason={state.reason} />}
+      {state.phase === "unavailable" && <Unavailable node={node} reason={state.reason} code={state.code} />}
     </div>
   );
 }

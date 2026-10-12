@@ -147,8 +147,10 @@ export interface SummaryStatus {
   stale: boolean;
   /** Claude Code CLI를 부를 수 있는지 */
   available: boolean;
-  /** 부를 수 없는 까닭 */
+  /** 부를 수 없는 까닭. 보이기만 한다. */
   reason: string | null;
+  /** 부를 수 없는 경우. 까닭이 없으면 null, 서술 규약 문서를 읽지 못하면 `style_guide_unreadable`, 그 밖에는 `claude`를 찾은 결과의 값이다. */
+  code: Code | "style_guide_unreadable" | null;
 }
 
 export interface MadeSummary {
@@ -275,13 +277,44 @@ export interface Status {
 }
 
 /** 도구의 후보 하나를 실행해 본 결과 */
+/**
+ * 도구를 찾은 기록과 결과의 경우를 가리는 값. 화면은 이 값으로 경우를 가르고 `detail`과 `note`의 글은 보이기만 한다.
+ * 서버(`tools.py`)가 내는 값은 이 목록뿐이다.
+ */
+export const CODES = [
+  "ok",
+  "not_found",
+  "missing",
+  "not_file",
+  "not_executable",
+  "no_clt",
+  "timeout",
+  "spawn_failed",
+  "failed",
+  "unreadable",
+  "not_on_path",
+  "manager_missing",
+  "manager_failed",
+  "manager_no_env",
+  "disabled",
+  "shell_pending",
+  "home_mismatch",
+  "user_mismatch",
+  "no_keychain_command",
+  "not_logged_in",
+  "not_answering",
+] as const;
+
+export type Code = (typeof CODES)[number];
+
 export interface Attempt {
   /** 후보의 출처: 저장한 경로(saved), 환경(env), 알려진 위치(known) */
   source: string;
   path: string | null;
   ok: boolean;
-  /** 판 번호나 통과하지 못한 까닭 */
+  /** 판 번호나 통과하지 못한 까닭. 보이기만 한다. */
   detail: string;
+  code: Code;
 }
 
 /** 도구 하나를 찾은 결과 */
@@ -294,8 +327,10 @@ export interface Found {
   /** 통과한 후보의 출처 */
   source: string | null;
   attempts: Attempt[];
-  /** 경로는 통과했지만 쓰지 못하는 까닭 */
+  /** 경로는 통과했지만 쓰지 못하는 까닭. 보이기만 한다. */
   note: string | null;
+  /** 쓸 수 있으면 `ok`. 경로가 없으면 그 위치에 없다는 기록이 아닌 첫 기록의 값이고, 그런 기록이 없으면 `not_found`다. */
+  code: Code;
   /** claude만: CLI가 알려 준 로그인 방법 */
   auth: string | null;
   /** python만: `sys.prefix` */

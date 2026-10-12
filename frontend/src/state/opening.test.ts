@@ -25,6 +25,7 @@ const found = (extra: Partial<Found> = {}): Found => ({
   auth: null,
   prefix: "/repos/shop/.venv",
   venv: true,
+  code: "ok",
   ...extra,
 });
 
@@ -39,7 +40,7 @@ const probe = (extra: Partial<Probe> = {}): Probe => ({
   ...extra,
 });
 
-const missing = found({ path: null, version: null, source: null, prefix: null, venv: null, attempts: [{ source: "env", path: null, ok: false, detail: "가상환경 폴더가 없다" }] });
+const missing = found({ path: null, version: null, source: null, prefix: null, venv: null, attempts: [{ source: "env", path: null, ok: false, detail: "가상환경 폴더가 없다", code: "missing" }], code: "not_found" });
 const system = found({ path: "/opt/homebrew/bin/python3.13", source: null, prefix: "/opt/homebrew", venv: false });
 
 const store = () => useOpening.getState();

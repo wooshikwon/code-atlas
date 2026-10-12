@@ -13859,8 +13859,10 @@ const CLAUDE_LOGIN = "claude auth login";
 const FIXED_CLAUDE = "/Users/me/.nvm/versions/node/v22.17.0/bin/claude";
 const CLAUDE_PLACES = ["/Users/me/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/Users/me/.volta/bin/claude", "/Users/me/.asdf/shims/claude"];
 
-const tried = (source, path, ok, detail) => ({ source, path, ok, detail });
-const toolFound = (tool, fields = {}) => ({ tool, path: null, version: null, source: null, attempts: [], note: null, auth: null, prefix: null, venv: null, ...fields });
+/** 시도 기록. code를 주지 않으면 통과한 기록은 `ok`, 아니면 없는 파일(`missing`)이다. */
+const tried = (source, path, ok, detail, code = ok ? "ok" : "missing") => ({ source, path, ok, detail, code });
+/** 도구를 찾은 결과. code를 주지 않으면 경로가 있을 때 `ok`, 없을 때 `not_found`다. */
+const toolFound = (tool, fields = {}) => ({ tool, path: null, version: null, source: null, attempts: [], note: null, auth: null, prefix: null, venv: null, code: fields.path == null ? "not_found" : "ok", ...fields });
 /** 알려진 위치 다섯 곳에 없고 nvm의 Node 폴더에서 찾은 `claude` */
 const claudeFound = (fields = {}) =>
   toolFound("claude", {
@@ -13906,8 +13908,8 @@ async function answerTools(page, state) {
       if (method === "PUT") {
         const { path } = request.postDataJSON();
         if (!state.runnable.has(path)) {
-          const attempt = tried("saved", path, false, "실행 권한 없음");
-          return route.fulfill({ status: 400, json: { error: `실행하지 못했다: ${path} (${attempt.detail})`, attempt } });
+          const attempt = tried("saved", path, false, "실행 권한 없음", "not_executable");
+          return route.fulfill({ status: 400, json: { error: `실행하지 못했다: ${path} (${attempt.detail})`, code: attempt.code, attempt } });
         }
         state.tools[tool] = toolFound(tool, { path, version: "9.9.9", source: "saved", attempts: [tried("saved", path, true, "9.9.9")], auth: tool === "claude" ? "claude.ai" : null });
       } else {
@@ -14134,8 +14136,10 @@ async function toolsMissing(t, page) {
   t.expected.push("404");
   /** 요약 칸이 받는 요약을 만들지 못하는 까닭 */
   let reason = "Claude Code CLI를 찾지 못했다";
+  /** 요약 칸이 까닭과 함께 받는 경우 */
+  let code = "not_found";
   await answerTools(page, state);
-  await answerSummaryReads(page, () => ({ summary: null, stale: false, available: false, reason }));
+  await answerSummaryReads(page, () => ({ summary: null, stale: false, available: false, reason, code }));
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   state.tools.claude = toolFound("claude", { attempts: [...CLAUDE_PLACES, FIXED_CLAUDE].map((path) => tried("known", path, false, "없는 파일")) });
   await openWithTools(page, state, dirs.shop);
@@ -14149,7 +14153,7 @@ async function toolsMissing(t, page) {
     page.evaluate(() => {
       const box = document.querySelector(".summary-unavailable");
       const texts = (selector) => [...box.querySelectorAll(selector)].map((element) => element.textContent.trim());
-      return { trouble: texts(".tools-trouble"), commands: texts(".tools-command code"), buttons: texts("button"), text: box.innerText };
+      return { trouble: texts(".tools-trouble"), notes: texts(".tools-note"), commands: texts(".tools-command code"), buttons: texts("button"), text: box.innerText };
     });
   /** 요약 칸의 다시 확인으로 값을 다시 받게 하고 까닭이 line으로 바뀔 때까지 기다린다. */
   const recheck = async (line) => {
@@ -14189,8 +14193,10 @@ async function toolsMissing(t, page) {
   await closeTools(page);
 
   const brokenLine = "Claude Code CLI를 실행하지 못했다: /opt/homebrew/bin/claude (종료 코드 127: env: node: No such file or directory)";
+  code = "failed";
   state.tools.claude = toolFound("claude", {
-    attempts: [tried("known", CLAUDE_PLACES[0], false, "없는 파일"), tried("known", CLAUDE_PLACES[1], false, "종료 코드 127: env: node: No such file or directory"), tried("known", CLAUDE_PLACES[2], false, "없는 파일")],
+    code,
+    attempts: [tried("known", CLAUDE_PLACES[0], false, "없는 파일"), tried("known", CLAUDE_PLACES[1], false, "종료 코드 127: env: node: No such file or directory", code), tried("known", CLAUDE_PLACES[2], false, "없는 파일")],
   });
   const broken = await recheck(brokenLine);
   const brokenRow = (await rows()).claude;
@@ -14202,7 +14208,8 @@ async function toolsMissing(t, page) {
   await closeTools(page);
 
   reason = "Claude Code에 로그인돼 있지 않다";
-  state.tools.claude = claudeFound({ note: reason, auth: null });
+  code = "not_logged_in";
+  state.tools.claude = claudeFound({ note: reason, auth: null, code });
   const out = await recheck(reason);
   const outRow = (await rows()).claude;
   t.check(
@@ -14220,11 +14227,52 @@ async function toolsMissing(t, page) {
   await page.screenshot({ path: TOOLS_SHOT("summary-logged-out") });
 
   reason = "Claude Code CLI가 응답하지 않는다";
-  state.tools.claude = claudeFound({ note: reason, auth: null });
-  const silent = await recheck(reason);
-  t.check("그 밖의 까닭은 받은 문장을 명령 없이 적는다", same(silent.trouble, [reason]) && silent.commands.length === 0, silent.trouble.join(" / "));
+  code = "not_answering";
+  state.tools.claude = claudeFound({ note: reason, auth: null, code });
+  const silentLine = "Claude Code CLI가 로그인 여부를 묻는 명령에 답하지 않았다. 잠시 뒤 다시 확인한다";
+  const silent = await recheck(silentLine);
+  t.check("로그인 여부를 묻는 명령이 답하지 않았으면 다시 확인하라고 명령 없이 적는다", same(silent.trouble, [silentLine]) && silent.commands.length === 0, silent.trouble.join(" / "));
 
-  reason = "서술 규약 문서를 읽지 못했다: /Users/me/style.md";
+  /** claude를 실행하지 않은 경우마다 화면이 적는 문장과 서버가 적는 글 */
+  const unchecked = [
+    ["disabled", "환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있어 Claude Code를 실행하지 않는다. 변수를 지우고 Atlas를 다시 띄운다", "확인하지 못함: 환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있다"],
+    ["shell_pending", "로그인 셸의 환경을 읽는 중이라 Claude Code를 아직 확인하지 않았다. 잠시 뒤 다시 확인한다", "확인하지 못함: 로그인 셸의 환경을 읽는 중이다"],
+    ["user_mismatch", "환경의 USER가 이 계정의 이름이 아니라 Claude Code를 실행하지 않는다. 로그인한 계정의 환경에서 Atlas를 다시 띄운다", "확인하지 못함: 환경의 USER가 이 계정의 이름(me)이 아니다"],
+    ["no_keychain_command", "환경의 PATH에 security가 없어 Claude Code를 실행하지 않는다. PATH에 /usr/bin을 넣고 Atlas를 다시 띄운다", "확인하지 못함: 환경의 PATH에 security가 없다"],
+    ["home_mismatch", "환경의 HOME이 이 계정의 홈 폴더가 아니라 Claude Code를 실행하지 않는다. 로그인한 계정의 환경에서 Atlas를 다시 띄운다", "확인하지 못함: 환경의 HOME이 이 계정의 홈 폴더(/Users/me)가 아니다"],
+  ];
+  const cells = [];
+  for (const [each, line, detail] of unchecked) {
+    [reason, code] = [detail, each];
+    state.tools.claude = toolFound("claude", { code, attempts: [tried("env", null, false, detail, code)] });
+    cells.push(await recheck(line));
+  }
+  t.check(
+    "claude를 실행하지 않은 다섯 경우마다 요약 칸이 까닭과 고치는 방법을 적고 그 아래에 받은 글을 적는다",
+    cells.every((seen, i) => same(seen.trouble, [unchecked[i][1]]) && same(seen.notes, [unchecked[i][2]]) && seen.commands.length === 0 && same(seen.buttons, ["다시 확인", "환경 점검"])),
+    cells.map((seen) => `${seen.trouble.join(" / ")} [${seen.notes.join(" / ")}]`).join(" || "),
+  );
+  const uncheckedRow = (await rows()).claude;
+  t.check(
+    "환경 점검 화면의 Claude Code 행도 실행하지 않은 까닭을 적고 응답 확인을 그리지 않는다",
+    !uncheckedRow.ok && uncheckedRow.state === "확인하지 않음" && same(uncheckedRow.notes, unchecked[4].slice(1)) && same(uncheckedRow.buttons, ["다시 확인", "직접 고르기"]) && same(uncheckedRow.attempts, [["환경", "경로 없음", unchecked[4][2]]]),
+    `${uncheckedRow.state} / ${uncheckedRow.notes.join(" / ")} / ${uncheckedRow.buttons.join(", ")}`,
+  );
+  await page.screenshot({ path: TOOLS_SHOT("unchecked") });
+  await closeTools(page);
+
+  [reason, code] = ["나중에 생긴 까닭", "later_added"];
+  state.tools.claude = toolFound("claude", { code, attempts: [tried("env", "/Users/me/bin/claude", false, reason, code)] });
+  const later = await recheck(reason);
+  const laterRow = (await rows()).claude;
+  t.check(
+    "목록에 없는 값이 오면 요약 칸과 환경 점검 화면이 받은 글만 그대로 적는다",
+    same(later.trouble, [reason]) && later.commands.length === 0 && same(later.buttons, ["다시 확인", "환경 점검"]) && laterRow.state === "쓰지 못함" && same(laterRow.notes, [reason]),
+    `${later.trouble.join(" / ")} · ${laterRow.state} / ${laterRow.notes.join(" / ")}`,
+  );
+  await closeTools(page);
+
+  [reason, code] = ["서술 규약 문서를 읽지 못했다: /Users/me/style.md", "style_guide_unreadable"];
   state.tools.claude = claudeFound();
   const guide = await recheck(reason);
   t.check("claude를 쓸 수 있는데 요약을 만들지 못하면 받은 까닭과 두 버튼만 그린다", same(guide.trouble, [reason]) && guide.commands.length === 0 && same(guide.buttons, ["다시 확인", "환경 점검"]), guide.trouble.join(" / "));
@@ -14266,13 +14314,26 @@ async function toolsMissing(t, page) {
   );
   const noClt = "Xcode Command Line Tools가 없다. 터미널에서 xcode-select --install을 실행한 뒤 다시 확인한다";
   state.tools.git = toolFound("git", {
-    attempts: [tried("known", "/opt/homebrew/bin/git", false, "없는 파일"), tried("known", "/usr/local/bin/git", false, "없는 파일"), tried("known", "/usr/bin/git", false, "Xcode Command Line Tools가 없다")],
+    attempts: [tried("known", "/opt/homebrew/bin/git", false, "없는 파일"), tried("known", "/usr/local/bin/git", false, "없는 파일"), tried("known", "/usr/bin/git", false, "Xcode Command Line Tools가 없다", "no_clt")],
+    code: "no_clt",
   });
   await page.click('.tools-row[data-tool="python"] button >> text=다시 확인');
   await page.waitForFunction((want) => document.querySelector('.tools-row[data-tool="git"] .tools-trouble')?.textContent === want, noClt, { timeout: 5_000 }).catch(() => {});
   const cltRow = (await toolRows(page)).git;
   const cltNote = await filterNote();
   t.check("Xcode Command Line Tools가 없으면 두 곳이 설치 명령을 적는다", same(cltRow.notes, [noClt]) && cltNote === noClt, `${cltRow.notes.join(" / ")} · 필터 창 "${cltNote}"`);
+
+  const brokenGit = "git을 실행하지 못했다: /Users/me/bin/git (종료 코드 1: dyld: Library not loaded). 변경 표시와 시점 비교를 끈다";
+  state.tools.git = toolFound("git", { code: "failed", attempts: [tried("saved", "/Users/me/bin/git", false, "종료 코드 1: dyld: Library not loaded", "failed"), tried("known", "/usr/bin/git", false, "없는 파일")] });
+  await page.click('.tools-row[data-tool="python"] button >> text=다시 확인');
+  await page.waitForFunction((want) => document.querySelector('.tools-row[data-tool="git"] .tools-trouble')?.textContent === want, brokenGit, { timeout: 5_000 }).catch(() => {});
+  const brokenGitRow = (await toolRows(page)).git;
+  const brokenGitNote = await filterNote();
+  t.check(
+    "있는 git이 확인 명령을 통과하지 못하면 두 곳이 그 경로와 까닭을 적고 저장한 경로 지우기를 둔다",
+    same(brokenGitRow.notes, [brokenGit]) && brokenGitNote === brokenGit && brokenGitRow.buttons.includes("저장한 경로 지우기"),
+    `${brokenGitRow.notes.join(" / ")} · 필터 창 "${brokenGitNote}"`,
+  );
 
   const shells = [
     ["읽지 못함", { shell: "/bin/zsh", ok: false, seconds: 10.02, detail: "로그인 셸(zsh)이 10초 안에 환경을 알려 주지 않았다. 앱이 받은 환경과 알려진 설치 위치에서 도구를 찾는다" }],

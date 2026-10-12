@@ -7,7 +7,7 @@ import type { Found, Pickable } from "../api/types";
 import { host } from "../host";
 import { nameOf, useOpening } from "../state/opening";
 import { useAtlas } from "../state/store";
-import { aboutLine, answerLine, claudeLine, claudeState, gitLine, INSTALL, LOGIN, saved, shellLine, sourceName, useTools, type ClaudeState } from "../state/tools";
+import { aboutLine, answerLine, claudeLine, claudeState, gitLine, INSTALL, LOGIN, saidOf, saved, shellLine, sourceName, useTools, type ClaudeState } from "../state/tools";
 import { Ask, Title } from "./Asks";
 import { AttemptRow } from "./Interpreters";
 
@@ -26,12 +26,14 @@ function Command({ text }: { text: string }) {
 
 /**
  * Claude Code를 쓰지 못하는 까닭과 고치는 방법. 찾지 못했으면 설치 명령을, 로그인돼 있지 않으면 앱은 터미널을 열어 로그인하게 하는
- * 버튼을, 브라우저는 로그인 명령을 적는다.
+ * 버튼을, 브라우저는 로그인 명령을 적는다. 실행하지 않은 경우는 서버가 적은 글을 까닭 아래에 함께 적는다. said는 서버가 적은 글이고
+ * 화면이 모르는 경우에 그대로 적는다.
  */
-export function ClaudeHelp({ state }: { state: Exclude<ClaudeState, { kind: "ready" }> }) {
+export function ClaudeHelp({ state, said }: { state: Exclude<ClaudeState, { kind: "ready" }>; said: string }) {
   return (
     <div className="tools-help" data-claude={state.kind}>
-      <span className="tools-trouble">{claudeLine(state)}</span>
+      <span className="tools-trouble">{claudeLine(state, said)}</span>
+      {state.kind === "unchecked" && state.detail !== "" && <span className="tools-note">{state.detail}</span>}
       {state.kind === "missing" && <Command text={INSTALL} />}
       {state.kind === "logged-out" &&
         (host.app ? (
@@ -170,7 +172,9 @@ const CLAUDE_STATES: Record<ClaudeState["kind"], string> = {
   missing: "찾지 못함",
   broken: "실행하지 못함",
   "logged-out": "로그인돼 있지 않음",
-  blocked: "쓰지 못함",
+  silent: "응답 없음",
+  unchecked: "확인하지 않음",
+  other: "쓰지 못함",
 };
 
 function ClaudeRow({ found }: { found: Found }) {
@@ -178,7 +182,7 @@ function ClaudeRow({ found }: { found: Found }) {
   const refused = useTools((s) => s.refused.claude);
   const ask = useTools((s) => s.ask);
   const keep = useTools((s) => s.keep);
-  const state = claudeState(found);
+  const state = claudeState(found.code, found);
   const login = state.kind === "ready" ? (found.auth === null ? "로그인됨" : `로그인됨(${found.auth})`) : null;
   return (
     <Row
@@ -199,7 +203,7 @@ function ClaudeRow({ found }: { found: Found }) {
         )
       }
     >
-      {state.kind !== "ready" && <ClaudeHelp state={state} />}
+      {state.kind !== "ready" && <ClaudeHelp state={state} said={saidOf(found)} />}
       {answer === "asking" && (
         <p className="ask-note" role="status">
           claude -p의 답을 기다리는 중
@@ -246,8 +250,8 @@ function PythonRow({ found }: { found: Found | null }) {
     <Row
       tool="python"
       name={`${nameOf(root)}의 Python`}
-      ok={found.path !== null}
-      state={found.path === null ? "찾지 못함" : "찾음"}
+      ok={found.code === "ok"}
+      state={found.code === "ok" ? "찾음" : "찾지 못함"}
       facts={[found.version, found.source === null ? null : sourceName(found.source), found.venv === true ? "가상환경" : null]}
       path={found.path}
       found={found}
@@ -257,7 +261,7 @@ function PythonRow({ found }: { found: Found | null }) {
         </button>
       }
     >
-      {found.path === null && <span className="tools-trouble">{nameOf(root)}의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다</span>}
+      {found.code !== "ok" && <span className="tools-trouble">{nameOf(root)}의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다</span>}
       {found.prefix !== null && (
         <span className="tools-prefix">
           sys.prefix

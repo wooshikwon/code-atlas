@@ -2,12 +2,7 @@
 // 저장과 지우기·`응답 확인`을 서버에 청한다. 후보의 순서와 확인 방법은 서버가 정하고, 여기서는 받은 결과를 화면에 적을 문구로 옮긴다.
 import { create } from "zustand";
 import { deleteTool, getAbout, getTools, postClaudeAsk, postToolsCheck, putTool } from "../api/client";
-import type { About, Answer, Found, Pickable, ShellEnv, Tools } from "../api/types";
-
-/** 서버(`tools.py`)가 시도 기록과 `note`에 적는 까닭 가운데 화면이 경우를 가르는 데 쓰는 것 */
-const ABSENT = "없는 파일";
-const NOT_LOGGED_IN = "Claude Code에 로그인돼 있지 않다";
-const NO_CLT = "Xcode Command Line Tools가 없다";
+import type { About, Answer, Code, Found, Pickable, ShellEnv, Tools } from "../api/types";
 
 export const INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
 export const LOGIN = "claude auth login";
@@ -19,30 +14,63 @@ export function sourceName(source: string): string {
   return SOURCES[source] ?? source;
 }
 
+/** 있는 후보가 확인 명령을 통과하지 못한 경우의 값 */
+const BROKEN = new Set<string>(["not_file", "not_executable", "timeout", "spawn_failed", "failed", "unreadable"]);
+
+/** 로그인 환경과 같다고 확인하지 못해 `claude`를 실행하지 않은 경우와 그때 적는 문장 */
+const UNCHECKED: Record<string, string> = {
+  disabled: "환경 변수 CODE_ATLAS_NO_CLAUDE가 켜져 있어 Claude Code를 실행하지 않는다. 변수를 지우고 Atlas를 다시 띄운다",
+  shell_pending: "로그인 셸의 환경을 읽는 중이라 Claude Code를 아직 확인하지 않았다. 잠시 뒤 다시 확인한다",
+  home_mismatch: "환경의 HOME이 이 계정의 홈 폴더가 아니라 Claude Code를 실행하지 않는다. 로그인한 계정의 환경에서 Atlas를 다시 띄운다",
+  user_mismatch: "환경의 USER가 이 계정의 이름이 아니라 Claude Code를 실행하지 않는다. 로그인한 계정의 환경에서 Atlas를 다시 띄운다",
+  no_keychain_command: "환경의 PATH에 security가 없어 Claude Code를 실행하지 않는다. PATH에 /usr/bin을 넣고 Atlas를 다시 띄운다",
+};
+
 /**
  * `claude`를 쓸 수 있는지와 쓰지 못하는 경우. missing은 있는 후보가 없고, broken은 있는 후보가 확인 명령을 통과하지 못했고,
- * logged-out은 로그인돼 있지 않고, blocked는 그 밖의 까닭(로그인 여부를 묻는 명령이 답하지 않음)이다.
+ * logged-out은 로그인돼 있지 않고, silent는 로그인 여부를 묻는 명령이 답하지 않았고, unchecked는 로그인 환경과 같다고 확인하지
+ * 못해 실행하지 않았다. other는 그 밖의 값이고 서버가 적은 글만 그대로 보인다.
  */
 export type ClaudeState =
   | { kind: "ready" }
   | { kind: "missing" }
   | { kind: "broken"; path: string; detail: string }
   | { kind: "logged-out"; path: string }
-  | { kind: "blocked"; note: string };
+  | { kind: "silent" }
+  | { kind: "unchecked"; line: string; detail: string }
+  | { kind: "other" };
 
-export function claudeState(found: Found): ClaudeState {
-  if (found.path === null) {
-    const tried = found.attempts.find((attempt) => !attempt.ok && attempt.path !== null && attempt.detail !== ABSENT);
-    return tried === undefined ? { kind: "missing" } : { kind: "broken", path: tried.path!, detail: tried.detail };
-  }
-  if (found.note === null) {
+/** code의 경우를 낸다. 경로와 서버가 적은 글은 `claude`를 찾은 결과 found에서 같은 code를 가진 첫 기록에서 읽는다. */
+export function claudeState(code: string, found: Found): ClaudeState {
+  const tried = found.attempts.find((attempt) => attempt.code === code);
+  if (code === "ok") {
     return { kind: "ready" };
   }
-  return found.note === NOT_LOGGED_IN ? { kind: "logged-out", path: found.path } : { kind: "blocked", note: found.note };
+  if (code === "not_found") {
+    return { kind: "missing" };
+  }
+  if (code === "not_logged_in" && found.path !== null) {
+    return { kind: "logged-out", path: found.path };
+  }
+  if (code === "not_answering") {
+    return { kind: "silent" };
+  }
+  if (BROKEN.has(code) && tried !== undefined && tried.path !== null) {
+    return { kind: "broken", path: tried.path, detail: tried.detail };
+  }
+  if (code in UNCHECKED) {
+    return { kind: "unchecked", line: UNCHECKED[code], detail: tried?.detail ?? "" };
+  }
+  return { kind: "other" };
 }
 
-/** `claude`를 쓰지 못하는 까닭을 적는 문장. 쓸 수 있으면 null이다. */
-export function claudeLine(state: ClaudeState): string | null {
+/** 찾지 못한 도구에 서버가 적은 글. `note`, 결과와 같은 code의 기록, 통과하지 못한 첫 기록 순서로 읽는다. */
+export function saidOf(found: Found): string {
+  return found.note ?? (found.attempts.find((attempt) => attempt.code === found.code) ?? found.attempts.find((attempt) => !attempt.ok))?.detail ?? "";
+}
+
+/** `claude`를 쓰지 못하는 까닭을 적는 문장. 쓸 수 있으면 null이다. said는 서버가 적은 글이고 other에서만 쓴다. */
+export function claudeLine(state: ClaudeState, said: string): string | null {
   switch (state.kind) {
     case "ready":
       return null;
@@ -51,20 +79,33 @@ export function claudeLine(state: ClaudeState): string | null {
     case "broken":
       return `Claude Code CLI를 실행하지 못했다: ${state.path} (${state.detail})`;
     case "logged-out":
-      return NOT_LOGGED_IN;
-    case "blocked":
-      return state.note;
+      return "Claude Code에 로그인돼 있지 않다";
+    case "silent":
+      return "Claude Code CLI가 로그인 여부를 묻는 명령에 답하지 않았다. 잠시 뒤 다시 확인한다";
+    case "unchecked":
+      return state.line;
+    case "other":
+      return said;
   }
 }
 
-/** `git`을 쓰지 못할 때 적는 문장. 찾았으면 null이다. */
+/** `git`을 쓰지 못할 때 적는 문장. 찾았으면 null이다. 목록에 없는 값이면 서버가 적은 글을 그대로 적는다. */
 export function gitLine(found: Found): string | null {
-  if (found.path !== null) {
+  const code: Code | string = found.code;
+  const tried = found.attempts.find((attempt) => attempt.code === code);
+  if (code === "ok") {
     return null;
   }
-  return found.attempts.some((attempt) => attempt.detail === NO_CLT)
-    ? `${NO_CLT}. 터미널에서 xcode-select --install을 실행한 뒤 다시 확인한다`
-    : "git을 찾지 못했다. 변경 표시와 시점 비교를 끈다";
+  if (code === "not_found") {
+    return "git을 찾지 못했다. 변경 표시와 시점 비교를 끈다";
+  }
+  if (code === "no_clt") {
+    return "Xcode Command Line Tools가 없다. 터미널에서 xcode-select --install을 실행한 뒤 다시 확인한다";
+  }
+  if (BROKEN.has(code) && tried !== undefined && tried.path !== null) {
+    return `git을 실행하지 못했다: ${tried.path} (${tried.detail}). 변경 표시와 시점 비교를 끈다`;
+  }
+  return saidOf(found);
 }
 
 /** 로그인 셸의 환경을 읽은 결과를 적는 문장. shell이 null이면 터미널에서 띄운 실행이다. */
