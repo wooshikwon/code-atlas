@@ -5,7 +5,8 @@ import type { CSSProperties } from "react";
 import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
-import { BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, labelOf, type Box, type RouteEnd } from "../layout";
+import { ASIDE_GAP, BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, labelOf, type Box, type RouteEnd } from "../layout";
+import { valueAside } from "../names";
 import { lifted } from "../scope";
 import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, insideTip, locTip } from "../tips";
 
@@ -22,8 +23,10 @@ export interface AtlasNodeData extends Record<string, unknown> {
   flow: boolean;
   /** 선택한 노드가 든 파일 상자 안의 노드다 */
   local: boolean;
-  /** 접힌 파일 상자와 접힌 폴더 상자의 배지에 적는 수. 파일 상자는 안에 든 함수·클래스 수, 폴더 상자는 안에 든 파일 수다. 그 밖의 노드는 0이다. */
+  /** 접힌 파일 상자와 접힌 폴더 상자의 배지에 적는 수. 파일 상자는 안에 든 함수·클래스·변수 수, 폴더 상자는 안에 든 파일 수다. 그 밖의 노드는 0이다. */
   inside: number;
+  /** 이 함수·메서드에서 나가는 바꿈 선의 도착 변수 이름. 비지 않으면 모듈 변수 변경 배지를 단다. */
+  writes: string[];
   /** 이 노드와 이 노드로 올린 안쪽 노드 가운데 LLM 요약을 만드는 중인 노드 수 */
   busy: number;
   /** 강조하는 경로 위의 노드면 출발 노드, 도착 노드, 그 사이의 노드 가운데 어느 것인지 */
@@ -262,8 +265,8 @@ export function Badges({ data, circle = false }: { data: AtlasNodeData; circle?:
           {data.inside}
         </span>
       )}
-      {data.node.global_write && (
-        <span className="badge badge-global" style={style} data-tip={globalTip(data.node.writes.filter((name) => !name.includes(".")))}>
+      {data.writes.length > 0 && (
+        <span className="badge badge-global" style={style} data-tip={globalTip(data.writes)}>
           g
         </span>
       )}
@@ -276,6 +279,30 @@ export function Circle({ data }: { data: AtlasNodeData }) {
   return (
     <span className="node-circle" style={{ marginRight: CIRCLE_GAP }}>
       <Badges data={data} circle />
+    </span>
+  );
+}
+
+/** 지름 16px 원과 같은 칸에 그리는 마름모의 꼭짓점. 테두리 굵기 1.5px의 뾰족한 끝이 칸의 변에 닿는다. */
+export const DIAMOND_POINTS = "8,1 15,8 8,15 1,8";
+/** 선택 고리. 원의 선택 고리처럼 마름모의 테두리에서 2px 띄운 굵기 3px 테두리다. */
+const DIAMOND_RING = "8,-4.5 20.5,8 8,20.5 -4.5,8";
+
+/** 모듈 변수의 마름모. 바탕 요소가 테두리와 채움을, 글자 요소가 선택 고리를 그린다. 배지를 달지 않는다. */
+export function Diamond({ data }: { data: AtlasNodeData }) {
+  return (
+    <svg className="node-diamond" viewBox="0 0 16 16" style={{ marginRight: CIRCLE_GAP }} aria-hidden>
+      {data.part === "face" && data.selected && <polygon className="node-diamond-ring" points={DIAMOND_RING} />}
+      <polygon points={DIAMOND_POINTS} />
+    </svg>
+  );
+}
+
+/** 변수 노드의 줄 수 숫자 뒤에 적는 값의 종류와 원소 수 */
+export function Aside({ data }: { data: AtlasNodeData }) {
+  return (
+    <span className="node-aside" style={{ marginLeft: ASIDE_GAP }}>
+      {valueAside(data.node)}
     </span>
   );
 }

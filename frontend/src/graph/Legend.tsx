@@ -1,4 +1,4 @@
-// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시와 접힌 상자의 배지, 선 모양 세 개와 갈림·합류, 찾은 경로의 선,
+// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 일곱 개와 이름표 옆 표시와 접힌 상자의 배지, 선 모양 세 개와 갈림·합류, 찾은 경로의 선,
 // 변경 표시 두 색을 보여 주고, 선 모양에 마우스를 올리면 그 분류에 드는 선 종류를 말풍선에 적는다. 분석 표시를 켜면 켠 표시의 견본과 뜻을 끝에 덧붙인다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
@@ -14,6 +14,7 @@ const SHAPES = [
   { key: "class", name: "클래스" },
   { key: "dataclass", name: "데이터 클래스" },
   { key: "function", name: "함수·메서드" },
+  { key: "variable", name: "모듈 변수" },
   { key: "external", name: "외부 노드" },
   { key: "entry", name: "진입점" },
   { key: "inside", name: "접힌 상자의 배지: 안에 든 정의·파일 수" },
@@ -45,6 +46,8 @@ function Shape({ kind }: { kind: string }) {
       );
     case "function":
       return <circle cx={11} cy={8} r={6} className="legend-node" />;
+    case "variable":
+      return <polygon points="11,1.5 17.5,8 11,14.5 4.5,8" className="legend-node" />;
     case "external":
       return <rect x={1} y={3} width={20} height={10} rx={5} className="legend-external" />;
     case "entry":

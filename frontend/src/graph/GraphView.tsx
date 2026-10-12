@@ -41,11 +41,11 @@ import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay"
 import type { Lit } from "./route";
 import { baseOf, definedName, rowsOf, type CellName, type LineRow } from "./rows";
 import { drawn, followed, type EdgeKey } from "./scope";
-import { clipped, nodeTip, packTip, tipOf } from "./tips";
+import { clipped, nodeTip, packTip, tipOf, valueTip } from "./tips";
 import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
 import { anchorOn, autoView, boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
-import { hidden, insideCounts, lift, local, nodeIndex, shown, unitOf, type Shown } from "./visible";
+import { hidden, insideCounts, lift, local, nodeIndex, shown, unitOf, writtenBy, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
 const NO_BOXES = new Map<string, Box>();
@@ -103,6 +103,7 @@ function itemsOf(
   const dim = opacities(scene.graph, scene.flow, scene.lit);
   const ends = endsOf(scene.lit);
   const inside = insideCounts(scene.graph, scene.shown.hidden);
+  const writes = writtenBy(scene.graph);
   /** 화면에 보이는 노드마다, 그 노드로 올린 노드 가운데 요약을 만드는 중인 노드 수. 펼친 폴더는 안에 든 노드를 모두 센다. */
   const busy = new Map<string, number>();
   for (const id of making) {
@@ -125,6 +126,7 @@ function itemsOf(
       flow: (scene.flow !== null || scene.lit !== null) && opacity > DIM,
       local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
       inside: expanded ? 0 : (inside.get(node.id) ?? 0),
+      writes: writes.get(node.id) ?? [],
       busy: busy.get(node.id) ?? 0,
       route,
       cycle: cover.cycle.get(node.id)?.map((group) => group.map((id) => titleOf(nodes.get(id)!))) ?? null,
@@ -163,7 +165,7 @@ function packNodes(scene: Scene, nodes: Map<string, AtlasNode>, at: Map<string, 
       draggable: false,
       connectable: false,
       style: { opacity: fresh?.has(box) === true ? 0 : (opacity.get(box) ?? 1) },
-      data: { box, label: packLabel(pack, covered), open: pack.open, tip: packTip(pack.ids.map((kid) => titleOf(nodes.get(kid)!))) },
+      data: { box, label: packLabel(pack, covered), open: pack.open, tip: packTip(pack, pack.ids.map((kid) => titleOf(nodes.get(kid)!))) },
     });
   }
   return result;
@@ -574,7 +576,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     clicked.current = null;
   };
   /**
-   * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 말풍선(`nodeTip`)을 띄운다. 그 위치에서 눌리는 노드면 선의 hover처럼
+   * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 말풍선(`nodeTip`)을 띄운다. 변수 노드는 요약의 요지 대신 값의 요약(`valueTip`)을 적는다. 그 위치에서 눌리는 노드면 선의 hover처럼
    * 진하기를 한 단계 올려 그린다. 경로 고정 중에는 경로 위 노드만 그렇게 그린다. 마우스 버튼을 누른 동안(화면을 끄는 동안)에는
    * 아무것도 하지 않는다.
    */
@@ -591,7 +593,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const { id } = node.data.node;
     const title = titleOf(node.data.node);
     const cut = labelOf(node.data.node) !== title || clipped(root.current?.querySelector(`[data-id="${CSS.escape(faceId(id))}"] .node-label`) ?? null);
-    const text = tipOf(event.target) ?? nodeTip(cut ? title : null, useSummaries.getState().leads[id] ?? null, node.data.unused);
+    const lead = node.data.node.kind === "variable" ? valueTip(node.data.node) : (useSummaries.getState().leads[id] ?? null);
+    const text = tipOf(event.target) ?? nodeTip(cut ? title : null, lead, node.data.unused);
     tooltip.show(text, event.clientX, event.clientY);
   };
   /** 사용자가 화면을 끌거나 확대·축소하면 전체 맞춤 상태를 끈다. 코드가 옮긴 화면은 event가 null이다. */

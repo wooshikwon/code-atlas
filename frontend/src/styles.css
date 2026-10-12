@@ -857,6 +857,7 @@ ul {
 .node-class,
 .node-dataclass,
 .node-function,
+.node-variable,
 .node-external,
 .node-call {
   position: relative;
@@ -921,13 +922,13 @@ ul {
   white-space: nowrap;
 }
 
-/* 선택 고리는 글자 요소가 그린다. 상자는 테두리 바깥에, 함수는 원 바깥에 두르고 클래스는 육각형 테두리를 굵게 그린다. */
+/* 선택 고리는 글자 요소가 그린다. 상자는 테두리 바깥에, 함수는 원 바깥에, 변수는 마름모 바깥에 두르고 클래스는 육각형 테두리를 굵게 그린다. */
 .node-face.node-selected {
   outline: 3px solid var(--ink);
   outline-offset: 2px;
 }
 
-.node-face:is(.node-class, .node-function, .node-call).node-selected {
+.node-face:is(.node-class, .node-function, .node-variable, .node-call).node-selected {
   outline: none;
 }
 
@@ -936,7 +937,7 @@ ul {
   outline-offset: 2px;
 }
 
-.node-face.node-selected :is(.node-hexagon polygon, .call-shape) {
+.node-face.node-selected :is(.node-hexagon polygon, .call-shape, .node-diamond-ring) {
   stroke: var(--ink);
   stroke-width: 3;
 }
@@ -1160,7 +1161,8 @@ ul {
   border-bottom-color: var(--line);
 }
 
-.node-function {
+.node-function,
+.node-variable {
   display: flex;
   align-items: center;
 }
@@ -1177,6 +1179,22 @@ ul {
 .node-body .node-circle {
   border: 1.5px solid var(--muted);
   background: var(--surface);
+}
+
+/* 변수의 마름모는 원과 같은 16px 칸에 그리고 테두리 굵기와 색, 채움이 원과 같다. */
+.node-diamond {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+  fill: none;
+  stroke: none;
+  stroke-width: 1.5;
+}
+
+.node-body .node-diamond {
+  fill: var(--surface);
+  stroke: var(--muted);
 }
 
 .node-external {
@@ -1283,7 +1301,7 @@ ul {
   border-color: var(--ink);
 }
 
-.react-flow__node.pointed.tone-strong > .node-body:not([data-change]) :is(.node-hexagon polygon, .call-shape) {
+.react-flow__node.pointed.tone-strong > .node-body:not([data-change]) :is(.node-hexagon polygon, .call-shape, .node-diamond) {
   stroke: var(--ink);
 }
 
@@ -1309,15 +1327,15 @@ ul {
 }
 
 /* 마우스를 올린 잎 노드는 올린 동안 네 변이 nodes/common.tsx의 GROW만큼 바깥으로 나가게 커진다. 노드의 폭과 높이에서 구한 가로·세로 확대 비율을
-   pointing이 --grow-x·--grow-y로 넣고, 바탕 요소와 글자 요소가 같은 비율을 받는다. 원과 함수 시점 뷰의 모양은 가로를 세로 비율에 맞춰
-   둥근 모양을 지킨다. React Flow 노드의 위치와 크기는 그대로여서 배치와 선은 바뀌지 않는다. 화면 이동, 배치 움직임, 화면을 끄는 동안에는
+   pointing이 --grow-x·--grow-y로 넣고, 바탕 요소와 글자 요소가 같은 비율을 받는다. 원과 마름모, 함수 시점 뷰의 모양은 가로를 세로 비율에 맞춰
+   제 모양을 지킨다. React Flow 노드의 위치와 크기는 그대로여서 배치와 선은 바뀌지 않는다. 화면 이동, 배치 움직임, 화면을 끄는 동안에는
    키우지 않는다. 펼친 상자와 폴더 영역은 비율을 받지 않는다. */
 .react-flow__node > :is(.node-body, .node-face),
-.react-flow__node :is(.node-circle, .call-shape) {
+.react-flow__node :is(.node-circle, .node-diamond, .call-shape) {
   transition: transform 200ms ease-out;
 }
 
-.react-flow__node :is(.node-circle, .call-shape) {
+.react-flow__node :is(.node-circle, .node-diamond, .call-shape) {
   transform-origin: left center;
 }
 
@@ -1325,21 +1343,21 @@ ul {
   transform: scale(var(--grow-x, 1), var(--grow-y, 1));
 }
 
-.graph:not([data-flying], [data-moving]) .react-flow__pane:not(.dragging) .react-flow__node.pointed :is(.node-circle, .call-shape) {
+.graph:not([data-flying], [data-moving]) .react-flow__pane:not(.dragging) .react-flow__node.pointed :is(.node-circle, .node-diamond, .call-shape) {
   transform: scaleX(calc(var(--grow-y, 1) / var(--grow-x, 1)));
 }
 
 @media (prefers-reduced-motion: reduce) {
   .react-flow__node > :is(.node-body, .node-face),
-  .react-flow__node :is(.node-circle, .call-shape) {
+  .react-flow__node :is(.node-circle, .node-diamond, .call-shape) {
     transition: none;
   }
 }
 
 /* 이름표는 확대 비율 구간에 따라 숨긴다. 40% 미만은 폴더·파일 이름만, 80% 미만은 클래스·데이터 클래스 이름까지 보인다.
    초점 상태에서 흐름에 든 노드와 선택한 노드가 든 파일 상자 안의 노드는 이름표가 확대 비율과 관계없이 보인다. */
-.graph[data-zoom="0"] :is(.node-class, .node-dataclass, .node-function):not([data-flow], [data-local]) :is(.node-label, .loc),
-.graph[data-zoom="1"] .node-function:not([data-flow], [data-local]) :is(.node-label, .loc) {
+.graph[data-zoom="0"] :is(.node-class, .node-dataclass, .node-function, .node-variable):not([data-flow], [data-local]) :is(.node-label, .loc, .node-aside),
+.graph[data-zoom="1"] :is(.node-function, .node-variable):not([data-flow], [data-local]) :is(.node-label, .loc, .node-aside) {
   visibility: hidden;
 }
 
@@ -1410,7 +1428,7 @@ ul {
   background: var(--ink);
 }
 
-/* 변경 표시. 파일 상자·데이터 클래스·접힌 폴더는 왼쪽 가장자리 3px 막대를, 함수·메서드는 원의 테두리를,
+/* 변경 표시. 파일 상자·데이터 클래스·접힌 폴더는 왼쪽 가장자리 3px 막대를, 함수·메서드는 원의 테두리를, 변수는 마름모의 테두리를,
    클래스는 육각형의 왼쪽 두 변을 변경 표시 색으로 그린다. 막대는 왼쪽 테두리와 안쪽 그림자를 더한 폭이다. */
 .node-body:is(.node-module, .node-dataclass)[data-change] {
   border-left-color: var(--change);
@@ -1426,7 +1444,8 @@ ul {
   border-color: var(--change);
 }
 
-.node-body.node-call[data-change] .call-shape {
+.node-body.node-call[data-change] .call-shape,
+.node-body.node-variable[data-change] .node-diamond {
   stroke: var(--change);
 }
 
@@ -2549,7 +2568,7 @@ ol.summary-list {
 
 /* 경로 고정 중에는 경로 위 노드([data-route])와 걸음, 걸음이 지나는 줄기([data-step])만 누를 수 있다. 그 밖의 노드·선·파일 상자 머리 줄·폴더 영역 머리 줄은
    누를 수 없음을 커서로 보이고 마우스를 올려도 바탕을 바꾸지 않는다. */
-.graph[data-pinned] :is(.node-package, .node-module, .node-class, .node-dataclass, .node-function, .node-external):not([data-route], .node-module-open),
+.graph[data-pinned] :is(.node-package, .node-module, .node-class, .node-dataclass, .node-function, .node-variable, .node-external):not([data-route], .node-module-open),
 .graph[data-pinned] :not([data-route]) > :is(.node-module-head, .node-region-head),
 .graph[data-pinned] .edge:not([data-route], [data-step]) :is(.edge-hit, .edge-line, .edge-weight) {
   cursor: not-allowed;
@@ -2737,7 +2756,8 @@ ol.summary-list {
   border-color: var(--muted);
 }
 
-.graph[data-overlay="cycles"] .node-body.node-call[data-change] .call-shape {
+.graph[data-overlay="cycles"] .node-body.node-call[data-change] .call-shape,
+.graph[data-overlay="cycles"] .node-body.node-variable[data-change] .node-diamond {
   stroke: var(--muted);
 }
 

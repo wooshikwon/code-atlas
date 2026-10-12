@@ -3,7 +3,7 @@ import { memo } from "react";
 import { useChange } from "../../state/changes";
 import { counted, type Side } from "../calls";
 import { CIRCLE_GAP } from "../layout";
-import { Circle, EntryMark, Handles, Loc, nodeProps, sameNode, type AtlasNodeData } from "./common";
+import { Circle, DIAMOND_POINTS, EntryMark, Handles, Loc, nodeProps, sameNode, type AtlasNodeData } from "./common";
 
 export interface CallNodeData extends AtlasNodeData {
   /** 메서드면 `클래스.이름()` */
@@ -17,7 +17,7 @@ export interface CallNodeData extends AtlasNodeData {
 
 export type CallFlowNode = Node<CallNodeData>;
 
-/** 함수·메서드는 원, 클래스는 육각형, 데이터 클래스는 표 모양이다. 글자 요소는 선택했을 때의 테두리만 그린다. */
+/** 함수·메서드는 원, 클래스는 육각형, 데이터 클래스는 표 모양, 변수는 마름모다. 글자 요소는 선택했을 때의 테두리만 그린다. */
 function Shape({ data }: { data: CallNodeData }) {
   const style = { marginRight: CIRCLE_GAP };
   switch (data.node.kind) {
@@ -33,6 +33,12 @@ function Shape({ data }: { data: CallNodeData }) {
           <rect x={1.5} y={1.5} width={13} height={13} />
           <line x1={1.5} y1={6} x2={14.5} y2={6} />
           <line x1={1.5} y1={10.5} x2={14.5} y2={10.5} />
+        </svg>
+      );
+    case "variable":
+      return (
+        <svg className="call-shape" viewBox="0 0 16 16" style={style}>
+          <polygon points={DIAMOND_POINTS} />
         </svg>
       );
     default:

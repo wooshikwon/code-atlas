@@ -2,7 +2,7 @@ import ELK from "elkjs/lib/elk.bundled.js";
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, Graph } from "../api/types";
 import { callEdges, callElk, callLabel, callLane, callSize, callTitle, callview, fileLabel } from "./calls";
-import { repoFixture } from "./fixture";
+import { repoFixture, variableFixture } from "./fixture";
 import { fromElk, LEAF_HEIGHT } from "./layout";
 import { edgeKey } from "./scope";
 import { hidden, nodeIndex } from "./visible";
@@ -148,5 +148,24 @@ describe("배치", () => {
     expect(tone(`${load}|${save}|call`)).toBe("strong");
     expect(tone(`${save}|pkg.mod:parse|call`)).toBe("muted");
     expect(views.every((view) => view.opacity === 1)).toBe(true);
+  });
+});
+
+describe("변수 노드", () => {
+  const none = hidden(variableFixture, { showTests: false, showExternal: false });
+  const variables = nodeIndex(variableFixture);
+
+  it("값 안에서 클래스를 생성하는 변수는 호출하는 쪽 노드로 나오고 읽음·바꿈 선은 그리지 않는다", () => {
+    const calls = callview(variableFixture, "conf:clamp", [], none);
+    expect(calls.nodes).toEqual(["app:run", "conf:clamp", "conf:remember"]);
+    const made = callview(variableFixture, "conf:Preset", [], none);
+    expect(made.nodes).toEqual(["app:STARTERS", "conf:PRESETS", "conf:Preset"]);
+    expect(made.side.get("conf:PRESETS")).toBe("caller");
+  });
+
+  it("변수 노드의 크기는 같은 글의 함수 노드와 같은 식으로 잡는다", () => {
+    const made = callview(variableFixture, "conf:Preset", [], none);
+    const size = callSize(made, variables, variables.get("conf:PRESETS")!, measure);
+    expect(size).toEqual({ width: 16 + 9 + Math.max(measure("PRESETS") + 5 + measure("6"), measure("conf.py")), height: LEAF_HEIGHT + 14 });
   });
 });

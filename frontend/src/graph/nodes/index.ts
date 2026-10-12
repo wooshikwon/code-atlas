@@ -7,6 +7,7 @@ import { FunctionNode } from "./FunctionNode";
 import { ModuleNode } from "./ModuleNode";
 import { PackageNode } from "./PackageNode";
 import { PackNode } from "./PackNode";
+import { VariableNode } from "./VariableNode";
 
 export const nodeTypes: NodeTypes = {
   package: PackageNode,
@@ -14,6 +15,7 @@ export const nodeTypes: NodeTypes = {
   class: ClassNode,
   dataclass: DataClassNode,
   function: FunctionNode,
+  variable: VariableNode,
   external: ExternalNode,
   pack: PackNode,
 };

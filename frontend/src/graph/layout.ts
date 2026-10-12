@@ -5,7 +5,9 @@ import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { entryUnits, siblings, type Columns } from "./columns";
 import { cycles } from "./cycles";
 import { cycleMarks } from "./overlay";
+import { valueAside } from "./names";
 import { aggKey, edgeKey, type EdgeKey } from "./scope";
+import { packCount } from "./tips";
 import { lift, nodeIndex, type Pack, type Shown } from "./visible";
 
 export interface Point {
@@ -74,6 +76,8 @@ export const BADGE_GAP = 3;
 /** 원과 그 오른쪽 이름표 사이의 폭. 배지가 나온 폭과 배지 뒤에 남기는 폭을 더한 값이다. */
 export const CIRCLE_GAP = BADGE_OVERHANG + BADGE_GAP;
 export const LOC_GAP = 5;
+/** 변수 노드의 줄 수 숫자와 그 뒤에 적는 값의 종류·원소 수 사이의 폭 */
+export const ASIDE_GAP = 6;
 /** 강조하는 경로의 출발 노드와 도착 노드 이름표 뒤에 적는 표지 */
 export const END_NAMES = { from: "출발", to: "도착" } as const;
 export type RouteEnd = keyof typeof END_NAMES;
@@ -308,14 +312,16 @@ export function packId(box: string): string {
 }
 
 /**
- * 손잡이의 글. 펼침 단계에서는 그리지 않은 안쪽 자식 수를 `내부 함수 k개`로, 전부 펼침 단계에서는 같은 수와 "접기"를 적는다.
+ * 손잡이의 글. 펼침 단계에서는 그리지 않은 안쪽 자식 수를 `내부 함수 k개`나 `내부 함수 k개 · 변수 m개`로(`tips.ts`의 `packCount`),
+ * 전부 펼침 단계에서는 같은 수와 "접기"를 적는다.
  * 미사용 후보 표시가 꺼져 있고(covered가 거짓) 그리지 않은 자식에 미사용 후보가 있으면 그 수를 뒤에 붙인다.
  */
 export function packLabel(pack: Pack, covered: boolean): string {
+  const count = packCount(pack);
   if (pack.open) {
-    return `내부 함수 ${pack.ids.length}개 접기`;
+    return `${count} 접기`;
   }
-  return pack.unused > 0 && !covered ? `내부 함수 ${pack.ids.length}개 · 미사용 후보 ${pack.unused}` : `내부 함수 ${pack.ids.length}개`;
+  return pack.unused > 0 && !covered ? `${count} · 미사용 후보 ${pack.unused}` : count;
 }
 
 /** 손잡이의 좌우 안쪽 여백 */
@@ -349,8 +355,9 @@ function leafSize(node: AtlasNode, measure: Measure, marks: Marks): Size {
   switch (node.kind) {
     case "function":
     case "method":
-    case "variable":
       return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true, marks), height: LEAF_HEIGHT };
+    case "variable":
+      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true, marks) + ASIDE_GAP + measure(valueAside(node)), height: LEAF_HEIGHT };
     case "class":
       return { width: labelWidth(node, measure, true, false, marks) + 28, height: HEX_HEIGHT };
     case "dataclass":

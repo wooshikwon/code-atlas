@@ -513,7 +513,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     }),
     setDepth: guarded((depth) => keep({ depth })),
     enterFunction: guarded((id) => {
-      if (kindOf(id) !== undefined) {
+      const kind = kindOf(id);
+      if (kind !== undefined && kind !== "variable") {
         enter(id);
       }
     }),

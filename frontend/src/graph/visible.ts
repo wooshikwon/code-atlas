@@ -98,6 +98,24 @@ export function insideCounts(graph: Graph, off: Set<string>): Map<string, number
   return result;
 }
 
+/** 함수·메서드마다 그 노드에서 나가는 바꿈 선의 도착 변수 이름. 선이 그래프에 나오는 순서이고 같은 이름은 한 번만 담는다. */
+export function writtenBy(graph: Graph): Map<string, string[]> {
+  const nodes = nodeIndex(graph);
+  const result = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const kind = nodes.get(edge.source)?.kind;
+    const name = nodes.get(edge.target)?.name;
+    if (edge.kind !== "write" || name === undefined || (kind !== "function" && kind !== "method")) {
+      continue;
+    }
+    const names = result.get(edge.source) ?? [];
+    if (!names.includes(name)) {
+      result.set(edge.source, [...names, name]);
+    }
+  }
+  return result;
+}
+
 /**
  * 토글로 숨긴 노드. 테스트 코드와 외부 노드는 토글이 켜졌을 때만 보인다. 값을 만든 호출의 대상이 외부 노드인 변수(`external_value`)는
  * 외부 노드 토글을 따른다.

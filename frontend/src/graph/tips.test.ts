@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture, variableFixture } from "./fixture";
-import { busyTip, cycleTip, globalTip, insideTip, locTip, nodeTip, packTip, valueTip } from "./tips";
+import { busyTip, cycleTip, globalTip, insideTip, locTip, nodeTip, packCount, packTip, valueTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
@@ -13,8 +13,17 @@ describe("배지 말풍선", () => {
   });
 
   it("손잡이는 안에서만 쓰이는 자식의 수와 이름을 적고 여섯 개부터는 줄인다", () => {
-    expect(packTip(["_parse()", "_merge()"])).toBe("이 파일 안에서만 쓰이는 내부 함수 2개 · _parse(), _merge()");
-    expect(packTip(["a()", "b()", "c()", "d()", "e()", "f()", "g()"])).toBe("이 파일 안에서만 쓰이는 내부 함수 7개 · a(), b(), c(), d(), e() 외 2개");
+    expect(packTip({ definitions: 2, variables: 0 }, ["_parse()", "_merge()"])).toBe("이 파일 안에서만 쓰이는 내부 함수 2개 · _parse(), _merge()");
+    expect(packTip({ definitions: 7, variables: 0 }, ["a()", "b()", "c()", "d()", "e()", "f()", "g()"])).toBe(
+      "이 파일 안에서만 쓰이는 내부 함수 7개 · a(), b(), c(), d(), e() 외 2개",
+    );
+  });
+
+  it("손잡이에 변수가 있으면 함수와 변수의 수를 나눠 적고 변수만 있으면 변수의 수만 적는다", () => {
+    expect(packCount({ definitions: 14, variables: 0 })).toBe("내부 함수 14개");
+    expect(packCount({ definitions: 14, variables: 6 })).toBe("내부 함수 14개 · 변수 6개");
+    expect(packCount({ definitions: 0, variables: 3 })).toBe("내부 변수 3개");
+    expect(packTip({ definitions: 1, variables: 2 }, ["_parse()", "LIMIT", "DEFAULT"])).toBe("이 파일 안에서만 쓰이는 내부 함수 1개 · 변수 2개 · _parse(), LIMIT, DEFAULT");
   });
 
   it("모듈 변수 변경은 바꿈 선의 도착 변수 이름을 적는다", () => {

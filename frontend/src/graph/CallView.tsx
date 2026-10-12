@@ -26,12 +26,12 @@ import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode
 import { flowNodes, parts, pointing, type Drawn } from "./nodes/common";
 import { UNUSED_OPACITY } from "./overlay";
 import { baseOf, definedName, rowsOf, type CellName, type LineRow } from "./rows";
-import { nodeTip, tipOf } from "./tips";
+import { nodeTip, tipOf, valueTip } from "./tips";
 import { NO_LINES } from "./view";
 import { tooltip } from "./Tooltip";
 import type { EdgeKey } from "./scope";
 import { boundsOf, fitPadding, FRAME_ZOOM, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
-import { hidden, nodeIndex } from "./visible";
+import { hidden, nodeIndex, writtenBy } from "./visible";
 
 const nodeTypes: NodeTypes = { call: CallNode };
 /** 함수 시점 뷰는 파일 사이의 import 선을 그리지 않으므로 순환 선이 없다. */
@@ -52,6 +52,7 @@ function itemsOf(
   selected: string | null,
   making: string[],
   unused: Set<string>,
+  writes: Map<string, string[]>,
 ): Drawn<CallNodeData>[] {
   return scene.calls.nodes.map((id) => {
     const node = nodes.get(id)!;
@@ -63,6 +64,7 @@ function itemsOf(
       flow: false,
       local: false,
       inside: 0,
+      writes: writes.get(id) ?? [],
       busy: making.includes(id) ? 1 : 0,
       cycle: null,
       unused: unused.has(id),
@@ -109,6 +111,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const clicked = useRef<{ id: string; from: History } | null>(null);
 
   const index = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
+  const writes = useMemo(() => (graph === null ? new Map<string, string[]>() : writtenBy(graph)), [graph]);
   const unused = useMemo(() => (overlay === "unused" ? candidates : new Set<string>()), [overlay, candidates]);
   const calls = useMemo(
     () => (graph === null ? null : callview(graph, center, expanded, hidden(graph, { showTests, showExternal }))),
@@ -130,7 +133,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     if (scene === null || index === null) {
       return;
     }
-    const items = itemsOf(scene, index, selected, makingOf(making), unused);
+    const items = itemsOf(scene, index, selected, makingOf(making), unused, writes);
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
@@ -251,7 +254,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     setAimedNode(node.data.node.id);
     const { id } = node.data.node;
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
-    const text = tipOf(event.target) ?? nodeTip(node.data.label === title ? null : title, useSummaries.getState().leads[id] ?? null, node.data.unused);
+    const lead = node.data.node.kind === "variable" ? valueTip(node.data.node) : (useSummaries.getState().leads[id] ?? null);
+    const text = tipOf(event.target) ?? nodeTip(node.data.label === title ? null : title, lead, node.data.unused);
     tooltip.show(text, event.clientX, event.clientY);
   };
   const onLeave = () => {

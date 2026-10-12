@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { node as made, repoFixture, routeFixture, variableFixture } from "./fixture";
 import { flow } from "./flow";
 import { lit, route } from "./route";
-import { drawnOut, hidden, insideCounts, inward, lift, nodeIndex, outward, packedIn, shown, unresolvedWithin } from "./visible";
+import { drawnOut, hidden, insideCounts, inward, lift, nodeIndex, outward, packedIn, shown, unresolvedWithin, writtenBy } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
 const toggles = { showTests: false, showExternal: false };
@@ -382,6 +382,21 @@ describe("변수 노드", () => {
     expect(["conf:LIMIT", "conf:DEFAULT", "conf:_cache", "conf:remember"].every((id) => full.nodes.has(id))).toBe(true);
     expect(full.nodes.has("conf:logger")).toBe(false);
     expect(at("conf", { showTests: false, showExternal: true }, ["conf"]).nodes.has("conf:logger")).toBe(true);
+  });
+
+  it("바꿈 선이 나가는 함수마다 도착 변수의 이름을 한 번씩 담고 모듈에서 나가는 바꿈 선은 담지 않는다", () => {
+    expect([...writtenBy(variableFixture)]).toEqual([["conf:remember", ["_cache"]]]);
+    const more = {
+      ...variableFixture,
+      edges: [
+        ...variableFixture.edges,
+        { ...variableFixture.edges.find((e) => e.kind === "write")!, target: "conf:LIMIT" },
+        { ...variableFixture.edges.find((e) => e.kind === "write")!, source: "app" },
+        { ...variableFixture.edges.find((e) => e.kind === "write")! },
+      ],
+    };
+    expect([...writtenBy(more)]).toEqual([["conf:remember", ["_cache", "LIMIT"]]]);
+    expect(writtenBy(repoFixture).size).toBe(0);
   });
 
   it("변수를 고르면 그 변수를 읽는 함수를 꺼내 그린다", () => {

@@ -213,6 +213,15 @@ describe("변수 노드", () => {
     expect(store().history).toBe(before.history);
   });
 
+  it("변수는 함수 시점 뷰의 가운데가 되지 않는다", () => {
+    store().select("conf:PRESETS");
+    const before = store();
+    store().enterFunction("conf:PRESETS");
+    store().open("conf:PRESETS", store().history);
+    expect(store().view).toEqual({ kind: "structure" });
+    expect(store().history).toBe(before.history);
+  });
+
   it("setEnd는 변수를 받지 않는다", () => {
     store().setEnd("from", "conf:PRESETS");
     store().setEnd("to", "conf:LIMIT");

@@ -3,7 +3,7 @@ import type { ElkNode } from "elkjs/lib/elk-api";
 import { describe, expect, it } from "vitest";
 import type { AtlasNode, Graph } from "../api/types";
 import { columns } from "./columns";
-import { repoFixture, routeFixture } from "./fixture";
+import { repoFixture, routeFixture, variableFixture } from "./fixture";
 import { flow } from "./flow";
 import {
   arrange,
@@ -13,6 +13,9 @@ import {
   CIRCLE_GAP,
   elkGraphs,
   labelOf,
+  LOC_GAP,
+  packLabel,
+  ASIDE_GAP,
   boxCaption,
   sideRoute,
   titleOf,
@@ -506,5 +509,42 @@ describe("belowRoute, sideRoute", () => {
       { x: 50, y: 86 },
     ]);
     expect(sideRoute(under, a, 10).map((p) => p.y)).toEqual([86, 86, 14, 14]);
+  });
+});
+
+describe("변수 노드의 배치", () => {
+  const variableCols = columns(variableFixture, toggles);
+  const at = (selection: string, unpacked: string[] = []) =>
+    shown(variableFixture, { ...toggles, collapsed: new Set(), unpacked: new Set(unpacked), flow: flow(variableFixture, selection, 2, hidden(variableFixture, toggles)), lit: null });
+
+  it("변수 노드의 폭은 함수 노드의 폭에 값의 종류·원소 수의 글자 폭과 간격을 더한 값이고 높이는 함수 노드와 같다", () => {
+    const input = elkGraphs(variableFixture, at("conf", ["conf"]), variableCols, measure, new Map());
+    const presets = find(input.components[0], "conf:PRESETS")!;
+    const clamp = find(input.components[0], "conf:clamp")!;
+    expect(presets.width).toBe(16 + CIRCLE_GAP + measure("PRESETS") + LOC_GAP + measure("6") + ASIDE_GAP + measure("dict · 2개"));
+    expect(clamp.width).toBe(16 + CIRCLE_GAP + measure("clamp()") + LOC_GAP + measure("9"));
+    expect(presets.height).toBe(clamp.height);
+  });
+
+  it("전부 펼친 파일 상자는 변수를 다른 정의와 함께 소스 정의 줄 순서로 놓는다", () => {
+    const input = elkGraphs(variableFixture, at("conf", ["conf"]), variableCols, measure, new Map());
+    const order = ["conf:Preset", "conf:PRESETS", "conf:LIMIT", "conf:DEFAULT", "conf:_cache", "conf:clamp", "conf:remember"];
+    expect(order.map((id) => variableCols.order.get(id))).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    const kids = find(input.components[0], "conf")!.children!.map((child) => child.id);
+    expect(kids.filter((id) => !order.includes(id))).toEqual([]);
+    expect([...kids].sort((a, b) => variableCols.order.get(a)! - variableCols.order.get(b)!)).toEqual(order);
+  });
+
+  it("손잡이는 변수가 든 수를 나눠 적고 그 글의 폭을 잡는다", () => {
+    const visible = at("conf");
+    const pack = visible.packs.get("conf")!;
+    expect(packLabel(pack, false)).toBe("내부 함수 1개 · 변수 3개");
+    expect(packLabel({ ...pack, open: true }, false)).toBe("내부 함수 1개 · 변수 3개 접기");
+    expect(packLabel({ ...pack, unused: 2 }, false)).toBe("내부 함수 1개 · 변수 3개 · 미사용 후보 2");
+    expect(packLabel({ ...pack, unused: 2 }, true)).toBe("내부 함수 1개 · 변수 3개");
+    expect(packLabel({ ...pack, definitions: 0 }, false)).toBe("내부 변수 3개");
+    expect(packLabel({ ...pack, variables: 0 }, false)).toBe("내부 함수 1개");
+    const input = elkGraphs(variableFixture, visible, variableCols, measure, new Map());
+    expect(input.packs.get("conf")!.width).toBe(measure("내부 함수 1개 · 변수 3개") + 12);
   });
 });

@@ -3,6 +3,7 @@
 // 선의 말풍선은 줄마다 세 칸으로 따로 그린다(`rows.ts`, `LineBubble.tsx`).
 import type { AtlasNode, Change } from "../api/types";
 import { valueAside } from "./names";
+import type { Pack } from "./visible";
 
 export const ENTRY_TIP = "진입점: 실행을 시작하는 코드";
 
@@ -48,9 +49,20 @@ function listed(names: string[]): string {
   return names.slice(0, NAMES_MAX).join(", ") + (rest > 0 ? ` 외 ${rest}개` : "");
 }
 
+/**
+ * 손잡이에 든 안쪽 자식의 수. 변수가 없으면 `내부 함수 k개`, 변수가 있으면 함수·클래스와 변수를 나눠 `내부 함수 14개 · 변수 6개`,
+ * 변수만 있으면 `내부 변수 k개`다. 손잡이의 글과 말풍선이 함께 쓴다.
+ */
+export function packCount(pack: Pick<Pack, "definitions" | "variables">): string {
+  if (pack.variables === 0) {
+    return `내부 함수 ${pack.definitions}개`;
+  }
+  return pack.definitions === 0 ? `내부 변수 ${pack.variables}개` : `내부 함수 ${pack.definitions}개 · 변수 ${pack.variables}개`;
+}
+
 /** 손잡이. 파일 밖과 선이 없는 정의의 수와 이름을 적는다. names는 그 정의의 이름표다. */
-export function packTip(names: string[]): string {
-  return `이 파일 안에서만 쓰이는 내부 함수 ${names.length}개 · ${listed(names)}`;
+export function packTip(pack: Pick<Pack, "definitions" | "variables">, names: string[]): string {
+  return `이 파일 안에서만 쓰이는 ${packCount(pack)} · ${listed(names)}`;
 }
 
 /**
