@@ -2,7 +2,8 @@
 // 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드나 선이 가리킨 폴더로 화면을 옮긴다. 경로 고정 중에는 고른 노드의 흐름 대신
 // 강조하는 경로를 그리고, finder.focus를 정할 때마다 그 노드와 다음 걸음이 보이게 화면을 옮긴다. 폴더나 손잡이를 눌러 상자 하나를
 // 펼치거나 접으면 화면을 옮기지 않고 그 상자의 모서리를 붙잡는다. 전체 맞춤 상태(저장소의 fitted)에서 그 밖의 까닭으로 배치가 바뀌면
-// 화면을 다시 맞추고, 이름표가 읽히는 확대 비율 아래로 줄이지 않는다.
+// 화면을 다시 맞추고, 이름표가 읽히는 확대 비율 아래로 줄이지 않는다. 시점 비교가 켜져 있으면 비교 결과를 그래프에 그릴 값(`compare.ts`의
+// `compared`)으로 바꿔 배치와 노드·선에 넘긴다.
 import {
   getViewportForBounds,
   ReactFlow,
@@ -18,6 +19,7 @@ import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { AtlasNode, Graph } from "../api/types";
 import { useNodeMenu } from "../nav/NodeMenu";
+import { useCompare } from "../state/compare";
 import { focusOf, type History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { litOf, useAtlas } from "../state/store";
@@ -26,6 +28,7 @@ import { useAim } from "./aim";
 import { Arranging, keepLayout, watchLayout } from "./arranging";
 import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
+import { compared, type Compared } from "./compare";
 import { cycles } from "./cycles";
 import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
 import { useFlight, useFlying } from "./flight";
@@ -68,6 +71,8 @@ interface Scene {
   /** 접은 폴더와 전부 펼친 파일 상자 */
   collapsed: Set<string>;
   unpacked: Set<string>;
+  /** 켜져 있는 시점 비교가 graph에 그리는 값. 비교가 꺼져 있으면 null이다. */
+  compare: Compared | null;
   layout: Layout;
 }
 
@@ -91,7 +96,10 @@ function endsOf(lit: Lit | null): Map<string, RouteEnd> {
   return ends;
 }
 
-/** selected는 선택 고리를 그리는 노드이고 cover는 분석 표시가 노드에 더하는 표시다. 경로 위의 미사용 후보는 점선 테두리만 받고 흐려지지 않는다. */
+/**
+ * selected는 선택 고리를 그리는 노드이고 cover는 분석 표시가 노드에 더하는 표시다. 경로 위의 미사용 후보는 점선 테두리만 받고 흐려지지 않는다.
+ * 시점 비교에서 삭제된 노드와 기준 시점에만 있던 노드는 선택·흐름·경로와 무관하게 흐린 단계로 그리고, 배지와 머리 줄의 수는 대상 시점의 그래프로 센다.
+ */
 function itemsOf(
   scene: Scene,
   nodes: Map<string, AtlasNode>,
@@ -104,9 +112,11 @@ function itemsOf(
   const parents = new Set(order.map((n) => n.parent));
   const dim = opacities(scene.graph, scene.flow, scene.lit);
   const ends = endsOf(scene.lit);
-  const inside = insideCounts(scene.graph, scene.shown.hidden);
-  const lines = folderLines(scene.graph, scene.shown.hidden);
-  const writes = writtenBy(scene.graph);
+  const { compare } = scene;
+  const live = compare?.live ?? scene.graph;
+  const inside = insideCounts(live, scene.shown.hidden);
+  const lines = folderLines(live, scene.shown.hidden);
+  const writes = writtenBy(live);
   /** 화면에 보이는 노드마다, 그 노드로 올린 노드 가운데 요약을 만드는 중인 노드 수. 펼친 폴더는 안에 든 노드를 모두 센다. */
   const busy = new Map<string, number>();
   for (const id of making) {
@@ -118,7 +128,8 @@ function itemsOf(
     }
   }
   return order.map((node) => {
-    const opacity = dim.get(node.id) ?? 1;
+    const gone = compare?.gone.nodes.has(node.id) === true;
+    const opacity = gone ? DIM : (dim.get(node.id) ?? 1);
     const expanded = parents.has(node.id);
     const route: AtlasNodeData["route"] = scene.lit?.nodes.has(node.id) === true ? (ends.get(node.id) ?? "via") : null;
     const { body, face } = parts({
@@ -136,6 +147,7 @@ function itemsOf(
       cycle: cover.cycle.get(node.id)?.map((group) => group.map((id) => titleOf(nodes.get(id)!))) ?? null,
       unused: cover.unused.has(node.id),
       candidates: cover.candidates.get(node.id) ?? 0,
+      compare: compare === null ? null : { lines: compare.lines.get(node.id) ?? null, gone },
     });
     return {
       id: node.id,
@@ -233,6 +245,7 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
   const making = useSummaries(makingKey);
   const overlay = useOverlay((s) => s.kind);
   const candidates = useOverlay((s) => s.unused);
+  const result = useCompare((s) => s.result);
   const { getViewport } = useReactFlow();
   const { fly, jump, halt, heading } = useFlight();
   const flying = useFlying((s) => s.on);
@@ -278,12 +291,14 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
   /** 화면에 그린 배치의 그래프로 만든다. 다시 분석한 그래프를 받으면 그 그래프의 배치가 올 때까지 앞의 그래프를 그린다. */
   const drawnGraph = scene?.graph ?? graph;
   const index = useMemo(
-    () => (drawnGraph === null ? null : { nodes: nodeIndex(drawnGraph), functions: functionCounts(drawnGraph) }),
-    [drawnGraph],
+    () => (drawnGraph === null ? null : { nodes: nodeIndex(drawnGraph), functions: functionCounts(scene?.compare?.live ?? drawnGraph) }),
+    [drawnGraph, scene],
   );
+  /** 저장소의 그래프가 켜져 있는 비교의 그래프일 때만 비교를 그린다. 비교를 켜고 끄는 사이에 둘이 어긋난 그래프에는 그리지 않는다. */
+  const compare = useMemo(() => (graph === null || result === null || result.graph !== graph ? null : compared(graph, result)), [graph, result]);
   const cols = useMemo(
-    () => (graph === null ? null : columns(graph, { showTests, showExternal })),
-    [graph, showTests, showExternal],
+    () => (graph === null ? null : columns(graph, { showTests, showExternal }, compare)),
+    [graph, showTests, showExternal, compare],
   );
   const target = useMemo(() => {
     if (graph === null) {
@@ -292,15 +307,15 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
     const toggles = { showTests, showExternal };
     const off = hidden(graph, toggles);
     const covered = overlay === "unused";
-    const boxes = { collapsed, unpacked, marked: covered ? candidates : undefined, candidates };
+    const boxes = { collapsed, unpacked, marked: covered ? candidates : undefined, candidates, compare };
     const state = [toggles, [...collapsed].sort(), [...unpacked].sort(), covered, [...candidates].sort()];
     if (lit !== null) {
-      return { flow: null, lit, focus: null, key: JSON.stringify(state), collapsed, unpacked, shown: shown(graph, { ...toggles, ...boxes, flow: null, lit }) };
+      return { flow: null, lit, focus: null, key: JSON.stringify(state), collapsed, unpacked, compare, shown: shown(graph, { ...toggles, ...boxes, flow: null, lit }) };
     }
     const picked = focus !== null && graph.nodes.some((n) => n.id === focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
     const key = JSON.stringify([...state, picked === null ? null : [focus, depth]]);
-    return { flow: picked, lit, focus: picked === null ? null : focus, key, collapsed, unpacked, shown: shown(graph, { ...toggles, ...boxes, flow: picked, lit }) };
-  }, [graph, showTests, showExternal, collapsed, unpacked, overlay, candidates, focus, depth, lit]);
+    return { flow: picked, lit, focus: picked === null ? null : focus, key, collapsed, unpacked, compare, shown: shown(graph, { ...toggles, ...boxes, flow: picked, lit }) };
+  }, [graph, showTests, showExternal, collapsed, unpacked, overlay, candidates, focus, depth, lit, compare]);
   /** 지금 상태로 그릴 배치의 키. 화면에 그린 배치의 키와 같으면 그 배치가 지금 상태의 배치다. */
   const wanted = useRef<string | null>(null);
   wanted.current = target?.key ?? null;
@@ -335,7 +350,7 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
       return;
     }
     return watchLayout(
-      layout(graph, target.shown, cols, endsOf(target.lit)),
+      layout(graph, target.shown, cols, endsOf(target.lit), target.compare),
       (result) => {
         arranged.current = input;
         setScene({ graph, columns: cols, ...target, layout: result });
@@ -365,7 +380,7 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
   );
 
   /** 지금 배치의 순환 묶음. 배치가 순환 아이콘의 폭을 잡을 때와 같은 숨긴 노드로 찾는다. */
-  const loops = useMemo(() => (scene === null ? null : cycles(scene.graph, scene.shown.hidden)), [scene]);
+  const loops = useMemo(() => (scene === null ? null : cycles(scene.compare?.live ?? scene.graph, scene.shown.hidden)), [scene]);
   const cover = useMemo((): Cover | null => {
     if (scene === null || loops === null) {
       return null;
@@ -499,7 +514,7 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
     if (scene === null || loops === null) {
       return { edges: [], keys: new Set<EdgeKey>() };
     }
-    const all = drawn(scene.graph, scene.shown, scene.flow, hovered, scene.lit);
+    const all = drawn(scene.graph, scene.shown, scene.flow, hovered, scene.lit, scene.compare?.gone.edges);
     const edges = scene.lit === null && index !== null ? followed(all, index.nodes, via) : all;
     return overlay === "cycles" ? cycleLines(scene.graph, scene.shown, scene.flow, scene.lit, edges, loops) : { edges, keys: new Set<EdgeKey>() };
   }, [scene, index, loops, overlay, hovered, via]);
@@ -519,14 +534,15 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
       return { path: "", name: id, full: id };
     }
     const title = titleOf(node);
+    const lines = scene?.compare?.lines.get(id);
     if (unitOf(index.nodes, id) !== id) {
-      return definedName(index.nodes, baseOf(index.nodes, scene?.focus ?? null, row, id), node);
+      return { ...definedName(index.nodes, baseOf(index.nodes, scene?.focus ?? null, row, id), node), lines };
     }
     if (scene?.layout.boxes.has(id) === true) {
-      return { path: "", name: title, full: title };
+      return { path: "", name: title, full: title, lines };
     }
     const at = title.replace(/\/$/, "").lastIndexOf("/") + 1;
-    return { path: title.slice(0, at), name: title.slice(at), full: title };
+    return { path: title.slice(0, at), name: title.slice(at), full: title, lines };
   };
   /**
    * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 말풍선이 고정되고, 그 줄의 이름을 누르면 선을 따라 그 노드로 간다(`go`). 관계를 누르거나
@@ -536,7 +552,7 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
     lines: views,
     boxes: scene?.layout.boxes ?? NO_BOXES,
     name: cellName,
-    rows: (view) => (index === null ? [] : rowsOf(index.nodes, scene?.focus ?? null, { ...view, edges: origins.get(view.key)?.edges ?? [] })),
+    rows: (view) => (index === null ? [] : rowsOf(index.nodes, scene?.focus ?? null, { ...view, edges: origins.get(view.key)?.edges ?? [] }, scene?.compare?.changes ?? null)),
     only: lit === null ? null : (view) => view.route !== null,
     skip: (event) => {
       const again = repeated(event);

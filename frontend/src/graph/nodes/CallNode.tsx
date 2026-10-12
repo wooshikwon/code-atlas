@@ -3,7 +3,7 @@ import { memo } from "react";
 import { useChange } from "../../state/changes";
 import type { Side } from "../calls";
 import { CIRCLE_GAP } from "../layout";
-import { Circle, DIAMOND_POINTS, EntryMark, Handles, nodeProps, sameNode, type AtlasNodeData } from "./common";
+import { Circle, DIAMOND_POINTS, EntryMark, Handles, nodeProps, sameNode, shownChange, type AtlasNodeData } from "./common";
 
 export interface CallNodeData extends AtlasNodeData {
   /** 메서드면 `클래스.이름()` */
@@ -51,7 +51,7 @@ function Shape({ data }: { data: CallNodeData }) {
  * + 버튼은 글자 요소가 그리고 바탕 요소는 같은 폭을 비운다.
  */
 export const CallNode = memo(function CallNode({ data }: NodeProps<CallFlowNode>) {
-  const change = useChange(data.node.id);
+  const change = shownChange(data, useChange(data.node.id));
   const face = data.part === "face";
   const more =
     data.more &&

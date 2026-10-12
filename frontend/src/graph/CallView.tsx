@@ -1,4 +1,5 @@
 // 함수 시점 뷰. 가운데 함수와 그 함수를 호출하는 쪽·호출되는 쪽을 실행 선으로 이어 배치하고, 가운데 함수가 바뀌면 화면을 맞춘다.
+// 시점 비교가 켜져 있으면 삭제된 노드와 선을 뺀 대상 시점의 그래프로 그리고 변경 표시를 그리지 않는다.
 import {
   getViewportForBounds,
   ReactFlow,
@@ -10,12 +11,14 @@ import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { AtlasNode } from "../api/types";
 import { useNodeMenu } from "../nav/NodeMenu";
+import { useCompare } from "../state/compare";
 import type { History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { useAim } from "./aim";
 import { Arranging, watchLayout } from "./arranging";
+import { liveGraph } from "./compare";
 import { callEdges, callElk, callLabel, callLane, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
 import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
 import { useFlight, useFlying } from "./flight";
@@ -47,7 +50,7 @@ interface Scene {
   nodes: Map<string, AtlasNode>;
 }
 
-/** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. unused는 미사용 후보 표시가 표시할 후보다. */
+/** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. unused는 미사용 후보 표시가 표시할 후보이고 comparing은 시점 비교가 켜져 있는지다. */
 function itemsOf(
   scene: Scene,
   nodes: Map<string, AtlasNode>,
@@ -55,6 +58,7 @@ function itemsOf(
   making: string[],
   unused: Set<string>,
   writes: Map<string, string[]>,
+  comparing: boolean,
 ): Drawn<CallNodeData>[] {
   return scene.calls.nodes.map((id) => {
     const node = nodes.get(id)!;
@@ -72,6 +76,7 @@ function itemsOf(
       cycle: null,
       unused: unused.has(id),
       candidates: 0,
+      compare: comparing ? { lines: null, gone: false } : null,
       route: null,
       label: callLabel(nodes, node),
       file: fileLabel(nodes, node),
@@ -83,7 +88,10 @@ function itemsOf(
 }
 
 export function CallView({ center, expanded }: { center: string; expanded: string[] }) {
-  const graph = useAtlas((s) => s.graph);
+  const drawnGraph = useAtlas((s) => s.graph);
+  const result = useCompare((s) => s.result);
+  const comparing = result !== null;
+  const graph = useMemo(() => (drawnGraph === null ? null : liveGraph(drawnGraph, result)), [drawnGraph, result]);
   const showTests = useAtlas((s) => s.showTests);
   const showExternal = useAtlas((s) => s.showExternal);
   const selection = useAtlas((s) => s.selection);
@@ -136,7 +144,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     if (scene === null) {
       return;
     }
-    const items = itemsOf(scene, scene.nodes, selected, makingOf(making), unused, writes);
+    const items = itemsOf(scene, scene.nodes, selected, makingOf(making), unused, writes, comparing);
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
@@ -171,7 +179,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, selected, making, unused, fly, jump]);
+  }, [scene, selected, making, unused, comparing, fly, jump]);
   useEffect(() => halt, [halt]);
 
   const lines = useMemo(() => (scene === null ? NO_LINES : callEdges(scene.calls, scene.center, scene.layout)), [scene]);

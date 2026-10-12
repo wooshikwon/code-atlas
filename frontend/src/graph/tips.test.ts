@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture, variableFixture } from "./fixture";
-import { busyTip, cycleTip, globalTip, nodeTip, packCount, packTip, sizeTip, valueTip } from "./tips";
+import { busyTip, cycleTip, diffTip, globalTip, nodeTip, packCount, packTip, sizeTip, valueTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
@@ -68,5 +68,12 @@ describe("배지 말풍선", () => {
       "설정을 읽어 엔진을 띄운다",
       "미사용 후보 · 들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다",
     ]);
+  });
+});
+
+describe("시점 비교의 말풍선", () => {
+  it("이름 옆 줄 수는 0이 아닌 쪽만 적는다", () => {
+    expect(diffTip({ added: 12, deleted: 3 })).toBe("기준 시점과 대상 시점 사이 · 추가된 줄 12줄 · 삭제된 줄 3줄");
+    expect(diffTip({ added: 0, deleted: 19 })).toBe("기준 시점과 대상 시점 사이 · 삭제된 줄 19줄");
   });
 });

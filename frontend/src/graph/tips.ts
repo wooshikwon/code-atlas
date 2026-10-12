@@ -2,6 +2,7 @@
 // 그래프에서는 그래프 뷰가 마우스 아래 배지와 표시에서 그 글을 찾아 노드의 말풍선 대신 띄운다. 줄은 `\n`으로 나눈다.
 // 선의 말풍선은 줄마다 세 칸으로 따로 그린다(`rows.ts`, `LineBubble.tsx`).
 import type { AtlasNode, Change } from "../api/types";
+import type { Lines } from "./compare";
 import { valueAside } from "./names";
 import type { Pack } from "./visible";
 
@@ -22,6 +23,12 @@ export function sizeTip(node: AtlasNode, loc: number, inside: number): string {
     return lines;
   }
   return node.kind === "package" ? `${lines} · 안에 든 파일 ${inside}개` : `${lines} · 안에 든 함수·클래스·변수 ${inside}개`;
+}
+
+/** 시점 비교에서 이름 옆에 적는 줄 수. 0인 쪽은 적지 않는다. */
+export function diffTip(lines: Lines): string {
+  const parts = [lines.added > 0 ? `추가된 줄 ${lines.added}줄` : null, lines.deleted > 0 ? `삭제된 줄 ${lines.deleted}줄` : null];
+  return `기준 시점과 대상 시점 사이 · ${parts.filter((part) => part !== null).join(" · ")}`;
 }
 
 /** 모듈 변수 변경 배지 `g`. names는 그 함수에서 나가는 바꿈 선의 도착 변수 이름이다. */

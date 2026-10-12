@@ -1,9 +1,11 @@
-// 선의 말풍선. 커서 밑의 선을 줄마다 출발·도착·관계 세 칸으로 적고 맨 위에 칸 이름을 적는다. 선에 마우스를 올린 동안에는 마우스 옆에
+// 선의 말풍선. 커서 밑의 선을 줄마다 출발·도착·관계 세 칸으로 적고 맨 위에 칸 이름을 적는다. 시점 비교가 켜져 있으면 넷째 칸 변경을 더해
+// 그 줄의 관계가 신규인지 삭제인지 유지인지 적고, 출발·도착 칸의 이름 뒤에 그 노드의 줄 수를 작게 적는다. 선에 마우스를 올린 동안에는 마우스 옆에
 // 떠 있고 누를 수 없으며, 선을 누르면 같은 모양으로 그곳에 고정돼 칸을 누를 수 있다. 출발·도착 칸의 이름은 그 노드로 가고,
 // 관계 칸은 그 관계의 코드 줄 목록을 연다. 고정한 말풍선은 방향키로 줄과 칸을 옮기고 말풍선 밖을 누르면 풀린다.
-import { useEffect, useLayoutEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import type { CellName, LineRow } from "./rows";
+import { Diff } from "./nodes/common";
+import { changeParts, type CellName, type LineRow } from "./rows";
 import type { EdgeKey } from "./scope";
 import { placeBeside } from "./Tooltip";
 
@@ -31,6 +33,9 @@ interface LineBubbleProps {
 }
 
 const COLUMNS = ["출발", "도착", "관계"];
+const CHANGE_COLUMN = "변경";
+/** 칸의 이름과 그 뒤에 적는 줄 수 사이의 폭 */
+const CELL_DIFF_GAP = 6;
 const MOVES: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
 
 /** 지금 그린 말풍선의 요소. 마우스를 따라 옮길 때 쓴다. */
@@ -46,6 +51,7 @@ export function moveBubble(x: number, y: number): void {
 export function LineBubble({ bubble, name, aim, go, list, close }: LineBubbleProps) {
   const element = useRef<HTMLDivElement | null>(null);
   const { rows, pinned } = bubble;
+  const columns = rows.some((row) => row.change !== undefined) ? [...COLUMNS, CHANGE_COLUMN] : COLUMNS;
 
   useLayoutEffect(() => {
     drawn = element.current;
@@ -97,6 +103,7 @@ export function LineBubble({ bubble, name, aim, go, list, close }: LineBubblePro
           </span>
         )}
         <span className="line-cell-name">{content.name}</span>
+        {content.lines !== undefined && <Diff lines={content.lines} gap={CELL_DIFF_GAP} />}
       </>
     );
     return (
@@ -115,11 +122,11 @@ export function LineBubble({ bubble, name, aim, go, list, close }: LineBubblePro
   };
 
   return createPortal(
-    <div ref={element} className="line-bubble" data-pinned={pinned ? "" : undefined} role={pinned ? "dialog" : "tooltip"} aria-label="선의 출발, 도착, 관계" onKeyDown={move} onMouseLeave={() => aim(null)}>
+    <div ref={element} className="line-bubble" data-pinned={pinned ? "" : undefined} role={pinned ? "dialog" : "tooltip"} aria-label={`선의 ${columns.join(", ")}`} onKeyDown={move} onMouseLeave={() => aim(null)}>
       <table>
         <thead>
           <tr>
-            {COLUMNS.map((column) => (
+            {columns.map((column) => (
               <th key={column} scope="col">
                 {column}
               </th>
@@ -132,6 +139,22 @@ export function LineBubble({ bubble, name, aim, go, list, close }: LineBubblePro
               {cell(i, 0, "source", name(row, row.source), row.source, row.keys === null ? null : () => go(row, row.source))}
               {cell(i, 1, "target", name(row, row.target), row.target, row.keys === null ? null : () => go(row, row.target))}
               {cell(i, 2, "relation", { path: "", name: row.relation, full: row.relation }, undefined, row.list === null ? null : () => list(row))}
+              {row.change !== undefined && (
+                <td data-cell="change">
+                  <span className="line-cell">
+                    <span className="line-cell-name">
+                      {changeParts(row.change).map(({ kind, text }, at) => (
+                        <Fragment key={kind}>
+                          {at > 0 && " · "}
+                          <span className="line-change" data-kind={kind}>
+                            {text}
+                          </span>
+                        </Fragment>
+                      ))}
+                    </span>
+                  </span>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

@@ -2,7 +2,7 @@ import type { NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { useChange } from "../../state/changes";
 import { moduleHeader } from "../layout";
-import { Badges, Below, Handles, Label, Mark, nodeProps, sameNode, type AtlasFlowNode } from "./common";
+import { Badges, Below, Handles, Label, Mark, nodeProps, sameNode, shownChange, type AtlasFlowNode } from "./common";
 
 /**
  * 접힌 파일 상자는 320×40 상자에 이름표를 적고, 줄 수를 오른쪽 위 배지에, 미사용 후보 표시를 켰을 때의
@@ -12,7 +12,7 @@ import { Badges, Below, Handles, Label, Mark, nodeProps, sameNode, type AtlasFlo
  */
 export const ModuleNode = memo(function ModuleNode({ data }: NodeProps<AtlasFlowNode>) {
   const count = moduleHeader(data.node, data.functions);
-  const change = useChange(data.node.id);
+  const change = shownChange(data, useChange(data.node.id));
   const face = data.part === "face";
   if (data.expanded) {
     return (

@@ -1,7 +1,7 @@
 import type { NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { useChange } from "../../state/changes";
-import { Badges, Handles, Label, nodeProps, sameNode, type AtlasFlowNode } from "./common";
+import { Badges, Handles, Label, nodeProps, sameNode, shownChange, type AtlasFlowNode } from "./common";
 
 const INSET = 10;
 
@@ -13,7 +13,7 @@ export const ClassNode = memo(function ClassNode({ data, width, height }: NodePr
   const w = width ?? 0;
   const h = height ?? 0;
   const points = `${INSET},0.75 ${w - INSET},0.75 ${w - 0.75},${h / 2} ${w - INSET},${h - 0.75} ${INSET},${h - 0.75} 0.75,${h / 2}`;
-  const change = useChange(data.node.id);
+  const change = shownChange(data, useChange(data.node.id));
   const face = data.part === "face";
   return (
     <div {...nodeProps(data.expanded ? "node-class node-class-expanded" : "node-class", data, change)}>

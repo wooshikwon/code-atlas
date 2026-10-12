@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { node, repoFixture, variableFixture } from "./fixture";
+import { compared } from "./compare";
+import { compareFixture, node, repoFixture, variableFixture } from "./fixture";
 import { flow } from "./flow";
-import { baseOf, definedName, rowsOf, stageOf, type RowLine } from "./rows";
+import { baseOf, changeParts, definedName, rowsOf, stageOf, type RowLine } from "./rows";
 import { drawn } from "./scope";
 import { hidden, nodeIndex, shown } from "./visible";
 
@@ -206,5 +207,56 @@ describe("변수 노드의 줄", () => {
     expect(definedName(variables, "app", variables.get("conf:PRESETS")!)).toEqual({ path: "conf.py::", name: "PRESETS", full: "conf.py::PRESETS" });
     expect(definedName(variables, "conf", variables.get("conf:PRESETS")!)).toEqual({ path: "", name: "PRESETS", full: "conf.py::PRESETS" });
     expect(baseOf(variables, "conf:PRESETS", { source: "app:run", target: "conf:PRESETS" }, "app:run")).toBe("conf");
+  });
+});
+
+describe("rowsOf: 시점 비교", () => {
+  const { graph } = compareFixture;
+  const compare = compared(graph, compareFixture);
+  const all = nodeIndex(graph);
+  const none = hidden(graph, toggles);
+  const at = (selection: string | null, collapsed: string[] = []) => {
+    const focus = selection === null ? null : flow(graph, selection, 2, none);
+    const visible = shown(graph, { ...toggles, collapsed: new Set(collapsed), flow: focus, lit: null, compare });
+    return new Map(drawn(graph, visible, focus, null, null, compare.gone.edges).map((edge) => [edge.key, edge]));
+  };
+  const rows = (selection: string | null, key: string, collapsed: string[] = []) => rowsOf(all, selection, at(selection, collapsed).get(key)!, compare.changes);
+
+  it("비교가 꺼져 있으면 줄에 변경 칸의 값이 없다", () => {
+    expect(rowsOf(nodes, null, lines(null).get("agg|cli|main")!)[0].change).toBeUndefined();
+  });
+
+  it("함수 단계의 줄은 관계마다 신규, 삭제, 유지를 적고 삭제된 줄은 기준 시점의 수를 적는다", () => {
+    expect(rows("cli:main", "cli:main|common:log|call")).toMatchObject([{ relation: "호출 1곳", change: { added: 1, deleted: 0, kept: 0 } }]);
+    expect(rows("cli:main", "cli:main|main:helper|call")).toMatchObject([{ relation: "호출 1곳", change: { added: 0, deleted: 1, kept: 0 }, keys: ["cli:main|main:helper|call"] }]);
+    expect(rows("cli:main", "cli:main|main:run|call")).toMatchObject([{ relation: "호출 1곳", change: { added: 0, deleted: 0, kept: 1 } }]);
+    expect(changeParts({ added: 1, deleted: 0, kept: 0 })).toEqual([{ kind: "added", text: "신규" }]);
+    expect(changeParts({ added: 0, deleted: 1, kept: 0 })).toEqual([{ kind: "deleted", text: "삭제" }]);
+    expect(changeParts({ added: 0, deleted: 0, kept: 1 })).toEqual([{ kind: "kept", text: "유지" }]);
+  });
+
+  it("수만 달라진 줄은 유지이고 관계 칸에 기준 시점의 수와 지금의 수를 적는다", () => {
+    const [row] = rows("main:run", "main:run|pkg.mod:Store.load|call");
+    expect(row).toMatchObject({ relation: "호출 2곳 → 3곳", change: { added: 0, deleted: 0, kept: 1 } });
+    expect(changeParts(row.change!)).toEqual([{ kind: "kept", text: "유지" }]);
+  });
+
+  it("파일 단계의 줄은 묶은 관계 가운데 추가되고 삭제된 수를 붙여 적고 관계 칸은 삭제되지 않은 관계만 센다", () => {
+    const [row] = rows("cli", "agg|cli|main").filter((r) => r.target === "main");
+    expect(row).toMatchObject({ source: "cli", target: "main", relation: "호출 1곳", change: { added: 0, deleted: 1, kept: 2 } });
+    expect(changeParts(row.change!)).toEqual([{ kind: "deleted", text: "삭제 1" }]);
+    expect(changeParts({ added: 1, deleted: 1, kept: 3 })).toEqual([
+      { kind: "added", text: "신규 1" },
+      { kind: "deleted", text: "삭제 1" },
+    ]);
+    expect(changeParts({ added: 2, deleted: 0, kept: 1 })).toEqual([{ kind: "added", text: "신규 2" }]);
+    expect(changeParts({ added: 1, deleted: 1, kept: 0 })).toEqual([
+      { kind: "added", text: "신규 1" },
+      { kind: "deleted", text: "삭제 1" },
+    ]);
+  });
+
+  it("삭제된 관계만 든 선의 줄은 삭제이고 이름을 눌러 갈 선의 키를 담는다", () => {
+    expect(rows(null, "agg|pkg.old|pkg.mod")).toMatchObject([{ source: "pkg.old", target: "pkg.mod", relation: "호출 2곳", change: { added: 0, deleted: 1, kept: 0 }, keys: ["agg|pkg.old|pkg.mod"] }]);
   });
 });
