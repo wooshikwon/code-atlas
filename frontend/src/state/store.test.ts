@@ -222,6 +222,13 @@ describe("변수 노드", () => {
     expect(store().history).toBe(before.history);
   });
 
+  it("새로고침은 고른 변수와 전부 펼친 파일 상자를 그대로 두고, 없어진 변수의 선택만 푼다", () => {
+    const place: Place = { view: { kind: "structure" }, selection: { type: "node", id: "conf:LIMIT" }, via: null, collapsed: [], unpacked: ["conf"] };
+    expect(placeIn(place, variableFixture, variableFixture)).toEqual(place);
+    const gone = { nodes: variableFixture.nodes.filter((n) => n.id !== "conf:LIMIT"), edges: variableFixture.edges.filter((e) => e.source !== "conf:LIMIT" && e.target !== "conf:LIMIT") };
+    expect(placeIn(place, gone, variableFixture)).toEqual({ ...place, selection: null });
+  });
+
   it("setEnd는 변수를 받지 않는다", () => {
     store().setEnd("from", "conf:PRESETS");
     store().setEnd("to", "conf:LIMIT");
