@@ -43,6 +43,7 @@ class Runner:
         self._sessions = AsyncExitStack()
         self._opening = asyncio.Lock()
         self._warming: asyncio.Task | None = None
+        self._closed = False
 
     async def run(
         self, previous: Analyzed | None = None, landed: Callable[[Analyzed, bool], None] | None = None
@@ -108,11 +109,18 @@ class Runner:
                 await self._sessions.aclose()
                 self._session = None
             if self._session is None or self._session.stopped:
-                self._session = await self._sessions.enter_async_context(
-                    Session(files.root, self.python, files.extra_paths)
-                )
+                self._session = await self._started(files)
                 self._env = env
             return self._session
+
+    async def _started(self, files: RepoFiles) -> Session:
+        """세션을 띄운다. `close`를 부른 뒤와 띄우는 동안 `close`가 불린 때는 세션을 남기지 않고 실패한다."""
+        if not self._closed:
+            session = await self._sessions.enter_async_context(Session(files.root, self.python, files.extra_paths))
+            if not self._closed:
+                return session
+            await self._sessions.aclose()
+        raise RuntimeError("닫은 레포의 세션은 띄우지 않는다")
 
     def _warm(self) -> None:
         """마지막 결과의 본문을 연 세션을 뒤에서 준비한다."""
@@ -126,9 +134,7 @@ class Runner:
             analyzed = self.analyzed
             if self._session is None or self._session.stopped:
                 self.lsp = "starting"
-                self._session = await self._sessions.enter_async_context(
-                    Session(analyzed.files.root, self.python, analyzed.files.extra_paths)
-                )
+                self._session = await self._started(analyzed.files)
                 self._env = analyzed.env
             if self.lsp != "ready":
                 self._session.sync_files(analyzed.texts)
@@ -137,7 +143,11 @@ class Runner:
             return self._session
 
     async def close(self) -> None:
-        """뒤에서 준비하던 세션을 멈추고 띄운 세션과 캐시를 닫는다. 분석 태스크는 부르는 쪽이 먼저 끝낸다."""
+        """뒤에서 준비하던 세션을 멈추고 띄운 세션과 캐시를 닫는다. 분석 태스크는 부르는 쪽이 먼저 끝낸다.
+
+        닫은 뒤에는 세션을 다시 띄우지 않는다.
+        """
+        self._closed = True
         if self._warming is not None and not self._warming.done():
             self._warming.cancel()
             await asyncio.gather(self._warming, return_exceptions=True)

@@ -275,7 +275,7 @@ def test_position_outside_analysis_is_404(client, route, path):
 
 
 def test_stopped_session_is_reopened(client, monkeypatch):
-    state = client.app.state
+    state = client.app.state.workspace
     deadline = time.monotonic() + 10
     while client.get("/api/status").json()["lsp"] != "ready" and time.monotonic() < deadline:
         time.sleep(0.05)
@@ -336,7 +336,7 @@ async def test_server_answers_before_the_analysis_and_counts_revisions(sample_re
     seen = []
     app = create_app(sample_repo, sys.executable, seen.append)
     async with app.router.lifespan_context(app):
-        while app.state.runner._session is None:
+        while app.state.workspace.runner._session is None:
             await asyncio.sleep(0.01)
         code, status = await call(app, "GET", "/api/status", {})
         total = status.pop("total")
@@ -350,16 +350,17 @@ async def test_server_answers_before_the_analysis_and_counts_revisions(sample_re
             "error": None,
             "stale": {"count": 0, "paths": []},
             "compare": None,
+            "session": 1,
         }
         for method, path, params in READS:
             assert await call(app, method, path, params) == (503, {"error": "분석 중이다"}), path
         assert seen == []
 
         release.set()
-        await app.state.running
+        await app.state.workspace.running
         _, status = await call(app, "GET", "/api/status", {})
         assert (status["phase"], status["revision"], status["draft"], status["error"]) == ("ready", 1, False, None)
-        assert seen == [app.state.analyzed.analysis]
+        assert seen == [app.state.workspace.analyzed.analysis]
         assert (await call(app, "GET", "/api/graph", {}))[0] == 200
         status, hover = await call(app, "GET", "/api/hover", RUN_ENGINE_CALL)
         assert status == 200 and hover["range"] == [10, 21, 10, 31]
@@ -373,7 +374,7 @@ async def test_resolve_phase_reports_the_requests_sent(sample_repo, tmp_path, mo
     app = create_app(sample_repo, sys.executable)
     seen = []
     async with app.router.lifespan_context(app):
-        while not app.state.running.done():
+        while not app.state.workspace.running.done():
             _, status = await call(app, "GET", "/api/status", {})
             seen.append((status["phase"], status["done"], status["total"]))
             await asyncio.sleep(0.005)
@@ -392,11 +393,11 @@ async def test_shutdown_during_the_analysis_ends_the_session_and_closes_the_cach
     app = create_app(sample_repo, sys.executable)
     started = time.monotonic()
     async with app.router.lifespan_context(app):
-        while app.state.runner._session is None:
+        while app.state.workspace.runner._session is None:
             await asyncio.sleep(0.01)
-        session, store = app.state.runner._session, app.state.runner._cache
+        session, store = app.state.workspace.runner._session, app.state.workspace.runner._cache
     assert time.monotonic() - started < 5
-    assert app.state.revision == 0 and not hasattr(app.state, "analyzed")
+    assert app.state.workspace.revision == 0 and app.state.workspace.analyzed is None
     assert session.stopped and group_ended(session.client._server.pid)
     with pytest.raises(sqlite3.ProgrammingError):
         store._db.execute("SELECT 1")
@@ -407,7 +408,7 @@ async def test_failed_first_analysis_keeps_the_server_up(sample_repo, tmp_path, 
     monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
     app = create_app(sample_repo, str(sample_repo / "no" / "python"))
     async with app.router.lifespan_context(app):
-        await asyncio.gather(app.state.running, return_exceptions=True)
+        await asyncio.gather(app.state.workspace.running, return_exceptions=True)
         _, status = await call(app, "GET", "/api/status", {})
         assert (status["phase"], status["revision"]) == ("failed", 0)
         assert "실행할 수 없다" in status["error"]
@@ -415,7 +416,7 @@ async def test_failed_first_analysis_keeps_the_server_up(sample_repo, tmp_path, 
 
         code, body = await call(app, "POST", "/api/reload", {})
         assert code == 500 and "실행할 수 없다" in body["error"]
-        app.state.runner.python = sys.executable
+        app.state.workspace.runner.python = sys.executable
         code, body = await call(app, "POST", "/api/reload", {})
         _, status = await call(app, "GET", "/api/status", {})
         assert (code, body["name"]) == (200, sample_repo.name)
@@ -428,8 +429,8 @@ async def test_cached_repo_opens_as_a_draft_and_is_replaced_after_asking(sample_
     monkeypatch.setattr(summary, "find_cli", lambda: None)
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
-        await app.state.running
-        full = app.state.graph
+        await app.state.workspace.running
+        full = app.state.workspace.graph
 
     asked = []
     definition = lsp.Session.definition
@@ -441,9 +442,9 @@ async def test_cached_repo_opens_as_a_draft_and_is_replaced_after_asking(sample_
     monkeypatch.setattr(lsp.Session, "definition", counted)
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
-        await app.state.running
-        assert (app.state.revision, app.state.draft, asked) == (1, False, [])
-        assert app.state.graph == full
+        await app.state.workspace.running
+        assert (app.state.workspace.revision, app.state.workspace.draft, asked) == (1, False, [])
+        assert app.state.workspace.graph == full
         status, hover = await call(app, "GET", "/api/hover", RUN_ENGINE_CALL)
         assert status == 200 and hover["range"] == [10, 21, 10, 31]
 
@@ -458,12 +459,12 @@ async def test_cached_repo_opens_as_a_draft_and_is_replaced_after_asking(sample_
     monkeypatch.setattr(lsp.Session, "wait_ready", held)
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
-        while app.state.revision == 0:
+        while app.state.workspace.revision == 0:
             await asyncio.sleep(0.01)
         _, status = await call(app, "GET", "/api/status", {})
         assert (status["phase"], status["revision"], status["draft"]) == ("resolve", 1, True)
-        draft = app.state.graph
-        assert "app.core:added" in app.state.nodes
+        draft = app.state.workspace.graph
+        assert "app.core:added" in app.state.workspace.nodes
         assert not any(e["source"] == "app.core:added" for e in draft["edges"])
         reloading = asyncio.create_task(call(app, "POST", "/api/reload", {}))
         await asyncio.sleep(0.05)
@@ -473,7 +474,7 @@ async def test_cached_repo_opens_as_a_draft_and_is_replaced_after_asking(sample_
         assert (await reloading)[0] == 200
         _, status = await call(app, "GET", "/api/status", {})
         assert (status["phase"], status["revision"], status["draft"]) == ("ready", 2, False)
-        assert any(e["source"] == "app.core:added" and e["target"] == "app.core:helper" for e in app.state.graph["edges"])
+        assert any(e["source"] == "app.core:added" and e["target"] == "app.core:helper" for e in app.state.workspace.graph["edges"])
 
 
 async def call(app, method: str, path: str, params: dict, gone: asyncio.Event | None = None) -> tuple[int, dict]:
@@ -530,7 +531,7 @@ async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects
     monkeypatch.setattr(summary, "unavailable", unavailable)
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
-        await app.state.running
+        await app.state.workspace.running
         names = {
             "app.core:helper": "app/core.py::helper",
             "app.core:run_engine": "app/core.py::run_engine",
@@ -592,7 +593,7 @@ def test_summaries_list_the_lead_of_every_kept_summary(client, generated, monkey
     monkeypatch.setattr(summary, "generate", generate)
     client.post("/api/summary", params={"node": "app.core:run_engine"})
     client.post("/api/summary", params={"node": "app.core"})
-    client.app.state.summaries.latest.put(Subject(client.app.state.repo["root"], "node", "app.core:gone", "d"), "없는 노드")
+    client.app.state.summaries.latest.put(Subject(client.app.state.workspace.repo["root"], "node", "app.core:gone", "d"), "없는 노드")
     client.post("/api/explanation", params={"path": "src/app/core.py", "start": 32, "end": 33})
     assert client.get("/api/summaries").json() == {
         "summaries": [
@@ -636,7 +637,7 @@ def test_explanation_is_made_listed_and_deleted(client, generated):
 def test_explanation_is_stale_after_the_range_code_changes(client, generated):
     path = "src/app/core.py"
     client.post("/api/explanation", params={"path": path, "start": 32, "end": 33})
-    texts = client.app.state.analyzed.texts
+    texts = client.app.state.workspace.analyzed.texts
     before = texts[path]
     texts[path] = before.replace("    engine.start(config)\n", "    engine.start(None)\n")
     try:
@@ -757,7 +758,7 @@ def test_summary_made_before_the_code_changed_is_returned_as_stale(client, gener
     client.post("/api/summary", params=node)
     assert client.get("/api/summary", params=node).json()["stale"] is False
 
-    texts = client.app.state.analyzed.texts
+    texts = client.app.state.workspace.analyzed.texts
     before = texts[path]
     texts[path] = before.replace("    engine.start(config)\n", "    engine.start(None)\n")
     try:
@@ -945,8 +946,8 @@ async def test_reload_replaces_the_analysis_and_keeps_the_session(sample_repo, t
     monkeypatch.setattr(api, "STALE_MEMO", 0.0)
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
-        await app.state.running
-        state = app.state
+        await app.state.workspace.running
+        state = app.state.workspace
         before, first = state.graph, await state.runner.session()
         assert "app.core:added" not in state.nodes
         assert (await call(app, "GET", "/api/status", {}))[1]["stale"] == {"count": 0, "paths": []}
@@ -983,7 +984,7 @@ async def test_status_counts_files_whose_content_changed_since_the_analysis(samp
         return (await call(app, "GET", "/api/status", {}))[1]["stale"]
 
     async with app.router.lifespan_context(app):
-        await app.state.running
+        await app.state.workspace.running
         monkeypatch.setattr(api, "STALE_MEMO", 0.0)
         (source / "core.py").write_text((source / "core.py").read_text())  # 내용은 같고 수정 시각만 바뀐다
         (sample_repo / "ignored_dir" / "more.py").write_text("x = 1\n")
@@ -1001,8 +1002,8 @@ async def test_status_counts_files_whose_content_changed_since_the_analysis(samp
         }
 
         counted = []
-        found = app.state.analyzed.stale
-        monkeypatch.setattr(app.state.analyzed, "stale", lambda: counted.append(1) or found())
+        found = app.state.workspace.analyzed.stale
+        monkeypatch.setattr(app.state.workspace.analyzed, "stale", lambda: counted.append(1) or found())
         monkeypatch.setattr(api, "STALE_MEMO", 60.0)
         (source / "e.py").write_text("x = 1\n")
         assert (await stale())["count"] == 7 and counted == []  # 기억 시간 안에는 다시 세지 않는다
@@ -1039,15 +1040,15 @@ async def test_reloads_asked_together_analyze_once(sample_repo, tmp_path, monkey
     monkeypatch.setattr(runner, "refresh", counted)
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
-        await app.state.running
-        first = app.state.analyzed
+        await app.state.workspace.running
+        first = app.state.workspace.analyzed
         assert runs == [None]
         add_function(sample_repo)
         replies = await asyncio.gather(*(call(app, "POST", "/api/reload", {}) for _ in range(3)))
         assert [status for status, _ in replies] == [200, 200, 200]
-        assert runs == [None, first] and "app.core:added" in app.state.nodes and app.state.revision == 2
+        assert runs == [None, first] and "app.core:added" in app.state.workspace.nodes and app.state.workspace.revision == 2
         await call(app, "POST", "/api/reload", {})
-        assert len(runs) == 3 and app.state.revision == 3
+        assert len(runs) == 3 and app.state.workspace.revision == 3
 
 
 @pytest.mark.asyncio
@@ -1056,8 +1057,8 @@ async def test_failed_reload_keeps_the_previous_analysis(sample_repo, tmp_path, 
     monkeypatch.setattr(summary, "find_cli", lambda: None)
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
-        await app.state.running
-        state = app.state
+        await app.state.workspace.running
+        state = app.state.workspace
         before, first = state.graph, await state.runner.session()
         add_function(sample_repo)
 
@@ -1241,7 +1242,7 @@ def test_file_at_a_commit_dropped_from_memory_is_read_again(history_client):
     client, at = history_client
     compared(client, at["base"], "worktree")
     compared(client, at["edit"], at["move"])
-    assert client.app.state.snapshots.held(at["base"]) is None
+    assert client.app.state.workspace.snapshots.held(at["base"]) is None
     old = client.get("/api/file", params={"path": PRICING, "at": at["base"]})
     assert old.status_code == 200 and "legacy_total" in old.json()["text"]
 
@@ -1323,7 +1324,7 @@ def test_compare_routes_outside_git(client):
     }  # fmt: skip
     assert client.get("/api/compare/stat", params={"a": "worktree", "b": "0" * 40}).status_code == 404
     assert client.post("/api/compare", json={"base": "0" * 40, "target": "worktree"}).status_code == 404
-    assert client.app.state.snapshots is None
+    assert client.app.state.workspace.snapshots is None
 
 
 @pytest.mark.asyncio
@@ -1345,7 +1346,7 @@ async def test_compare_task_reports_progress_joins_and_gives_way(history_repo, t
         return await real(self, commit, near, report)
 
     async with app.router.lifespan_context(app):
-        await app.state.running
+        await app.state.workspace.running
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
 
             def post(base, target):
@@ -1381,7 +1382,7 @@ async def test_compare_task_reports_progress_joins_and_gives_way(history_repo, t
             monkeypatch.setattr(snapshot.Snapshots, "at", real)
             again = await client.post("/api/compare", json={"base": at["move"], "target": "worktree"})
             assert again.status_code == 200
-        folder = app.state.snapshots.directory
+        folder = app.state.workspace.snapshots.directory
     assert not folder.exists()
 
 
@@ -1394,7 +1395,7 @@ async def test_worktree_compare_waits_for_the_reload(history_repo, tmp_path, mon
     monkeypatch.setattr(summary, "find_cli", lambda: None)
     app = create_app(repo, sys.executable)
     async with app.router.lifespan_context(app):
-        await app.state.running
+        await app.state.workspace.running
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             (repo / "src/shop/notes.py").write_text("def later():\n    return 1\n")
             reloading = asyncio.ensure_future(client.post("/api/reload"))

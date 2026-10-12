@@ -150,7 +150,7 @@ class Session:
             self.client._async_tasks.append(asyncio.create_task(self._drain(server.stderr)))
         result = await self.client.initialize_async(
             types.InitializeParams(
-                process_id=None,
+                process_id=os.getpid(),
                 root_uri=self.root.as_uri(),
                 workspace_folders=[types.WorkspaceFolder(uri=self.root.as_uri(), name=self.root.name)],
                 capabilities=types.ClientCapabilities(
