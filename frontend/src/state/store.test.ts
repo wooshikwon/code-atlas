@@ -16,12 +16,32 @@ beforeEach(() => {
 });
 
 describe("select", () => {
-  it("같은 노드를 다시 고르면 선택이 풀린다", () => {
-    store().select(a);
-    expect(store().selection).toEqual(node(a));
-    store().select(a);
+  it("고른 파일 상자를 다시 고르면 선택이 풀린다", () => {
+    store().select("main");
+    expect(store().selection).toEqual(node("main"));
+    store().select("main");
     expect(store().selection).toBeNull();
-    expect(selected()).toEqual([null, node(a), null]);
+    expect(selected()).toEqual([null, node("main"), null]);
+  });
+
+  it("고른 함수·메서드·클래스를 다시 고르면 선택과 이력, 전부 펼친 상자가 그대로다", () => {
+    for (const id of [a, "pkg.mod:Store.save", "pkg.mod:Store", "pkg.mod:Row"]) {
+      store().select(id);
+      const before = store();
+      store().select(id);
+      expect(store().selection).toEqual(node(id));
+      expect(store().history).toBe(before.history);
+      expect(store().unpacked).toBe(before.unpacked);
+    }
+  });
+
+  it("함수 시점 뷰에서 고른 가운데 함수를 다시 골라도 뷰와 선택이 그대로다", () => {
+    store().enterFunction(a);
+    const before = store();
+    store().select(a);
+    expect(store().view).toBe(before.view);
+    expect(store().selection).toEqual(node(a));
+    expect(store().history).toBe(before.history);
   });
 
   it("그래프에 없는 id는 고르지 않는다", () => {
@@ -370,7 +390,7 @@ describe("open", () => {
     store().select(a);
     const from = store().history;
     store().select(a);
-    expect(store().selection).toBeNull();
+    expect(store().history).toBe(from);
     store().open(a, from);
     expect(store().history).toMatchObject({ index: 2, entries: { length: 3 } });
     store().back();

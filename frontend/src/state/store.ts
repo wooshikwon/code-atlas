@@ -113,7 +113,7 @@ export interface AtlasStore {
    * select(null)은 고정 중에 아무것도 하지 않는다.
    *
    * 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 폴더를 고르면 그 폴더를 접는다.
-   * 같은 id를 다시 고르거나 null을 넘기면 선택을 푼다.
+   * null을 넘기거나 고른 파일 상자·폴더·외부 노드를 다시 고르면 선택을 푼다. 고른 함수·클래스·메서드를 다시 고르면 아무것도 바꾸지 않는다.
    */
   select(id: string | null): void;
   /** 구조 뷰로 돌아가 select처럼 노드를 고른다. 이미 고른 노드여도 선택을 풀지 않는다. */
@@ -466,12 +466,15 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
           visit({ selection: null });
           return;
         }
-        if (kindOf(id) === undefined) {
+        const kind = kindOf(id);
+        if (kind === undefined) {
           return;
         }
         const selection = get().selection;
         if (selection?.type === "node" && selection.id === id) {
-          visit({ selection: null });
+          if (kind === "module" || kind === "package" || kind === "external") {
+            visit({ selection: null });
+          }
           return;
         }
         visit({ selection: { type: "node", id }, collapsed: revealed(id) });

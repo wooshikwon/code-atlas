@@ -738,6 +738,28 @@ async function focused(t, page) {
 async function functionScenario(t, page) {
   await load(page);
   await focused(t, page);
+  await t.shot();
+
+  // 고른 함수를 그래프와 파일트리에서 다시 눌러도 선택과 펼친 파일 상자, 이력이 그대로다.
+  const state = async () => ({
+    selected: await selectedOf(page),
+    open: (await boxes(page)).filter((b) => b.open).map((b) => b.id),
+    steps: await count(page, ".trail-step"),
+  });
+  const before = await state();
+  await clickNode(page, FUNCTION);
+  await page.mouse.move(5, 5);
+  await rest(page);
+  const onGraph = await state();
+  t.check("고른 함수를 그래프에서 다시 눌러도 선택, 펼친 파일 상자, 탐색 이력이 그대로다", before.selected === FUNCTION && before.open.includes(FILE) && same(onGraph, before), `선택 ${onGraph.selected}, 펼친 파일 상자 ${onGraph.open.length}개`);
+  await page.click(`.tree-row.tree-symbol[data-node="${FUNCTION}"]`);
+  await page.mouse.move(5, 5);
+  await rest(page);
+  const onTree = await state();
+  t.check("고른 함수의 파일트리 행을 다시 눌러도 그대로다", same(onTree, before), `선택 ${onTree.selected}, 펼친 파일 상자 ${onTree.open.length}개`);
+  await page.keyboard.press("Escape");
+  await rest(page);
+  t.check("Esc는 선택을 풀고 파일 상자를 접는다", (await selectedOf(page)) === null && !(await boxes(page)).some((b) => b.open));
 }
 
 async function body(t, page) {
