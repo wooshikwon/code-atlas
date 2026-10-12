@@ -1,0 +1,18 @@
+[package]
+name = "code-atlas"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-single-instance = "2.5"
+tauri-plugin-window-state = "2.5"
+
+[features]
+# 화면이 확인 결과를 파일에 남기는 통로를 켠다. `CODE_ATLAS_PROBE`가 있을 때만 동작한다.
+probe = []
