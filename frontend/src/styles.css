@@ -21,6 +21,34 @@
   --region-bg: color-mix(in srgb, var(--ink) 2%, var(--surface));
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* 그래프 밖 보조 글자의 색. muted 잉크에 본문 잉크를 30% 섞어 칸 바탕과 고른 행 위에서 대비 4.5:1 안팎을 받는다. 노드 테두리와 선은 --muted를 쓴다. */
+  --muted-text: color-mix(in srgb, var(--ink) 30%, var(--muted));
+
+  /* 그래프 밖 요소의 간격, 모서리, 글자 크기, 높이. 그래프 안의 노드·선·배지는 배치 계산과 같은 수를 쓰므로 이 값을 쓰지 않는다. */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  /* 칩과 줄 안의 표지, 버튼·입력 칸·메뉴·말풍선·떠 있는 칸, 화면 가운데에 뜨는 창, 알약 모양 */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+  /* 보조 글자, 본문, 화면과 패널의 제목. 구역 이름은 보조 글자 크기에 굵기 600과 본문 잉크로 적는다. */
+  --text-sm: 11px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  /* 줄 안의 버튼과 상단 줄의 아이콘 버튼, 입력 칸, 그래프 위에 뜬 둥근 버튼과 검색 팔레트의 입력 칸 */
+  --control-sm: 22px;
+  --control-md: 28px;
+  --control-lg: 34px;
+  /* 파일트리의 행, 창 안 목록(커밋 그래프, 경로의 단계, 검색 결과)의 행 */
+  --row: 22px;
+  --row-list: 24px;
+  --icon: 14px;
+  --icon-lg: 16px;
 
   /* 그래프 밖 요소의 겹침 순서. 그래프 안 요소의 층은 graph/layers.ts가 정한다. */
   --z-panel-grip: 2;
@@ -62,6 +90,40 @@ button {
   background: none;
   border: none;
   cursor: pointer;
+}
+
+/* 키보드로 옮긴 포커스의 표시. 글자 입력 칸은 감싼 칸의 테두리가 표시한다. */
+:is(button, a, [tabindex], [role="button"], [role="option"], [role="menuitem"], [role="row"], summary):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+/* 검색 성격의 입력 칸 앞에 그리는 돋보기 */
+.search-icon {
+  flex: none;
+  width: var(--icon);
+  height: var(--icon);
+  fill: none;
+  stroke: var(--muted-text);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* 줄 안에 놓는 글자 버튼 */
+.inline-button,
+.info-panel-end,
+.summary-action,
+.finder-fit {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: var(--control-sm);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 ul {
@@ -113,15 +175,36 @@ ul {
   display: flex;
   align-items: center;
   height: 32px;
-  padding: 0 8px;
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--line);
   font-weight: 600;
+}
+
+.explorer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 다른 레포를 여는 버튼. 상단 줄의 아이콘 버튼과 같은 크기다. */
+.explorer-open {
+  display: grid;
+  place-items: center;
+  width: var(--control-md);
+  height: var(--control-sm);
+  padding: 0;
+}
+
+.explorer-open .tree-icon {
+  margin: 0;
 }
 
 .explorer-body {
   flex: 1;
   overflow: auto;
-  padding: 4px 0;
+  padding: var(--space-2) 0;
   user-select: none;
 }
 
@@ -129,16 +212,16 @@ ul {
 .explorer-error,
 .code-error,
 .graph-empty {
-  padding: 4px 8px;
-  color: var(--muted);
+  padding: var(--space-2) var(--space-4);
+  color: var(--muted-text);
   white-space: pre-wrap;
 }
 
 .tree-row {
   display: flex;
   align-items: center;
-  height: 22px;
-  padding: 0 8px 0 4px;
+  height: var(--row);
+  padding: 0 var(--space-4) 0 var(--space-2);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -178,7 +261,7 @@ ul {
 }
 
 .tree-icon {
-  margin-right: 5px;
+  margin-right: var(--space-2);
   stroke-width: 1.1;
 }
 
@@ -201,8 +284,8 @@ ul {
 }
 
 .tree-symbol {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--muted-text);
+  font-size: var(--text-md);
 }
 
 .tree-symbol.active {
@@ -213,8 +296,9 @@ ul {
   display: flex;
   flex: none;
   align-items: center;
-  height: 28px;
-  padding: 0 4px 0 8px;
+  gap: var(--space-3);
+  height: var(--control-md);
+  padding: 0 var(--space-2) 0 var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 
@@ -238,7 +322,7 @@ ul {
   flex: none;
   width: 20px;
   height: 20px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   color: var(--muted);
   line-height: 1;
 }
@@ -249,7 +333,7 @@ ul {
 }
 
 .tree-result {
-  padding-left: 8px;
+  padding-left: var(--space-4);
 }
 
 .tree-result .tree-label {
@@ -265,11 +349,11 @@ ul {
 .tree-aside {
   flex: 1;
   min-width: 0;
-  margin-left: 8px;
+  margin-left: var(--space-4);
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
   text-align: right;
 }
 
@@ -278,11 +362,11 @@ ul {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   margin-left: auto;
-  padding-left: 8px;
+  padding-left: var(--space-4);
   color: var(--ink);
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -295,20 +379,20 @@ ul {
 }
 
 .tree-deleted {
-  margin-top: 8px;
-  padding-top: 4px;
+  margin-top: var(--space-4);
+  padding-top: var(--space-2);
   border-top: 1px solid var(--line);
-  color: var(--muted);
+  color: var(--muted-text);
 }
 
 .tree-deleted-title {
-  padding: 2px 8px;
-  font-size: 11px;
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--text-sm);
 }
 
 .tree-deleted-row {
-  height: 22px;
-  padding: 0 8px;
+  height: var(--row);
+  padding: 0 var(--space-4);
   overflow: hidden;
   line-height: 22px;
   white-space: nowrap;
@@ -333,17 +417,26 @@ ul {
   max-height: min(420px, calc(100% - 72px));
   transform: translateX(-50%);
   border: 1px solid var(--muted);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 18%, transparent);
 }
 
-.palette-input {
+.palette-field {
+  display: flex;
   flex: none;
-  height: 36px;
-  padding: 0 12px;
-  border: none;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0 var(--space-5);
   border-bottom: 1px solid var(--line);
+}
+
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-lg);
+  padding: 0;
+  border: none;
   outline: none;
   font: inherit;
   color: var(--ink);
@@ -352,7 +445,7 @@ ul {
 
 .palette-list {
   overflow: auto;
-  padding: 4px 0;
+  padding: var(--space-2) 0;
 }
 
 .palette-list:empty {
@@ -362,9 +455,9 @@ ul {
 .palette-option {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  height: 24px;
-  padding: 0 12px;
+  gap: var(--space-5);
+  height: var(--row-list);
+  padding: 0 var(--space-5);
   line-height: 24px;
   white-space: nowrap;
   cursor: pointer;
@@ -380,7 +473,7 @@ ul {
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 
 .palette-aside {
@@ -388,8 +481,8 @@ ul {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
   text-align: right;
 }
 
@@ -431,9 +524,15 @@ ul {
 }
 
 /* 필터 창은 이 칸의 오른쪽 끝에 맞춰 열린다. */
+/* 오른쪽 칸은 아이콘 버튼 묶음(모드, 필터, 새로고침)과 글자 버튼 묶음(화면 맞춤, 화면 초기화, 화면 색)이다. 묶음 안은 6px, 묶음 사이는 12px를 띄운다. */
 .toolbar-tools {
   position: relative;
   flex: none;
+  gap: 6px;
+}
+
+.toolbar-texts {
+  margin-left: 6px;
 }
 
 /* 새로고침 버튼. 필터 버튼과 같은 크기로 새로고침 기호만 그리고, 분석하는 동안에는 기호 대신 도는 원을 그린다.
@@ -448,7 +547,7 @@ ul {
   align-items: center;
   justify-content: center;
   width: 28px;
-  height: 22px;
+  height: var(--control-sm);
   padding: 0;
 }
 
@@ -488,7 +587,7 @@ ul {
   align-items: center;
   justify-content: center;
   width: 28px;
-  height: 22px;
+  height: var(--control-sm);
   padding: 0;
 }
 
@@ -507,9 +606,9 @@ ul {
   right: 0;
   z-index: var(--z-menu);
   max-width: 320px;
-  padding: 4px 8px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--critical);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   text-align: left;
 }
@@ -528,13 +627,13 @@ ul {
 .trail-gap,
 .trail-cut {
   flex: none;
-  color: var(--muted);
+  color: var(--muted-text);
 }
 
 .trail-step {
   flex: none;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 /* 줄 폭이 모자라면 마지막 단계만 줄어든다. Trail이 이 단계의 글자가 잘리지 않을 때까지 앞 단계를 `…`로 줄인다. */
@@ -547,7 +646,7 @@ ul {
 
 .trail-root {
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .trail-root:hover,
@@ -561,9 +660,9 @@ ul {
   margin-left: 6px;
   padding: 0 7px;
   border: 1px solid var(--line);
-  border-radius: 9px;
-  color: var(--muted);
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .trail-leave-mark {
@@ -638,6 +737,10 @@ ul {
     gap: 4px;
   }
 
+  .toolbar-texts {
+    margin-left: 0;
+  }
+
   /* 두 칸 사이의 틈은 컨테이너인 줄이 정하므로 오른쪽 칸을 당겨 줄인다. */
   .toolbar-tools {
     margin-left: -8px;
@@ -673,7 +776,7 @@ ul {
   padding: 2px 8px;
   white-space: nowrap;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 
 .toolbar-button:hover:enabled {
@@ -709,18 +812,18 @@ ul {
 }
 
 .code-error {
-  padding: 6px 12px;
-  color: var(--muted);
+  padding: var(--space-3) var(--space-5);
+  color: var(--muted-text);
 }
 
 .code-note {
   position: absolute;
   z-index: var(--z-menu);
-  padding: 2px 6px;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--panel-bg);
-  font-size: 11px;
+  font-size: var(--text-sm);
   margin-top: var(--code-top, 0px);
   white-space: nowrap;
   pointer-events: none;
@@ -750,7 +853,7 @@ ul {
 
 .code-explain {
   position: absolute;
-  margin: 2px 0 0;
+  margin: var(--space-1) 0 0;
   background: var(--panel-bg);
   white-space: nowrap;
 }
@@ -763,7 +866,7 @@ ul {
   flex-direction: column;
   max-height: 45%;
   border: 1px solid var(--muted);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--panel-bg);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
   line-height: 1.6;
@@ -772,8 +875,8 @@ ul {
 .code-note-head {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 6px 4px 10px;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-5);
   border-bottom: 1px solid var(--line);
 }
 
@@ -788,13 +891,13 @@ ul {
 
 .code-note-body {
   min-height: 0;
-  padding: 7px 10px;
+  padding: var(--space-4) var(--space-5);
   overflow-y: auto;
 }
 
 .code-note-body code {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 .code-note-body .summary-text > :last-child {
@@ -803,28 +906,28 @@ ul {
 
 /* 창에 쌓는 코드 분석 하나. 질문과 조작 버튼이 한 줄이고 그 아래에 답, 끝에 토큰 수를 적는다. */
 .code-note-item + .code-note-item {
-  margin-top: 8px;
-  padding-top: 7px;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--line);
 }
 
 .code-note-asked {
   display: flex;
   align-items: flex-start;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .code-note-question {
   flex: 1;
   min-width: 0;
-  color: var(--muted);
+  color: var(--muted-text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .code-note-usage {
   display: block;
-  margin-top: 4px;
+  margin-top: var(--space-2);
   text-align: right;
 }
 
@@ -833,11 +936,11 @@ ul {
   position: absolute;
   display: flex;
   align-items: flex-end;
-  gap: 4px;
-  margin: 2px 0 0;
-  padding: 6px;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 0;
+  padding: var(--space-3);
   border: 1px solid var(--muted);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--panel-bg);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
 }
@@ -845,9 +948,9 @@ ul {
 .code-ask-input {
   flex: 1;
   min-width: 0;
-  padding: 3px 5px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   outline: none;
   font: inherit;
   line-height: 1.5;
@@ -861,7 +964,7 @@ ul {
 }
 
 .code-ask-input::placeholder {
-  color: var(--muted);
+  color: var(--muted-text);
 }
 
 .code-ask-send {
@@ -870,9 +973,9 @@ ul {
 
 /* 대상이 바뀌기 전에 만든 설명. 문구를 위에 적고 본문을 흐리게 그린다. LLM 요약 칸과 코드 분석 창이 함께 쓴다. */
 .stale-note {
-  margin: 0 0 4px;
-  color: var(--muted);
-  font-size: 11px;
+  margin: 0 0 var(--space-2);
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .stale-text {
@@ -923,7 +1026,7 @@ ul {
 
 .graph .react-flow {
   --xy-background-color: var(--surface);
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 
 .react-flow__node,
@@ -1172,7 +1275,7 @@ ul {
 .node-pack {
   height: 100%;
   border: 1px dashed var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-pill);
   color: var(--muted);
   font-size: 11px;
   line-height: 16px;
@@ -1190,7 +1293,7 @@ ul {
 }
 
 .graph[data-pinned] .node-pack:hover {
-  color: var(--muted);
+  color: var(--muted-text);
   border-color: var(--line);
 }
 
@@ -1210,7 +1313,7 @@ ul {
   left: 0;
   box-sizing: border-box;
   border: 3px solid var(--ink);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   opacity: 0;
   pointer-events: none;
   animation: reached-out 1.2s ease-out;
@@ -1719,11 +1822,10 @@ ul {
   z-index: var(--z-overlay);
 }
 
-.legend,
 .graph-minimap,
 .info-panel {
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--panel-bg);
   font-size: 12px;
 }
@@ -1754,11 +1856,11 @@ ul {
   top: 12px;
   left: 50%;
   max-width: min(480px, calc(100% - 24px));
-  padding: 4px 10px;
+  padding: var(--space-2) var(--space-5);
   border: 1px solid var(--critical);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--surface);
-  font-size: 12px;
+  font-size: var(--text-md);
   text-align: left;
   white-space: pre-wrap;
   transform: translateX(-50%);
@@ -1774,15 +1876,15 @@ ul {
   left: 50%;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-4);
   box-sizing: border-box;
-  height: 34px;
-  padding: 0 14px;
+  height: var(--control-lg);
+  padding: 0 var(--space-6);
   border: 1px solid var(--line);
-  border-radius: 17px;
+  border-radius: var(--radius-pill);
   background: var(--surface);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
-  font-size: 12px;
+  font-size: var(--text-md);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   transform: translateX(-50%);
@@ -1795,7 +1897,7 @@ ul {
 
 .summary-queue [role="status"] {
   display: flex;
-  gap: 10px;
+  gap: var(--space-4);
 }
 
 /* 만들지 못한 수. critical에 본문 잉크를 섞어 칸 바탕 위에서 대비 4.5:1을 넘긴다. */
@@ -1806,8 +1908,8 @@ ul {
 /* 묶음이 쓴 토큰 수. 칸의 오른쪽 끝에 한 단계 작은 muted 글자로 적고, 칸이 바닥 줄의 구간에 들어가지 않으면 감춘다. */
 .summary-queue-usage {
   flex: none;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .summary-queue[data-lean] .summary-queue-usage {
@@ -1816,9 +1918,9 @@ ul {
 
 .summary-queue-cancel {
   flex: none;
-  padding: 2px 10px;
+  padding: var(--space-1) var(--space-5);
   border: 1px solid var(--line);
-  border-radius: 11px;
+  border-radius: var(--radius-pill);
 }
 
 /* 칸의 오른쪽 끝에 있는 버튼은 칸의 둥근 끝에 붙인다. */
@@ -1862,10 +1964,26 @@ ul {
   pointer-events: auto;
 }
 
+/* 기호 창의 세 묶음. 폭이 모자라면 묶음이 아래로 내려간다. */
 .legend {
   display: flex;
-  gap: 16px;
-  padding: 8px 12px;
+  flex-wrap: wrap;
+  gap: var(--space-5) var(--space-6);
+}
+
+.legend-group {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.legend-group .ask-label {
+  margin: 0 0 var(--space-2);
+}
+
+.legend-kinds {
+  margin-left: var(--space-3);
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .dock-button {
@@ -1875,7 +1993,7 @@ ul {
   height: 34px;
   border: 1px solid var(--line);
   border-radius: 50%;
-  color: var(--muted);
+  color: var(--muted-text);
   background: var(--panel-bg);
   font-weight: 600;
 }
@@ -1977,9 +2095,12 @@ ul {
 .legend-list li {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 18px;
-  white-space: nowrap;
+  gap: var(--space-4);
+  min-height: var(--row);
+}
+
+.legend-list svg {
+  flex: none;
 }
 
 .legend-node,
@@ -2120,21 +2241,21 @@ button.line-cell:focus-visible {
   z-index: var(--z-tooltip);
   max-height: 50vh;
   margin: 0;
-  padding: 3px 0;
+  padding: var(--space-2) 0;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   overflow: auto;
   color: var(--ink);
   background: var(--panel-bg);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
-  font-size: 11px;
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
 .menu-item {
   display: block;
   width: 100%;
-  padding: 1px 8px;
+  padding: 1px var(--space-4);
   color: inherit;
   text-align: left;
   white-space: pre;
@@ -2167,7 +2288,7 @@ button.line-cell:focus-visible {
 
 .menu-item .entry-icon {
   display: inline-block;
-  margin-right: 4px;
+  margin-right: var(--space-2);
   vertical-align: -2px;
 }
 
@@ -2178,13 +2299,13 @@ button.line-cell:focus-visible {
   left: 0;
   z-index: var(--z-tooltip);
   max-width: min(420px, calc(100vw - 16px));
-  padding: 3px 8px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   color: var(--ink);
   background: var(--panel-bg);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
-  font-size: 11px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2203,7 +2324,7 @@ button.line-cell:focus-visible {
 
 .info-panel-head {
   flex: none;
-  padding: 8px 12px 7px;
+  padding: var(--space-4) var(--space-5) 7px;
   cursor: move;
   user-select: none;
   touch-action: none;
@@ -2226,7 +2347,7 @@ button.line-cell:focus-visible {
 .info-panel-title {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 /* 이름 줄. 앞쪽 경로는 옅게 적고 넘치면 앞에서부터 줄이며, 이름은 줄이지 않는다. */
@@ -2234,8 +2355,8 @@ button.line-cell:focus-visible {
   display: flex;
   align-items: baseline;
   min-width: 0;
-  margin-right: 2px;
-  font-size: 14px;
+  margin-right: var(--space-1);
+  font-size: var(--text-lg);
   white-space: nowrap;
 }
 
@@ -2244,7 +2365,7 @@ button.line-cell:focus-visible {
   min-width: 0;
   overflow: hidden;
   direction: rtl;
-  color: var(--muted);
+  color: var(--muted-text);
   font-weight: 400;
   text-overflow: ellipsis;
 }
@@ -2258,16 +2379,16 @@ button.line-cell:focus-visible {
 
 .info-panel-chip {
   flex: none;
-  padding: 0 7px;
+  padding: 0 var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 9px;
-  color: var(--muted);
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .info-panel-change {
   flex: none;
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 .info-panel-change::before {
@@ -2275,22 +2396,17 @@ button.line-cell:focus-visible {
   display: inline-block;
   width: 6px;
   height: 6px;
-  margin-right: 4px;
+  margin-right: var(--space-2);
   border-radius: 50%;
   background: var(--change);
   vertical-align: 1px;
-}
-
-.info-panel-head > .info-panel-hint {
-  margin-top: 3px;
-  font-size: 11px;
 }
 
 /* 구역 머리. 누르면 구역을 접거나 편다. 접힌 구역은 이름 옆에 한 줄 요약을 적고 넘치는 글은 줄인다. */
 .info-section-head {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-3);
   min-width: 0;
   max-width: 100%;
   padding: 0;
@@ -2335,7 +2451,7 @@ button.line-cell:focus-visible {
   flex: 0 1 auto;
   flex-direction: column;
   align-items: flex-start;
-  padding: 7px 12px;
+  padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--line);
 }
 
@@ -2347,8 +2463,8 @@ button.line-cell:focus-visible {
   display: grid;
   align-self: stretch;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 3px 14px;
-  margin: 5px 0 0;
+  gap: var(--space-2) var(--space-5);
+  margin: var(--space-2) 0 0;
   line-height: 1.5;
 }
 
@@ -2357,7 +2473,7 @@ button.line-cell:focus-visible {
 }
 
 .info-row dt {
-  color: var(--muted);
+  color: var(--muted-text);
 }
 
 .info-row dd {
@@ -2375,7 +2491,7 @@ button.line-cell:focus-visible {
 
 /* 내용 뒤에 적는 `그 밖` 묶음 */
 .info-more {
-  margin-left: 8px;
+  margin-left: var(--space-4);
 }
 
 .info-link:hover,
@@ -2389,7 +2505,7 @@ button.line-cell:focus-visible {
 .info-panel-summary {
   flex: 1 1 0;
   min-height: 0;
-  padding: 7px 12px;
+  padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--line);
   line-height: 1.6;
   overflow-y: auto;
@@ -2398,14 +2514,12 @@ button.line-cell:focus-visible {
 .info-panel-label {
   display: block;
   margin: 0;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.04em;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .info-panel-hint {
-  color: var(--muted);
+  color: var(--muted-text);
 }
 
 .summary-head {
@@ -2418,8 +2532,8 @@ button.line-cell:focus-visible {
 .summary-usage {
   flex: none;
   margin-left: auto;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -2462,30 +2576,30 @@ button.line-cell:focus-visible {
 
 .info-panel-summary code {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 /* 설명 본문. 요지를 가장 크게, 구역 제목을 굵게 그리고 문단 사이를 띄운다. */
 .summary-text p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-4);
 }
 
 .summary-text .summary-lead {
   margin-bottom: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   line-height: 1.55;
 }
 
 .summary-part {
-  margin-top: 12px;
-  padding-top: 9px;
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--line);
 }
 
 .summary-title {
-  margin: 0 0 5px;
-  font-size: 12px;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
   font-weight: 700;
 }
 
@@ -2494,8 +2608,8 @@ button.line-cell:focus-visible {
 }
 
 .summary-list {
-  margin: 0 0 8px;
-  padding-left: 18px;
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-6);
   list-style: disc;
 }
 
@@ -2504,25 +2618,25 @@ ol.summary-list {
 }
 
 .summary-list li + li {
-  margin-top: 3px;
+  margin-top: var(--space-2);
 }
 
 .summary-code {
-  margin: 0 0 8px;
-  padding: 6px 8px;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
   overflow-x: auto;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--ink) 4%, transparent);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
 /* 코드 칩. 백틱으로 감싼 식별자와 정의 표기를 옅은 바탕의 등폭 글자로 그리고, 긴 표기는 칩 안에서 줄을 바꾼다. */
 .summary-text code {
-  padding: 1px 4px;
-  border-radius: 3px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--ink) 7%, transparent);
   overflow-wrap: anywhere;
   -webkit-box-decoration-break: clone;
@@ -2530,7 +2644,7 @@ ol.summary-list {
 }
 
 .summary-text .ref-path {
-  color: var(--muted);
+  color: var(--muted-text);
 }
 
 /* 정의 표기 가운데 그래프의 노드와 대응하는 것은 누를 수 있다. 글자를 --link 색으로 그리고 마우스를 올리면 밑줄을 긋는다. */
@@ -2557,14 +2671,9 @@ ol.summary-list {
 }
 
 .summary-action {
-  margin-left: 6px;
-  padding: 0 6px;
-  line-height: 14px;
+  margin-left: var(--space-3);
   vertical-align: middle;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
 }
 
 .summary-action:hover {
@@ -2578,8 +2687,8 @@ ol.summary-list {
   flex: 0 1 auto;
   align-self: stretch;
   min-height: 0;
-  margin: 5px -4px 0;
-  padding: 3px 0 0;
+  margin: var(--space-2) -4px 0;
+  padding: var(--space-2) 0 0;
   border-top: 1px solid var(--line);
   line-height: 1.5;
   overflow-y: auto;
@@ -2598,8 +2707,8 @@ ol.summary-list {
 .info-panel-sites-head {
   display: flex;
   align-items: baseline;
-  gap: 14px;
-  padding: 0 4px;
+  gap: var(--space-5);
+  padding: 0 var(--space-2);
 }
 
 .info-panel-sites-name {
@@ -2624,8 +2733,8 @@ ol.summary-list {
 .info-panel-site {
   display: block;
   width: 100%;
-  padding: 0 4px;
-  border-radius: 2px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
   overflow: hidden;
   text-align: left;
   white-space: nowrap;
@@ -2633,7 +2742,7 @@ ol.summary-list {
 }
 
 .info-panel-sites-head + ul .info-panel-site {
-  padding-left: 14px;
+  padding-left: var(--space-5);
 }
 
 .info-panel-site:hover {
@@ -2646,7 +2755,7 @@ ol.summary-list {
 
 .info-panel-site code {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 .info-panel-resize {
@@ -2759,9 +2868,9 @@ ol.summary-list {
 .filter-button {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 22px;
-  padding: 0 6px;
+  gap: var(--space-2);
+  height: var(--control-sm);
+  padding: 0 var(--space-3);
 }
 
 .filter-icon {
@@ -2780,7 +2889,7 @@ ol.summary-list {
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
-  border-radius: 7px;
+  border-radius: var(--radius-pill);
   color: var(--surface);
   background: var(--ink);
   font-size: 9px;
@@ -2800,15 +2909,15 @@ ol.summary-list {
   max-height: calc(100vh - 56px);
   overflow-y: auto;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--surface);
 }
 
 .filter-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
 }
 
 .filter-section + .filter-section {
@@ -2817,15 +2926,15 @@ ol.summary-list {
 
 .filter-title {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
 .filter-label {
   display: block;
-  padding: 0 0 2px;
-  color: var(--muted);
-  font-size: 11px;
+  padding: 0 0 var(--space-1);
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .filter-overlays {
@@ -2833,22 +2942,22 @@ ol.summary-list {
 }
 
 .filter-overlays .filter-label {
-  padding-left: 4px;
+  padding-left: var(--space-2);
 }
 
 .filter-stats,
 .filter-branch {
-  color: var(--muted);
+  color: var(--muted-text);
   white-space: nowrap;
 }
 
 .overlay-option {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 2px 8px 2px 4px;
-  border-radius: 3px;
+  padding: var(--space-1) var(--space-4) var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
   white-space: nowrap;
 }
 
@@ -2873,9 +2982,9 @@ ol.summary-list {
 
 .overlay-option-count {
   margin-left: auto;
-  padding-left: 16px;
-  color: var(--muted);
-  font-size: 11px;
+  padding-left: var(--space-6);
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 /* 순환 아이콘은 분석 표시와 관계없이 muted 잉크로 적는다. 아이콘을 더해도 파일 상자 폭을 넘지 않게 이름표를 줄인다. */
@@ -2956,7 +3065,7 @@ ol.summary-list {
 .overview {
   flex: 1 1 0;
   min-height: 0;
-  padding: 7px 12px 10px;
+  padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--line);
   overflow-y: auto;
 }
@@ -2967,27 +3076,27 @@ ol.summary-list {
 }
 
 .overview-hint {
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 11px;
+  margin-top: var(--space-2);
+  color: var(--muted-text);
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
 .overview-file {
-  margin: 9px 0 2px;
-  color: var(--muted);
+  margin: var(--space-4) 0 var(--space-1);
+  color: var(--muted-text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 400;
 }
 
 .overview-row {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: var(--space-5);
   width: 100%;
-  padding: 1px 4px;
-  border-radius: 2px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
   text-align: left;
 }
 
@@ -3005,8 +3114,8 @@ ol.summary-list {
 .overview-aside {
   flex: none;
   margin-left: auto;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 /* 경로 탐색 창 */
@@ -3015,14 +3124,14 @@ ol.summary-list {
 .finder {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
   width: 330px;
   max-width: 100%;
-  padding: 10px 12px;
+  padding: var(--space-5);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--panel-bg);
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 
 .finder > * {
@@ -3032,21 +3141,21 @@ ol.summary-list {
 .finder-head {
   display: flex;
   justify-content: space-between;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .finder-ends {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .finder-fields {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-3);
   min-width: 0;
 }
 
@@ -3054,11 +3163,11 @@ ol.summary-list {
 .finder-field {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 4px 0 9px;
+  gap: var(--space-4);
+  height: var(--control-md);
+  padding: 0 var(--space-2) 0 var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--surface);
 }
 
@@ -3095,7 +3204,7 @@ ol.summary-list {
   display: flex;
   flex: 1;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-4);
   min-width: 0;
   height: 100%;
   padding: 0;
@@ -3117,15 +3226,15 @@ ol.summary-list {
   margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .finder-unset {
   flex: none;
   width: 20px;
   padding: 0;
-  color: var(--muted);
+  color: var(--muted-text);
 }
 
 .finder-unset:hover {
@@ -3134,10 +3243,10 @@ ol.summary-list {
 
 .finder-hits {
   max-height: 194px;
-  margin-top: 2px;
+  margin-top: var(--space-1);
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--surface);
 }
 
@@ -3146,14 +3255,14 @@ ol.summary-list {
 }
 
 .finder-hit {
-  padding: 0 8px;
+  padding: 0 var(--space-4);
 }
 
 .finder-swap {
   flex: none;
   width: 28px;
-  height: 28px;
-  margin-top: 19px;
+  height: var(--control-md);
+  margin-top: 17px;
   border: 1px solid var(--line);
   border-radius: 50%;
   background: var(--surface);
@@ -3173,7 +3282,7 @@ ol.summary-list {
 /* 숫자 버튼은 경로가 다섯 개일 때 줄을 채우는 폭으로 그린다. */
 .finder-picks {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .finder-pick {
@@ -3181,20 +3290,20 @@ ol.summary-list {
   flex: 0 0 calc((100% - 24px) / 5);
   flex-direction: column;
   align-items: center;
-  padding: 3px 0 4px;
+  padding: var(--space-2) 0;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   line-height: 1.25;
 }
 
 .finder-pick b {
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .finder-pick span {
-  color: var(--muted);
-  font-size: 10px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .finder-pick[aria-pressed="true"] {
@@ -3220,11 +3329,11 @@ ol.summary-list {
 .finder-step {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-3);
   width: 100%;
-  height: 24px;
-  padding: 0 6px 0 2px;
-  border-radius: 3px;
+  height: var(--row-list);
+  padding: 0 var(--space-3) 0 var(--space-1);
+  border-radius: var(--radius-sm);
   line-height: 24px;
   text-align: left;
   white-space: nowrap;
@@ -3241,37 +3350,33 @@ ol.summary-list {
 .finder-step-number {
   flex: none;
   width: 16px;
-  color: var(--muted);
-  font-size: 10px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
   text-align: right;
 }
 
 .finder-step-mark {
   flex: none;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 .finder-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-4);
   white-space: nowrap;
 }
 
 .finder-more {
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .finder-fit {
   margin-left: auto;
-  padding: 1px 8px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
   background: var(--surface);
-  font-size: 11px;
 }
 
 .finder-fit:hover {
@@ -3283,9 +3388,9 @@ ol.summary-list {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 4px 6px 4px 10px;
-  border-radius: 4px;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
   background: var(--active-bg);
   white-space: nowrap;
 }
@@ -3297,15 +3402,15 @@ ol.summary-list {
 
 .finder-clear {
   flex: none;
-  padding: 0 8px;
+  padding: 0 var(--space-4);
   border: 1px solid currentColor;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 
 .finder-empty {
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   border: 1px dashed var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 
 .finder-empty p {
@@ -3317,10 +3422,10 @@ ol.summary-list {
 }
 
 .finder-reverse {
-  margin-top: 6px;
-  padding: 2px 8px;
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--surface);
 }
 
@@ -3356,7 +3461,7 @@ ol.summary-list {
   height: 30px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 15px;
+  border-radius: var(--radius-pill);
   overflow: hidden;
   background: var(--panel-bg);
   font-size: 12px;
@@ -3392,7 +3497,7 @@ ol.summary-list {
 /* 추가된 줄 수와 삭제된 줄 수. 초록은 줄 수 숫자의 색이고 빨강은 critical에 본문 잉크를 섞어 칸 바탕 위에서 대비 4.5:1을 넘긴다. */
 .compare-lines {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .compare-added {
@@ -3413,11 +3518,11 @@ ol.summary-list {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--surface);
   box-shadow: 0 4px 18px color-mix(in srgb, var(--ink) 12%, transparent);
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 
 /* 커밋 그래프. 줄은 높이 24px이고 Rows가 보이는 줄만 세로 위치를 넣어 그린다. */
@@ -3482,9 +3587,9 @@ ol.summary-list {
   left: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding-right: 14px;
+  gap: var(--space-3);
+  height: var(--row-list);
+  padding-right: var(--space-5);
   overflow: hidden;
   white-space: nowrap;
   cursor: pointer;
@@ -3517,18 +3622,18 @@ ol.summary-list {
 }
 
 .compare-ref {
-  padding: 0 4px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   color: color-mix(in srgb, var(--ink) 55%, var(--muted));
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   line-height: 15px;
 }
 
 /* 태그의 이름표는 둥근 점선 테두리로 브랜치와 가른다. */
 .compare-ref[data-kind="tag"] {
   border-style: dashed;
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
 }
 
 :is(.compare-row, .compare-bar) > .compare-gap {
@@ -3536,17 +3641,17 @@ ol.summary-list {
 }
 
 .compare-hash {
-  color: var(--muted);
+  color: var(--muted-text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 /* 줄의 표시. `대상`은 본문 잉크로 채우고 `기준`과 `갈라진 지점`은 테두리만 그린다. */
 .compare-mark {
-  padding: 0 5px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--ink);
-  border-radius: 3px;
-  font-size: 10.5px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   font-weight: 600;
   line-height: 16px;
 }
@@ -3561,10 +3666,10 @@ ol.summary-list {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   height: 38px;
   margin-top: auto;
-  padding: 0 12px;
+  padding: 0 var(--space-5);
   border-top: 1px solid var(--line);
   background: var(--panel-bg);
   font-variant-numeric: tabular-nums;
@@ -3576,12 +3681,12 @@ ol.summary-list {
 }
 
 .compare-bar .compare-lines {
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
 }
 
 .compare-hint {
-  color: var(--muted);
+  color: var(--muted-text);
 }
 
 .compare-bar > .compare-failed {
@@ -3593,15 +3698,22 @@ ol.summary-list {
 
 .compare-confirm,
 .compare-off {
-  height: 24px;
-  padding: 0 14px;
-  border-radius: 4px;
+  height: var(--control-sm);
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-md);
 }
 
-.compare-confirm {
+/* 확정 버튼. 누르면 창이 닫히고 고른 것이 적용되는 버튼 하나만 본문 잉크로 채운다. */
+.compare-confirm,
+.toolbar-button.confirm-button {
   color: var(--surface);
   background: var(--ink);
+  border-color: var(--ink);
   font-weight: 600;
+}
+
+.toolbar-button.confirm-button:hover:enabled {
+  background: color-mix(in srgb, var(--ink) 85%, var(--surface));
 }
 
 .compare-confirm:disabled {
@@ -3634,16 +3746,10 @@ ol.summary-list {
 /* 정보 패널 머리 줄의 출발로·도착으로 버튼 */
 .info-panel-ends {
   display: flex;
-  gap: 6px;
-  margin-top: 6px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
-.info-panel-end {
-  padding: 1px 8px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font-size: 11px;
-}
 
 .info-panel-end:hover {
   background: var(--hover-bg);
@@ -3667,10 +3773,10 @@ ol.summary-list {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: var(--space-5);
   height: 100%;
-  padding: 0 16px;
-  color: var(--muted);
+  padding: 0 var(--space-6);
+  color: var(--muted-text);
 }
 
 .progress-phase {
@@ -3796,10 +3902,10 @@ ol.summary-list {
 .overview-from {
   flex: 0 1 auto;
   min-width: 0;
-  margin-left: 6px;
+  margin-left: var(--space-3);
   overflow: hidden;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -3832,11 +3938,11 @@ ol.summary-list {
   display: flex;
   flex: none;
   align-items: baseline;
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 .info-panel-compared > .line-counts {
-  padding-left: 5px;
+  padding-left: var(--space-2);
 }
 
 /* 두 시점을 엮은 문서의 삭제된 줄과 추가된 줄. 바탕은 줄 번호 칸까지 칠하고 줄 번호 칸 옆에 −와 +를 적는다. */
@@ -3871,7 +3977,7 @@ ol.summary-list {
   display: flex;
   justify-content: center;
   height: 100%;
-  padding: 16vh 16px 16px;
+  padding: 16vh var(--space-6) var(--space-6);
   overflow: auto;
 }
 
@@ -3879,44 +3985,49 @@ ol.summary-list {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-5);
   width: min(560px, 100%);
 }
 
 .welcome-title {
-  margin: 0 0 6px;
-  font-size: 15px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
 .welcome-pick {
-  padding: 4px 14px;
+  padding: var(--space-2) var(--space-6);
 }
 
 .welcome-hint {
   margin: 0;
-  color: var(--muted);
+  color: var(--muted-text);
 }
 
 /* 경로 입력 칸과 그 옆의 버튼. 레포 열기 화면과 경로 입력 창, 인터프리터를 고르는 화면이 함께 쓴다. */
 .open-path {
   display: flex;
   flex: none;
-  gap: 6px;
+  gap: var(--space-3);
   width: 100%;
   min-width: 0;
+}
+
+.open-path .toolbar-button {
+  height: var(--control-md);
 }
 
 .open-input {
   flex: 1;
   min-width: 0;
-  padding: 2px 8px;
+  height: var(--control-md);
+  padding: 0 var(--space-4);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   outline: none;
   font: inherit;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--ink);
   background: none;
 }
@@ -3929,21 +4040,20 @@ ol.summary-list {
    경로의 글자는 bdi로 감싸 맨 앞의 `/`가 뒤로 가지 않게 한다. */
 .recent {
   width: 100%;
-  margin-top: 18px;
+  margin-top: var(--space-6);
 }
 
 .recent-title {
-  margin: 0 0 4px;
-  padding: 0 8px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 400;
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .recent-row {
   display: flex;
   align-items: center;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 
 .recent-row:hover {
@@ -3954,9 +4064,9 @@ ol.summary-list {
   display: flex;
   flex: 1;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--space-4);
   min-width: 0;
-  padding: 3px 8px;
+  padding: var(--space-2) var(--space-4);
   text-align: left;
   white-space: nowrap;
 }
@@ -3977,23 +4087,23 @@ ol.summary-list {
   overflow: hidden;
   direction: rtl;
   text-overflow: ellipsis;
-  color: var(--muted);
+  color: var(--muted-text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
   text-align: left;
 }
 
 .recent-day {
   flex: none;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
 .recent-forget {
   flex: none;
-  padding: 0 8px;
-  color: var(--muted);
+  padding: 0 var(--space-4);
+  color: var(--muted-text);
 }
 
 .recent-forget:hover {
@@ -4008,20 +4118,20 @@ ol.summary-list {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 16vh 16px 16px;
+  padding: 16vh var(--space-6) var(--space-6);
   background: var(--active-bg);
 }
 
 .ask {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-5);
   width: min(440px, 100%);
   max-height: 100%;
-  padding: 14px 16px;
+  padding: var(--space-6);
   overflow: auto;
   border: 1px solid var(--muted);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   outline: none;
   background: var(--surface);
   box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 18%, transparent);
@@ -4033,7 +4143,7 @@ ol.summary-list {
 
 .ask-title {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -4041,7 +4151,7 @@ ol.summary-list {
 .ask-note,
 .ask-error {
   margin: 0;
-  color: var(--muted);
+  color: var(--muted-text);
   overflow-wrap: anywhere;
 }
 
@@ -4052,18 +4162,17 @@ ol.summary-list {
 }
 
 .ask-label {
-  margin: 4px 0 -6px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 400;
+  margin: var(--space-2) 0 -6px;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .ask-buttons {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
-  margin-top: 4px;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
 }
 
 .ask-buttons .toolbar-button {
@@ -4082,17 +4191,17 @@ ol.summary-list {
 .ask-options {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .ask-option {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 3px 8px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   text-align: left;
   white-space: nowrap;
 }
@@ -4113,26 +4222,26 @@ ol.summary-list {
   overflow: hidden;
   direction: rtl;
   text-overflow: ellipsis;
-  color: var(--muted);
+  color: var(--muted-text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
   text-align: left;
 }
 
 .ask-option-aside {
   flex: none;
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 /* 시도한 경로. 출처, 경로, 통과하지 못한 까닭 세 칸이다. */
 .ask-attempt {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  padding: 1px 8px;
-  color: var(--muted);
-  font-size: 11px;
+  gap: var(--space-4);
+  padding: 1px var(--space-4);
+  color: var(--muted-text);
+  font-size: var(--text-sm);
   white-space: nowrap;
 }
 
@@ -4153,8 +4262,8 @@ ol.summary-list {
   flex: none;
   align-items: center;
   padding: 4px 2px;
-  border-radius: 3px;
-  color: var(--muted);
+  border-radius: var(--radius-sm);
+  color: var(--muted-text);
 }
 
 .trail-repo:hover,
@@ -4165,8 +4274,8 @@ ol.summary-list {
 
 /* 메뉴의 묶음을 가르는 가로선 */
 .menu-item[data-rule] {
-  margin-top: 3px;
-  padding-top: 3px;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
   border-top: 1px solid var(--line);
 }
 
@@ -4174,9 +4283,9 @@ ol.summary-list {
 
 /* 레포 열기 화면의 환경 점검 버튼. 글자만 그리고 올리면 밑줄을 긋는다. */
 .welcome-tools {
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 11px;
+  margin-top: var(--space-4);
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .welcome-tools:hover,
@@ -4189,7 +4298,7 @@ ol.summary-list {
 
 /* 환경 점검 화면의 행. 머리 줄은 접는 버튼과 이름, 상태, 판과 출처, 오른쪽 끝의 버튼이고 그 아래에 경로, 까닭과 안내, 시도한 경로를 둔다. */
 .tools-about {
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 .tools-rows {
@@ -4200,8 +4309,8 @@ ol.summary-list {
 .tools-row {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 8px 0;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
   border-top: 1px solid var(--line);
 }
 
@@ -4209,7 +4318,7 @@ ol.summary-list {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 10px;
+  gap: var(--space-1) var(--space-4);
 }
 
 .tools-head .info-section-head:disabled {
@@ -4234,15 +4343,15 @@ ol.summary-list {
 .tools-note,
 .tools-prefix,
 .tools-busy {
-  color: var(--muted);
-  font-size: 11px;
+  color: var(--muted-text);
+  font-size: var(--text-sm);
 }
 
 .tools-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 4px;
+  gap: var(--space-2);
   margin-left: auto;
 }
 
@@ -4272,15 +4381,15 @@ ol.summary-list {
 }
 
 .tools-path {
-  color: var(--muted);
+  color: var(--muted-text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 .tools-prefix {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-3);
   white-space: nowrap;
 }
 
@@ -4298,21 +4407,46 @@ ol.summary-list {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: var(--space-2);
+}
+
+/* 고치는 방법의 단계. 단계마다 번호와 할 일, 그 아래에 복사할 명령을 적는다. */
+.tools-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding-left: var(--space-6);
+  list-style: decimal;
+}
+
+.tools-steps li {
+  padding-left: var(--space-1);
+}
+
+.tools-steps .tools-command {
+  margin-top: var(--space-1);
+}
+
+.tools-steps .tools-login {
+  margin-left: var(--space-4);
 }
 
 .tools-command {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: var(--space-3);
   max-width: 100%;
 }
 
 .tools-command code {
   min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--hover-bg);
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
 }
 
 .tools-login {
@@ -4320,11 +4454,11 @@ ol.summary-list {
 }
 
 .tools-row .ask-attempts {
-  margin-top: 2px;
+  margin-top: var(--space-1);
 }
 
 .tools-row .ask-attempt {
-  padding-left: 13px;
+  padding-left: var(--space-5);
 }
 
 /* 시도한 경로 가운데 통과한 줄은 본문 색으로 적는다. */
@@ -4337,12 +4471,12 @@ ol.summary-list {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .summary-fixes {
   display: flex;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 /* 필터 창의 인터프리터. 판과 바꾸기 버튼을 한 줄에, 경로를 그 아래 줄에 적는다. 경로는 넘치면 앞에서부터 줄인다. */
@@ -4350,8 +4484,8 @@ ol.summary-list {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 6px;
-  color: var(--muted);
+  gap: var(--space-3);
+  color: var(--muted-text);
   white-space: nowrap;
 }
 
@@ -4361,12 +4495,17 @@ ol.summary-list {
   direction: rtl;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted);
+  color: var(--muted-text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-sm);
   text-align: left;
 }
 
 .filter-note {
   color: color-mix(in srgb, var(--ink) 25%, var(--critical));
+}
+
+.finder-head > :first-child {
+  color: var(--ink);
+  font-weight: 600;
 }
