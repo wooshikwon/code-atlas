@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cycles } from "./cycles";
 import { node, routeFixture } from "./fixture";
-import { flow } from "./flow";
+import { DIM, flow } from "./flow";
 import { cycleLines, cycleMarks, unusedCounts } from "./overlay";
 import { lit, route } from "./route";
 import { drawn } from "./scope";
@@ -94,7 +94,7 @@ describe("경로 고정 중의 순환 선", () => {
     const edges = drawn(routeFixture, visible, null, null, path);
     const lines = cycleLines(routeFixture, visible, null, path, edges, found);
     expect(lines.keys.size).toBe(5);
-    expect(lines.edges.filter((e) => lines.keys.has(e.key)).every((e) => e.opacity === 0.2 && e.route === null)).toBe(true);
+    expect(lines.edges.filter((e) => lines.keys.has(e.key)).every((e) => e.opacity === DIM && e.route === null)).toBe(true);
     const steps = lines.edges.filter((e) => e.route !== null);
     expect(steps).toHaveLength(path.path.length - 1);
     expect(steps.every((e) => e.opacity === 1 && !lines.keys.has(e.key))).toBe(true);

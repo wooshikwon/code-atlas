@@ -26,7 +26,7 @@ import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
 import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
-import { flow, opacities, type Flow } from "./flow";
+import { DIM, flow, opacities, type Flow } from "./flow";
 import { functionCounts, labelOf, layout, packId, packLabel, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
@@ -114,7 +114,7 @@ function itemsOf(
       functions: functions.get(node.id) ?? 0,
       expanded,
       selected: node.id === selected,
-      flow: (scene.flow !== null || scene.lit !== null) && opacity > 0.2,
+      flow: (scene.flow !== null || scene.lit !== null) && opacity > DIM,
       local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
       inside: expanded ? 0 : (inside.get(node.id) ?? 0),
       busy: busy.get(node.id) ?? 0,

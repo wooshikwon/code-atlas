@@ -1,6 +1,6 @@
 // 보이는 노드 사이에 그릴 선을 정한다. 배치와 독립이므로 선을 바꿔 그려도 layout을 다시 부르지 않는다.
 import type { AtlasEdge, AtlasNode, EdgeGroup, EdgeKind, Graph } from "../api/types";
-import type { Flow } from "./flow";
+import { DIM, type Flow } from "./flow";
 import type { Lit, StepKind } from "./route";
 import { COUNTED_KINDS } from "./names";
 import { lift, local, nodeIndex, unitOf, within, type Shown } from "./visible";
@@ -40,12 +40,12 @@ export interface DrawnEdge {
  * 흐름에 든 노드 사이의 선은 FULL, 그 밖의 선은 REST다. 경로를 강조하는 동안에는 경로의 걸음이 FULL, 그 밖의 선이 REST다.
  * 선 가운데 숫자는 선과 같은 색과 불투명도로 그린다.
  */
-export const EDGE_OPACITY = { full: 1, idle: 0.5, rest: 0.2 } as const;
+export const EDGE_OPACITY = { full: 1, idle: 0.5, rest: DIM } as const;
 
 /** 색과 불투명도로 정한 진하기 */
 export type Shade = { tone: Tone; opacity: number };
 
-/** 진하기 단계를 연한 것부터 적은 사다리: muted 20%, muted 50%, muted 100%, 본문 잉크 100%. 선의 진하기 표의 단계와 같다. */
+/** 진하기 단계를 연한 것부터 적은 사다리: muted 흐림(`EDGE_OPACITY.rest`), muted 50%, muted 100%, 본문 잉크 100%. 선의 진하기 표의 단계와 같다. */
 const SHADES: Shade[] = [
   { tone: "muted", opacity: EDGE_OPACITY.rest },
   { tone: "muted", opacity: EDGE_OPACITY.idle },
@@ -59,7 +59,7 @@ export function darkness(shade: Shade): number {
 }
 
 /**
- * 마우스를 올린 선과 노드의 진하기. 지금 진하기에서 사다리의 한 단계 위다: muted 20%는 muted 50%, muted 50%는 muted 100%,
+ * 마우스를 올린 선과 노드의 진하기. 지금 진하기에서 사다리의 한 단계 위다: muted 흐림은 muted 50%, muted 50%는 muted 100%,
  * muted 100%는 본문 잉크 100%가 되고, 가장 진한 본문 잉크 100%는 그대로다. 단계 사이의 값(미사용 덮개의 40%)은 바로 위 단계로 올린다.
  */
 export function lifted(shade: Shade): Shade {
@@ -141,9 +141,9 @@ function strides(graph: Graph, lit: Lit): DrawnEdge[] {
  *    마우스를 올린 노드에 닿는 선은 모두 그린다.
  * 올린 양 끝이 같은 선은 집계 규칙으로 합치고, 올린 양 끝이 같거나 한쪽이 다른 쪽의 조상인 선은 버린다.
  * 선의 진하기는 다섯 단계이고 경로 고정이 가장 앞선다. 강조하는 경로 lit이 있으면 흐름과 hover를 보지 않고,
- * 경로의 걸음마다 선 하나를 strong에 불투명도 1로, 접힌 상자 사이의 선을 muted에 불투명도 0.2로 그린다.
+ * 경로의 걸음마다 선 하나를 strong에 불투명도 1로, 접힌 상자 사이의 선을 muted에 흐린 단계(`EDGE_OPACITY.rest`)로 그린다.
  * lit이 없으면 고른 노드에 닿는 선(고른 노드와 그 자손의 경계를 넘는 선)은 strong에 불투명도 1,
- * 흐름에 든 노드 사이의 선은 muted에 불투명도 1, 그 밖의 선은 muted에 불투명도 0.2다. 고른 노드가 없으면
+ * 흐름에 든 노드 사이의 선은 muted에 불투명도 1, 그 밖의 선은 muted에 흐린 단계다. 고른 노드가 없으면
  * 모두 muted에 불투명도 0.5다.
  */
 export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: string | null, lit: Lit | null): DrawnEdge[] {

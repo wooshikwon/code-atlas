@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture, routeFixture } from "./fixture";
-import { flow } from "./flow";
+import { DIM, flow } from "./flow";
 import { lit, route } from "./route";
 import { sideRoute, type Layout } from "./layout";
 import { drawn } from "./scope";
@@ -122,7 +122,7 @@ describe("edgeViews", () => {
     const focused = views("pkg.mod:Store.save");
     expect(focused.get("pkg.mod:Store.save|main:helper|call")).toMatchObject({ tone: "strong", opacity: 1 });
     expect(focused.get("pkg.mod:Store.save|pkg.mod:parse|call")).toMatchObject({ tone: "strong", opacity: 1 });
-    expect(focused.get("pkg.mod:Store.load|pkg.mod:Row|construct")).toMatchObject({ tone: "muted", opacity: 0.2 });
+    expect(focused.get("pkg.mod:Store.load|pkg.mod:Row|construct")).toMatchObject({ tone: "muted", opacity: DIM });
   });
 
   it("배치에 상자가 없는 노드에 닿는 선은 뺀다", () => {
@@ -226,7 +226,7 @@ describe("edgeViews: 강조하는 경로", () => {
     const { visible, edges } = scene("flow.build:make", "flow.sink:tune");
     const views = edgeViews(edges, { ...lineLayout(visible), routes: new Map() }, routeNodes).views;
     expect(views.filter((v) => v.route !== null).map((v) => v.route)).toEqual(["construct", "init", "call"]);
-    expect(views.filter((v) => v.route === null).every((v) => v.opacity === 0.2)).toBe(true);
+    expect(views.filter((v) => v.route === null).every((v) => v.opacity === DIM)).toBe(true);
   });
 
   it("클래스에서 그 생성자 메서드로 가는 걸음은 클래스의 왼쪽 변에서 메서드의 왼쪽 변으로 가로로 잇는다", () => {
@@ -418,11 +418,11 @@ describe("trunkViews", () => {
 
   it("줄기의 진하기는 따로 그리는 선을 뺀 가지 가운데 가장 진한 값이다", () => {
     const strong = { ...a, tone: "strong" as const, opacity: 1 };
-    const rest = { ...b, opacity: 0.2 };
+    const rest = { ...b, opacity: DIM };
     const flowed = { ...c, opacity: 1 };
     const apart = (v: EdgeView) => emphasized(v, { pointed: false, cycle: false });
     expect(trunkShade([strong, rest, flowed], apart)).toEqual({ tone: "muted", opacity: 1 });
-    expect(trunkShade([strong, rest], apart)).toEqual({ tone: "muted", opacity: 0.2 });
+    expect(trunkShade([strong, rest], apart)).toEqual({ tone: "muted", opacity: DIM });
     expect(trunkShade([strong], apart)).toEqual({ tone: "strong", opacity: 1 });
   });
 

@@ -5,6 +5,7 @@ import { MiniMap, useReactFlow, useStore, type Node, type XYPosition } from "@xy
 import { useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAtlas } from "../state/store";
+import { DIM } from "./flow";
 import { reducedMotion } from "./motion";
 import type { AtlasNodeData } from "./nodes/common";
 import { isPack, type PackFlowNode } from "./nodes/PackNode";
@@ -14,11 +15,11 @@ const SIZE = { width: 220, height: 140 };
 
 /**
  * 미니맵에 그리는 노드의 클래스. 노드의 바탕 요소만 그린다. 펼친 폴더 영역과 펼친 파일 상자는 테두리와 옅은 바탕으로 그린다.
- * 진하기는 구조 뷰의 불투명도를 세 단계(1, 1 미만, 0.2 이하)로 따르고 고른 노드는 본문 잉크로 그린다. 손잡이는 손잡이를 단 상자의 진하기를 따르는 노드 하나로 그린다.
+ * 진하기는 구조 뷰의 불투명도를 세 단계(1, 1 미만, 흐린 단계 이하)로 따르고 고른 노드는 본문 잉크로 그린다. 손잡이는 손잡이를 단 상자의 진하기를 따르는 노드 하나로 그린다.
  */
 export function minimapClass(node: Node<AtlasNodeData> | PackFlowNode): string {
   const opacity = Number(node.style?.opacity ?? 1);
-  const shade = opacity <= 0.2 ? "dim" : opacity < 1 ? "half" : "full";
+  const shade = opacity <= DIM ? "dim" : opacity < 1 ? "half" : "full";
   if (isPack(node)) {
     return `minimap-pack minimap-${shade}`;
   }

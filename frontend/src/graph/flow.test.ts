@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture, routeFixture } from "./fixture";
-import { flow, opacities, opacity } from "./flow";
+import { DIM, flow, opacities, opacity } from "./flow";
 import { lit, route } from "./route";
 import { hidden } from "./visible";
 
@@ -58,13 +58,13 @@ describe("opacity", () => {
     expect(opacity(null, "scratch")).toBe(1);
   });
 
-  it("마지막 단계는 0.5, 그보다 앞 단계는 1, 흐름 밖은 0.2다", () => {
+  it("마지막 단계는 0.5, 그보다 앞 단계는 1, 흐름 밖은 흐린 단계다", () => {
     const three = flow(repoFixture, "app.web:render", 2, off);
     expect(opacity(three, "app.web:render")).toBe(1);
     expect(opacity(three, "app.web:index")).toBe(1);
     expect(opacity(three, "app.text:wrap")).toBe(1);
     expect(opacity(three, "app.text:pad")).toBe(0.5);
-    expect(opacity(three, "scratch:todo")).toBe(0.2);
+    expect(opacity(three, "scratch:todo")).toBe(DIM);
   });
 
   it("흐름이 depth보다 앞 단계에서 끝나면 끝 단계도 1이다", () => {
@@ -85,8 +85,8 @@ describe("opacities", () => {
     expect(result.get("pkg.mod:Store.save")).toBe(0.5);
     expect(result.get("pkg.mod:Store")).toBe(1);
     expect(result.get("pkg")).toBe(1);
-    expect(result.get("pkg.util")).toBe(0.2);
-    expect(result.get("app")).toBe(0.2);
+    expect(result.get("pkg.util")).toBe(DIM);
+    expect(result.get("app")).toBe(DIM);
   });
 
   it("파일 상자를 고르면 파일 상자와 그 폴더가 값을 받는다", () => {
@@ -94,7 +94,7 @@ describe("opacities", () => {
     expect(result.get("main")).toBe(1);
     expect(result.get("cli")).toBe(0.5);
     expect(result.get("pkg.util")).toBe(1);
-    expect(result.get("app.web")).toBe(0.2);
+    expect(result.get("app.web")).toBe(DIM);
   });
 
   it("폴더를 고르면 그 폴더와 흐름에 든 파일 상자가 값을 받는다", () => {
@@ -102,10 +102,10 @@ describe("opacities", () => {
     expect(result.get("pkg")).toBe(1);
     expect(result.get("main")).toBe(1);
     expect(result.get("cli")).toBe(0.5);
-    expect(result.get("app")).toBe(0.2);
+    expect(result.get("app")).toBe(DIM);
   });
 
-  it("강조하는 경로가 있으면 흐름을 보지 않고 경로 위 노드와 그 조상 상자를 1, 그 밖을 0.2로 둔다", () => {
+  it("강조하는 경로가 있으면 흐름을 보지 않고 경로 위 노드와 그 조상 상자를 1, 그 밖을 흐린 단계로 둔다", () => {
     const none = hidden(routeFixture, { showTests: false, showExternal: false });
     const path = lit(route(routeFixture, "flow.build:make", "flow.sink:tune", none), 0)!;
     const result = opacities(routeFixture, flow(routeFixture, "flow.walk:begin", 2, none), path);
@@ -113,7 +113,7 @@ describe("opacities", () => {
       expect(result.get(id)).toBe(1);
     }
     for (const id of ["flow.build:Base", "flow.build:Base.run", "flow.walk", "flow.walk:begin", "flow.walk:left", "ring", "ring.a"]) {
-      expect(result.get(id)).toBe(0.2);
+      expect(result.get(id)).toBe(DIM);
     }
   });
 });

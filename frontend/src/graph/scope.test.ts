@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { repoFixture, routeFixture } from "./fixture";
-import { flow } from "./flow";
+import { DIM, flow } from "./flow";
 import { lit, route } from "./route";
 import { along, arriving, drawn, endsOf, followed, lifted, picked, trunkTarget, type DrawnEdge } from "./scope";
 import { hidden, nodeIndex, shown, unitOf } from "./visible";
@@ -18,7 +18,7 @@ function draw(selection: string | null, collapsed: string[] = [], hover: string 
 
 describe("lifted", () => {
   it("마우스를 올린 진하기는 한 단계만 오르고 가장 진한 단계는 그대로다", () => {
-    expect(lifted({ tone: "muted", opacity: 0.2 })).toEqual({ tone: "muted", opacity: 0.5 });
+    expect(lifted({ tone: "muted", opacity: DIM })).toEqual({ tone: "muted", opacity: 0.5 });
     expect(lifted({ tone: "muted", opacity: 0.5 })).toEqual({ tone: "muted", opacity: 1 });
     expect(lifted({ tone: "muted", opacity: 1 })).toEqual({ tone: "strong", opacity: 1 });
     expect(lifted({ tone: "strong", opacity: 1 })).toEqual({ tone: "strong", opacity: 1 });
@@ -86,26 +86,26 @@ describe("drawn", () => {
     expect(edges.get("app.text:wrap|app.text:pad|call")).toMatchObject({ tone: "muted", opacity: 1 });
   });
 
-  it("진하기는 세 단계다. 고른 노드에 닿는 선은 strong, 흐름에 든 노드 사이의 선은 muted 1, 그 밖은 muted 0.2다", () => {
+  it("진하기는 세 단계다. 고른 노드에 닿는 선은 strong, 흐름에 든 노드 사이의 선은 muted 1, 그 밖은 muted 흐림이다", () => {
     const levels = new Set([...draw("main:run").values()].map((e) => `${e.tone} ${e.opacity}`));
-    expect([...levels].sort()).toEqual(["muted 0.2", "muted 1", "strong 1"]);
+    expect([...levels].sort()).toEqual([`muted ${DIM}`, "muted 1", "strong 1"]);
     const edges = draw("main:run");
     expect(edges.get("cli:main|main:run|call")).toMatchObject({ tone: "strong", opacity: 1 });
     expect(edges.get("main:run|main:helper|call")).toMatchObject({ tone: "strong", opacity: 1 });
     expect(edges.get("pkg.mod:Store.load|pkg.mod:Store.save|call")).toMatchObject({ tone: "muted", opacity: 1 });
-    expect(edges.get("agg|app.web|app.text")).toMatchObject({ tone: "muted", opacity: 0.2 });
+    expect(edges.get("agg|app.web|app.text")).toMatchObject({ tone: "muted", opacity: DIM });
   });
 
   it("규칙 2: 접힌 상자 사이의 선은 흐리게 그대로 그리고, 펼친 파일 상자에 닿는 흐름 밖 선은 그리지 않는다", () => {
     const edges = draw("app.web:render");
-    expect(edges.get("agg|main|pkg.mod")).toMatchObject({ tone: "muted", opacity: 0.2 });
+    expect(edges.get("agg|main|pkg.mod")).toMatchObject({ tone: "muted", opacity: DIM });
     expect(edges.has("app.web|app.text|import")).toBe(false);
     expect(edges.has("agg|app.web|app.text")).toBe(false);
   });
 
   it("규칙 2: 고른 노드가 든 파일 상자 안의 선을 그린다", () => {
     const edges = draw("pkg.mod:parse");
-    expect(edges.get("pkg.mod:Store.load|pkg.mod:Row|construct")).toMatchObject({ tone: "muted", opacity: 0.2 });
+    expect(edges.get("pkg.mod:Store.load|pkg.mod:Row|construct")).toMatchObject({ tone: "muted", opacity: DIM });
     expect(edges.get("pkg.mod:Store.save|pkg.mod:parse|call")?.tone).toBe("strong");
   });
 
@@ -121,7 +121,7 @@ describe("drawn", () => {
     expect(edges.get("agg|pkg.mod|main")).toMatchObject({ weight: 1, tone: "strong", opacity: 1 });
     expect(edges.get("pkg.mod|pkg.util|import")).toMatchObject({ tone: "strong", deferred: true });
     expect(edges.get("agg|cli|main")).toMatchObject({ tone: "muted", opacity: 1 });
-    expect(edges.get("agg|app.web|app.text")).toMatchObject({ tone: "muted", opacity: 0.2 });
+    expect(edges.get("agg|app.web|app.text")).toMatchObject({ tone: "muted", opacity: DIM });
   });
 
   it("규칙 2: 접힌 폴더 상자를 고르면 그 상자에서 나가고 들어오는 집계 선만 strong이다", () => {
@@ -130,7 +130,7 @@ describe("drawn", () => {
     expect(edges.get("agg|pkg|main")).toMatchObject({ weight: 1, tone: "strong", opacity: 1 });
     expect(edges.get("agg|pkg|common")).toMatchObject({ weight: 0, kinds: { import: 1 }, tone: "strong", opacity: 1 });
     expect(edges.get("agg|cli|main")).toMatchObject({ tone: "muted", opacity: 1 });
-    expect(edges.get("agg|app.web|app.text")).toMatchObject({ tone: "muted", opacity: 0.2 });
+    expect(edges.get("agg|app.web|app.text")).toMatchObject({ tone: "muted", opacity: DIM });
     expect([...edges.values()].filter((e) => e.tone === "strong").every((e) => e.source === "pkg" || e.target === "pkg")).toBe(true);
   });
 
@@ -150,7 +150,7 @@ describe("drawn", () => {
     const all = ["agg|cli|common", "app.__init__|common|import", "app.web|common|import", "main|common|import", "pkg.mod|common|import"];
     expect(into(null)).toEqual(all);
     expect(into("scratch")).toEqual(all);
-    expect([...draw("scratch").values()].filter((e) => e.target === "common").every((e) => e.opacity === 0.2)).toBe(true);
+    expect([...draw("scratch").values()].filter((e) => e.target === "common").every((e) => e.opacity === DIM)).toBe(true);
   });
 
   it("여러 상자가 쓰는 상자를 고르면 들어오는 선이 고른 노드에 닿는 선이다", () => {
@@ -164,7 +164,7 @@ describe("drawn", () => {
     const edges = draw("cli");
     expect(edges.get("agg|cli|common")).toMatchObject({ weight: 1, tone: "strong", opacity: 1 });
     expect(edges.get("pkg.mod|common|import")).toMatchObject({ tone: "muted", opacity: 1 });
-    expect(edges.get("app.web|common|import")?.opacity).toBe(0.2);
+    expect(edges.get("app.web|common|import")?.opacity).toBe(DIM);
   });
 
   it("그린 선의 양 끝은 늘 보이는 노드다", () => {
@@ -275,12 +275,12 @@ describe("drawn: 강조하는 경로", () => {
     ]);
   });
 
-  it("걸음이 아닌 선은 접힌 상자 사이의 선만 muted에 불투명도 0.2로 낸다", () => {
+  it("걸음이 아닌 선은 접힌 상자 사이의 선만 muted에 흐린 단계로 낸다", () => {
     const { path, visible } = scene("flow.build:make", "flow.sink:tune");
     const rest = drawn(routeFixture, visible, null, null, path).filter((e) => e.route === null);
     expect(rest.length).toBeGreaterThan(0);
     for (const e of rest) {
-      expect([e.tone, e.opacity]).toEqual(["muted", 0.2]);
+      expect([e.tone, e.opacity]).toEqual(["muted", DIM]);
       expect(visible.open.has(e.source) || visible.open.has(e.target)).toBe(false);
       expect(e.source.includes(":") || e.target.includes(":")).toBe(false);
     }
@@ -292,7 +292,7 @@ describe("drawn: 강조하는 경로", () => {
     const { path, visible } = scene("flow.walk:begin", "flow.walk:finish", ["flow", "ring", "lazy"]);
     const edges = drawn(routeFixture, visible, null, null, path);
     expect(steps(edges)).toHaveLength(2);
-    expect(edges.find((e) => e.key === "agg|ring|lazy")).toMatchObject({ tone: "muted", opacity: 0.2, route: null });
+    expect(edges.find((e) => e.key === "agg|ring|lazy")).toMatchObject({ tone: "muted", opacity: DIM, route: null });
   });
 
   it("흐름과 마우스를 올린 노드를 보지 않는다", () => {

@@ -18,7 +18,13 @@ export interface Flow {
   incoming: Set<string>;
 }
 
-type Opacity = 1 | 0.5 | 0.2;
+/**
+ * 흐린 단계의 불투명도. 초점 밖의 노드와 선, 경로 고정 중의 경로 밖 노드와 선이 이 값으로 그려진다. 흐린 항목도 이름을 읽고 찾아갈 수
+ * 있어야 하고, 한 단계 위(0.5)와 눈으로 구분돼야 한다.
+ */
+export const DIM = 0.3;
+
+type Opacity = 1 | 0.5 | typeof DIM;
 
 /**
  * 고른 노드에서 세 분류의 선을 나가는 방향으로 depth단계까지 따라가 단계를 센다. 함수 안 import 선도 따라가고,
@@ -80,7 +86,7 @@ export function flow(graph: Graph, selection: string, depth: number, hidden: Set
 
 /**
  * 노드 하나의 불투명도. 고른 노드와 그 자손, 고른 노드로 선을 보내는 노드는 1이다. 나가는 흐름에 든 노드는
- * 마지막 단계이고 depth가 2 이상이면 0.5, 그보다 앞 단계면 1이다. 그 밖은 0.2다.
+ * 마지막 단계이고 depth가 2 이상이면 0.5, 그보다 앞 단계면 1이다. 그 밖은 흐린 단계(`DIM`)다.
  */
 export function opacity(flow: Flow | null, id: string): Opacity {
   if (flow === null || flow.seeds.has(id) || flow.incoming.has(id)) {
@@ -88,18 +94,18 @@ export function opacity(flow: Flow | null, id: string): Opacity {
   }
   const step = flow.out.get(id);
   if (step === undefined) {
-    return 0.2;
+    return DIM;
   }
   return step === flow.depth && flow.depth >= 2 ? 0.5 : 1;
 }
 
 /**
  * 노드마다 불투명도를 정한다. 상자는 자기 값과 안에 든 노드의 값 가운데 가장 큰 값을 받는다.
- * 강조하는 경로 lit이 있으면 흐름을 보지 않고 경로 위 노드를 1, 그 밖을 0.2로 둔다.
+ * 강조하는 경로 lit이 있으면 흐름을 보지 않고 경로 위 노드를 1, 그 밖을 흐린 단계로 둔다.
  */
 export function opacities(graph: Graph, flow: Flow | null, lit: Lit | null): Map<string, Opacity> {
   const nodes = nodeIndex(graph);
-  const own = (id: string): Opacity => (lit === null ? opacity(flow, id) : lit.nodes.has(id) ? 1 : 0.2);
+  const own = (id: string): Opacity => (lit === null ? opacity(flow, id) : lit.nodes.has(id) ? 1 : DIM);
   const result = new Map(graph.nodes.map((n) => [n.id, own(n.id)]));
   for (const node of graph.nodes) {
     const own = result.get(node.id)!;

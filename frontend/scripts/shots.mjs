@@ -23,7 +23,7 @@ const OUT = join(homedir(), "data", "code-atlas", "screenshots");
 const FILE = "arbiter";
 const FUNCTION = "arbiter:_rebuild_note_sections";
 /** 초점 상태에서 흐름 밖 노드가 받는 불투명도 */
-const DIM = 0.2;
+const DIM = 0.3;
 /** 함수 이름표가 모두 보이는 확대 비율 구간의 시작값. 이보다 작은 확대 비율에서 노드를 고르면 이 값이 된다. */
 const NAMED_ZOOM = 0.8;
 /** 정보 패널의 기본 폭과 기본 여백(위·오른쪽·아래)을 관계 그래프 영역의 폭으로 나눈 값, 패널의 최소 폭 */
@@ -319,7 +319,7 @@ function toneLevels(edges) {
   const ink = edges.filter((e) => e.tone === "strong").length;
   const full = edges.filter((e) => e.tone === "muted" && e.opacity === 1).length;
   const dim = edges.filter((e) => e.tone === "muted" && e.opacity === DIM).length;
-  return `본문 잉크 ${ink}개, muted 100% ${full}개, muted 20% ${dim}개`;
+  return `본문 잉크 ${ink}개, muted 100% ${full}개, muted ${DIM * 100}% ${dim}개`;
 }
 
 /** CSS 변수의 값과 그 값을 브라우저가 계산한 rgb 문자열 */
@@ -710,7 +710,7 @@ async function focused(t, page) {
   );
   const rest = edges.filter((e) => e.tone === "muted");
   t.check(
-    "그 밖의 선은 muted 잉크이고 불투명도가 1(흐름에 든 노드 사이)이나 0.2다",
+    `그 밖의 선은 muted 잉크이고 불투명도가 1(흐름에 든 노드 사이)이나 ${DIM}다`,
     rest.some((e) => e.opacity === 1) && rest.some((e) => e.opacity === DIM) && rest.every((e) => e.opacity === 1 || e.opacity === DIM),
     `불투명도 ${[...new Set(rest.map((e) => e.opacity))].sort().join("·")}`,
   );
@@ -740,7 +740,7 @@ async function focused(t, page) {
     })),
   );
   t.check(
-    "arbiter.py 상자 안의 흐름 밖 함수 이름표가 불투명도 0.2로 보인다",
+    `arbiter.py 상자 안의 흐름 밖 함수 이름표가 불투명도 ${DIM}로 보인다`,
     local.length > 0 && local.every((n) => n.opacity === DIM && n.label === "visible"),
     `흐름 밖 노드 ${local.length}개, 불투명도 ${[...new Set(local.map((n) => n.opacity))].join("·")}, 이름표 ${[...new Set(local.map((n) => n.label))].join("·")}`,
   );
@@ -1144,8 +1144,8 @@ async function edge(t, page) {
   const focusedLines = await linesOf(page);
   const levels = [...new Set(focusedLines.map((line) => `${line.tone} ${line.opacity}`))].sort();
   t.check(
-    "노드를 고르면 닿는 선은 본문 잉크 1, 그 밖의 선은 muted 1이나 0.2이고, 세 단계 모두 숫자의 색이 선의 색과 같다",
-    levels.includes("strong 1") && levels.includes("muted 0.2") && levels.every((level) => ["strong 1", "muted 1", "muted 0.2"].includes(level)) && digitsMatch(focusedLines),
+    `노드를 고르면 닿는 선은 본문 잉크 1, 그 밖의 선은 muted 1이나 ${DIM}이고, 세 단계 모두 숫자의 색이 선의 색과 같다`,
+    levels.includes("strong 1") && levels.includes(`muted ${DIM}`) && levels.every((level) => ["strong 1", "muted 1", `muted ${DIM}`].includes(level)) && digitsMatch(focusedLines),
     levels.join(", "),
   );
   const again = await hittable(page, (await linesOf(page)).filter((line) => ends(line)[1] === target));
@@ -5709,6 +5709,93 @@ async function hoverStep(t, page) {
   await away();
 }
 
+/**
+ * 함수를 고른 화면에서 흐린 노드와 선이 흐린 단계의 불투명도로 그려지고 한 단계 위(50%)와 다른 값인지 본다. 흐린 항목의 이름이 읽히는지와
+ * 두 단계가 눈으로 구분되는지는 사진 `hf3-dim-{레포}-{화면 색}.png`로 본다. `--wide-url`을 받으면 그 레포에서 `mdp/settings/loader.py`의 함수도 본다.
+ */
+async function dim(t, page) {
+  /** 화면에 보이는 노드와 선의 불투명도마다의 수 */
+  const levels = () =>
+    page.evaluate(() => {
+      const tally = (elements) => {
+        const counts = {};
+        for (const element of elements) {
+          const opacity = getComputedStyle(element).opacity;
+          counts[opacity] = (counts[opacity] ?? 0) + 1;
+        }
+        return counts;
+      };
+      return {
+        nodes: tally([...document.querySelectorAll('.react-flow__node[data-id$="#face"]')]),
+        lines: tally([...document.querySelectorAll(".react-flow__edge .edge[data-key]")]),
+      };
+    });
+  const look = async (name) => {
+    await page.mouse.move(1, 1);
+    await settle(page);
+    const found = await levels();
+    const text = (counts) => Object.entries(counts).map(([opacity, count]) => `${opacity}: ${count}개`).join(", ");
+    t.check(
+      `${name}: 흐린 노드와 선의 불투명도가 ${DIM}이고 노드의 단계는 1, 0.5, ${DIM}, 선의 단계는 1, ${DIM}뿐이다`,
+      found.nodes[DIM] > 0 && found.lines[DIM] > 0 && Object.keys(found.nodes).every((opacity) => [1, 0.5, DIM].includes(Number(opacity))) && Object.keys(found.lines).every((opacity) => [1, DIM].includes(Number(opacity))),
+      `노드 ${text(found.nodes)} / 선 ${text(found.lines)}`,
+    );
+    /** 불투명도 50%인 노드가 화면에 있으면 그 둘레 560×360px도 남겨 흐린 단계와 나란히 본다. */
+    const half = await page.evaluate(() => {
+      const area = document.querySelector(".graph").getBoundingClientRect();
+      const panel = document.querySelector(".info-panel").getBoundingClientRect();
+      for (const face of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
+        const rect = face.getBoundingClientRect();
+        if (face.style.opacity === "0.5" && rect.left > area.left && rect.right < panel.left && rect.top > area.top && rect.bottom < area.bottom) {
+          const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+          return { x: clamp(rect.left + rect.width / 2 - 280, area.left, panel.left - 560), y: clamp(rect.top + rect.height / 2 - 180, area.top, area.bottom - 360), width: 560, height: 360 };
+        }
+      }
+      return null;
+    });
+    const shots = async (theme) => {
+      await page.screenshot({ path: join(OUT, `hf3-dim-${name}-${theme}.png`) });
+      if (half !== null) {
+        await page.screenshot({ path: join(OUT, `hf3-dim-${name}-half-${theme}.png`), clip: half });
+      }
+    };
+    await shots("light");
+    await page.getByRole("button", { name: "어두운 화면" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    await page.mouse.move(1, 1);
+    await shots("dark");
+  };
+
+  await load(page);
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await look("se");
+
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서 함수를 고른 화면의 흐린 단계", "--wide-url을 주지 않았다");
+    return;
+  }
+  const wide = WIDE_LINE_FOLDER;
+  const graph = await api("/api/graph", wideUrl);
+  await page.goto(wideUrl);
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  for (const folder of wide.open) {
+    await openFolder(page, folder);
+  }
+  /** 펼친 폴더 바로 아래 파일의 함수 가운데 나가는 선이 가장 많은 함수 */
+  const fn = graph.nodes
+    .filter((n) => n.kind === "function" && !n.test && wide.open.includes(graph.nodes.find((file) => file.id === n.parent)?.parent))
+    .sort((a, b) => touchingOf(graph, b.id).out - touchingOf(graph, a.id).out)[0];
+  if (fn === undefined) {
+    t.skip("폴더가 여러 겹인 레포에서 함수를 고른 화면의 흐린 단계", "펼친 폴더 바로 아래 파일에 함수가 없다");
+    return;
+  }
+  await pickInTree(page, { owner: fn.parent, id: fn.id });
+  await look("mdp");
+}
+
 // ── 4단계: 선의 합류 ─────────────────────────────────────────────
 
 /**
@@ -7757,6 +7844,7 @@ const SCENARIOS = [
   ["arranging", arranging],
   ["node-hover", nodeHover],
   ["hover-step", hoverStep],
+  ["dim", dim],
   ["merge", merge],
   ["merge-out", mergeOut],
   ["merge-hover", mergeHover],
@@ -7791,6 +7879,7 @@ const STAGE4 = new Set([
   "arranging",
   "node-hover",
   "hover-step",
+  "dim",
   "merge",
   "merge-out",
   "merge-hover",

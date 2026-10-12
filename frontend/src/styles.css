@@ -1,8 +1,8 @@
 /* 색은 theme.ts가 내보내는 변수만 쓴다. 칸 바탕·경계선·강조는 잉크를 바탕에 섞어 만든다. */
 :root {
   --line: color-mix(in srgb, var(--muted) 35%, transparent);
-  /* 펼친 폴더 영역의 테두리. 파일 상자의 테두리(muted 100%)와 평소의 선(muted 50%)보다 뒤로 물러나게, 선의 진하기 단계
-     (100%·50%·20%, graph/scope.ts의 EDGE_OPACITY) 가운데 가장 연한 20%로 그린다. 미니맵의 폴더 영역도 이 값을 쓴다. */
+  /* 펼친 폴더 영역의 테두리. 파일 상자의 테두리(muted 100%)와 평소의 선(muted 50%)보다 뒤로 물러나게 muted 20%로 그린다.
+     미니맵의 폴더 영역도 이 값을 쓴다. */
   --region-line: color-mix(in srgb, var(--muted) 20%, transparent);
   --hover-bg: color-mix(in srgb, var(--ink) 6%, transparent);
   --active-bg: color-mix(in srgb, var(--ink) 12%, transparent);
@@ -1170,7 +1170,7 @@ ul {
   margin-left: 4px;
 }
 
-/* 마우스를 올린 노드는 선의 hover처럼 진하기를 한 단계만 올린다. 불투명도는 nodes/common.tsx의 pointing이 한 단계 올리고(20%는 50%, 50%는 100%),
+/* 마우스를 올린 노드는 선의 hover처럼 진하기를 한 단계만 올린다. 불투명도는 nodes/common.tsx의 pointing이 한 단계 올리고(흐린 단계는 50%, 50%는 100%),
    불투명도 100%이던 노드만 tone-strong을 받아 모양의 테두리와 머리 줄의 이름표가 본문 잉크가 된다. 옅은 빛과 굵은 이름표는 진하기와 관계없이
    붙고, 빛은 노드의 불투명도를 함께 받아 흐린 노드에서 연하다. 이름표는 글자 외곽선으로 굵히므로 폭이 바뀌지 않는다.
    변경 표시 색으로 그린 테두리는 그대로 둔다. 펼친 파일 상자와 폴더 영역은 머리 줄의 이름표만 바꾼다. */
