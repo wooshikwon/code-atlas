@@ -25,6 +25,27 @@ def cache_dir(tmp_path_factory):
         yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def no_real_claude():
+    """시험은 이 컴퓨터에 설치된 `claude`를 실행하지 않는다. 알려진 위치와 `PATH`에서 `claude`가 든 폴더를 뺀다."""
+    from code_atlas import tools
+
+    folders = os.environ.get("PATH", "").split(os.pathsep)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(tools, "PLACES", {**tools.PLACES, "claude": ()})
+        patch.setenv("PATH", os.pathsep.join(f for f in folders if not os.path.exists(os.path.join(f, "claude"))))
+        yield
+
+
+@pytest.fixture(autouse=True)
+def forgotten_tools(monkeypatch):
+    """찾아 둔 `claude`와 기억한 설정을 시험마다 버린다."""
+    from code_atlas import tools
+
+    tools.fresh(tools.CLAUDE.name)
+    monkeypatch.setattr(tools, "_settings", None)
+
+
 def _copy_fixture(tmp_path: Path) -> Path:
     """고정 레포를 복사하고 git에 담을 수 없는 무시 대상 파일과 가상환경 폴더를 더한다."""
     repo = tmp_path / "sample_repo"

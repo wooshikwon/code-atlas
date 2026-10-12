@@ -38,6 +38,13 @@ def test_markdown_of_hover_content_forms():
     assert markdown_of([code, "설명"]) == "```python\ndef f(): ...\n```\n\n설명"
 
 
+def test_server_command_runs_the_server_script_with_the_bundled_node():
+    node, script, *options = lsp._server_command()
+    assert os.access(node, os.X_OK) and node.endswith("nodejs_wheel/bin/node")
+    assert os.path.isfile(script) and script.endswith("basedpyright/langserver.index.js")
+    assert options == ["--stdio"]
+
+
 @pytest.mark.asyncio
 async def test_hover_and_definition_at_after_korean_string(sample_repo):
     files = collect(sample_repo)
@@ -150,7 +157,7 @@ async def test_session_ends_the_process_group_when_shutdown_gets_no_response(sam
 
 
 @pytest.mark.asyncio
-async def test_session_ends_the_child_left_by_a_killed_launcher(sample_repo):
+async def test_session_closes_after_the_server_is_killed(sample_repo):
     async with Session(sample_repo, sys.executable, []) as session:
         pid = session.client._server.pid
         os.kill(pid, signal.SIGKILL)

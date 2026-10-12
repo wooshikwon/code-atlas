@@ -1,8 +1,9 @@
 import asyncio
 import json
+import os
 import shutil
+import signal
 import sqlite3
-import subprocess
 import sys
 import time
 from urllib.parse import urlencode
@@ -279,7 +280,7 @@ def test_stopped_session_is_reopened(client, monkeypatch):
     while client.get("/api/status").json()["lsp"] != "ready" and time.monotonic() < deadline:
         time.sleep(0.05)
     stopped = state.runner._session
-    subprocess.run(["pkill", "-KILL", "-P", str(stopped.client._server.pid)], check=True)
+    os.kill(stopped.client._server.pid, signal.SIGKILL)
     while not stopped.stopped and time.monotonic() < deadline:
         time.sleep(0.05)
     assert stopped.stopped

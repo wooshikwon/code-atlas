@@ -10,9 +10,9 @@ import asyncio
 import logging
 import os
 import signal
-import sys
 import uuid
 from dataclasses import dataclass
+from importlib.util import find_spec
 from pathlib import Path
 
 from lsprotocol import types
@@ -64,15 +64,20 @@ class Hover:
     range: tuple[int, int, int, int] | None
 
 
-def _server_command() -> str:
-    exe = Path(sys.executable).parent / "basedpyright-langserver"
-    return str(exe) if exe.exists() else "basedpyright-langserver"
+def _server_command() -> list[str]:
+    """언어 서버를 띄우는 명령. `nodejs_wheel`이 실은 `node`로 `basedpyright` 패키지의 서버 스크립트를 직접 실행한다.
+
+    두 경로를 설치된 패키지에서 구하므로 설치한 폴더를 옮겨도 같은 명령이 나온다.
+    """
+    node = Path(find_spec("nodejs_wheel").origin).parent / "bin" / "node"
+    script = Path(find_spec("basedpyright").origin).parent / "langserver.index.js"
+    return [str(node), str(script), "--stdio"]
 
 
 class Session:
     """basedpyright 프로세스 묶음 하나의 수명. `async with`로 띄우고 닫는다.
 
-    `basedpyright-langserver`는 node를 자식으로 띄우므로 새 세션에서 띄워 프로세스 묶음으로 다룬다.
+    언어 서버를 새 세션에서 띄워 프로세스 묶음으로 다룬다.
     """
 
     def __init__(self, root: Path, python: str | None, extra_paths: list[str]):
@@ -131,7 +136,7 @@ class Session:
             client.feature(method)(lambda params: None)
 
     async def __aenter__(self) -> Session:
-        await self.client.start_io(_server_command(), "--stdio", cwd=str(self.root), start_new_session=True)
+        await self.client.start_io(*_server_command(), cwd=str(self.root), start_new_session=True)
         try:
             await self._initialize()
         except BaseException:

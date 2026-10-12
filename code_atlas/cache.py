@@ -11,9 +11,7 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import sqlite3
-import subprocess
 import threading
 import time
 import zlib
@@ -21,6 +19,7 @@ from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 
+from . import tools
 from .collect import RepoFiles, SourceFile, disk_path
 from .extract import DefInfo, FileFacts, VarInfo
 from .model import Node, Site
@@ -31,8 +30,6 @@ ANALYZER_VERSION = 3  # extract·resolve·graph의 판정이 달라지는 변경
 SCHEMA_VERSION = 4  # 표와 `body`의 모양이 달라지는 변경마다 올린다
 CACHE_DIR = Path.home() / ".cache" / "code-atlas"
 LOCK_TIMEOUT = 5.0
-PROBE_TIMEOUT = 5.0
-_PROBE = "import json, sys; print(json.dumps([sys.version, sys.path]))"
 _INSTALLED = (".dist-info", ".egg-info", ".pth")
 _TABLES = {
     "meta": "key TEXT PRIMARY KEY, value TEXT NOT NULL",
@@ -89,12 +86,11 @@ def environment(python: str, files: RepoFiles) -> str:
     basedpyright 버전, 인터프리터의 실제 경로와 `sys.version`, `sys.path`의 폴더마다 설치된 패키지의 이름 목록,
     소스 루트, `extra_paths`를 해시한다. 인터프리터를 실행하지 못하면 인터프리터의 수정 시각으로 대신한다.
     """
-    exe = os.path.realpath(shutil.which(python) or python)
-    try:
-        out = subprocess.run([python, "-c", _PROBE], capture_output=True, text=True, timeout=PROBE_TIMEOUT, check=True)
-        version, folders = json.loads(out.stdout)
-        interpreter = [version, [[folder, _installed(folder)] for folder in folders if folder]]
-    except (OSError, subprocess.SubprocessError, ValueError):
+    exe = os.path.realpath(python)
+    told = tools.probe(python)
+    if told is not None:
+        interpreter = [told["version"], [[folder, _installed(folder)] for folder in told["path"] if folder]]
+    else:
         try:
             interpreter = [os.stat(exe).st_mtime_ns]
         except OSError:

@@ -15,6 +15,7 @@ from code_atlas.summary import Cache, Made, Summaries, SummaryError, Usage
 
 MADE = "설정을 받아 엔진을 만들고 시작한다.\n\n하는 일\n엔진을 만든다.\n\n앞뒤 흐름\n`main`이 호출한다."
 
+VERSION = 'if [ "$1" = "--version" ]; then echo "2.1.288 (Claude Code)"; exit 0; fi\n'
 OK = """
 if [ "$1" = "auth" ]; then echo '{"loggedIn": true}'; exit 0; fi
 cat > "$RECORD/stdin"
@@ -26,7 +27,7 @@ printf '%s\\n' '{"is_error": false, "result": "\\n설정을 받아 엔진을 만
 USAGE = ', "usage": {"input_tokens": 2, "cache_creation_input_tokens": 1487, "cache_read_input_tokens": 16411, "output_tokens": 527, "service_tier": "standard"}'
 USED = Usage(input=2, cache_write=1487, cache_read=16411, output=527)
 ONE_SENTENCE = """printf '%s\\n' '{"is_error": false, "result": "한 문장 요약이다."}'\n"""
-SLOW = "sleep 30\n"
+SLOW = """if [ "$1" = "auth" ]; then echo '{"loggedIn": true}'; exit 0; fi\nsleep 30\n"""
 FAILING = "echo '인증 서버에 닿지 못했다' >&2\nexit 3\n"
 LOGGED_OUT = """
 if [ "$1" = "auth" ]; then echo '{"loggedIn": false}'; exit 1; fi
@@ -37,7 +38,10 @@ exit 1
 
 @pytest.fixture
 def fake_cli(tmp_path, monkeypatch):
-    """임시 폴더에 가짜 `claude` 셸 스크립트를 두고 `PATH`와 홈 폴더를 그 폴더로 돌린다. 스크립트가 받은 값은 돌려준 폴더에 남는다."""
+    """임시 폴더에 가짜 `claude` 셸 스크립트를 두고 `PATH`와 홈 폴더를 그 폴더로 돌린다. 스크립트가 받은 값은 돌려준 폴더에 남는다.
+
+    스크립트는 `--version`에 판 번호를 답하고 그 밖의 인자는 받은 본문대로 처리한다.
+    """
     bin_dir, record = tmp_path / "bin", tmp_path / "record"
     bin_dir.mkdir()
     record.mkdir()
@@ -47,31 +51,20 @@ def fake_cli(tmp_path, monkeypatch):
 
     def install(body: str):
         script = bin_dir / "claude"
-        script.write_text("#!/bin/sh\n" + body)
+        script.write_text("#!/bin/sh\n" + VERSION + body)
         script.chmod(0o755)
         return record
 
     return install
 
 
-def test_find_cli_reads_path_then_local_bin(tmp_path, monkeypatch):
-    home = tmp_path / "home"
-    local = home / ".local" / "bin" / "claude"
-    local.parent.mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+def test_find_cli_gives_only_a_cli_that_passed_the_check(fake_cli, tmp_path):
     assert summary.find_cli() is None
-
-    local.write_text("#!/bin/sh\n")
+    fake_cli(OK)
+    cli = tmp_path / "bin" / "claude"
+    assert summary.find_cli() == str(cli)
+    cli.write_text("#!/bin/sh\nexit 1\n")
     assert summary.find_cli() is None
-    local.chmod(0o755)
-    assert summary.find_cli() == str(local)
-
-    on_path = tmp_path / "bin" / "claude"
-    on_path.parent.mkdir()
-    on_path.write_text("#!/bin/sh\n")
-    on_path.chmod(0o755)
-    assert summary.find_cli() == str(on_path)
 
 
 @pytest.mark.asyncio

@@ -37,14 +37,14 @@ basedpyright는 Python 의존성으로 함께 설치한다. 화면은 `frontend/
 
 ### 대상 레포의 인터프리터
 
-basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 레포의 파이썬 인터프리터가 필요하다. `--python`을 주지 않으면 레포 루트에서 `.venv/bin/python`, `venv/bin/python`, poetry 환경(`poetry.lock`이 있고 `poetry`가 설치돼 있을 때 `poetry env info -p`가 알려 준 환경) 순서로 찾는다. 찾지 못하면 `<레포>에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.`를 적고 종료 코드 2로 끝나므로, 인터프리터를 직접 지정한다.
+basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 레포의 파이썬 인터프리터가 필요하다. `--python`을 주지 않으면 그 레포의 인터프리터를 두 출처에서 차례로 찾는다. 먼저 레포 루트 바로 아래에서 `pyvenv.cfg`가 든 폴더의 `bin/python`을 `.venv`, `venv`, 그 밖의 이름 순서로 본다. 다음으로 레포의 표지 파일이 가리키는 관리자에게 묻는다. `poetry.lock`이 있으면 `poetry env info -p`, `.python-version`이 있으면 `pyenv prefix`, `environment.yml`에 `name`이 있으면 `conda env list --json`에서 그 이름의 환경이다. 후보마다 실제로 실행해 판과 `sys.prefix`를 받은 것만 쓰고, 전역 인터프리터는 후보에 넣지 않는다. 찾지 못하면 `<레포>에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.`와 시도한 후보마다의 까닭을 적고 종료 코드 2로 끝나므로, 인터프리터를 직접 지정한다.
 
 ```bash
 .venv/bin/code-atlas ~/work/some-repo --python ~/work/some-repo/env/bin/python
 .venv/bin/code-atlas ~/work/some-repo --python python3
 ```
 
-`--python`에 준 경로를 실행할 수 없을 때도 안내를 적고 종료 코드 2로 끝난다. 가상환경이 없는 레포에 시스템 인터프리터를 지정하면 그 인터프리터에 설치되지 않은 외부 패키지의 import와 그 패키지 객체를 거친 호출은 대상을 확인하지 못해 미확인 호출로 셀 수 있다. 레포 안의 함수·클래스 사이 관계는 그대로 분석한다. code-atlas는 대상 레포에 파일을 쓰지 않는다.
+`--python`에 준 값은 그 실행의 유일한 후보다. 실행할 수 없으면 레포의 가상환경으로 넘어가지 않고 까닭을 적은 뒤 종료 코드 2로 끝난다. 가상환경이 없는 레포에 시스템 인터프리터를 지정하면 그 인터프리터에 설치되지 않은 외부 패키지의 import와 그 패키지 객체를 거친 호출은 대상을 확인하지 못해 미확인 호출로 셀 수 있다. 레포 안의 함수·클래스 사이 관계는 그대로 분석한다. code-atlas는 대상 레포에 파일을 쓰지 않는다.
 
 ### 분석 캐시
 
@@ -180,7 +180,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 
 정보 패널의 LLM 요약 칸은 고른 파일·클래스·함수의 설명을 요지, 하는 일, 앞뒤 흐름 세 부분으로 보여 준다. 변수는 요약하지 않는다. 요지는 굵고 크게, 구역 제목은 굵게 그리고, 백틱으로 감싼 식별자와 `파일 경로::정의 이름` 표기는 옅은 바탕의 등폭 글자(코드 칩)로 그린다. 그래프에 있는 정의의 표기는 글자가 파란색인 칩이고 누르면 그 노드를 고른다. 목록 기호로 시작하는 줄은 목록으로, `**`로 감싼 글은 굵게, 코드 울타리 사이의 줄은 코드 블록으로 그린다. 코드 분석 창도 같은 방식으로 그린다. 코드 뷰어가 함께 열려 있으면 요약 칸은 처음에 패널 높이의 4분의 1까지만 쓰고 넘치는 글은 칸 안에서 스크롤한다. 요약 칸과 코드 뷰어 사이의 경계선을 끌어 정한 높이는 다음에 열 때도 유지한다. 설명은 이 컴퓨터에 설치된 Claude Code CLI를 `claude -p`로 불러 만들고, Claude Code에 로그인한 구독 계정을 쓰므로 API 키가 필요 없다.
 
-1. Claude Code CLI를 설치한다(npm으로는 `npm install -g @anthropic-ai/claude-code`). code-atlas는 `claude` 실행 파일을 `PATH`와 `~/.local/bin/claude`에서 찾는다.
+1. Claude Code CLI를 설치한다(npm으로는 `npm install -g @anthropic-ai/claude-code`). code-atlas는 `claude` 실행 파일을 `PATH`에서 찾고, 없으면 `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.volta/bin`, `~/.asdf/shims`, `~/.nvm/versions/node/*/bin`(Node 판이 높은 순서)에서 찾는다. 후보마다 `claude --version`을 실행해 통과한 것만 쓴다.
 2. 터미널에서 `claude auth login`을 실행해 Claude 구독 계정으로 로그인한다.
 3. `claude auth status`가 `"loggedIn": true`를 출력하는지 확인한다.
 4. code-atlas를 실행해 노드를 고르고 요약 칸의 "요약 생성"을 누른다.
@@ -204,7 +204,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 
 대상 레포가 git 저장소면 마지막 커밋(`HEAD`) 뒤에 수정하거나 추가한 파일과 함수를 그래프와 파일트리에 표시한다. 수정은 주황 `M`, 추가(스테이징한 새 파일과 추적하지 않는 파일)는 파랑 `A`이고, 지워진 파일은 파일트리 아래 목록에 적는다. 함수·클래스·변수의 표시는 `HEAD`와 작업 중인 상태를 시점 비교와 같은 규칙으로 견준 값이다. `HEAD`에 없던 정의는 추가, 본문의 글이 달라진 정의는 수정이고 위쪽 코드가 바뀌어 줄만 밀린 정의에는 표시가 없다. 화면은 15초마다, 그리고 창이 포커스를 받을 때 변경 내용을 다시 읽는다. 필터 창의 레포 정보에 현재 브랜치 이름을 적는다.
 
-변경 표시와 시점 비교는 대상 레포에 읽기 전용 git 명령(`status`, `diff`, `rev-parse`, `symbolic-ref`, `log`, `merge-base`, `show`, `archive`)만 부르고, 인덱스를 다시 쓰지 않으며, 원격에 접속하지 않는다. git 저장소가 아니면 변경 표시 없이 나머지 기능이 동작한다.
+변경 표시와 시점 비교는 대상 레포에 읽기 전용 git 명령(`status`, `diff`, `rev-parse`, `symbolic-ref`, `log`, `merge-base`, `show`, `archive`)만 부르고, 인덱스를 다시 쓰지 않으며, 원격에 접속하지 않는다. git 실행 파일은 `PATH`에서 찾고, 없으면 `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`에서 찾아 `git --version`을 통과한 것만 쓴다. macOS의 `/usr/bin/git`은 Xcode Command Line Tools가 있을 때만 실행한다. git을 찾지 못했거나 git 저장소가 아니면 변경 표시 없이 나머지 기능이 동작한다.
 
 ## 알려진 한계
 
@@ -236,14 +236,15 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | `code_atlas/collect.py` | 분석할 `.py` 파일 수집(`.gitignore`·가상환경 폴더 제외), 소스 루트·테스트 코드 판정, `pyproject.toml`의 진입점 설정, 미사용 판정이 읽는 설정 파일 본문, 경로를 디스크에 적힌 이름으로 맞추기 |
 | `code_atlas/extract.py` | 파일마다 `ast`로 정의 노드와 모듈 변수 후보, 관계 후보 지점(호출·import·이름 사용·데코레이터·타입·상속·변수 읽음과 바꿈)을 뽑는다 |
 | `code_atlas/routes.py` | 라우트 데코레이터를 알아보는 패키지·이름 표, 데코레이터 인자에서 읽는 주소·메서드와 같은 파일의 앞 주소 |
-| `code_atlas/lsp.py` | basedpyright 언어 서버 세션 수명, 요청의 시간 제한, 연 파일의 본문 맞추기, UTF-8 바이트·UTF-16 열 변환 |
+| `code_atlas/lsp.py` | basedpyright 언어 서버 세션 수명(`nodejs_wheel`의 `node`로 서버 스크립트를 직접 띄운다), 요청의 시간 제한, 연 파일의 본문 맞추기, UTF-8 바이트·UTF-16 열 변환 |
 | `code_atlas/resolve.py` | 언어 서버가 돌려준 정의 위치를 노드 id와 선 종류로 바꾼다 |
 | `code_atlas/graph.py` | 노드·선 조립, 패키지 노드, 변수 후보 가운데 노드로 삼을 변수와 값 안 지점의 출발, 데이터 클래스·오버라이드·진입점·API 엔드포인트 판정, 해석률 집계 |
 | `code_atlas/analyze.py` | 수집부터 그래프 조립, 미사용 후보 판정까지 차례로 부르는 분석 진입점 `refresh`. 캐시나 앞의 결과에서 시작해 다시 물을 지점을 고르고 단계와 진행 수를 알린다. 인터프리터 확인과 분석 뒤 바뀐 파일 판정도 맡는다 |
 | `code_atlas/cache.py` | 파일의 추출 결과와 지점의 판정을 레포마다 SQLite 파일 하나(`~/.cache/code-atlas/analysis-*.db`)에 담고 환경 지문을 계산한다 |
 | `code_atlas/runner.py` | 분석 태스크 하나의 수명과 진행 상태, 언어 서버 세션, 분석 캐시를 맡는다 |
 | `code_atlas/unused.py` | 분석 결과에서 들어오는 실행·사용 선이 없는 정의를 찾고 제외 규칙 일곱 개를 적용해 미사용 후보를 낸다 |
-| `code_atlas/venv.py` | 대상 레포의 가상환경 인터프리터 탐색 |
+| `code_atlas/tools.py` | `claude`, `git`, 대상 레포의 인터프리터를 찾는다. 후보를 저장한 경로, 환경, 알려진 위치 순서로 만들어 확인 명령을 실제로 실행하고, 시도한 후보와 통과하지 못한 까닭을 기록한다. 통과한 경로는 파일이 바뀔 때까지 다시 실행하지 않는다 |
+| `code_atlas/shellenv.py` | 로그인 셸(zsh·bash·fish)을 띄워 그 셸의 환경 변수를 읽는다. 앱 껍데기가 띄운 실행(`--hosted`)이 서버를 띄우기 전에 한 번 읽어 자기 환경을 그 값으로 바꾼다 |
 | `code_atlas/git.py` | 대상 레포의 git을 읽는다. 지금 커밋과 브랜치, 파일의 상태(`git status`), 커밋 그래프(`git log`), 두 시점의 조상 관계와 갈라진 커밋(`git merge-base`), 두 시점 사이에 바뀐 `.py` 파일과 줄 단위 토막(`git diff`), 커밋의 파일 본문(`git show`)을 내고 커밋의 파일을 레포 밖 폴더에 꺼낸다(`git archive`). 모든 git 호출이 함수 하나를 지나고 인덱스를 다시 쓰지 않는 읽기 전용 명령만 부른다 |
 | `code_atlas/snapshot.py` | 커밋 하나의 분석 결과를 낸다. 커밋의 파일을 `~/.cache/code-atlas/snapshots/` 아래에 꺼내, 캐시에 그 커밋의 판정이 있으면 언어 서버 없이 조립하고 없으면 메모리의 분석 결과 가운데 바뀐 파일이 가장 적은 것에서 증분으로 분석한 뒤 꺼낸 폴더를 지운다 |
 | `code_atlas/compare.py` | 두 시점의 분석 결과와 바뀐 파일 목록, 줄 단위 토막을 받아 정의·변수·파일의 추가·삭제·수정과 줄 수, 선의 추가·삭제와 달라진 지점 수를 판정하고 대상 시점의 그래프에 삭제된 노드와 선을 더한다. git과 언어 서버를 부르지 않는다. 변경 표시의 정의 판정(`definitions`)도 낸다 |
@@ -278,7 +279,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 .venv/bin/pytest
 ```
 
-`tests/test_lsp.py`·`tests/test_graph.py`·`tests/test_refresh.py`·`tests/test_runner.py`·`tests/test_api.py`·`tests/test_cli.py`·`tests/test_unused.py`·`tests/test_cycles.py`는 code-atlas 가상환경의 basedpyright를 실제로 띄운다. LLM 요약 테스트는 가짜 `claude`를 쓰고 실제 CLI를 부르지 않는다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다. 분석 캐시는 임시 폴더에 두므로 테스트는 `~/.cache/code-atlas`에 쓰지 않는다.
+`tests/test_lsp.py`·`tests/test_graph.py`·`tests/test_refresh.py`·`tests/test_runner.py`·`tests/test_api.py`·`tests/test_cli.py`·`tests/test_unused.py`·`tests/test_cycles.py`는 code-atlas 가상환경의 basedpyright를 실제로 띄운다. LLM 요약과 도구 찾기 테스트는 가짜 `claude`를 쓰고, `tests/conftest.py`가 `PATH`와 알려진 위치에서 이 컴퓨터의 `claude`를 빼므로 실제 CLI를 부르지 않는다. 테스트는 고정 레포를 임시 디렉토리에 복사해 돌린다. git에 담을 수 없는 무시 대상 파일과 가상환경 폴더는 `tests/conftest.py`가 복사본에 만든다. 분석 캐시는 임시 폴더에 두므로 테스트는 `~/.cache/code-atlas`에 쓰지 않는다.
 
 화면을 고칠 때는 백엔드를 띄운 채 `frontend/`에서 `npm run dev`를 실행한다. Vite 개발 서버가 `/api`를 `localhost:8766`으로 넘긴다. `npm run typecheck`로 타입을 검사하고, `npm test`로 화면 없이 계산하는 모듈을 고정 그래프에서 확인한다. 대상은 저장소와 경로 고정, 분석 표시, 변경 내용, 분석 상태, 요약과 코드 분석의 요청(`state/`), 보이는 노드와 펼침 단계·흐름·그릴 선·열 배정·배치·선 경로와 줄기·숫자의 위치·커서 밑의 선·배치 움직임·화면 이동·리니지 뷰·경로·순환 묶음·분석 표시·배지 말풍선의 글(`graph/`), 경로 탐색 창의 글(`route/words`), 기본값과 다른 보기 설정(`nav/settings`), 정보 패널 사각형·연 파일·설명 나누기·정보 구역의 값(`panel/`), 검색 색인(`search/`), 파일트리 행(`tree/`)이다.
 

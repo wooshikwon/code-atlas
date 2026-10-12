@@ -1,7 +1,7 @@
 """Claude Code CLI로 노드의 설명(요지, 하는 일, 앞뒤 흐름)과 코드 범위의 설명을 만들고 캐시한다.
 
-설명은 그 컴퓨터에 로그인한 Claude Code 구독 계정으로 `claude -p`를 불러 만든다.
-실행 파일 찾기, 앞뒤 흐름 자료, 프롬프트, 호출, 캐시는 이 모듈만 한다.
+설명은 그 컴퓨터의 Claude Code에 로그인한 계정으로 `claude -p`를 불러 만든다. 실행 파일은 `tools.claude`가 확인한
+경로를 쓰고, 앞뒤 흐름 자료, 프롬프트, 호출, 캐시는 이 모듈만 한다.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import signal
 import sqlite3
 import tempfile
@@ -24,6 +23,7 @@ from contextlib import closing
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from . import tools
 from .model import Edge, Node
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 PROMPT_VERSION = 3
 MODEL = "sonnet"
 GENERATE_TIMEOUT = 120.0
-STATUS_TIMEOUT = 10.0
 MAX_CODE = 24_000
 MAX_PROMPT = 60_000
 MAX_STYLE_GUIDE = 100_000
@@ -202,7 +201,6 @@ GENERATE_TAIL = (
     "--output-format",
     "json",
 )
-STATUS_ARGS = ("auth", "status", "--json")
 
 
 class SummaryError(Exception):
@@ -236,12 +234,8 @@ class Made:
 
 
 def find_cli() -> str | None:
-    """`PATH`와 `~/.local/bin/claude`에서 Claude Code 실행 파일을 찾는다."""
-    found = shutil.which("claude")
-    if found is not None:
-        return found
-    local = Path.home() / ".local" / "bin" / "claude"
-    return str(local) if os.access(local, os.X_OK) else None
+    """`tools.claude`가 확인한 Claude Code 실행 파일의 경로. 찾지 못했으면 None이다."""
+    return tools.claude().path
 
 
 def find_style_guide(option: str | None) -> Path | None:
@@ -778,19 +772,16 @@ async def _run(cli: str, args: tuple[str, ...], stdin: str, timeout: float) -> t
 
 
 async def unavailable() -> str | None:
-    """Claude Code CLI를 부를 수 없는 까닭. 부를 수 있으면 None이다."""
-    cli = find_cli()
-    if cli is None:
+    """Claude Code CLI를 부를 수 없는 까닭. 부를 수 있으면 None이다.
+
+    찾은 CLI를 쓰지 못하는 까닭(로그인돼 있지 않다)이 있으면 찾은 값을 버려, 다음에 물을 때 다시 확인하게 한다.
+    """
+    if await asyncio.to_thread(find_cli) is None:
         return "Claude Code CLI를 찾지 못했다"
-    try:
-        _, out, _ = await _run(cli, STATUS_ARGS, "", STATUS_TIMEOUT)
-    except (OSError, asyncio.TimeoutError):
-        return "Claude Code CLI가 응답하지 않는다"
-    try:
-        logged_in = json.loads(out).get("loggedIn")
-    except (ValueError, AttributeError):
-        return None
-    return "Claude Code에 로그인돼 있지 않다" if logged_in is False else None
+    note = tools.claude().note
+    if note is not None:
+        tools.fresh(tools.CLAUDE.name)
+    return note
 
 
 def usage_of(body: object) -> Usage | None:
@@ -806,7 +797,7 @@ def usage_of(body: object) -> Usage | None:
 
 async def _ask(system: str, prompt: str) -> Made:
     """`claude -p`에 시스템 프롬프트를 인자로, 프롬프트를 표준 입력으로 넘겨 CLI가 낸 글과 사용량을 받는다."""
-    cli = find_cli()
+    cli = await asyncio.to_thread(find_cli)
     if cli is None:
         raise SummaryError("Claude Code CLI를 찾지 못했다")
     try:
@@ -814,6 +805,7 @@ async def _ask(system: str, prompt: str) -> Made:
     except asyncio.TimeoutError:
         raise SummaryError(f"Claude Code CLI가 {GENERATE_TIMEOUT:.0f}초 안에 응답하지 않았다") from None
     except OSError as exc:
+        tools.fresh(tools.CLAUDE.name)
         raise SummaryError(f"Claude Code CLI를 띄우지 못했다: {exc}") from exc
     try:
         body = json.loads(out)

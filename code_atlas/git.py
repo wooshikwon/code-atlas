@@ -1,9 +1,9 @@
 """대상 레포의 git 이력과 변경을 읽는다.
 
-git 명령 실행과 출력 해석은 이 모듈만 한다. 부르는 명령은 `rev-parse`, `symbolic-ref`, `log`, `status`, `diff`,
-`merge-base`, `archive`, `show`이고 모두 `_run` 하나를 지난다. `git status`는 `GIT_OPTIONAL_LOCKS=0`으로, `git diff`는
-`diff.autoRefreshIndex=false`로 인덱스를 다시 쓰지 않게 하므로 대상 레포는 바뀌지 않는다. `git archive`의 출력은
-레포 밖 폴더에만 푼다. 경로는 모두 레포 루트 기준 posix 경로이고, 레포 루트가 git 저장소의 하위 폴더면 그 폴더 안의
+git 명령 실행과 출력 해석은 이 모듈만 하고, 실행 파일은 `tools.git`이 확인한 경로를 쓴다. 부르는 명령은 `rev-parse`,
+`symbolic-ref`, `log`, `status`, `diff`, `merge-base`, `archive`, `show`이고 모두 `_run` 하나를 지난다. `git status`는
+`GIT_OPTIONAL_LOCKS=0`으로, `git diff`는 `diff.autoRefreshIndex=false`로 인덱스를 다시 쓰지 않게 하므로 대상 레포는
+바뀌지 않는다. `git archive`의 출력은 레포 밖 폴더에만 푼다. 경로는 모두 레포 루트 기준 posix 경로이고, 레포 루트가 git 저장소의 하위 폴더면 그 폴더 안의
 파일만 낸다. 분석 결과와 캐시, 어느 시점을 견주는지는 모른다.
 """
 
@@ -17,6 +17,7 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import tools
 from .collect import collected, disk_path
 
 GIT_TIMEOUT = 5.0
@@ -73,15 +74,21 @@ class Hunk:
 
 
 def _run(root: Path, *args: str, timeout: float = GIT_TIMEOUT) -> bytes | None:
-    """레포 루트에서 git 명령을 부른다. git이 없거나, 시간 안에 끝나지 않거나, 종료 코드가 0이 아니면 None이다."""
+    """레포 루트에서 git 명령을 부른다. git을 찾지 못했거나, 시간 안에 끝나지 않거나, 종료 코드가 0이 아니면 None이다."""
+    git = tools.git().path
+    if git is None:
+        return None
     try:
         done = subprocess.run(
-            ["git", "-C", str(root), "-c", "core.quotepath=false", "-c", "diff.autoRefreshIndex=false", *args],
+            [git, "-C", str(root), "-c", "core.quotepath=false", "-c", "diff.autoRefreshIndex=false", *args],
             capture_output=True,
             timeout=timeout,
             env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError:
+        tools.fresh(tools.GIT.name)
+        return None
+    except subprocess.TimeoutExpired:
         return None
     return done.stdout if done.returncode == 0 else None
 
