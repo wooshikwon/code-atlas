@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import platform
 import re
 import threading
 import time
@@ -25,6 +26,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict, astuple, dataclass, field, replace
 from functools import partial
+from importlib import metadata
 from pathlib import Path
 from typing import TypeVar
 
@@ -62,6 +64,8 @@ from .summary import (
 HOST = "127.0.0.1"
 PORT = 8766
 DIST_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+# 빌드 명령이 앱에 묶은 `code_atlas` 옆에 적는 파일. 레포의 커밋 해시 `commit`과 빌드한 날 `built`가 들어 있다.
+BUILD_FILE = Path(__file__).with_name("_build.json")
 LSP_TIMEOUT = 3.0
 # `/api/status`가 분석 뒤 바뀐 파일을 다시 세기까지 앞의 값을 돌려주는 시간. 한 번 세는 데 파일 251개인 레포에서 13ms,
 # 1,033개에서 44ms, 2,141개(다른 파일도 많은 torch 폴더)에서 0.33초가 들었다. 1초에 한 번으로 묶으면 가장 큰 경우에도
@@ -369,6 +373,20 @@ def create_app(
             "stale": stale(state) if state is not None else NOT_STALE,
             "compare": asdict(state.compare) if state is not None and state.compare is not None else None,
             "session": app.state.session,
+        }
+
+    @app.get("/api/about")
+    def get_about() -> dict:
+        """이 서버의 판. 앱에 묶인 실행이면 빌드한 레포의 커밋 해시와 빌드한 날이 있고, 그 밖에는 둘 다 없다."""
+        try:
+            build = json.loads(BUILD_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            build = {}
+        return {
+            "commit": build.get("commit"),
+            "built": build.get("built"),
+            "python": platform.python_version(),
+            "basedpyright": metadata.version("basedpyright"),
         }
 
     @app.post("/api/probe")

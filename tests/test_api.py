@@ -232,6 +232,21 @@ def test_unknown_api_path_is_404(client):
     assert "error" in response.json()
 
 
+def test_about_reads_the_build_file_beside_the_package(client, tmp_path, monkeypatch):
+    from importlib import metadata
+    from platform import python_version
+
+    versions = {"python": python_version(), "basedpyright": metadata.version("basedpyright")}
+    monkeypatch.setattr(api, "BUILD_FILE", tmp_path / "_build.json")
+    assert client.get("/api/about").json() == {"commit": None, "built": None, **versions}
+
+    api.BUILD_FILE.write_text(json.dumps({"commit": "5743574a0b1c2d3e", "built": "2026-10-12"}), encoding="utf-8")
+    assert client.get("/api/about").json() == {"commit": "5743574a0b1c2d3e", "built": "2026-10-12", **versions}
+
+    api.BUILD_FILE.write_text("{", encoding="utf-8")
+    assert client.get("/api/about").json() == {"commit": None, "built": None, **versions}
+
+
 def test_hover_returns_markdown(client):
     body = client.get("/api/hover", params=RUN_ENGINE_CALL).json()
     assert "def run_engine(config: Config) -> Engine" in body["markdown"]

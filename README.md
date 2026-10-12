@@ -16,6 +16,34 @@ cd frontend && npm install && npm run build
 
 basedpyright는 Python 의존성으로 함께 설치한다. 화면은 `frontend/dist/`를 백엔드가 같은 포트에서 서빙하므로 처음 한 번과 `frontend/src`를 고친 뒤에 `npm run build`를 실행한다. 백엔드는 이 폴더의 `frontend/dist/`를 읽으므로 `pip install`에 `-e`를 붙인다.
 
+## 앱 만들기
+
+macOS에서는 레포를 받은 Mac에서 데스크톱 앱 `Atlas`를 만든다. 앱은 Python 3.13과 의존성, basedpyright가 쓰는 `node`를 품으므로 앱을 쓸 때는 가상환경과 `npm`이 필요 없다. 만들 때는 Xcode Command Line Tools, Rust 1.90 이상, Node.js 22.12 이상, Python 3.12 이상이 필요하다.
+
+```bash
+python3 scripts/build_app.py --doctor     # 빌드 전 점검만 한다
+python3 scripts/build_app.py --install    # 앱을 만들어 /Applications/Atlas.app에 놓는다
+```
+
+`--doctor`는 칩과 macOS, 위 도구의 판과 경로, 디스크 여유, 내려받을 곳에 닿는지를 한 줄씩 적고, 통과하지 못한 항목마다 설치·설정 방법을 함께 적는다. `python3`이 3.12보다 낮으면 그 Mac에서 찾은 더 높은 판으로 실행하는 명령을 적는다. 빌드는 늘 이 점검으로 시작하고, 통과하지 못한 항목이 있으면 그 뒤 단계를 하지 않는다.
+
+| 옵션 | 뜻 |
+|---|---|
+| `--doctor` | 빌드 전 점검만 한다 |
+| `--install` | 만든 앱을 `/Applications/Atlas.app`에 놓는다. 그 앱이 떠 있으면 끝내 달라고 적고 끝난다. 주지 않으면 만든 앱의 경로와 놓는 명령을 적는다 |
+| `--dmg` | `.dmg`도 만든다 |
+| `--check` | 만들어 둔 앱에 판정(격리 속성, 서명, 묶은 Python과 `node`의 실행)만 다시 돌린다 |
+| `--clean` | 끝난 단계의 표식과 묶을 Python 폴더를 지우고 처음부터 한다 |
+| `--sign adhoc` | 서명 방식. 임시 서명만 만든다 |
+
+단계는 점검, 묶을 Python 받기, 의존성 설치와 정리, 화면 빌드, 앱 껍데기 빌드, 서명, 판정, 놓기 순서이고 단계마다 `[3/8] 의존성 설치와 정리` 꼴로 이름을 적는다. 실패하면 단계 이름, 실패한 명령과 그 명령이 낸 마지막 줄들을 적는다. 같은 명령을 다시 실행하면 받아 둔 파일을 다시 받지 않고, 입력(레포의 커밋과 커밋하지 않은 변경, `scripts/requirements-app.txt`, 묶을 Python의 판)이 같은 단계를 건너뛴다.
+
+- **내려받는 것**: 묶을 Python(python-build-standalone 3.13의 `install_only_stripped`, `curl`), Python 의존성(`pip`), 화면의 의존성(`npm ci`), 앱 껍데기의 크레이트(`cargo`)다. 묶을 Python은 `scripts/build_app.py`에 적어 둔 SHA-256과, Python 의존성은 `scripts/requirements-app.txt`의 해시와 같아야 쓰고, npm과 cargo는 `package-lock.json`과 `Cargo.lock`의 판을 쓴다.
+- **망 설정**: 네 도구는 그 Mac의 설정을 따르고 빌드 명령은 그 설정을 바꾸지 않는다. `curl`은 `HTTPS_PROXY`·`HTTP_PROXY`·`NO_PROXY`와 `~/.curlrc`를, `pip`는 `pip.conf`와 `PIP_INDEX_URL`·`PIP_CERT`를, `npm`은 `.npmrc`의 `registry`·`cafile`·`proxy`를, `cargo`는 `~/.cargo/config.toml`의 `[source]`·`[http]`를 따른다. 묶을 Python을 받는 주소는 환경 변수 `CODE_ATLAS_PYTHON_URL`에 사내 미러의 파일 주소나 받아 둔 파일의 경로를 줘서 바꾼다.
+- **쓰는 곳**: `frontend/src-tauri/pyembed/`(묶을 Python과 표식)·`target/`, `frontend/node_modules/`·`dist/`, `~/.cache/code-atlas/build/`(받은 묶을 Python)와 `--install`을 줬을 때의 `/Applications/Atlas.app`이다.
+- **새 판으로 올리기**: `git pull` 뒤 같은 명령을 다시 실행한다. 설정 파일(`~/.config/code-atlas/`), 캐시(`~/.cache/code-atlas/`), 창의 크기와 위치, 화면 설정은 앱 밖에 있어 그대로 남는다. 앱은 빌드한 레포의 커밋 해시와 빌드한 날을 `/api/about`으로 낸다.
+- **Intel Mac**: 묶을 Python과 의존성의 x86_64 체크섬을 적어 두었고, Intel Mac에서 빌드해 보지는 않았다.
+
 ## 실행
 
 ```bash
@@ -248,7 +276,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | `code_atlas/snapshot.py` | 커밋 하나의 분석 결과를 낸다. 커밋의 파일을 `~/.cache/code-atlas/snapshots/` 아래에 꺼내, 캐시에 그 커밋의 판정이 있으면 언어 서버 없이 조립하고 없으면 메모리의 분석 결과 가운데 바뀐 파일이 가장 적은 것에서 증분으로 분석한 뒤 꺼낸 폴더를 지운다 |
 | `code_atlas/compare.py` | 두 시점의 분석 결과와 바뀐 파일 목록, 줄 단위 토막을 받아 정의·변수·파일의 추가·삭제·수정과 줄 수, 선의 추가·삭제와 달라진 지점 수를 판정하고 대상 시점의 그래프에 삭제된 노드와 선을 더한다. git과 언어 서버를 부르지 않는다. 변경 표시의 정의 판정(`definitions`)도 낸다 |
 | `code_atlas/summary.py` | 분석 결과에서 앞뒤 흐름 자료를 모아 프롬프트를 만들고, Claude Code CLI(`claude -p`)를 불러 노드의 설명과 코드 분석의 답을 받아 `~/.cache/code-atlas/summaries.db`에 저장한다 |
-| `code_atlas/api.py` | 서버가 뜬 뒤에 분석을 시작하고 분석 결과를 판 번호와 함께 응답 상태에 넣는다. `/api/status`(분석 단계와 진행 수, 판 번호, 언어 서버 상태, 분석 뒤 바뀐 파일), `/api/repo`·`/api/tree`·`/api/graph`·`/api/file`(분석 결과. `/api/file`은 분석할 때 읽은 본문을 돌려준다. 첫 결과가 나오기 전에는 `/api/status` 밖의 경로가 503이다), `POST /api/reload`(열어 둔 세션에서 바뀐 만큼만 다시 분석해 결과를 바꾸고 판 번호를 올린다. 분석하는 중에 온 요청은 그 분석이 끝나기를 기다린다), `/api/hover`·`/api/definition`(언어 서버에 묻는 타입 정보와 정의 위치), `/api/changes`(변경 표시), `/api/history`(커밋 그래프의 줄과 지금 커밋·기본 브랜치), `/api/compare/stat`(고른 두 시점의 기준·대상·갈라진 커밋과 줄 수), `POST /api/compare`(두 시점을 분석해 견준 그래프·파일트리·변경 내용·파일마다의 줄 토막. 분석하는 동안 `/api/status`의 `compare`가 진행 수를 낸다), `/api/file`의 `at`(비교에 쓴 커밋의 본문), `/api/unused`(판정 대상 정의 수 `definitions`와 미사용 후보의 노드 id `candidates`), `/api/summary`(LLM 요약. 요약을 만든 `POST` 응답은 `claude` 호출의 토큰 수 `usage`를 담고, 캐시에서 읽은 요약은 `usage`가 `null`이다), `/api/summaries`(노드마다 남겨 둔 요약의 요지 목록), `/api/explanations`·`/api/explanation`(코드 분석. 줄 범위와 질문마다 하나씩 남긴다) 경로와 `frontend/dist/` 서빙. `127.0.0.1`에만 연다 |
+| `code_atlas/api.py` | 서버가 뜬 뒤에 분석을 시작하고 분석 결과를 판 번호와 함께 응답 상태에 넣는다. `/api/status`(분석 단계와 진행 수, 판 번호, 언어 서버 상태, 분석 뒤 바뀐 파일), `/api/repo`·`/api/tree`·`/api/graph`·`/api/file`(분석 결과. `/api/file`은 분석할 때 읽은 본문을 돌려준다. 첫 결과가 나오기 전에는 `/api/status` 밖의 경로가 503이다), `POST /api/reload`(열어 둔 세션에서 바뀐 만큼만 다시 분석해 결과를 바꾸고 판 번호를 올린다. 분석하는 중에 온 요청은 그 분석이 끝나기를 기다린다), `/api/hover`·`/api/definition`(언어 서버에 묻는 타입 정보와 정의 위치), `/api/changes`(변경 표시), `/api/history`(커밋 그래프의 줄과 지금 커밋·기본 브랜치), `/api/compare/stat`(고른 두 시점의 기준·대상·갈라진 커밋과 줄 수), `POST /api/compare`(두 시점을 분석해 견준 그래프·파일트리·변경 내용·파일마다의 줄 토막. 분석하는 동안 `/api/status`의 `compare`가 진행 수를 낸다), `/api/file`의 `at`(비교에 쓴 커밋의 본문), `/api/unused`(판정 대상 정의 수 `definitions`와 미사용 후보의 노드 id `candidates`), `/api/summary`(LLM 요약. 요약을 만든 `POST` 응답은 `claude` 호출의 토큰 수 `usage`를 담고, 캐시에서 읽은 요약은 `usage`가 `null`이다), `/api/summaries`(노드마다 남겨 둔 요약의 요지 목록), `/api/explanations`·`/api/explanation`(코드 분석. 줄 범위와 질문마다 하나씩 남긴다), `/api/about`(이 서버가 도는 Python과 basedpyright의 판, 앱에 묶인 실행이면 빌드한 레포의 커밋 해시와 빌드한 날) 경로와 `frontend/dist/` 서빙. `127.0.0.1`에만 연다 |
 | `code_atlas/cli.py` | `code-atlas <레포>`(서버 실행과 분석)와 `code-atlas analyze <레포>`(결과 출력) 명령 |
 | `frontend/src/api/` | API 계약 자료형과 백엔드 호출. 화면 컴포넌트는 `client.ts`만 거친다 |
 | `frontend/src/state/` | `store.ts`의 zustand 저장소 `useAtlas(selector)`가 분석 결과, 선택, 뷰 종류, 접은 폴더(`startFolds`가 처음 화면의 접은 폴더를 고른다), 전부 펼친 파일 상자, 흐름 단계, 토글, 정보 패널 사각형을 담고 `history.ts`가 탐색 이력을 맡는다. `store.ts`는 경로 고정 상태 `finder`(창의 열림, 출발, 도착, 찾은 경로, 고른 번호, 정보 패널이 보이는 경로 위 노드)와 고정 중에 막는 액션, 고정 중에 막는 진입의 판정 `barred`도 맡는다. `overlay.ts`는 켠 분석 표시와 `/api/unused` 응답을, `cycles.ts`는 지금 토글의 순환 묶음을 낸다. `changes.ts`는 `/api/changes`를 15초마다와 창이 포커스를 받을 때 다시 받는다. `summaries.ts`와 `explanations.ts`는 노드 요약과 코드 분석의 상태와 요청을 맡고, `summaries.ts`는 요약 요청의 대기열과 묶음의 진행 수, 취소도 맡는다. `status.ts`는 `/api/status`를 분석하는 동안 0.5초마다, 그 밖에는 2초마다 받아 분석 단계와 분석 뒤 바뀐 파일을 담고 판 번호가 달라지면 분석 결과를 받아 그린다. `reload.ts`는 새로고침(다시 분석을 요청하고 새 분석 결과를 받는다)을 맡고, `store.ts`의 `placeIn`이 보던 화면과 탐색 이력을 새 그래프에 맞춘다 |
@@ -261,8 +289,11 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | `frontend/src/compare/` | 비교 버튼(`Button.tsx`)과 비교 창(`Window.tsx`, 커밋 그래프의 줄 `Rows.tsx`). `log.ts`가 줄과 표시, 버튼에 적는 시점 이름, 그릴 줄의 범위를 낸다. 고른 두 시점과 켜져 있는 비교는 `state/compare.ts`가, 세로 줄 배정은 `graph/commits.ts`가, 비교 결과를 그래프의 표시로 바꾸는 일은 `graph/compare.ts`가, 두 시점의 본문을 줄 토막으로 엮는 일은 `graph/weave.ts`가 맡는다 |
 | `frontend/src/code/` | 고른 노드가 든 파일의 전체 코드를 열고 노드의 줄 범위 밖을 흐리게 그리는 읽기 전용 Monaco 코드 뷰어. `hover.ts`가 이름 위 hover를, `CodeView.tsx`가 `Mod`+클릭 정의 이동을 백엔드에 연결한다. `RangeNotes.tsx`는 고른 줄 범위의 코드 분석 버튼·질문 입력 창·분석 창·말풍선 표지를 그린다. Monaco는 CDN 없이 번들에 넣는다 |
 | `frontend/src/graph/` | 그래프 뷰와 리니지 뷰. `visible.ts`가 보이는 노드와 파일 상자의 펼침 단계를, `flow.ts`가 고른 노드에서 나가는 흐름과 불투명도를, `scope.ts`가 그릴 선을, `columns.ts`가 열 번호와 연결 묶음·선반을 정한다. `route.ts`가 두 끝점 사이의 경로를, `cycles.ts`가 순환 묶음을, `overlay.ts`가 분석 표시가 그래프에 더하는 표시를 낸다. `layout.ts`가 ELK를 Web Worker로 돌려 좌표를 정하고, `view.ts`가 선마다 경로와 도착이 같은 선의 줄기, 숫자의 위치를, `motion.ts`가 배치 움직임을, `viewport.ts`가 화면 이동 좌표를, `flight.ts`가 화면 이동의 경로와 시간, 그 경로를 그리는 함수(`useFlight`)를, `layers.ts`가 노드·선·글자의 겹침 순서를 낸다. `aim.tsx`가 커서 밑을 지나는 선의 집합으로 선의 hover와 클릭을 판정하고, `arranging.tsx`가 느린 배치의 표시와 취소를, `Progress.tsx`가 분석 중의 진행 표시를, `SummaryQueue.tsx`가 요약 요청 묶음의 진행 칸을 맡는다. `calls.ts`·`CallView.tsx`는 리니지 뷰, `nodes/`·`edges/`는 React Flow 노드·선 컴포넌트(`PackNode.tsx`는 손잡이, `Trunk.tsx`는 줄기), `Dock.tsx`는 왼쪽 아래 칸, `Minimap.tsx`·`Legend.tsx`는 미니맵·범례다. `Tooltip.tsx`는 앱 전체가 함께 쓰는 말풍선으로, 요소의 `data-tip`에 담은 글을 마우스를 올리거나 키보드 초점을 받았을 때 띄운다. `tips.ts`는 노드·배지·선의 말풍선 글을, `names.ts`는 노드 종류와 선 종류의 이름, 선에 든 관계를 종류와 수로 적는 글(`relationsOf`)을 낸다 |
+| `frontend/src-tauri/` | 앱 껍데기. `backend.rs`가 백엔드 프로세스의 수명을, `menu.rs`가 앱 메뉴를, `main.rs`가 창과 화면이 부르는 명령을 맡는다. `tauri.bundle.json`은 묶을 Python을 앱에 넣는 설정이고 빌드 명령만 쓴다 |
 | `frontend/scripts/shots.mjs` | 화면 시나리오 스크립트. 떠 있는 서버에서 정해진 조작을 하고 확인 항목의 통과 여부와 스크린샷을 남긴다 |
 | `frontend/scripts/perf.mjs` | 화면 측정 스크립트. 떠 있는 서버의 화면에서 처음 배치, 폴더 펼침, 노드 선택의 시간과 화면 이동·확대의 프레임 간격을 JSON으로 낸다 |
+| `scripts/build_app.py` | 앱을 만드는 빌드 명령. 빌드 전 점검, 묶을 Python 받기와 구성, 화면과 앱 껍데기 빌드, 임시 서명, 판정, `/Applications`에 놓기를 맡는다 |
+| `scripts/requirements-app.txt` | 앱에 묶는 Python 의존성의 판과 wheel 해시 |
 | `scripts/measure_analysis.py` | 레포를 분석하며 단계별 시간, 정의 요청 수, 응답 없음 수를 JSONL로 내고 `--compare`로 다른 분석 결과와 노드·선·지점 판정을 견준다 |
 | `scripts/measure_compare.py` | 두 시점의 비교가 응답하기까지의 시간, 정의 요청 수, 응답 없음 수, 바뀐 노드와 선의 수를 JSONL로 출력한다 |
 | `scripts/measure_resolution.py` | 호출 지점 해석 상태별 비율 출력, 고정 시드 표본 JSONL 작성(`~/data/code-atlas/resolution-sample.jsonl`), `--report`로 직접 채운 판정 집계 |
