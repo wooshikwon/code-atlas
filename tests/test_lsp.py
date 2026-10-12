@@ -45,6 +45,7 @@ def test_server_command_runs_the_server_script_with_the_bundled_node():
     assert options == ["--stdio"]
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_hover_and_definition_at_after_korean_string(sample_repo):
     files = collect(sample_repo)
@@ -64,6 +65,7 @@ async def test_hover_and_definition_at_after_korean_string(sample_repo):
     assert session.stopped
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_timed_out_request_is_cancelled_on_the_server(sample_repo, monkeypatch):
     files = collect(sample_repo)
@@ -141,6 +143,7 @@ async def test_wait_ready_asks_the_probe_once(tmp_path, monkeypatch, caplog):
     assert len(asked) == 2 and "readiness probe timed out" in caplog.text
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_session_ends_the_process_group_when_shutdown_gets_no_response(sample_repo, monkeypatch):
     async def no_response(params):
@@ -156,6 +159,7 @@ async def test_session_ends_the_process_group_when_shutdown_gets_no_response(sam
     assert session.stopped and group_ended(pid)
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_session_closes_after_the_server_is_killed(sample_repo):
     async with Session(sample_repo, sys.executable, []) as session:
@@ -166,6 +170,7 @@ async def test_session_closes_after_the_server_is_killed(sample_repo):
     assert group_ended(pid)
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_session_left_by_an_exception_ends_without_a_shutdown_request(sample_repo, monkeypatch):
     asked: list[None] = []
@@ -177,6 +182,7 @@ async def test_session_left_by_an_exception_ends_without_a_shutdown_request(samp
     assert asked == [] and session.stopped and group_ended(pid)
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_session_that_fails_to_initialize_ends_its_process_group(sample_repo, monkeypatch):
     async def fail(params):
@@ -207,15 +213,6 @@ def test_deferred_import(analyzed):
 def test_override(analyzed):
     analysis, _ = analyzed
     assert edge_set(analysis, "override") == {("app.plugins.base:Loud.run", "app.plugins.base:Plugin.run")}
-
-
-def test_namedtuple_and_enum_are_dataclasses(analyzed):
-    analysis, _ = analyzed
-    nodes = {n.id: n for n in analysis.nodes}
-    assert nodes["app.models:Point"].kind == "dataclass"
-    assert nodes["app.models:Point"].fields == [{"name": "x", "type": "int"}, {"name": "y", "type": "int"}]
-    assert nodes["app.models:Color"].kind == "dataclass"
-    assert nodes["app.models:Config"].kind == "dataclass"
 
 
 def test_builtin_name_defined_in_the_repo_resolves_to_the_repo(analyzed):

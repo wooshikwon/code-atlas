@@ -83,6 +83,7 @@ def test_dataclass_detection_and_fields(facts):
         {"name": "retries", "type": "int"},
     ]
     assert models["app.models:Point"].kind == "dataclass"
+    assert models["app.models:Point"].fields == [{"name": "x", "type": "int"}, {"name": "y", "type": "int"}]
     assert models["app.models:Color"].kind == "dataclass"
 
 

@@ -10,6 +10,8 @@ from code_atlas import analyze, runner
 from code_atlas.analyze import Progress, PythonNotFound
 from code_atlas.runner import Runner
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.mark.asyncio
 async def test_run_records_progress_and_reopens_from_the_cache_without_asking(sample_repo, monkeypatch):

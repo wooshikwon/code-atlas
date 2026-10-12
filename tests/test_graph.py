@@ -1,3 +1,6 @@
+import pytest
+
+
 def nodes(analysis):
     return {n.id: n for n in analysis.nodes}
 
@@ -129,6 +132,7 @@ def run():
 NAMESAKE = "def hook():\n    return 2\n"
 
 
+@pytest.mark.slow
 def test_call_answered_with_a_variable_stays_an_unknown_call(tmp_path):
     import sys
 
