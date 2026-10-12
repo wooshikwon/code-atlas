@@ -5,6 +5,7 @@ import { usePick } from "./graph/aim";
 import { useFlight } from "./graph/flight";
 import { GraphView } from "./graph/GraphView";
 import { Progress } from "./graph/Progress";
+import { SummaryQueue } from "./graph/SummaryQueue";
 import { Tooltip } from "./graph/Tooltip";
 import { Entries } from "./nav/Entries";
 import { Filters } from "./nav/Filters";
@@ -123,6 +124,7 @@ export function App() {
                 {opened ? <GraphView key={epoch} /> : <Progress />}
                 {opened && <InfoPanel />}
                 <SummaryNotice />
+                <SummaryQueue />
               </div>
               <Palette />
             </div>

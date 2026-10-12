@@ -9635,6 +9635,205 @@ async function folderSum(t, page) {
   }
 }
 
+/** 요약 요청 묶음의 진행 칸. 글, 막대가 찬 비율, 취소 버튼, 화면 사각형과 색. 칸이 없으면 null이다. */
+const queueOf = (page) =>
+  page.evaluate(() => {
+    const box = document.querySelector(".summary-queue");
+    if (box === null) {
+      return null;
+    }
+    const rect = box.getBoundingClientRect();
+    const button = box.querySelector("button");
+    const style = getComputedStyle(box);
+    return {
+      text: box.querySelector('[role="status"]')?.textContent ?? null,
+      share: box.querySelector(".progress-bar")?.dataset.share ?? null,
+      cancel: button?.textContent ?? null,
+      tab: button?.tabIndex ?? null,
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      style: { backgroundColor: style.backgroundColor, color: style.color, borderTopColor: style.borderTopColor },
+      shadow: style.boxShadow !== "none",
+    };
+  });
+
+/**
+ * 요약 요청 묶음의 진행 칸과 취소. 폴더의 "모두 요약"으로 요청을 여럿 넣고 서버 대신 하나씩 답해, 칸의 수와 막대가 진행에 따라 바뀌는지,
+ * 칸이 정보 패널·왼쪽 아래 칸과 겹치지 않는지, "취소" 뒤에 요청이 더 가지 않고 도는 표시가 줄어드는지 본다. 요청 하나에는 칸이 뜨지 않는다.
+ * `--wide-url`을 받으면 그 레포에서도 본다. 사진은 `hf4-foldersum-queue.png`, `hf4-foldersum-queue-dark.png`로 남긴다.
+ */
+async function summaryQueue(t, page) {
+  const posts = [];
+  await page.route((at) => at.pathname === "/api/summaries", (route) => route.fulfill({ json: { summaries: [] } }));
+  await page.route(
+    (at) => at.pathname === "/api/summary",
+    (route) => {
+      const id = new URL(route.request().url()).searchParams.get("node");
+      if (route.request().method() !== "POST") {
+        return route.fulfill({ json: { summary: null, stale: false, available: true, reason: null } });
+      }
+      posts.push({
+        node: id,
+        done: false,
+        answer: () => route.fulfill({ json: { summary: `${id}의 요지다.\n\n하는 일\n문단\n\n앞뒤 흐름\n문단` } }),
+        fail: () => route.fulfill({ status: 503, json: { error: "Claude Code CLI가 응답하지 않았다" } }),
+      });
+      return undefined;
+    },
+  );
+  t.expected.push("503");
+  /** 붙잡아 둔 요청 가운데 앞의 count개를 끝낸다. failed면 만들지 못했다고 답한다. */
+  const end = async (count, failed = false) => {
+    for (const post of posts.filter((each) => !each.done).slice(0, count)) {
+      post.done = true;
+      await (failed ? post.fail() : post.answer());
+    }
+    await page.waitForTimeout(250);
+  };
+  const folded = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll(".react-flow__node:has(> .node-package)")]
+        .filter((wrapper) => {
+          const rect = wrapper.getBoundingClientRect();
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          return hit !== null && (wrapper.contains(hit) || hit.closest(".react-flow__node")?.dataset.id === `${wrapper.dataset.id}#face`);
+        })
+        .map((wrapper) => wrapper.dataset.id),
+    );
+  const menuOf = async (act) => {
+    await act();
+    await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+    return (await listOf(page))?.items.map((item) => `${item.text}${item.disabled ? "(비활성)" : ""}`) ?? null;
+  };
+  /** 칸이 정보 패널, 왼쪽 아래 칸과 겹치지 않고, 가리지 않는 사각형의 가로 가운데와 아래 끝에서 12px 위에 있는가 */
+  const placed = async () => {
+    const [queue, stage] = [await queueOf(page), await stageOf(page)];
+    const dock = await page.evaluate(() => [...document.querySelectorAll(".dock-panels > *, .dock-buttons")].map((element) => (({ left, top, width, height }) => ({ x: left, y: top, width, height }))(element.getBoundingClientRect())));
+    if (queue === null) {
+      return { ok: false, text: "칸 없음" };
+    }
+    const off = queue.rect.x + queue.rect.width / 2 - (stage.clear.x + stage.clear.width / 2);
+    const gap = stage.clear.y + stage.clear.height - (queue.rect.y + queue.rect.height);
+    return {
+      ok: [stage.panel, ...dock].every((cover) => apart(queue.rect, cover)) && near(off, 0) && near(gap, 12),
+      text: `칸 ${rectText(queue.rect)}, 패널 ${rectText(stage.panel)}, 가운데 차이 ${off.toFixed(1)}px, 아래 ${gap.toFixed(1)}px`,
+    };
+  };
+  const round = async (name, at, shoot) => {
+    posts.length = 0;
+    const graph = await api("/api/graph", at);
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const under = (n, id) => n !== undefined && (n.id === id || (n.parent !== null && under(byId.get(n.parent), id)));
+    const filesOf = (id) => graph.nodes.filter((n) => n.kind === "module" && !n.test && under(n, id)).map((n) => n.id);
+    await load(page, at, false);
+    const id = (await folded()).filter((each) => filesOf(each).length >= 5).sort((a, b) => filesOf(a).length - filesOf(b).length)[0];
+    if (id === undefined) {
+      t.skip(`${name}: 요약 요청 묶음의 진행 칸`, "파일이 다섯 개 이상 든 접힌 폴더 상자가 화면에 없다");
+      return;
+    }
+    const total = filesOf(id).length;
+    const item = (count) => `안에 든 파일 모두 요약 (${count}개)`;
+    const busyTip = () => page.evaluate((sel) => document.querySelector(`${sel} > * > .badge-busy`)?.dataset.tip ?? null, face(id));
+
+    // 요청 하나에는 칸이 뜨지 않는다.
+    const single = await page.evaluate(() => document.querySelector(".tree-row.tree-file[data-node]")?.dataset.node ?? null);
+    if (single === null) {
+      t.skip(`${name}: 요청 하나에는 진행 칸이 뜨지 않는다`, "파일트리에 보이는 파일 행이 없다");
+    } else {
+      const row = center(await rectOf(page, `.tree-row.tree-file[data-node="${single}"] .tree-label`));
+      await menuOf(() => page.mouse.click(row.x, row.y, { button: "right" }));
+      await page.click('.menu-item[data-key="one"]');
+      await page.waitForTimeout(300);
+      const alone = { posts: posts.length, queue: await queueOf(page) };
+      await end(1);
+      t.check(`${name}: 요청 하나에는 진행 칸이 뜨지 않는다`, alone.posts === 1 && alone.queue === null && (await queueOf(page)) === null, `POST ${alone.posts}번, 칸 ${alone.queue?.text ?? "없음"}`);
+    }
+    posts.length = 0;
+
+    await menuOf(() => clickNode(page, id, 1, "right"));
+    await page.click('.menu-item[data-key="all"]');
+    await page.waitForTimeout(300);
+    const first = await queueOf(page);
+    t.check(
+      `${name}: 폴더의 파일 ${total}개를 요청하면 그래프 아래쪽에 "요약 0 / ${total}"과 빈 막대, "취소"가 뜬다`,
+      posts.length === 2 && first?.text === `요약 0 / ${total}` && Number(first.share) === 0 && first.cancel === "취소" && first.tab === 0,
+      `POST ${posts.length}번, "${first?.text}", 막대 ${first?.share}, 버튼 ${first?.cancel}`,
+    );
+    const where = await placed();
+    t.check(`${name}: 칸은 정보 패널·왼쪽 아래 칸과 겹치지 않고 둘이 가리지 않는 영역의 가로 가운데, 아래 끝에서 12px 위에 있다`, where.ok, where.text);
+    t.check(`${name}: 칸은 칸 바탕색에 본문 잉크, 선 색 테두리와 그림자를 쓴다`, same(first?.style, await page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement("span"));
+      probe.style.cssText = "background: var(--surface); color: var(--ink); border: 1px solid var(--line)";
+      const { backgroundColor, color, borderTopColor } = getComputedStyle(probe);
+      probe.remove();
+      return { backgroundColor, color, borderTopColor };
+    })) && first.shadow, JSON.stringify(first?.style));
+
+    await end(1);
+    const one = await queueOf(page);
+    await end(1, true);
+    const two = await queueOf(page);
+    t.check(
+      `${name}: 요청이 끝날 때마다 수와 막대가 늘고, 만들지 못한 요청은 "실패 1"로 함께 적는다`,
+      one?.text === `요약 1 / ${total}` && near(Number(one.share), 1 / total, 0.001) && two?.text === `요약 2 / ${total} · 실패 1` && near(Number(two.share), 2 / total, 0.001) && posts.length === 4,
+      `"${one?.text}" 막대 ${one?.share} → "${two?.text}" 막대 ${two?.share}, POST ${posts.length}번`,
+    );
+    if (shoot) {
+      await page.screenshot({ path: HF4("foldersum-queue") });
+      await page.getByRole("button", { name: "어두운 화면" }).click();
+      await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+      await page.mouse.move(1, 1);
+      const dark = await queueOf(page);
+      t.check(`${name}: 어두운 화면의 칸은 어두운 바탕에 밝은 글자다`, dark !== null && dark.style.backgroundColor !== first.style.backgroundColor && dark.style.color !== first.style.color, JSON.stringify(dark?.style));
+      await page.screenshot({ path: HF4("foldersum-queue-dark") });
+      await page.getByRole("button", { name: "밝은 화면" }).click();
+      await page.waitForFunction(() => document.documentElement.dataset.theme !== "dark");
+    }
+
+    // 정보 패널을 왼쪽으로 옮기고 범례를 펼쳐도 칸이 겹치지 않는다.
+    const before = (await queueOf(page)).rect;
+    await drag(page, center(await rectOf(page, ".info-panel-head")), -600, 300);
+    await page.waitForTimeout(300);
+    const moved = await placed();
+    t.check(`${name}: 정보 패널을 왼쪽 아래로 옮기면 칸이 패널이 가리지 않는 영역으로 옮겨 간다`, moved.ok && !sameRect(before, (await queueOf(page)).rect), moved.text);
+    await page.click(".legend-button");
+    await page.waitForTimeout(300);
+    const wide = await placed();
+    t.check(`${name}: 범례를 펼쳐도 칸이 왼쪽 아래 칸과 겹치지 않는다`, wide.ok, wide.text);
+    if (shoot) {
+      await page.screenshot({ path: HF4("foldersum-queue-moved") });
+    }
+    await page.click(".legend-button");
+
+    // 취소. 아직 보내지 않은 요청만 빠지고 보낸 두 개는 끝까지 간다.
+    await page.focus(".summary-queue-cancel");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(600);
+    const stopped = { queue: await queueOf(page), posts: posts.length, tip: await busyTip() };
+    t.check(
+      `${name}: 취소 버튼에 초점을 두고 Enter를 누르면 요청이 더 가지 않고, 칸은 "요약 만드는 중 2개"만 적으며 막대와 취소 버튼이 없다`,
+      stopped.posts === 4 && stopped.queue?.text === "요약 만드는 중 2개" && stopped.queue.share === null && stopped.queue.cancel === null,
+      `POST ${stopped.posts}번, "${stopped.queue?.text}"`,
+    );
+    t.check(`${name}: 취소한 노드의 도는 표시가 바로 사라져 폴더 상자의 말풍선이 남은 2개를 적는다`, stopped.tip === "LLM 요약을 만드는 중 · 안에 든 노드 남은 2개", stopped.tip);
+    const dir = center(await rectOf(page, `.tree-row.tree-dir[data-node="${id}"] .tree-label`));
+    const back = await menuOf(() => page.mouse.click(dir.x, dir.y, { button: "right" }));
+    t.check(`${name}: 취소한 파일과 만들지 못한 파일은 요청 전처럼 다시 대상에 든다`, same(back, [item(total - 3)]), back?.join(", "));
+    await page.keyboard.press("Escape");
+    await end(2);
+    await page.waitForTimeout(400);
+    t.check(`${name}: 보낸 두 요청이 끝나면 칸과 도는 표시가 사라지고 요청은 모두 네 번 갔다`, (await queueOf(page)) === null && (await count(page, BUSY)) === 0 && posts.length === 4, `POST ${posts.length}번, 도는 표시 ${await count(page, BUSY)}개`);
+    t.check(`${name}: 화면에 title 속성과 SVG title이 없다`, (await nativeTips(page)).length === 0, (await nativeTips(page)).join(", "));
+    await page.click(".summary-notice").catch(() => {});
+  };
+  await round("sync-engine", url, true);
+  await t.shot();
+  if (wideUrl === null) {
+    t.skip("폴더가 여러 겹인 레포에서 요약 요청 묶음의 진행 칸", "--wide-url을 주지 않았다");
+  } else {
+    await round("폴더가 여러 겹인 레포", wideUrl, false);
+  }
+}
+
 /**
  * 화면 이동. 파일트리의 파일 행을 눌러 먼 노드와 가까운 노드로 가며 프레임마다의 화면을 읽는다. 먼 이동의 프레임은
  * `s4-motion-{0~5}.png`에 남긴다.
@@ -9897,6 +10096,7 @@ const SCENARIOS = [
   ["entry", entry],
   ["menu", menu],
   ["folder-sum", folderSum],
+  ["summary-queue", summaryQueue],
   ["tips", tips],
   ["minimap", minimap],
   ["region", region],
