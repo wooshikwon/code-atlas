@@ -7960,6 +7960,7 @@ async function menu(t, page) {
   const busyOn = (ids) => page.evaluate((sels) => sels.filter((sel) => document.querySelector(`${sel} .badge-busy`) !== null).length, ids.map(face));
   const labels = async () => (await listOf(page))?.items.map((item) => `${item.text}${item.disabled ? "(비활성)" : ""}`) ?? null;
   const rightClick = async (selector) => {
+    await page.locator(selector).scrollIntoViewIfNeeded();
     const rect = await rectOf(page, selector);
     await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2, { button: "right" });
   };
@@ -8078,9 +8079,20 @@ async function menu(t, page) {
   );
 
   // 실패한 요청
+  /** 이름표의 가운데 점이 눌리는 접힌 파일 상자. skip은 고르지 않을 상자를 정한다. */
+  const foldedBox = (skip) =>
+    page.evaluate((selector) => {
+      for (const wrapper of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
+        const rect = wrapper.querySelector(`:scope > ${selector} .node-module-name .node-label`)?.getBoundingClientRect();
+        if (rect !== undefined && wrapper.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))) {
+          return { id: wrapper.dataset.id.replace(/#face$/, ""), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        }
+      }
+      return null;
+    }, skip);
   const other = graph.nodes.find((n) => n.kind === "module" && !n.test && n.id !== FILE && n.entry);
   t.expected.push("503");
-  await clickNode(page, other.id, 1, "right");
+  await rightClick(`.tree-row.tree-file[data-node="${other.id}"] .tree-label`);
   await page.click('.menu-item[data-key="one"]');
   await page.waitForTimeout(200);
   posts.at(-1).done = true;
@@ -8088,7 +8100,7 @@ async function menu(t, page) {
   await page.waitForSelector(".summary-notice", { timeout: 5_000 }).catch(() => {});
   const notice = await page.evaluate(() => document.querySelector(".summary-notice")?.textContent ?? "");
   t.check(
-    "메뉴에서 요청한 요약을 만들지 못하면 그래프 영역 위쪽에 그 노드의 이름과 까닭을 적는다",
+    "파일트리의 파일 행에서 요청한 요약을 만들지 못하면 그래프 영역 위쪽에 그 노드의 이름과 까닭을 적는다",
     notice === `LLM 요약을 만들지 못했다 · ${other.id.replaceAll(".", "/")}.py: Claude Code에 로그인돼 있지 않다` && same(await stateOf(), before),
     notice,
   );
@@ -8138,16 +8150,7 @@ async function menu(t, page) {
   await page.keyboard.press("Escape");
   await rest(page);
   await pin(page);
-  const off = await page.evaluate(() => {
-    for (const wrapper of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
-      const label = wrapper.querySelector(":scope > .node-module:not([data-route]) .node-module-name .node-label");
-      const rect = label?.getBoundingClientRect();
-      if (rect !== undefined && wrapper.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))) {
-        return { id: wrapper.dataset.id.replace(/#face$/, ""), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      }
-    }
-    return null;
-  });
+  const off = await foldedBox(".node-module:not([data-route])");
   if (off === null) {
     t.skip("경로 고정 중에 경로 밖 노드를 우클릭하면 메뉴가 뜬다", "화면에 보이는 경로 밖 파일 상자가 없다");
     return;
