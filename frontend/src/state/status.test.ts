@@ -1,14 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getGraph, getRepo, getStatus, getTree, getUnused } from "../api/client";
 import type { Status } from "../api/types";
-import { phaseText, progressOf, running, staleLines, useStatus } from "./status";
+import { comparingText, phaseText, progressOf, running, staleLines, useStatus } from "./status";
 
 const atlas = vi.hoisted(() => ({ repo: null as object | null, load: vi.fn(), refresh: vi.fn() }));
 const overlay = vi.hoisted(() => ({ load: vi.fn(), mark: vi.fn() }));
 const changes = vi.hoisted(() => ({ load: vi.fn() }));
+const compare = vi.hoisted(() => ({
+  state: { running: false, result: null as { target: string; revision: number } | null, renew: vi.fn() },
+  listeners: new Set<(now: { running: boolean }, before: { running: boolean }) => void>(),
+}));
 
 vi.mock("../api/client", () => ({ getStatus: vi.fn(), getRepo: vi.fn(), getGraph: vi.fn(), getTree: vi.fn(), getUnused: vi.fn(), forgetFiles: vi.fn() }));
 vi.mock("./changes", () => ({ useChanges: { getState: () => changes } }));
+vi.mock("./compare", () => ({
+  useCompare: {
+    getState: () => compare.state,
+    subscribe: (listener: (now: { running: boolean }, before: { running: boolean }) => void) => {
+      compare.listeners.add(listener);
+      return () => compare.listeners.delete(listener);
+    },
+  },
+}));
 vi.mock("./explanations", () => ({ useExplanations: { getState: () => ({ forget: vi.fn(), list: vi.fn() }) } }));
 vi.mock("./overlay", () => ({ useOverlay: { getState: () => overlay } }));
 vi.mock("./store", () => ({ useAtlas: { getState: () => atlas } }));
@@ -25,6 +38,7 @@ const status = (extra: Partial<Status> = {}): Status => ({
   lsp: "ready",
   error: null,
   stale: { count: 0, paths: [] },
+  compare: null,
   ...extra,
 });
 
@@ -40,6 +54,10 @@ beforeEach(() => {
     atlas.repo = {};
   });
   changes.load.mockResolvedValue(undefined);
+  compare.state.running = false;
+  compare.state.result = null;
+  compare.state.renew.mockResolvedValue(undefined);
+  compare.listeners.clear();
   vi.mocked(getRepo).mockResolvedValue({ name: "repo" } as never);
   vi.mocked(getGraph).mockResolvedValue({ nodes: [], edges: [] } as never);
   vi.mocked(getTree).mockResolvedValue({ entries: [] } as never);
@@ -132,6 +150,60 @@ describe("load", () => {
   });
 });
 
+describe("시점 비교가 켜져 있는 동안의 load", () => {
+  beforeEach(async () => {
+    received.mockResolvedValue(status());
+    await store().load();
+    vi.mocked(getGraph).mockClear();
+  });
+
+  it("대상이 작업 중인 상태면 판 번호가 달라질 때 그래프를 받지 않고 비교를 다시 받는다", async () => {
+    compare.state.result = { target: "worktree", revision: 1 };
+    received.mockResolvedValue(status({ revision: 2 }));
+    await store().load();
+    expect(compare.state.renew).toHaveBeenCalledTimes(1);
+    expect(getGraph).not.toHaveBeenCalled();
+    expect(atlas.refresh).not.toHaveBeenCalled();
+    expect(changes.load).toHaveBeenCalledTimes(1);
+    expect(store().shown).toBe(2);
+  });
+
+  it("비교가 이미 그 판으로 만든 것이면 다시 받지 않는다", async () => {
+    compare.state.result = { target: "worktree", revision: 2 };
+    received.mockResolvedValue(status({ revision: 2 }));
+    await store().load();
+    expect(compare.state.renew).not.toHaveBeenCalled();
+    expect(getGraph).not.toHaveBeenCalled();
+    expect(store().shown).toBe(2);
+  });
+
+  it("비교를 다시 받지 못하면 그린 판 번호를 바꾸지 않고 다음에 다시 받는다", async () => {
+    compare.state.result = { target: "worktree", revision: 1 };
+    compare.state.renew.mockRejectedValueOnce(new Error("분석 중"));
+    received.mockResolvedValue(status({ revision: 2 }));
+    await store().load();
+    expect(store().shown).toBe(1);
+    await store().load();
+    expect(compare.state.renew).toHaveBeenCalledTimes(2);
+    expect(store().shown).toBe(2);
+  });
+
+  it("대상이 커밋이면 아무것도 받지 않고, 비교를 끈 뒤에 그 판을 받아 그린다", async () => {
+    compare.state.result = { target: "b".repeat(40), revision: 0 };
+    received.mockResolvedValue(status({ revision: 2 }));
+    await store().load();
+    expect(compare.state.renew).not.toHaveBeenCalled();
+    expect(getGraph).not.toHaveBeenCalled();
+    expect(changes.load).not.toHaveBeenCalled();
+    expect(store().shown).toBe(1);
+
+    compare.state.result = null;
+    await store().load();
+    expect(atlas.refresh).toHaveBeenCalledTimes(1);
+    expect(store().shown).toBe(2);
+  });
+});
+
 describe("watch", () => {
   const page = Object.assign(new EventTarget(), { hidden: false });
 
@@ -169,6 +241,30 @@ describe("watch", () => {
     stop();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(received).toHaveBeenCalledTimes(4);
+  });
+
+  it("비교할 시점의 분석이 시작되면 바로 받고 끝날 때까지 0.5초마다 받는다", async () => {
+    received.mockResolvedValue(status());
+    const stop = store().watch();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(received).toHaveBeenCalledTimes(1);
+
+    compare.state.running = true;
+    compare.listeners.forEach((listener) => listener({ running: true }, { running: false }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(received).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(received).toHaveBeenCalledTimes(4);
+
+    compare.state.running = false;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(received).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(received).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(received).toHaveBeenCalledTimes(6);
+    stop();
+    expect(compare.listeners.size).toBe(0);
   });
 
   it("상태를 받지 못하면 0.5초 뒤에 다시 받는다", async () => {
@@ -214,6 +310,15 @@ describe("진행 표시의 글", () => {
     expect(running(resolving)).toBe(true);
     expect(running(status())).toBe(false);
     expect(running(status({ phase: "failed", revision: 0, error: "가상환경 없음" }))).toBe(false);
+  });
+});
+
+describe("comparingText", () => {
+  it("비교할 시점을 분석하는 진행 수를 적고, 수를 세지 않는 동안에는 글만 적는다", () => {
+    expect(comparingText(status({ compare: { phase: "resolve", done: 120, total: 3_333 } }))).toBe("분석 중 120 / 3,333");
+    expect(comparingText(status({ compare: { phase: "collect", done: 0, total: 0 } }))).toBe("분석 중");
+    expect(comparingText(status())).toBe("분석 중");
+    expect(comparingText(null)).toBe("분석 중");
   });
 });
 

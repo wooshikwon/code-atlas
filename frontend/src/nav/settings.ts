@@ -2,7 +2,10 @@
 import type { OverlayKind } from "../state/overlay";
 import type { Depth } from "../state/store";
 
-export const OVERLAY_NAMES: Record<OverlayKind, string> = { cycles: "순환 의존", unused: "미사용 후보" };
+/** 필터 창에서 고르는 분석 표시. 시점 비교는 비교 창에서 켜고 끈다. */
+export type FilterOverlay = Exclude<OverlayKind, "compare">;
+
+export const OVERLAY_NAMES: Record<FilterOverlay, string> = { cycles: "순환 의존", unused: "미사용 후보" };
 
 /** 흐름 단계의 기본값 */
 export const DEPTH: Depth = 2;
@@ -15,11 +18,11 @@ export interface ViewSettings {
   autoSummary: boolean;
 }
 
-/** 기본값(흐름 단계 2, 분석 표시 없음, 토글 세 개 꺼짐)과 다른 보기 설정의 이름. 필터 창에 그리는 순서다. */
+/** 기본값(흐름 단계 2, 분석 표시 없음, 토글 세 개 꺼짐)과 다른 보기 설정의 이름. 필터 창에 그리는 순서다. 시점 비교는 세지 않는다. */
 export function changed(settings: ViewSettings): string[] {
   return [
     ...(settings.depth !== DEPTH ? [`흐름 단계 ${settings.depth}`] : []),
-    ...(settings.overlay !== null ? [`${OVERLAY_NAMES[settings.overlay]} 표시`] : []),
+    ...(settings.overlay !== null && settings.overlay !== "compare" ? [`${OVERLAY_NAMES[settings.overlay]} 표시`] : []),
     ...(settings.showTests ? ["테스트 코드"] : []),
     ...(settings.showExternal ? ["외부 노드"] : []),
     ...(settings.autoSummary ? ["자동 요약"] : []),

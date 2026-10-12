@@ -219,6 +219,98 @@ export interface Status {
   error: string | null;
   /** 지금 판을 분석한 뒤 내용이 달라졌거나 생기거나 없어진 파일. paths는 레포 루트 기준 경로의 앞 5개다. */
   stale: { count: number; paths: string[] };
+  /** 비교할 시점을 분석하는 단계와 진행 수. 비교를 분석하는 중이 아니면 null이다. */
+  compare: { phase: Phase; done: number; total: number } | null;
+}
+
+/** 비교할 시점의 이름. 커밋은 40자 해시, 작업 중인 상태는 `worktree`다. */
+export const WORKTREE = "worktree";
+
+export interface Commit {
+  hash: string;
+  /** 부모 커밋의 해시. 첫째 부모가 앞이다. */
+  parents: string[];
+  /** 커밋한 시각(초) */
+  time: number;
+  subject: string;
+  /** 이 커밋을 가리키는 브랜치와 태그의 이름. 원격 브랜치는 `origin/main` 꼴이다. */
+  refs: string[];
+}
+
+/** 커밋 그래프의 한 묶음. git 저장소가 아니면 git이 거짓이고 commits가 비어 있다. */
+export interface History {
+  git: boolean;
+  /** 지금 커밋의 해시. 커밋이 없으면 null이다. */
+  head: string | null;
+  branch: string | null;
+  /** 기본 브랜치가 가리키는 커밋의 해시 */
+  default: string | null;
+  /** 커밋하지 않은 `.py` 변경이 있다 */
+  dirty: boolean;
+  /** 최신이 앞이다. */
+  commits: Commit[];
+  /** 이 묶음 뒤에 커밋이 더 있다 */
+  more: boolean;
+}
+
+/** 고른 두 시점의 기준과 대상, 그 사이에 바뀐 분석 대상 `.py`의 파일 수와 줄 수 */
+export interface Stat {
+  base: string;
+  target: string;
+  /** 두 시점이 조상 관계가 아닐 때 기준이 된 갈라진 커밋의 해시 */
+  fork: string | null;
+  files: number;
+  added: number;
+  deleted: number;
+}
+
+export interface NodeChange {
+  /** null은 줄 수만 있는 파일·폴더와, 기준 시점에만 있던 변수·외부 노드(only가 base)다. */
+  change: "added" | "deleted" | "modified" | null;
+  added: number;
+  deleted: number;
+  /** 삭제된 정의가 대상 시점의 본문에서 놓였을 줄 번호 */
+  slot?: number;
+  /** 삭제된 관계의 끝으로만 그래프에 든 노드 */
+  only?: "base";
+}
+
+export interface EdgeChange {
+  /** null은 양쪽 시점에 있고 sites 수만 달라진 선이다. */
+  change: "added" | "deleted" | null;
+  /** 기준 시점의 sites 수 */
+  before: number | null;
+}
+
+export interface ComparedFile {
+  /** 레포 루트 기준 경로. 삭제된 파일은 기준 시점의 경로다. */
+  path: string;
+  /** 이름이 바뀌기 전의 경로 */
+  old: string | null;
+  status: "added" | "deleted" | "modified" | "renamed";
+  added: number;
+  deleted: number;
+  test: boolean;
+}
+
+/**
+ * 두 시점의 비교. graph는 대상 시점의 그래프에 삭제된 노드와 선을 더한 것이고 tree는 대상 시점의 파일트리에 삭제된 파일과 폴더를 더한 것이다.
+ * 삭제된 노드의 path와 range는 기준 시점의 값이다.
+ */
+export interface Comparison {
+  base: string;
+  target: string;
+  /** 대상이 작업 중인 상태일 때 이 비교가 쓴 분석 결과의 판 번호. 대상이 커밋이면 0이다. */
+  revision: number;
+  graph: Graph;
+  tree: Tree;
+  /** 노드 id → 변경 내용. 바뀐 노드만 담는다. */
+  nodes: Record<string, NodeChange>;
+  /** 선의 키(`{source}|{target}|{kind}`) → 변경 내용. 바뀐 선만 담는다. */
+  edges: Record<string, EdgeChange>;
+  files: ComparedFile[];
+  /** 대상 시점의 미사용 후보 */
+  unused: Unused;
 }
 
 export interface ApiErrorBody {

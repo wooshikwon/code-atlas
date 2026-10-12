@@ -17,6 +17,7 @@ describe("기본값과 다른 보기 설정", () => {
 
   it("다른 값만 적는다", () => {
     expect(changed({ ...base, overlay: "unused" })).toEqual(["미사용 후보 표시"]);
+    expect(changed({ ...base, overlay: "compare" })).toEqual([]);
     expect(changed({ ...base, depth: 1 })).toEqual(["흐름 단계 1"]);
   });
 });

@@ -5,7 +5,8 @@
 // 폴더 pkg 안의 테스트 코드 pkg.conftest, 폴더 app의 `__init__.py` 파일 app.__init__과 거기에 정의한 함수 app:version을 더한다.
 // routeFixture는 경로와 순환 묶음의 시험에 쓴다. 폴더 flow에 경로를, 폴더 ring·north·south·lazy에 import 순환을 담는다.
 // variableFixture는 모듈 변수 노드와 읽음·바꿈 선의 시험에 쓴다.
-import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
+// compareFixture는 시점 비교의 시험에 쓴다. repoFixture를 대상 시점으로 삼고 삭제된 정의·파일·관계를 더한다.
+import type { AtlasEdge, AtlasNode, Comparison, Graph } from "../api/types";
 
 export function node(id: string, kind: AtlasNode["kind"], parent: string | null, extra: Partial<AtlasNode> = {}): AtlasNode {
   const name = id.includes(":") ? id.split(":")[1].split(".").at(-1)! : id.split(".").at(-1)!;
@@ -227,4 +228,64 @@ export const variableFixture: Graph = {
     edge("tests.test_conf:test_clamp", "tests.test_conf:SAMPLE", "read"),
     edge("tests.test_conf:test_clamp", "conf:clamp", "call"),
   ],
+};
+
+/**
+ * 기준 시점 `a…`에서 대상 시점 `b…`(repoFixture)로 바뀐 내용.
+ * - pkg/mod.py: 함수 drop이 삭제되고 parse가 수정됐다. Store.save → drop, drop → helper 호출이 함께 삭제됐다.
+ * - pkg/old.py: 파일이 삭제됐다. 그 안의 legacy → parse 호출과, 외부 노드 yaml로 가던 import가 삭제됐고 yaml은 기준 시점에만 있다.
+ * - app/text.py: 함수 pad와 wrap → pad 호출이 추가됐다.
+ * - cli.py: 이름이 tool.py에서 바뀌었고 줄은 그대로다. main → helper 호출이 삭제되고 main → log 호출이 추가됐다.
+ * - main.py: run → Store.load 호출이 2곳에서 3곳이 됐다.
+ * - pkg/__init__.py: 정의가 없어 파일 노드가 없는 파일의 줄이 바뀌었다.
+ */
+export const compareFixture: Comparison = {
+  base: "a".repeat(40),
+  target: "b".repeat(40),
+  revision: 0,
+  graph: {
+    nodes: [
+      ...repoFixture.nodes,
+      node("pkg.mod:drop", "function", "pkg.mod", { path: "pkg/mod.py", range: [52, 58] }),
+      node("pkg.old", "module", "pkg", { path: "pkg/old.py", loc: 12 }),
+      node("pkg.old:legacy", "function", "pkg.old", { path: "pkg/old.py", range: [3, 12] }),
+      node("ext:yaml", "external", null, { origin: "thirdparty" }),
+    ],
+    edges: [
+      ...repoFixture.edges,
+      edge("pkg.mod:Store.save", "pkg.mod:drop", "call"),
+      edge("pkg.mod:drop", "main:helper", "call"),
+      edge("pkg.old:legacy", "pkg.mod:parse", "call", { sites: [4, 9].map((line) => ({ path: "pkg/old.py", line, col: 4 })) }),
+      edge("pkg.old", "ext:yaml", "import"),
+      edge("cli:main", "main:helper", "call"),
+    ],
+  },
+  tree: { entries: [] },
+  nodes: {
+    "pkg.mod:drop": { change: "deleted", added: 0, deleted: 7, slot: 51 },
+    "pkg.mod:parse": { change: "modified", added: 3, deleted: 1 },
+    "pkg.old": { change: "deleted", added: 0, deleted: 12 },
+    "pkg.old:legacy": { change: "deleted", added: 0, deleted: 10, slot: 1 },
+    "ext:yaml": { change: null, added: 0, deleted: 0, only: "base" },
+    "app.text:pad": { change: "added", added: 7, deleted: 0 },
+  },
+  edges: {
+    "pkg.mod:Store.save|pkg.mod:drop|call": { change: "deleted", before: 1 },
+    "pkg.mod:drop|main:helper|call": { change: "deleted", before: 1 },
+    "pkg.old:legacy|pkg.mod:parse|call": { change: "deleted", before: 2 },
+    "pkg.old|ext:yaml|import": { change: "deleted", before: 1 },
+    "cli:main|main:helper|call": { change: "deleted", before: 1 },
+    "cli:main|common:log|call": { change: "added", before: null },
+    "app.text:wrap|app.text:pad|call": { change: "added", before: null },
+    "main:run|pkg.mod:Store.load|call": { change: null, before: 2 },
+  },
+  files: [
+    { path: "app/text.py", old: null, status: "modified", added: 7, deleted: 0, test: false },
+    { path: "cli.py", old: "tool.py", status: "renamed", added: 0, deleted: 0, test: false },
+    { path: "main.py", old: null, status: "modified", added: 1, deleted: 0, test: false },
+    { path: "pkg/__init__.py", old: null, status: "modified", added: 2, deleted: 1, test: false },
+    { path: "pkg/mod.py", old: null, status: "modified", added: 3, deleted: 8, test: false },
+    { path: "pkg/old.py", old: null, status: "deleted", added: 0, deleted: 12, test: false },
+  ],
+  unused: { definitions: 12, candidates: ["scratch:todo"] },
 };

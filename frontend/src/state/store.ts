@@ -2,11 +2,13 @@
 import { create } from "zustand";
 import { getGraph, getRepo, getTree } from "../api/client";
 import type { AtlasNode, Graph, Repo, Tree } from "../api/types";
+import { liveGraph } from "../graph/compare";
 import { cycles } from "../graph/cycles";
 import { lit, route, type Lit, type Route } from "../graph/route";
 import { endsOf, type EdgeKey } from "../graph/scope";
 import { hidden, packedIn } from "../graph/visible";
 import { applyTheme, preferredTheme, type Theme } from "../theme";
+import { useCompare } from "./compare";
 import { back, focusOf, forward, jump, push, remap, type History, type Place, type Selection, type View } from "./history";
 import { useOverlay } from "./overlay";
 
@@ -105,6 +107,7 @@ export interface AtlasStore {
   /**
    * 다시 분석한 결과를 받는다. 보기 설정과 화면 상태는 그대로 두고, 뷰·선택·지나온 선·접은 폴더·전부 펼친 상자와 탐색 이력의 모든 단계를
    * 새 그래프에 맞춘다(`placeIn`). 경로 탐색 창의 출발과 도착은 새 그래프에 없으면 비우고, 두 칸이 차 있으면 경로를 다시 찾는다.
+   * 시점 비교의 그래프를 받으면 삭제된 노드를 출발과 도착에서 비우고 삭제된 선을 뺀 그래프에서 경로를 찾는다.
    */
   refresh(repo: Repo, graph: Graph, tree: Tree): void;
   /**
@@ -355,6 +358,11 @@ function opened(repo: Repo, graph: Graph, tree: Tree, showTests: boolean) {
   return { repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 }, arranging: false, arranged: null };
 }
 
+/** 경로를 찾는 그래프. 시점 비교가 켜져 있으면 삭제된 노드와 선을 뺀 대상 시점의 그래프다. */
+function routable(graph: Graph): Graph {
+  return liveGraph(graph, useCompare.getState().result);
+}
+
 /** 레포를 열 때의 분석 표시. 지금 토글에서 순환 묶음이 하나라도 있으면 순환 의존 표시를 켜고 없으면 끈다. */
 function cover(graph: Graph, toggles: { showTests: boolean; showExternal: boolean }): void {
   useOverlay.getState().set(cycles(graph, hidden(graph, toggles)).groups.length > 0 ? "cycles" : null);
@@ -414,7 +422,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
   const seek = (from: string | null, to: string | null) => {
     const { graph, showTests, showExternal, view } = get();
     const found =
-      graph !== null && from !== null && to !== null ? route(graph, from, to, hidden(graph, { showTests, showExternal })) : null;
+      graph !== null && from !== null && to !== null ? route(routable(graph), from, to, hidden(graph, { showTests, showExternal })) : null;
     const first = found?.paths[0];
     if (first !== undefined && view.kind === "function") {
       visit({ view: { kind: "structure" } });
@@ -505,9 +513,10 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         const fit = (place: Place) => placeIn(place, graph, state.graph);
         const { view, selection, via, collapsed, unpacked } = fit(placeOf(state));
         const toggles = { showTests: state.showTests, showExternal: state.showExternal };
-        const has = (id: string | null) => (id !== null && graph.nodes.some((n) => n.id === id) ? id : null);
+        const live = routable(graph);
+        const has = (id: string | null) => (id !== null && live.nodes.some((n) => n.id === id) ? id : null);
         const [from, to] = [has(state.finder.from), has(state.finder.to)];
-        const found = from !== null && to !== null ? route(graph, from, to, hidden(graph, toggles)) : null;
+        const found = from !== null && to !== null ? route(live, from, to, hidden(graph, toggles)) : null;
         const pick = found !== null && state.finder.pick < found.paths.length ? state.finder.pick : 0;
         const path = found?.paths[pick];
         const focus = state.finder.focus !== null && path?.includes(state.finder.focus) === true ? state.finder.focus : (path?.[0] ?? null);
