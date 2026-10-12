@@ -1,5 +1,5 @@
 // 앱의 말풍선. 문서 최상위의 고정 위치 요소 하나를 마우스 옆으로 옮기고, App이 한 번 그린다.
-// 그래프의 노드와 선은 그래프 뷰가 `tooltip`으로 글을 띄운다. 그 밖의 요소는 `data-tip`·`data-full`에 글을 담고(`tips.ts`의 `tipOf`),
+// 그래프의 노드는 그래프 뷰가 `tooltip`으로 글을 띄우고, 선은 세 칸 말풍선(`LineBubble.tsx`)을 따로 띄운다. 그 밖의 요소는 `data-tip`·`data-full`에 글을 담고(`tips.ts`의 `tipOf`),
 // 마우스를 올리거나 키보드 초점을 받았을 때 이 컴포넌트가 띄운다.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -18,6 +18,13 @@ const EDGE = 8;
 /** 키보드 초점을 받은 요소의 아래 끝과 말풍선 사이 */
 const FOCUS_GAP = 4;
 
+/** 요소 el을 마우스 (x, y)의 오른쪽 아래에 놓고, 화면 오른쪽·아래 끝을 넘으면 마우스 반대쪽으로 뒤집는다. 선의 말풍선(`LineBubble.tsx`)도 쓴다. */
+export function placeBeside(el: HTMLElement, x: number, y: number): void {
+  const left = x + GAP_X + el.offsetWidth > window.innerWidth - EDGE ? x - GAP_X - el.offsetWidth : x + GAP_X;
+  const top = y + GAP_Y + el.offsetHeight > window.innerHeight - EDGE ? y - GAP_Y - el.offsetHeight : y + GAP_Y;
+  el.style.transform = `translate(${Math.max(EDGE, left)}px, ${Math.max(EDGE, top)}px)`;
+}
+
 let drawn: TooltipHandle | null = null;
 
 /** 화면에 그린 말풍선. `Tooltip`을 그리기 전에는 아무 일도 하지 않는다. */
@@ -35,16 +42,10 @@ export function Tooltip() {
   const at = useRef({ x: 0, y: 0 });
   const [text, setText] = useState<string | null>(null);
 
-  /** 마우스 오른쪽 아래에 놓고, 화면 오른쪽·아래 끝을 넘으면 마우스 반대쪽으로 뒤집는다. */
   const place = () => {
-    const el = element.current;
-    if (el === null) {
-      return;
+    if (element.current !== null) {
+      placeBeside(element.current, at.current.x, at.current.y);
     }
-    const { x, y } = at.current;
-    const left = x + GAP_X + el.offsetWidth > window.innerWidth - EDGE ? x - GAP_X - el.offsetWidth : x + GAP_X;
-    const top = y + GAP_Y + el.offsetHeight > window.innerHeight - EDGE ? y - GAP_Y - el.offsetHeight : y + GAP_Y;
-    el.style.transform = `translate(${Math.max(EDGE, left)}px, ${Math.max(EDGE, top)}px)`;
   };
 
   useEffect(() => {

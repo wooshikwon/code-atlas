@@ -31,17 +31,20 @@ import { functionCounts, labelOf, layout, packId, packLabel, titleOf, type Box, 
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
 import { faceId, LAYER } from "./layers";
+import type { CellName } from "./LineBubble";
 import { flowNodes, parts, pointing, pressable, type AtlasFlowNode, type AtlasNodeData, type Drawn } from "./nodes/common";
 import { nodeType, nodeTypes } from "./nodes";
 import { isPack, type PackFlowNode } from "./nodes/PackNode";
+import { nameOf } from "./names";
 import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
+import { rowsOf } from "./rows";
 import { drawn, followed, type EdgeKey } from "./scope";
 import { clipped, nodeTip, packTip, tipOf } from "./tips";
 import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
 import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
-import { hidden, insideCounts, lift, local, nodeIndex, shown, type Shown } from "./visible";
+import { hidden, insideCounts, lift, local, nodeIndex, shown, unitOf, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
 const NO_BOXES = new Map<string, Box>();
@@ -457,27 +460,46 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     (): Lines => (scene === null || index === null ? NO_LINES : edgeViews(lines.edges, scene.layout, index.nodes)),
     [scene, index, lines],
   );
-  const nameOf = (id: string) => {
+  /** 그린 선마다 그 선에 합친 원래 선. 말풍선이 선을 고른 노드의 단계로 풀어 적는 데 쓴다. */
+  const origins = useMemo(() => new Map(lines.edges.map((edge) => [edge.key, edge])), [lines]);
+  /**
+   * 말풍선의 칸에 적는 노드 이름. 화면에 그려진 노드는 이름표를 적고, 그려져 있지 않은 정의는 `파일 경로::이름`으로, 그려져 있지 않은
+   * 파일과 폴더는 앞쪽 폴더 경로와 이름으로 나눠 적는다.
+   */
+  const cellName = (id: string): CellName => {
     const node = index?.nodes.get(id);
-    return node === undefined ? id : titleOf(node);
+    if (node === undefined || index === null) {
+      return { path: "", name: id };
+    }
+    const title = titleOf(node);
+    if (scene?.layout.boxes.has(id) === true) {
+      return { path: "", name: title };
+    }
+    const unit = index.nodes.get(unitOf(index.nodes, id));
+    if (unit !== undefined && unit.id !== id) {
+      return { path: `${titleOf(unit)}::`, name: nameOf(index.nodes, node) };
+    }
+    const at = title.replace(/\/$/, "").lastIndexOf("/") + 1;
+    return { path: title.slice(0, at), name: title.slice(at) };
   };
   /**
-   * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 그 선을 따라 도착 노드로 간다(`go`). Shift를 누른 채면 그 선을 골라
-   * 정보 패널에 지점 목록을 연다. 경로 고정 중에는 경로의 걸음만 강조하고, 그 밖의 선은 말풍선만 띄운다.
+   * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 말풍선이 고정되고, 그 줄의 이름을 누르면 선을 따라 그 노드로 간다(`go`). 관계를 누르거나
+   * Shift를 누른 채 선을 누르면 그 선을 골라 정보 패널에 코드 줄 목록을 연다. 경로 고정 중에는 경로의 걸음만 강조한다.
    */
   const aim = useAim({
     lines: views,
     boxes: scene?.layout.boxes ?? NO_BOXES,
-    name: nameOf,
+    name: cellName,
+    rows: (view) => (index === null ? [] : rowsOf(index.nodes, scene?.focus ?? null, { ...view, edges: origins.get(view.key)?.edges ?? [] })),
     only: lit === null ? null : (view) => view.route !== null,
     skip: (event) => {
       const again = repeated(event);
       clicked.current = null;
       return again;
     },
-    pick: (target, keys) => {
+    go: (to, keys) => {
       clicked.current = null;
-      go(target, keys);
+      go(to, keys);
     },
     open: selectEdge,
   });
@@ -513,7 +535,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   };
 
   /**
-   * 누른 선 keys를 따라 도착 노드 id로 간다(`follow`). 도착 노드가 폴더면 그 폴더를 펼친 새 배치가 올 때 펼친 폴더 영역으로 화면을
+   * 누른 선 keys를 따라 그 선의 한쪽 끝 노드 id로 간다(`follow`). 그 노드가 폴더면 그 폴더를 펼친 새 배치가 올 때 펼친 폴더 영역으로 화면을
    * 옮긴다(`arrive`). 그 밖의 노드는 고른 노드로 화면을 옮기는 규칙을 따른다.
    */
   const go = (id: string, keys: EdgeKey[]) => {
@@ -652,7 +674,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       </ReactFlow>
       <Dock />
       <Arranging />
-      {aim.menu}
+      {aim.bubble}
     </div>
   );
 }

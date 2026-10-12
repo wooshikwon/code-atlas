@@ -23,6 +23,7 @@ import { play, reducedMotion, settled, tween } from "./motion";
 import { CallNode, type CallFlowNode, type CallNodeData } from "./nodes/CallNode";
 import { flowNodes, parts, pointing, type Drawn } from "./nodes/common";
 import { UNUSED_OPACITY } from "./overlay";
+import { rowsOf } from "./rows";
 import { nodeTip, tipOf } from "./tips";
 import { NO_LINES } from "./view";
 import { tooltip } from "./Tooltip";
@@ -162,24 +163,28 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   }, [scene, index, selected, making, unused, setViewport]);
 
   const lines = useMemo(() => (scene === null ? NO_LINES : callEdges(scene.calls, scene.center, scene.layout)), [scene]);
-  const nameOf = (id: string) => {
+  const cellName = (id: string) => {
     const node = index?.get(id);
-    return node === undefined || index === null ? id : callTitle(index, node);
+    return { path: "", name: node === undefined || index === null ? id : callTitle(index, node) };
   };
-  /** 선의 hover와 클릭(`aim.tsx`). 선을 누르면 도착 노드를 고르고 이미 고른 노드면 그대로 둔다. Shift를 누른 채면 그 선의 지점 목록을 연다. */
+  /**
+   * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 말풍선이 고정되고, 그 줄의 이름을 누르면 그 노드를 고른다. 이미 고른 노드면 그대로 둔다.
+   * 관계를 누르거나 Shift를 누른 채 선을 누르면 그 선의 코드 줄 목록을 연다. 모든 노드가 함수이므로 줄은 그린 양 끝이다.
+   */
   const aim = useAim({
     lines,
     boxes: scene?.layout.boxes ?? NO_BOXES,
-    name: nameOf,
+    name: cellName,
+    rows: (view) => (index === null ? [] : rowsOf(index, null, { ...view, edges: [] })),
     only: null,
     skip: (event) => {
       const again = repeated(event);
       clicked.current = null;
       return again;
     },
-    pick: (target) => {
-      if (target !== selected) {
-        select(target);
+    go: (to) => {
+      if (to !== selected) {
+        select(to);
       }
     },
     open: selectEdge,
@@ -277,7 +282,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       />
       <Dock />
       <Arranging />
-      {aim.menu}
+      {aim.bubble}
     </div>
   );
 }

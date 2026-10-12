@@ -1,15 +1,14 @@
 // 커서 밑을 지나는 선의 집합으로 선의 hover와 클릭을 판정한다. 구조 뷰와 함수 시점 뷰가 함께 쓴다. 화면을 끄는 동안에는 hover를 받지 않는다.
-// 선이 하나면 그 선을 강조하고 누르면 도착 노드를 고른다. 여럿이면 그 구간을 지나는 선만 강조하고 말풍선에 한 줄씩 적는다(`tips.ts`의 `lineTip`).
-// 도착 노드가 모두 같으면 누를 때 그 노드를 고르고, 둘 이상이면 누른 자리에 선을 고르는 목록을 고정한다.
+// 선에 마우스를 올리면 그 구간을 지나는 선을 강조하고 말풍선(`LineBubble.tsx`)에 선마다 푼 줄(`rows.ts`)을 적는다.
+// 선을 누르면 선이 하나여도 그 말풍선을 그곳에 고정하고, 줄의 출발·도착 이름을 누르면 그 노드로, 관계를 누르면 코드 줄 목록으로 간다.
 import { useReactFlow, type EdgeMouseHandler } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { createPortal } from "react-dom";
 import { create } from "zustand";
-import type { EdgeKind } from "../api/types";
 import type { FlowEdge } from "./edges/OrthogonalEdge";
 import type { Box, Point } from "./layout";
+import { LineBubble, moveBubble, type Bubble, type CellName } from "./LineBubble";
+import type { LineRow } from "./rows";
 import { type EdgeKey } from "./scope";
-import { lineTip, trunkTip } from "./tips";
 import { tooltip } from "./Tooltip";
 import { trunkKey, type EdgeView, type Lines } from "./view";
 
@@ -32,59 +31,57 @@ export function sameTarget(views: EdgeView[]): string | null {
   return views.length > 0 && views.every((view) => view.target === views[0].target) ? views[0].target : null;
 }
 
-/** 선을 고르는 목록 하나. 누른 화면 좌표에 고정한다. open이 참이면 고른 선의 코드 줄 목록을 연다. */
-interface Menu {
-  x: number;
-  y: number;
-  items: { key: EdgeKey; target: string; text: string }[];
-  open: boolean;
-}
-
 interface PickStore {
-  menu: Menu | null;
-  /** 목록에서 마우스를 올린 선 */
+  /** 떠 있거나 고정한 말풍선 */
+  bubble: Bubble | null;
+  /** 고정한 말풍선에서 마우스를 올리거나 초점을 둔 줄의 선 */
   hover: EdgeKey | null;
-  show(menu: Menu): void;
+  show(bubble: Bubble): void;
   aim(key: EdgeKey | null): void;
-  /** 목록을 닫는다. 열려 있었으면 참을 돌려준다. Esc가 선택을 풀기 전에 이 함수를 먼저 부른다. */
+  /** 말풍선을 거둔다. 고정한 말풍선이었으면 참을 돌려준다. Esc가 선택을 풀기 전에 이 함수를 먼저 부른다. */
   close(): boolean;
 }
 
 export const usePick = create<PickStore>()((set, get) => ({
-  menu: null,
+  bubble: null,
   hover: null,
-  show: (menu) => set({ menu, hover: null }),
+  show: (bubble) => set({ bubble, hover: null }),
   aim: (hover) => set({ hover }),
   close: () => {
-    const opened = get().menu !== null;
-    set({ menu: null, hover: null });
-    return opened;
+    const pinned = get().bubble?.pinned === true;
+    if (get().bubble !== null) {
+      set({ bubble: null, hover: null });
+    }
+    return pinned;
   },
 }));
 
 interface AimOptions {
   lines: Lines;
-  /** 노드의 화면 기준 상자. 목록과 말풍선의 줄을 출발 노드의 위에서 아래, 왼쪽에서 오른쪽 순서로 놓는 데 쓴다. */
+  /** 노드의 화면 기준 상자. 말풍선의 줄을 출발 노드의 위에서 아래, 왼쪽에서 오른쪽 순서로 놓는 데 쓴다. */
   boxes: Map<string, Box>;
-  name: (id: string) => string;
-  /** 경로 고정 중이면 걸음인 선만 대상으로 본다. 고정 중이 아니면 null이다. */
+  /** 말풍선의 칸에 적는 노드 이름 */
+  name: (id: string) => CellName;
+  /** 선 하나를 말풍선의 줄로 푼다. */
+  rows: (view: EdgeView) => LineRow[];
+  /** 경로 고정 중이면 걸음인 선만 강조한다. 고정 중이 아니면 null이다. */
   only: ((view: EdgeView) => boolean) | null;
   /** 누른 것을 받지 않을 때 참을 돌려준다(더블클릭의 둘째 클릭). */
   skip: (event: ReactMouseEvent) => boolean;
-  /** 선 keys를 눌러 도착 노드 target으로 간다. */
-  pick: (target: string, keys: EdgeKey[]) => void;
+  /** 말풍선의 이름을 눌러 선 keys를 따라 노드 to로 간다. */
+  go: (to: string, keys: EdgeKey[]) => void;
   /** 선이나 줄기의 코드 줄 목록을 연다. */
   open: (key: EdgeKey) => void;
 }
 
 /**
  * 선의 hover와 클릭 처리. pointed는 마우스를 올린 선으로 그릴 선의 키다. 커서 밑의 선이 하나면 그 선, 여럿이면 그 구간을 지나는 선이고,
- * 고정한 목록의 항목에 올리면 그 선 하나다. menu는 고정한 목록이다.
+ * 말풍선을 고정한 동안에는 그 말풍선의 선이며 줄에 올리면 그 줄의 선 하나다. bubble은 그릴 말풍선이다.
  */
-export function useAim({ lines, boxes, name, only, skip, pick, open }: AimOptions) {
+export function useAim({ lines, boxes, name, rows, only, skip, go, open }: AimOptions) {
   const { screenToFlowPosition } = useReactFlow();
   const [aimed, setAimed] = useState<EdgeKey[]>([]);
-  const menu = usePick((s) => s.menu);
+  const bubble = usePick((s) => s.bubble);
   const hover = usePick((s) => s.hover);
   const state = useRef({ lines, boxes });
   state.current = { lines, boxes };
@@ -92,6 +89,7 @@ export function useAim({ lines, boxes, name, only, skip, pick, open }: AimOption
   // 배치가 바뀌거나 뷰를 떠나면 선과 노드가 커서 밑에서 옮겨 가므로 강조와 말풍선을 거둔다.
   useEffect(() => {
     setAimed([]);
+    usePick.getState().close();
     tooltip.hide();
     return () => tooltip.hide();
   }, [boxes]);
@@ -102,47 +100,46 @@ export function useAim({ lines, boxes, name, only, skip, pick, open }: AimOption
     const place = (view: EdgeView) => state.current.boxes.get(view.source) ?? { x: 0, y: 0 };
     return linesAt(state.current.lines.views, at).sort((a, b) => place(a).y - place(b).y || place(a).x - place(b).x);
   };
-  const describe = (view: EdgeView) => lineTip(name(view.source), name(view.target), view.kinds, view.route);
-  const text = (views: EdgeView[]): string => {
-    const target = sameTarget(views);
-    const rows = views.map(describe);
-    if (views.length < 2 || target === null) {
-      return rows.join("\n");
-    }
-    const kinds: EdgeView["kinds"] = {};
-    for (const view of views) {
-      for (const [kind, count] of Object.entries(view.kinds) as [EdgeKind, number][]) {
-        kinds[kind] = (kinds[kind] ?? 0) + count;
-      }
-    }
-    return [trunkTip(new Set(views.map((view) => view.source)).size, name(target), kinds), ...rows].join("\n");
+  /**
+   * 선 views를 푼 말풍선의 줄. 함수 단계에서 세는 관계가 없어 누를 수 없는 줄은 다른 줄이 있으면 적지 않고, 줄이 그런 줄뿐이면 그대로 적는다.
+   */
+  const table = (views: EdgeView[]): LineRow[] => {
+    const all = views.flatMap(rows);
+    const live = all.filter((row) => row.keys !== null);
+    return live.length > 0 ? live : all;
   };
+  const lit = (views: EdgeView[]) => (only === null ? views : views.filter(only)).map((view) => view.key);
   const onEdgeLeave = () => {
+    if (usePick.getState().bubble?.pinned === true) {
+      return;
+    }
     setAimed((before) => (before.length === 0 ? before : []));
-    tooltip.hide();
+    usePick.getState().close();
   };
   /** 마우스 버튼을 누른 동안(화면을 끄는 동안)에는 선을 강조하지 않고 말풍선을 띄우지 않는다. */
   const over: EdgeMouseHandler<FlowEdge> = (event) => {
-    if (usePick.getState().menu !== null) {
+    const shown = usePick.getState().bubble;
+    if (shown?.pinned === true) {
       return;
     }
-    if (event.buttons !== 0) {
+    const views = event.buttons !== 0 ? [] : under(event);
+    if (views.length === 0) {
       onEdgeLeave();
       return;
     }
-    const views = under(event);
-    const keys = (only === null ? views : views.filter(only)).map((view) => view.key);
+    const keys = lit(views);
     setAimed((before) => (before.join("\n") === keys.join("\n") ? before : keys));
-    if (views.length === 0) {
-      tooltip.hide();
+    const drawn = views.map((view) => view.key).join("\n");
+    if (shown !== null && shown.lines === drawn) {
+      moveBubble(event.clientX, event.clientY);
     } else {
-      tooltip.show(text(views), event.clientX, event.clientY);
+      usePick.getState().show({ x: event.clientX, y: event.clientY, rows: table(views), pinned: false, lit: keys, lines: drawn });
     }
   };
   const onEdgeClick: EdgeMouseHandler<FlowEdge> = (event) => {
     tooltip.hide();
     setAimed([]);
-    const opened = usePick.getState().close();
+    usePick.getState().close();
     if (skip(event)) {
       return;
     }
@@ -153,69 +150,35 @@ export function useAim({ lines, boxes, name, only, skip, pick, open }: AimOption
     if (views.length === 0) {
       return;
     }
-    if (views.length === 1 || target !== null) {
-      if (event.shiftKey) {
-        open(views.length === 1 ? views[0].key : (views[0].trunks.in ?? trunkKey(views[0].target, "in", 0)));
-      } else {
-        pick(
-          views[0].target,
-          views.map((view) => view.key),
-        );
-      }
+    if (event.shiftKey && (views.length === 1 || target !== null)) {
+      open(views.length === 1 ? views[0].key : (views[0].trunks.in ?? trunkKey(views[0].target, "in", 0)));
       return;
     }
-    if (!opened) {
-      usePick.getState().show({
-        x: event.clientX,
-        y: event.clientY,
-        items: views.map((view) => ({ key: view.key, target: view.target, text: describe(view) })),
-        open: event.shiftKey,
-      });
-    }
+    usePick.getState().show({ x: event.clientX, y: event.clientY, rows: table(views), pinned: true, lit: lit(views), lines: views.map((view) => view.key).join("\n") });
   };
 
-  const pointed = useMemo(() => new Set(menu !== null ? (hover === null ? [] : [hover]) : aimed), [menu, hover, aimed]);
+  const pointed = useMemo(
+    () => new Set(bubble?.pinned === true ? (hover === null ? bubble.lit : bubble.lit.filter((key) => key === hover)) : aimed),
+    [bubble, hover, aimed],
+  );
   const element =
-    menu === null ? null : (
-      <LineMenu
-        menu={menu}
-        choose={(item) => {
+    bubble === null ? null : (
+      <LineBubble
+        bubble={bubble}
+        name={name}
+        aim={usePick.getState().aim}
+        go={(row, id) => {
           usePick.getState().close();
-          if (menu.open) {
-            open(item.key);
-          } else {
-            pick(item.target, [item.key]);
+          go(id, row.keys ?? []);
+        }}
+        list={(row) => {
+          usePick.getState().close();
+          if (row.list !== null) {
+            open(row.list);
           }
         }}
+        close={usePick.getState().close}
       />
     );
-  return { pointed, onEdgeEnter: over, onEdgeMove: over, onEdgeLeave, onEdgeClick, menu: element };
-}
-
-/** 누른 자리에 고정한 선 목록. 항목에 올리면 그 선을 강조하고 누르면 고른다. 목록 밖을 누르면 닫는다. */
-function LineMenu({ menu, choose }: { menu: Menu; choose: (item: Menu["items"][number]) => void }) {
-  const element = useRef<HTMLUListElement | null>(null);
-  useEffect(() => {
-    const outside = (event: PointerEvent) => {
-      // 선을 누른 것은 그 선의 클릭 처리가 목록을 닫거나 바꾼다.
-      const target = event.target as Element;
-      if (element.current?.contains(target) !== true && target.closest(".react-flow__edge") === null) {
-        usePick.getState().close();
-      }
-    };
-    document.addEventListener("pointerdown", outside, true);
-    return () => document.removeEventListener("pointerdown", outside, true);
-  }, []);
-  return createPortal(
-    <ul ref={element} className="line-menu" role="menu" style={{ left: menu.x, top: menu.y }} onMouseLeave={() => usePick.getState().aim(null)}>
-      {menu.items.map((item) => (
-        <li key={item.key} role="none">
-          <button className="line-menu-item" role="menuitem" data-key={item.key} onMouseEnter={() => usePick.getState().aim(item.key)} onClick={() => choose(item)}>
-            {item.text}
-          </button>
-        </li>
-      ))}
-    </ul>,
-    document.body,
-  );
+  return { pointed, onEdgeEnter: over, onEdgeMove: over, onEdgeLeave, onEdgeClick, bubble: element };
 }

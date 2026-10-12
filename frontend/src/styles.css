@@ -1675,12 +1675,15 @@ ul {
   font-weight: 600;
 }
 
-/* 여러 선이 함께 지나는 구간을 눌렀을 때 누른 자리에 고정하는 선 목록. 말풍선과 같은 색이고 항목을 누를 수 있다. */
-.line-menu {
+/* 선의 말풍선. 앱의 말풍선과 같은 색으로 줄마다 출발·도착·관계 세 칸을 적고 맨 위에 칸 이름을 적는다. 마우스를 올린 동안에는 마우스를
+   받지 않고, 선을 눌러 고정하면([data-pinned]) 칸을 누를 수 있다. 화면 높이의 절반을 넘으면 말풍선 안에서 스크롤한다. */
+.line-bubble {
   position: fixed;
+  top: 0;
+  left: 0;
   z-index: var(--z-tooltip);
+  max-width: calc(100vw - 16px);
   max-height: 50vh;
-  margin: 0;
   padding: 3px 0;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -1690,19 +1693,65 @@ ul {
   box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
   font-size: 11px;
   line-height: 1.5;
+  pointer-events: none;
 }
 
-.line-menu-item {
-  display: block;
+.line-bubble[data-pinned] {
+  pointer-events: auto;
+}
+
+.line-bubble table {
+  border-collapse: collapse;
+}
+
+.line-bubble th {
+  padding: 0 8px;
+  color: var(--muted);
+  font-weight: 400;
+  text-align: left;
+}
+
+.line-bubble td {
+  padding: 0;
+}
+
+/* 칸 하나. 화면에 그려져 있지 않은 노드는 이름 앞에 경로를 적고, 칸이 넘치면 경로의 앞쪽부터 줄여 이름을 끝까지 보인다. */
+.line-cell {
+  display: flex;
+  align-items: baseline;
   width: 100%;
+  max-width: 320px;
   padding: 1px 8px;
   color: inherit;
+  font: inherit;
   text-align: left;
-  white-space: pre;
+  white-space: nowrap;
 }
 
-.line-menu-item:hover {
+.line-cell-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  color: var(--muted);
+  text-overflow: ellipsis;
+}
+
+.line-cell-name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.line-bubble[data-pinned] tbody tr:hover {
+  background: var(--hover-bg);
+}
+
+button.line-cell:hover,
+button.line-cell:focus-visible {
   background: var(--active-bg);
+  outline: none;
 }
 
 /* 앱의 말풍선. 칸 바탕과 경계선의 색을 써서 밝은 화면과 어두운 화면을 따른다. 긴 글은 폭 안에서 줄을 바꾼다. */
