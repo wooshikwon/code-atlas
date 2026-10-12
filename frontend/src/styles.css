@@ -1308,6 +1308,34 @@ ul {
   text-shadow: 0 0 2px color-mix(in srgb, var(--ink) 45%, transparent);
 }
 
+/* 마우스를 올린 잎 노드는 올린 동안 네 변이 nodes/common.tsx의 GROW만큼 바깥으로 나가게 커진다. 노드의 폭과 높이에서 구한 가로·세로 확대 비율을
+   pointing이 --grow-x·--grow-y로 넣고, 바탕 요소와 글자 요소가 같은 비율을 받는다. 원과 함수 시점 뷰의 모양은 가로를 세로 비율에 맞춰
+   둥근 모양을 지킨다. React Flow 노드의 위치와 크기는 그대로여서 배치와 선은 바뀌지 않는다. 화면 이동, 배치 움직임, 화면을 끄는 동안에는
+   키우지 않는다. 펼친 상자와 폴더 영역은 비율을 받지 않는다. */
+.react-flow__node > :is(.node-body, .node-face),
+.react-flow__node :is(.node-circle, .call-shape) {
+  transition: transform 200ms ease-out;
+}
+
+.react-flow__node :is(.node-circle, .call-shape) {
+  transform-origin: left center;
+}
+
+.graph:not([data-flying], [data-moving]) .react-flow__pane:not(.dragging) .react-flow__node.pointed > :is(.node-body, .node-face) {
+  transform: scale(var(--grow-x, 1), var(--grow-y, 1));
+}
+
+.graph:not([data-flying], [data-moving]) .react-flow__pane:not(.dragging) .react-flow__node.pointed :is(.node-circle, .call-shape) {
+  transform: scaleX(calc(var(--grow-y, 1) / var(--grow-x, 1)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__node > :is(.node-body, .node-face),
+  .react-flow__node :is(.node-circle, .call-shape) {
+    transition: none;
+  }
+}
+
 /* 이름표는 확대 비율 구간에 따라 숨긴다. 40% 미만은 폴더·파일 이름만, 80% 미만은 클래스·데이터 클래스 이름까지 보인다.
    초점 상태에서 흐름에 든 노드와 선택한 노드가 든 파일 상자 안의 노드는 이름표가 확대 비율과 관계없이 보인다. */
 .graph[data-zoom="0"] :is(.node-class, .node-dataclass, .node-function):not([data-flow], [data-local]) :is(.node-label, .loc),
