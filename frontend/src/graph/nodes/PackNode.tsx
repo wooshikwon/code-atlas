@@ -5,7 +5,7 @@ import { PACK_PAD } from "../layout";
 /** 손잡이 하나. box는 손잡이를 단 상자의 노드 id다. */
 export interface PackData extends Record<string, unknown> {
   box: string;
-  /** `안쪽 12개`나 `안쪽 12개 접기` */
+  /** `내부 함수 12개`나 `내부 함수 12개 접기` */
   label: string;
   /** 전부 펼침 단계의 손잡이다 */
   open: boolean;
