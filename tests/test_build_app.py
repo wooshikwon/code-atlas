@@ -158,15 +158,17 @@ def test_unpacking_replaces_what_an_earlier_run_left(build, tmp_path):
         build.unpack_python(packed)
 
 
-def test_a_step_is_skipped_only_with_the_same_input_and_redoing_it_forgets_the_later_steps(build):
+def test_a_step_is_skipped_only_with_the_same_input_and_redoing_it_forgets_the_steps_that_use_it(build):
     assert not build.done("npm", "a")
     for name in build.STAMPED:
         build.finish(name, "a")
     assert all(build.done(name, "a") for name in build.STAMPED)
     assert not build.done("npm", "b") and not build.done("npm", None)
 
-    build.begin("dist")
-    assert [name for name in build.STAMPED if build.done(name, "a")] == ["packages", "npm"]
+    build.begin("packages")
+    assert [name for name in build.STAMPED if build.done(name, "a")] == ["npm", "dist"]
+    build.begin("npm")
+    assert not any(build.done(name, "a") for name in build.STAMPED)
 
     build.finish("dist", None)
     assert not (build.STAMPS / "dist").exists()

@@ -70,13 +70,13 @@ CARGO_INDEX = "https://index.crates.io/config.json"
 REACH_TIMEOUT = 15
 
 # 개인 Mac(arm64)의 첫 빌드에서 잰 크기(MB). 이미 있는 폴더는 그 크기만큼 덜 필요하다.
-BUILD_SIZES = {SHELL / "target": 1900, PYEMBED: 240, FRONTEND / "node_modules": 230, DOWNLOADS: 25}
-# pip·npm·cargo의 캐시와 내려받은 것을 푸는 동안 쓰는 크기(MB)
-DISK_MARGIN = 700
+BUILD_SIZES = {SHELL / "target": 1450, PYEMBED: 230, FRONTEND / "node_modules": 230, DOWNLOADS: 25}
+# pip·npm·cargo가 자기 캐시에 받아 두는 크기(MB). 개인 Mac에서 cargo의 레지스트리 190, npm 60, pip가 받은 wheel 75 안팎이었다
+DISK_MARGIN = 400
 
 STEPS = ["점검", "묶을 Python 받기", "의존성 설치와 정리", "화면 빌드", "앱 껍데기 빌드", "서명", "판정", "놓기"]
-# 표식의 순서. 한 단계를 다시 하면 그 뒤 단계의 표식을 지운다.
-STAMPED = ["packages", "npm", "dist", "shell", "sign"]
+# 표식마다 그 결과를 입력으로 쓰는 표식. 한 표식의 일을 다시 하면 이 표식들을 지운다.
+STAMPED = {"packages": ["shell", "sign"], "npm": ["dist", "shell", "sign"], "dist": ["shell", "sign"], "shell": ["sign"], "sign": []}
 KEPT_LINES = 15
 # Mach-O 파일(32·64비트, 두 바이트 순서, 여러 칩을 묶은 파일)의 앞 네 바이트
 MACHO_MAGICS = {bytes.fromhex(magic) for magic in ("feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca")}
@@ -349,9 +349,9 @@ def done(name: str, key: str | None) -> bool:
 
 
 def begin(name: str) -> None:
-    """`name` 단계와 그 뒤 단계의 표식을 지운다."""
-    for later in STAMPED[STAMPED.index(name) :]:
-        (STAMPS / later).unlink(missing_ok=True)
+    """`name`의 표식과 그 결과를 입력으로 쓰는 표식을 지운다."""
+    for stale in (name, *STAMPED[name]):
+        (STAMPS / stale).unlink(missing_ok=True)
 
 
 def finish(name: str, key: str | None) -> None:
@@ -650,6 +650,7 @@ def main(argv: list[str] | None = None) -> int:
             report(label, failed, resumes=number > 1 and not args.check)
             return 1
         except KeyboardInterrupt:
+            sys.stdout.flush()
             print(f"\n{label}에서 끊었다. {RESUME}", file=sys.stderr)
             return 130
         print(f"  {time.monotonic() - began:.0f}초", flush=True)
