@@ -4007,7 +4007,7 @@ async function toolbar(t, page) {
           last: last === null ? null : { text: last.textContent, width: Math.round(last.getBoundingClientRect().width), whole: last.scrollWidth <= last.clientWidth, inside: last.getBoundingClientRect().right <= area.right },
           cut: document.querySelector(".trail-cut")?.dataset.tip ?? null,
           stale: document.querySelector(".reload-dot") !== null,
-          gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom, Math.round(stage.width * PANEL_GAP)],
+          gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom, Math.round(stage.width * 0.005)],
           filters: filters === undefined ? null : { inside: filters.left >= area.left && filters.right <= Math.min(area.right, window.innerWidth) && filters.bottom <= window.innerHeight },
         };
       });
