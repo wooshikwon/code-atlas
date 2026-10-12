@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import shutil
 from collections.abc import Callable
 from contextlib import AsyncExitStack
@@ -29,6 +30,7 @@ HELD = 2  # 메모리에 두는 시점의 수. 비교 하나가 쓰는 기준과
 class _Running:
     task: asyncio.Task
     waiting: int = 0
+    stopping: bool = False  # 기다리는 요청이 모두 취소되어 멈추는 중이다
 
 
 async def _finished(call: Callable, *args):
@@ -41,11 +43,23 @@ async def _finished(call: Callable, *args):
         raise
 
 
+def _alive(name: str) -> bool:
+    """폴더 이름이 지금 돌고 있는 프로세스의 id다."""
+    try:
+        os.kill(int(name), 0)
+    except (ValueError, ProcessLookupError):
+        return False
+    except OSError:
+        return True
+    return True
+
+
 class Snapshots:
     """레포 하나의 시점별 분석 결과와 그 분석이 쓰는 꺼낸 폴더.
 
-    꺼낸 폴더는 `{directory}/snapshots/{레포 루트 해시 16자}/{커밋 해시}`이고 `directory`를 주지 않으면 분석 캐시의
-    폴더다. 만들 때 앞 실행이 남긴 그 레포의 폴더를 지운다. `python`은 원본 레포를 분석하는 인터프리터의 절대 경로다.
+    꺼낸 폴더는 `{directory}/snapshots/{레포 루트 해시 16자}/{프로세스 id}/{커밋 해시}`이고 `directory`를 주지 않으면
+    분석 캐시의 폴더다. 같은 레포를 연 다른 서버와 폴더가 겹치지 않는다. 만들 때 끝난 프로세스가 남긴 그 레포의 폴더를
+    지운다. `python`은 원본 레포를 분석하는 인터프리터의 절대 경로다.
     """
 
     def __init__(self, root: Path, python: str, cache: Cache | None, directory: Path | None = None):
@@ -53,10 +67,13 @@ class Snapshots:
         self.python = python
         self.cache = cache
         key = hashlib.sha256(str(self.root).encode()).hexdigest()[:16]
-        self.directory = Path(directory or caching.CACHE_DIR) / "snapshots" / key
+        shared = Path(directory or caching.CACHE_DIR) / "snapshots" / key
+        self.directory = shared / str(os.getpid())
         self._held: dict[str, Analyzed] = {}  # 커밋 해시 → 결과. 마지막에 쓴 시점이 뒤에 온다
         self._running: dict[str, _Running] = {}
-        shutil.rmtree(self.directory, ignore_errors=True)
+        for left in shared.iterdir() if shared.is_dir() else ():
+            if left == self.directory or not _alive(left.name):
+                shutil.rmtree(left, ignore_errors=True)
 
     def held(self, commit: str) -> Analyzed | None:
         """메모리에 둔 그 커밋의 결과. 없으면 None이다."""
@@ -73,7 +90,11 @@ class Snapshots:
         if commit in self._held:
             self._held[commit] = self._held.pop(commit)
             return self._held[commit]
-        running = self._running.get(commit)
+        # 멈추는 중인 분석이 그 커밋의 폴더를 지우고 끝난 뒤에 새로 분석한다.
+        while (running := self._running.get(commit)) is not None and running.stopping:
+            await asyncio.gather(running.task, return_exceptions=True)
+            if self._running.get(commit) is running:
+                del self._running[commit]
         if running is None:
             running = self._running[commit] = _Running(asyncio.ensure_future(self._analyzed(commit, near, report)))
         running.waiting += 1
@@ -82,10 +103,12 @@ class Snapshots:
         finally:
             running.waiting -= 1
             if running.waiting == 0:
-                del self._running[commit]
                 if not running.task.done():
+                    running.stopping = True
                     running.task.cancel()
                     await asyncio.gather(running.task, return_exceptions=True)
+                if self._running.get(commit) is running:
+                    del self._running[commit]
 
     async def _analyzed(self, commit: str, near: list[Analyzed], report: Callable[[Progress], None]) -> Analyzed:
         dest = self.directory / commit

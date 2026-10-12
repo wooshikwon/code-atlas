@@ -11,8 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import FIXTURE, git, group_ended
+from history import run as history_run
 
-from code_atlas import api, lsp, runner, summary
+from code_atlas import api, lsp, runner, snapshot, summary
 from code_atlas.api import create_app
 from code_atlas.summary import Made, Subject, Summaries, SummaryError, Usage
 
@@ -313,6 +314,9 @@ READS = [
     ("POST", "/api/explanation", {"path": "src/app/core.py", "start": 1, "end": 2}),
     ("DELETE", "/api/explanation", {"path": "src/app/core.py", "start": 1, "end": 2}),
     ("POST", "/api/reload", {}),
+    ("GET", "/api/history", {}),
+    ("GET", "/api/compare/stat", {"a": "worktree", "b": "0" * 40}),
+    ("POST", "/api/compare", {}),
 ]
 
 
@@ -344,6 +348,7 @@ async def test_server_answers_before_the_analysis_and_counts_revisions(sample_re
             "lsp": "starting",
             "error": None,
             "stale": {"count": 0, "paths": []},
+            "compare": None,
         }
         for method, path, params in READS:
             assert await call(app, method, path, params) == (503, {"error": "분석 중이다"}), path
@@ -984,3 +989,346 @@ async def test_failed_reload_keeps_the_previous_analysis(sample_repo, tmp_path, 
 
         status, _ = await call(app, "POST", "/api/reload", {})
         assert status == 200 and "app.core:added" in state.nodes and state.revision == 2
+
+
+PRICING = "src/shop/pricing.py"
+
+
+@pytest.fixture(scope="module")
+def history_client(module_history, tmp_path_factory):
+    """이력이 있는 고정 레포를 연 서버와 단계 이름표별 커밋 해시. 시험은 레포를 고치지 않는다."""
+    repo, at = module_history
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(summary, "CACHE_PATH", tmp_path_factory.mktemp("cache") / "summaries.db")
+        patch.setattr(summary, "find_cli", lambda: None)
+        with TestClient(create_app(repo, sys.executable)) as client:
+            yield analysed(client), at
+
+
+def stat(client, a: str, b: str) -> dict:
+    response = client.get("/api/compare/stat", params={"a": a, "b": b})
+    assert response.status_code == 200, response.json()
+    return response.json()
+
+
+def compared(client, base: str, target: str) -> dict:
+    response = client.post("/api/compare", json={"base": base, "target": target})
+    assert response.status_code == 200, response.json()
+    return response.json()
+
+
+def rows(entries: list[dict]) -> dict[str, dict]:
+    """파일트리의 경로 → 행."""
+    found: dict[str, dict] = {}
+    for e in entries:
+        found[e["path"]] = e
+        found.update(rows(e.get("children", [])))
+    return found
+
+
+def test_history_lists_the_commit_graph(history_client):
+    client, at = history_client
+    body = client.get("/api/history").json()
+    order = [at[k] for k in ("topic", "merge", "move", "feature", "edit", "base")]
+    assert (body["git"], body["head"], body["branch"], body["default"]) == (True, at["merge"], "main", at["merge"])
+    assert body["dirty"] is True and body["more"] is False
+    assert [c["hash"] for c in body["commits"]] == order
+    assert body["commits"][1] == {
+        "hash": at["merge"],
+        "parents": [at["move"], at["feature"]],
+        "time": 1_750_014_400,
+        "subject": "쿠폰을 합친다",
+        "refs": ["main"],
+    }
+    assert body["commits"][4]["refs"] == ["v0.1"]
+    page = client.get("/api/history", params={"skip": 1, "limit": 2}).json()
+    assert [c["hash"] for c in page["commits"]] == order[1:3] and page["more"] is True
+    assert client.get("/api/history", params={"skip": 4, "limit": 2}).json()["more"] is False
+
+
+def test_stat_arranges_base_target_and_fork(history_client):
+    client, at = history_client
+    forward = stat(client, at["edit"], at["merge"])
+    assert (forward["base"], forward["target"], forward["fork"]) == (at["edit"], at["merge"], None)
+    assert stat(client, at["merge"], at["edit"]) == forward
+    assert (forward["files"], forward["added"], forward["deleted"]) == (4, 9, 12)
+
+    apart = stat(client, at["merge"], at["topic"])  # 갈라진 두 브랜치. 새 쪽이 대상이다
+    assert (apart["base"], apart["target"], apart["fork"]) == (at["move"], at["topic"], at["move"])
+    assert stat(client, at["topic"], at["merge"]) == apart
+    assert (apart["files"], apart["added"], apart["deleted"]) == (1, 1, 1)
+
+    dirty = stat(client, "worktree", at["merge"])
+    assert (dirty["base"], dirty["target"], dirty["fork"]) == (at["merge"], "worktree", None)
+    assert stat(client, at["merge"], "worktree") == dirty
+    assert (dirty["files"], dirty["added"], dirty["deleted"]) == (2, 7, 0)
+
+    aside = stat(client, at["topic"], "worktree")  # 지금 커밋의 조상이 아닌 커밋과 작업 중인 상태
+    assert (aside["base"], aside["target"], aside["fork"]) == (at["move"], "worktree", at["move"])
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "code"),
+    [("worktree", "worktree", 400), ("main", "worktree", 400), ("--all", "worktree", 400), ("0" * 40, "worktree", 404)],
+)
+def test_stat_of_bad_moments(history_client, a, b, code):
+    client, at = history_client
+    a = at["edit"] if a == b == "edit" else a
+    response = client.get("/api/compare/stat", params={"a": a, "b": b})
+    assert response.status_code == code and "error" in response.json()
+    assert client.get("/api/compare/stat", params={"a": at["edit"], "b": at["edit"]}).status_code == 400
+    assert client.post("/api/compare", json={"base": "worktree", "target": at["edit"]}).status_code == 400
+    assert client.post("/api/compare", json={"base": at["edit"], "target": at["edit"]}).status_code == 400
+    assert client.post("/api/compare", json={"base": "0" * 40, "target": "worktree"}).status_code == 404
+
+
+def test_compare_with_the_worktree_adds_deleted_nodes_edges_and_files(history_client):
+    client, at = history_client
+    counted = stat(client, at["edit"], "worktree")
+    body = compared(client, at["edit"], "worktree")
+    assert (body["base"], body["target"]) == (at["edit"], "worktree")
+    assert body["revision"] == client.get("/api/status").json()["revision"]
+    assert client.get("/api/status").json()["compare"] is None
+
+    files = {f["path"]: f for f in body["files"]}
+    assert len(files) == counted["files"]
+    assert (sum(f["added"] for f in body["files"]), sum(f["deleted"] for f in body["files"])) == (
+        counted["added"],
+        counted["deleted"],
+    )
+    assert files["src/shop/audit.py"] == {
+        "path": "src/shop/audit.py", "old": None, "status": "deleted", "added": 0, "deleted": 8, "test": False,
+    }  # fmt: skip
+    assert files["src/shop/inventory.py"]["old"] == "src/shop/stock.py"
+    assert files["src/shop/notes.py"]["status"] == "added"
+
+    nodes = {n["id"]: n for n in body["graph"]["nodes"]}
+    live = {n["id"] for n in client.get("/api/graph").json()["nodes"]}
+    changes = body["nodes"]
+    assert changes["shop.audit"]["change"] == "deleted" and changes["shop.audit:log"]["change"] == "deleted"
+    assert changes["shop.pricing:tax"] == {"change": "modified", "added": 2, "deleted": 0}
+    assert changes["shop.notes:remind"]["change"] == "added"
+    assert changes["shop.inventory:available"] == {"change": "modified", "added": 1, "deleted": 1}
+    assert "shop.inventory:reserve" not in changes and "shop.stock:reserve" not in nodes
+    assert set(nodes) - live == {id for id, c in changes.items() if c["change"] == "deleted" or c.get("only") == "base"}
+    assert nodes["shop.audit:log"]["path"] == "src/shop/audit.py" and nodes["shop.audit:log"]["range"] == [6, 8]
+    assert all(n["parent"] is None or n["parent"] in nodes for n in nodes.values())
+    top = [id for id, n in nodes.items() if n["parent"] is None and n["kind"] != "external"]
+    assert sum(changes[id]["added"] for id in top if id in changes) == counted["added"]
+
+    edges = {f"{e['source']}|{e['target']}|{e['kind']}" for e in body["graph"]["edges"]}
+    assert set(body["edges"]) <= edges
+    assert body["edges"]["shop.orders:checkout|shop.audit:log|call"] == {"change": "deleted", "before": None}
+    assert body["edges"]["shop.notes:remind|shop.report:render|call"] == {"change": "added", "before": None}
+    assert "shop.orders:checkout|shop.inventory:reserve|call" not in body["edges"]  # 이름만 바뀐 파일의 정의로 가는 선
+
+    tree = rows(body["tree"]["entries"])
+    assert tree["src/shop/audit.py"]["node"] == "shop.audit" and "src/shop/stock.py" not in tree
+    assert set(tree) - set(rows(client.get("/api/tree").json()["entries"])) == {"src/shop/audit.py"}
+    assert body["unused"] == client.get("/api/unused").json()
+    assert compared(client, at["edit"], "worktree") == body
+
+
+def test_file_at_a_compared_commit(history_client):
+    client, at = history_client
+    compared(client, at["edit"], "worktree")
+    deleted = client.get("/api/file", params={"path": "src/shop/audit.py", "at": at["edit"]}).json()
+    assert deleted["text"].startswith("from shop.report import fmt\n")
+    renamed = client.get("/api/file", params={"path": "src/shop/stock.py", "at": at["edit"]}).json()
+    assert "LEVELS.get(item, 0) > 0" in renamed["text"]
+    now = client.get("/api/file", params={"path": PRICING}).json()["text"]
+    then = client.get("/api/file", params={"path": PRICING, "at": at["edit"]}).json()["text"]
+    assert "amount < 0" in now and "amount < 0" not in then
+    assert client.get("/api/file", params={"path": PRICING, "at": "worktree"}).json()["text"] == now
+    assert client.get("/api/file", params={"path": "src/shop/audit.py"}).status_code == 404
+    assert client.get("/api/file", params={"path": "src/shop/notes.py", "at": at["edit"]}).status_code == 404
+    assert client.get("/api/file", params={"path": PRICING, "at": at["topic"]}).status_code == 404  # 비교에 쓰지 않은 커밋
+
+
+def test_file_at_a_commit_dropped_from_memory_is_read_again(history_client):
+    client, at = history_client
+    compared(client, at["base"], "worktree")
+    compared(client, at["edit"], at["move"])
+    assert client.app.state.snapshots.held(at["base"]) is None
+    old = client.get("/api/file", params={"path": PRICING, "at": at["base"]})
+    assert old.status_code == 200 and "legacy_total" in old.json()["text"]
+
+
+def test_compare_of_two_commits_judges_definitions_and_edges(history_client):
+    client, at = history_client
+    counted = stat(client, at["base"], at["edit"])
+    body = compared(client, at["base"], at["edit"])
+    assert (body["base"], body["target"], body["revision"]) == (at["base"], at["edit"], 0)
+    changes = body["nodes"]
+    assert changes["shop.pricing:rounded"]["change"] == "added"
+    assert changes["shop.pricing:legacy_total"] == {"change": "deleted", "added": 0, "deleted": 2, "slot": 17}
+    assert changes["shop.pricing:total"]["change"] == "modified"
+    assert "shop.pricing:tax" not in changes and "shop.pricing:discount" not in changes  # 줄만 밀렸다
+    assert body["edges"]["shop.pricing:total|shop.pricing:tax|call"] == {"change": None, "before": 1}
+    assert body["edges"]["shop.pricing:total|shop.pricing:rounded|call"] == {"change": "added", "before": None}
+    assert body["edges"]["shop.orders:refund|shop.pricing:legacy_total|call"] == {"change": "deleted", "before": None}
+    assert [(f["path"], f["status"]) for f in body["files"]] == [(PRICING, "modified"), ("src/shop/orders.py", "modified")] or [
+        (f["path"], f["status"]) for f in body["files"]
+    ] == [("src/shop/orders.py", "modified"), (PRICING, "modified")]
+    assert (sum(f["added"] for f in body["files"]), sum(f["deleted"] for f in body["files"])) == (
+        counted["added"],
+        counted["deleted"],
+    )
+    ids = {n["id"] for n in body["graph"]["nodes"]}
+    assert {"shop.audit:log", "shop.stock:reserve", "shop.pricing:legacy_total"} <= ids
+    assert "shop.notes:remind" not in ids and "shop.inventory:reserve" not in ids  # 작업 중인 상태에만 있다
+    assert "src/shop/stock.py" in rows(body["tree"]["entries"])
+
+
+def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch):
+    client, at = history_client
+    calls: list[str] = []
+
+    async def generate(system, prompt):
+        calls.append(prompt)
+        return Made(f"요약 {len(calls)}", USED)
+
+    async def unavailable():
+        return None
+
+    monkeypatch.setattr(summary, "generate", generate)
+    monkeypatch.setattr(summary, "explain", generate)
+    monkeypatch.setattr(summary, "unavailable", unavailable)
+    monkeypatch.setattr(client.app.state, "summaries", Summaries(tmp_path / "summaries.db"))
+    past, gone, both = {"node": "shop.audit:log"}, {"node": "shop.pricing:legacy_total"}, {"node": "shop.pricing:tax"}
+
+    client.get("/api/graph")
+    assert client.get("/api/summary", params=past).status_code == 404
+    compared(client, at["base"], at["edit"])  # 대상이 커밋이다. `audit.py`는 그 커밋에 있고 작업 중인 상태에 없다
+    assert client.get("/api/summary", params=past).json()["summary"] is None
+    made = client.post("/api/summary", params=past)
+    assert made.status_code == 200 and made.json()["summary"] == "요약 1"
+    assert "ENTRIES.append(fmt(amount))" in calls[0]
+    assert client.post("/api/summary", params=gone).status_code == 404  # 삭제된 정의는 대상 시점에 없다
+    assert client.post("/api/summary", params=both).json()["summary"] == "요약 2"
+    assert "amount < 0" not in calls[1]  # 작업 중인 상태의 본문이 아니다
+    assert [s["node"] for s in client.get("/api/summaries").json()["summaries"]] == ["shop.audit:log", "shop.pricing:tax"]
+    explained = client.post("/api/explanation", params={"path": "src/shop/audit.py", "start": 6, "end": 8})
+    assert explained.status_code == 200
+    assert len(client.get("/api/explanations", params={"path": "src/shop/audit.py"}).json()["explanations"]) == 1
+
+    client.get("/api/graph")  # 화면이 비교를 끄면 작업 중인 상태의 그래프를 다시 받는다
+    assert client.get("/api/summary", params=past).status_code == 404
+    assert client.get("/api/explanations", params={"path": "src/shop/audit.py"}).status_code == 404
+    assert client.get("/api/summary", params=both).json() == {
+        "summary": "요약 2", "stale": True, "available": True, "reason": None,
+    }  # fmt: skip
+    assert [s["node"] for s in client.get("/api/summaries").json()["summaries"]] == ["shop.pricing:tax"]
+
+    compared(client, at["base"], at["edit"])
+    compared(client, at["edit"], "worktree")  # 대상이 작업 중인 상태인 비교도 작업 중인 상태를 보인다
+    assert client.get("/api/summary", params=past).status_code == 404
+
+
+def test_compare_routes_outside_git(client):
+    assert client.get("/api/history").json() == {
+        "git": False, "head": None, "branch": None, "default": None, "dirty": False, "commits": [], "more": False,
+    }  # fmt: skip
+    assert client.get("/api/compare/stat", params={"a": "worktree", "b": "0" * 40}).status_code == 404
+    assert client.post("/api/compare", json={"base": "0" * 40, "target": "worktree"}).status_code == 404
+    assert client.app.state.snapshots is None
+
+
+@pytest.mark.asyncio
+async def test_compare_task_reports_progress_joins_and_gives_way(history_repo, tmp_path, monkeypatch):
+    import httpx
+
+    repo, at = history_repo
+    monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+    monkeypatch.setattr(summary, "find_cli", lambda: None)
+    app = create_app(repo, sys.executable)
+    release = asyncio.Event()
+    entered: list[str] = []
+    real = snapshot.Snapshots.at
+
+    async def held(self, commit, near, report=lambda progress: None):
+        entered.append(commit)
+        report(api.Progress("resolve", 3, 7))
+        await release.wait()
+        return await real(self, commit, near, report)
+
+    async with app.router.lifespan_context(app):
+        await app.state.running
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+
+            def post(base, target):
+                return asyncio.ensure_future(client.post("/api/compare", json={"base": at[base], "target": target}))
+
+            async def until(count):
+                while len(entered) < count:
+                    await asyncio.sleep(0.01)
+
+            monkeypatch.setattr(snapshot.Snapshots, "at", held)
+            first, same = post("edit", "worktree"), post("edit", "worktree")
+            await until(1)
+            await asyncio.sleep(0.05)
+            assert entered == [at["edit"]]  # 같은 두 시점의 요청은 한 번만 분석한다
+            assert (await client.get("/api/status")).json()["compare"] == {"phase": "resolve", "done": 3, "total": 7}
+            other = post("base", "worktree")
+            await until(2)
+            stopped = [await first, await same]
+            assert [r.status_code for r in stopped] == [409, 409] and "error" in stopped[0].json()
+            assert (await client.get("/api/status")).json()["compare"] is not None  # 뒤의 비교가 돌고 있다
+            release.set()
+            done = await other
+            assert done.status_code == 200 and done.json()["base"] == at["base"]
+            assert (await client.get("/api/status")).json()["compare"] is None
+
+            async def failing(self, commit, near, report=lambda progress: None):
+                raise RuntimeError("분석이 멈췄다")
+
+            monkeypatch.setattr(snapshot.Snapshots, "at", failing)
+            failed = await client.post("/api/compare", json={"base": at["move"], "target": "worktree"})
+            assert failed.status_code == 500 and failed.json() == {"error": "비교하지 못했다: 분석이 멈췄다"}
+            assert (await client.get("/api/status")).json()["compare"] is None
+            monkeypatch.setattr(snapshot.Snapshots, "at", real)
+            again = await client.post("/api/compare", json={"base": at["move"], "target": "worktree"})
+            assert again.status_code == 200
+        folder = app.state.snapshots.directory
+    assert not folder.exists()
+
+
+@pytest.mark.asyncio
+async def test_worktree_compare_waits_for_the_reload(history_repo, tmp_path, monkeypatch):
+    import httpx
+
+    repo, at = history_repo
+    monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+    monkeypatch.setattr(summary, "find_cli", lambda: None)
+    app = create_app(repo, sys.executable)
+    async with app.router.lifespan_context(app):
+        await app.state.running
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            (repo / "src/shop/notes.py").write_text("def later():\n    return 1\n")
+            reloading = asyncio.ensure_future(client.post("/api/reload"))
+            await asyncio.sleep(0)
+            body = (await client.post("/api/compare", json={"base": at["merge"], "target": "worktree"})).json()
+            assert (await reloading).status_code == 200
+            assert body["revision"] == 2 and body["nodes"]["shop.notes:later"]["change"] == "added"
+
+            # 분석한 뒤 바뀐 파일이 있으면 다시 분석한 결과로 견준다.
+            (repo / PRICING).write_text((repo / PRICING).read_text() + "\n\ndef unsaved():\n    return 0\n")
+            (repo / "src/shop/fresh.py").write_text("def new():\n    return 1\n")
+            counted = (await client.get("/api/compare/stat", params={"a": at["merge"], "b": "worktree"})).json()
+            body = (await client.post("/api/compare", json={"base": at["merge"], "target": "worktree"})).json()
+            assert body["revision"] == 3 and (await client.get("/api/status")).json()["revision"] == 3
+            assert body["nodes"]["shop.pricing:unsaved"]["change"] == "added"
+            assert body["nodes"]["shop.fresh:new"] == {"change": "added", "added": 2, "deleted": 0}
+            assert body["nodes"]["shop"]["added"] == counted["added"] == sum(f["added"] for f in body["files"])
+
+            # 다시 분석하지 못하면 앞의 결과로 견주고 바뀐 파일은 파일의 줄 수만 낸다.
+            (repo / PRICING).write_text((repo / PRICING).read_text() + "\n\ndef later():\n    return 0\n")
+
+            async def fail(repo, python, session, **options):
+                raise RuntimeError("분석이 멈췄다")
+
+            monkeypatch.setattr(runner, "refresh", fail)
+            stale = (await client.post("/api/compare", json={"base": at["merge"], "target": "worktree"})).json()
+            assert stale["revision"] == 3 and "shop.pricing:later" not in stale["nodes"]
+            assert stale["nodes"]["shop.pricing"] == {"change": "modified", "added": 10, "deleted": 0}
+            assert "shop.pricing:tax" not in stale["nodes"]

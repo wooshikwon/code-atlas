@@ -8,24 +8,12 @@ from code_atlas import compare as compare_module
 from code_atlas.collect import RepoFiles, SourceFile, is_test_path, module_id
 from code_atlas.compare import Comparison, EdgeChange, NodeChange, compare, definitions
 from code_atlas.extract import extract
+from code_atlas.git import WORKTREE, Changed, Hunk, changed, export, hunks
 from code_atlas.graph import EDGE_GROUPS, build
 from code_atlas.model import Analysis, Edge, Node, SiteRef
 from code_atlas.resolve import Resolution
 
 
-@dataclass
-class Changed:
-    status: str
-    path: str
-    old: str | None = None
-
-
-@dataclass
-class Hunk:
-    old_start: int
-    old_count: int
-    new_start: int
-    new_count: int
 
 
 @dataclass
@@ -476,3 +464,44 @@ def test_module_imports_no_process_server_or_web_layer():
     local = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.level == 1}
     assert not names & {"subprocess", "fastapi", "asyncio"}
     assert local <= {"extract", "model", "unused", "git"}
+
+
+def analysis_of(root: Path) -> tuple[Analysis, dict, dict[str, str]]:
+    """폴더의 파일을 추출해 선 없이 조립한 분석 결과, 경로별 추출 결과, 경로별 본문."""
+    from code_atlas.collect import collect
+    from code_atlas.extract import extract_repo, read_source
+
+    files = collect(root)
+    texts = {f.path: read_source(files, f) for f in files.files}
+    facts = extract_repo(files)
+    analysis = build(files, copy.deepcopy(facts), Resolution([], {}), texts)
+    return analysis, {f.file.path: f for f in facts}, texts
+
+
+def test_history_read_by_git_gives_the_changes_of_the_fixture(history_repo, tmp_path):
+    repo, at = history_repo
+    export(repo, at["base"], tmp_path / "base")
+    base, base_facts, base_texts = analysis_of(tmp_path / "base")
+    target, target_facts, target_texts = analysis_of(repo)
+    files, found = changed(repo, at["base"], WORKTREE), hunks(repo, at["base"], WORKTREE)
+    result = compare(base, base_facts, base_texts, target, target_facts, target_texts, files, found)
+    changes = {id: c.change for id, c in result.node_changes.items()}
+    assert {id: c for id, c in changes.items() if ":" in id} == {
+        "shop.audit:log": "deleted",
+        "shop.coupons:apply": "added",
+        "shop.inventory:available": "modified",
+        "shop.notes:remind": "added",
+        "shop.orders:checkout": "modified",
+        "shop.orders:refund": "modified",
+        "shop.pricing:legacy_total": "deleted",
+        "shop.pricing:rounded": "added",
+        "shop.pricing:tax": "modified",
+        "shop.pricing:total": "modified",
+    }
+    assert "shop.pricing:discount" not in changes and "shop.inventory:reserve" not in changes
+    counted = (sum(h.new_count for own in found.values() for h in own), sum(h.old_count for own in found.values() for h in own))
+    assert (sum(f["added"] for f in result.files), sum(f["deleted"] for f in result.files)) == counted
+    assert (result.node_changes["shop"].added, result.node_changes["shop"].deleted) == counted
+    assert [f["path"] for f in result.files] == [c.path for c in files]
+    renamed = next(f for f in result.files if f["status"] == "renamed")
+    assert (renamed["path"], renamed["old"]) == ("src/shop/inventory.py", "src/shop/stock.py")

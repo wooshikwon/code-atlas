@@ -178,6 +178,12 @@ def commits(root: Path, skip: int, limit: int) -> list[Commit]:
     return found
 
 
+def committed(root: Path, commit: str) -> int | None:
+    """그 커밋을 커밋한 때의 유닉스 시각(초). 커밋이 없으면 None이다."""
+    out = _git(root, "log", "--max-count=1", "--no-show-signature", "--format=%ct", commit, "--")
+    return int(out) if out and out.strip().isdigit() else None
+
+
 def is_ancestor(root: Path, old: str, new: str) -> bool:
     """`old`가 `new`의 조상이거나 같은 커밋이다."""
     return _run(root, "merge-base", "--is-ancestor", old, new) is not None

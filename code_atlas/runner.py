@@ -88,6 +88,11 @@ class Runner:
         self._warm()
         return analyzed
 
+    @property
+    def cache(self) -> Cache | None:
+        """분석 캐시. 첫 분석이 열기 전이거나 열지 못했으면 None이다. 시점 분석이 같은 연결을 나눠 쓴다."""
+        return self._cache
+
     def _report(self, progress: Progress) -> None:
         self.progress = progress
 

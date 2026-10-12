@@ -1,4 +1,5 @@
 import asyncio
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -183,13 +184,20 @@ async def test_leftover_folders_are_removed_on_start_and_close(history_repo, tmp
     first = Snapshots(repo, sys.executable, None, tmp_path / "out")
     left = first.directory / at["edit"] / "src"
     left.mkdir(parents=True)
-    other = tmp_path / "out" / "snapshots" / "0123456789abcdef" / at["edit"]
+    ended = subprocess.Popen([sys.executable, "-c", "pass"])
+    ended.wait()
+    dead = first.directory.parent / str(ended.pid) / at["edit"]
+    dead.mkdir(parents=True)
+    living = first.directory.parent / str(os.getppid()) / at["edit"]  # 같은 레포를 연 다른 서버
+    living.mkdir(parents=True)
+    other = tmp_path / "out" / "snapshots" / "0123456789abcdef" / "1" / at["edit"]
     other.mkdir(parents=True)
     second = Snapshots(repo, sys.executable, None, tmp_path / "out")
-    assert second.directory == first.directory and not left.exists() and other.is_dir()
+    assert second.directory == first.directory and first.directory.name == str(os.getpid())
+    assert not left.exists() and not dead.exists() and living.is_dir() and other.is_dir()
     left.mkdir(parents=True)
     second.close()
-    assert not second.directory.exists() and other.is_dir()
+    assert not second.directory.exists() and living.is_dir() and other.is_dir()
 
 
 @pytest.mark.asyncio
@@ -197,7 +205,7 @@ async def test_default_folder_is_under_the_analysis_cache(history_repo):
     from code_atlas import cache
 
     repo, _ = history_repo
-    assert Snapshots(repo, sys.executable, None).directory.parent == cache.CACHE_DIR / "snapshots"
+    assert Snapshots(repo, sys.executable, None).directory.parent.parent == cache.CACHE_DIR / "snapshots"
 
 
 @pytest.mark.asyncio
