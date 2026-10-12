@@ -566,14 +566,11 @@ const within = (inner, outer) =>
   inner.x >= outer.x - 0.5 && inner.y >= outer.y - 0.5 && inner.x + inner.width <= outer.x + outer.width + 0.5 && inner.y + inner.height <= outer.y + outer.height + 0.5;
 
 const tipText = (page) => page.evaluate(() => document.querySelector(".tooltip")?.textContent ?? "");
-/** 수로 세는 관계의 종류(`graph/names.ts`의 `COUNTED_KINDS`) */
-const COUNTED = ["call", "construct", "inherit"];
+/** 수로 세는 관계의 종류(`graph/names.ts`의 `COUNTED_KINDS`). 실행할 때 그 코드가 실제로 도는 관계다. */
+const COUNTED = ["call", "construct", "pass", "decorate", "inherit", "override"];
 /** 세는 관계가 없는 선에 수 대신 적는 글과 그 순서(`graph/names.ts`의 `ALONE`) */
 const ALONE = [
-  ["pass", "전달에만 쓰임"],
-  ["decorate", "데코레이터에만 쓰임"],
   ["type", "타입에만 쓰임"],
-  ["override", "오버라이드 관계만 있음"],
   ["import", "import 관계만 있음"],
 ];
 /** 원래 선 edges의 종류마다 코드 줄 수 */
@@ -1643,7 +1640,7 @@ async function tips(t, page) {
     await bubbleOver(page, { x: found.at.x, y: found.at.y });
     const rows = await bubbleRows(page);
     t.check(
-      "집계 선에 올리면 말풍선이 출발과 도착, 그 선에 든 호출·생성·상속의 수를 적고 그 셋이 없으면 수 없이 적는다",
+      "집계 선에 올리면 말풍선이 출발과 도착, 그 선에 든 세는 관계의 수를 적고 타입이나 import만 있으면 수 없이 적는다",
       rows.includes(`${title(source)} → ${title(target)} · ${relations}`) && rows.every((row) => new RegExp(` → .+ · ${RELATIONS}$`).test(row)),
       rows.join(" / "),
     );
@@ -6267,13 +6264,13 @@ async function lineBubble(t, page) {
   const drawnLines = await page.evaluate(() => [...document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")].map((edge) => ({ key: edge.dataset.key, sites: Number(edge.dataset.sites) })));
   const wrong = drawnLines.filter((line) => line.sites !== countedSites(tree.origins(line.key)));
   t.check(
-    `처음 화면의 선 ${drawnLines.length}개마다 선의 수가 /api/graph에서 센 호출·생성·상속 수와 같다`,
+    `처음 화면의 선 ${drawnLines.length}개마다 선의 수가 /api/graph에서 센 실행 관계(호출·생성·전달·데코레이터·상속·오버라이드)의 수와 같다`,
     drawnLines.length > 0 && wrong.length === 0,
     wrong.slice(0, 3).map((line) => `${line.key}: 화면 ${line.sites}, 그래프 ${countedSites(tree.origins(line.key))}`).join(" / "),
   );
   const sums = await trunksOf(page, "in");
   t.check(
-    `들어오는 줄기 ${sums.length}개의 합계가 가지의 호출·생성·상속 수를 더한 값이고 0이나 1이면 적지 않는다`,
+    `들어오는 줄기 ${sums.length}개의 합계가 가지의 실행 관계 수를 더한 값이고 0이나 1이면 적지 않는다`,
     sums.every((trunk) => trunk.sum === (trunk.sites >= 2 ? trunk.sites : null)) && sums.every((trunk) => trunk.sites === trunk.branches.reduce((sum, key) => sum + countedSites(tree.origins(key)), 0)),
     sums.filter((trunk) => trunk.sum !== (trunk.sites >= 2 ? trunk.sites : null)).slice(0, 3).map((trunk) => `${trunk.key}: 적힌 수 ${trunk.sum}, 합 ${trunk.sites}`).join(" / "),
   );
@@ -6338,7 +6335,7 @@ async function lineBubble(t, page) {
   await away();
   await settle(page);
   let bare = null;
-  for (const line of (await linesOf(page)).filter((each) => /\|(type|import|pass)$/.test(each.key) && each.key.startsWith(`${FUNCTION}|`))) {
+  for (const line of (await linesOf(page)).filter((each) => /\|(type|import)$/.test(each.key) && each.key.startsWith(`${FUNCTION}|`))) {
     const at = await edgePoint(page, line.key);
     const seen = at === null ? null : await bubbleOver(page, at);
     if (seen !== null && seen.rows.length === 1 && seen.rows[0].key === line.key) {
@@ -8459,7 +8456,7 @@ async function panelHead(t, page) {
     await page.click('.info-row[data-row="out"] .info-more');
     await page.waitForSelector(".info-panel-sites", { timeout: 5_000 }).catch(() => {});
     t.check(
-      "나가는 연결의 그 밖 묶음을 누르면 호출·생성·상속이 아닌 관계의 코드 줄 목록이 열린다",
+      "나가는 연결의 그 밖 묶음을 누르면 타입과 import 관계의 코드 줄 목록이 열린다",
       (await count(page, ".info-panel-site")) === others.rest && (await page.textContent('.info-row[data-row="out"] .info-more')) === others.more,
       `코드 줄 ${await count(page, ".info-panel-site")}개, ${others.more}`,
     );
@@ -8535,7 +8532,7 @@ async function panelHead(t, page) {
   });
   const found = await hittable(page, candidates);
   if (found === null) {
-    t.skip("고른 함수에서 나가는 선을 눌러 도착 노드로 간다", "줄기에 들지 않고 누를 점이 있는 호출·생성·상속 선이 없다");
+    t.skip("고른 함수에서 나가는 선을 눌러 도착 노드로 간다", "줄기에 들지 않고 누를 점이 있는 세는 관계의 선이 없다");
   } else {
     const [, target] = endsOfKey(found.line.key);
     const along = found.line.key.startsWith("agg|") ? crossing(graph, target).into.filter((e) => e.source === FUNCTION) : graph.edges.filter((e) => `${e.source}|${e.target}|${e.kind}` === found.line.key);
