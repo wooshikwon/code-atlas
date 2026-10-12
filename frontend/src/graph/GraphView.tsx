@@ -18,7 +18,6 @@ import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { AtlasNode, Graph } from "../api/types";
 import { useNodeMenu } from "../nav/NodeMenu";
-import { useOpened } from "../panel/opened";
 import { focusOf, type History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { litOf, useAtlas } from "../state/store";
@@ -576,11 +575,6 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return;
     }
     clicked.current = null;
-    if (useOpened.getState().path !== null) {
-      useOpened.getState().close();
-    } else {
-      select(null);
-    }
   };
   /**
    * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 말풍선(`nodeTip`)을 띄운다. 그 위치에서 눌리는 노드면 선의 hover처럼
