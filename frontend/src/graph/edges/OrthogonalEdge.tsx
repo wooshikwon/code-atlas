@@ -1,5 +1,5 @@
 // 배치가 정한 직각 경로를 모서리를 둥글려 그린다. 선 분류는 선 모양과 화살촉으로, 초점은 선의 진하기로 가른다.
-// 강조하는 경로의 걸음은 `data-route`에 걸음 종류를 받아 굵게 그린다.
+// 강조하는 경로의 걸음은 `data-route`에 걸음 종류를 받아 굵게 그리고, 선을 눌러 온 상태에서 지나온 선은 `data-via`를 받아 1px 굵게 그린다.
 // 순환 덮개가 켜진 동안의 순환 선만 critical 색으로 그린다.
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
 import { useMemo, useRef } from "react";
@@ -166,6 +166,7 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
       data-pointed={data.pointed ? "" : undefined}
       data-cycle={data.cycle ? "" : undefined}
       data-route={data.route ?? undefined}
+      data-via={data.via ? "" : undefined}
       style={{ opacity: data.opacity }}
     >
       <path className="edge-hit" d={branch} />

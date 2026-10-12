@@ -46,6 +46,12 @@ export interface AtlasStore {
   error: string | null;
   view: View;
   selection: Selection;
+  /**
+   * 그래프에서 선을 눌러 지금 화면에 왔으면 누른 선의 키(선을 눌러 온 상태). 키가 선의 출발 노드·도착 노드·종류를 담고, 그 선의 어느 쪽
+   * 노드로 왔는지는 selection이 따로 담는다. 정보 패널이 `연결`·`관계` 줄을 보이고 그래프가 그 선을 굵게 그린다.
+   * 선택을 바꾸는 다른 액션이 null로 돌리고, 선택을 그대로 두는 액션(폴더 접기·펴기, 손잡이)은 그대로 둔다.
+   */
+  via: EdgeKey[] | null;
   /** 접은 폴더(패키지 노드 id). 레포를 열면 `startFolds`가 고른 폴더가 접혀 있다. */
   collapsed: Set<string>;
   /**
@@ -62,10 +68,13 @@ export interface AtlasStore {
   theme: Theme;
   history: History;
   finder: Finder;
-  /** 정보 패널의 사각형. null이면 기본 위치(오른쪽 위)다. */
+  /** 사용자가 옮기거나 크기를 바꾼 정보 패널의 사각형. null이면 기본 사각형(`panel/rect.ts`의 `initial`)이다. */
   panel: Rect | null;
   /** 코드 뷰어와 함께 보이는 LLM 요약 칸의 높이를 정보 패널 높이로 나눈 값. null이면 요약 칸이 내용만큼, 패널 높이의 4분의 1까지 쓴다. */
   split: number | null;
+  /** 정보 패널의 "정보" 구역과 "LLM 요약" 구역을 폈는지. 접은 구역은 한 줄 요약만 보인다. */
+  factsOpen: boolean;
+  summaryOpen: boolean;
   legendOpen: boolean;
   minimapOpen: boolean;
   paletteOpen: boolean;
@@ -93,12 +102,12 @@ export interface AtlasStore {
   /**
    * 다시 분석한 결과를 받아 화면 상태를 레포를 처음 연 상태로 되돌린다. 보기 설정(흐름 단계, 테스트 코드, 외부 노드, 자동 요약, 덮개),
    * 선택과 뷰, 탐색 이력, 접은 폴더, 경로 탐색 창과 경로 고정을 되돌리고, 화면 색, 정보 패널의 사각형과 요약 칸 비율,
-   * 미니맵·범례의 접힘은 그대로 둔다.
+   * 정보 패널 구역과 미니맵·범례의 접힘은 그대로 둔다.
    */
   reopen(repo: Repo, graph: Graph, tree: Tree): void;
   /**
-   * 경로 고정 중에는 selectEdge, toggleFolder, openFolder, togglePack, setDepth, enterFunction, expandFunction, open, back, forward, jump,
-   * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다(`barred`). select와 show는
+   * 경로 고정 중에는 selectEdge, toggleFolder, togglePack, setDepth, enterFunction, expandFunction, open, back, forward, jump,
+   * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다(`barred`). select와 show, follow는
    * 강조한 경로 위의 노드를 받으면 finder.focus만 그 노드로 바꾸고, 그 밖의 노드를 받으면 같은 방식으로 막힌다.
    * select(null)은 고정 중에 아무것도 하지 않는다.
    *
@@ -112,8 +121,11 @@ export interface AtlasStore {
   selectEdge(key: EdgeKey): void;
   /** 폴더를 접거나 펼친다. 초점을 둔 노드가 든 폴더를 접거나 초점을 둔 폴더를 펼치면 선택을 푼다. */
   toggleFolder(id: string): void;
-  /** 선이 가리키는 폴더로 간다. 접힌 폴더면 펼치고 선택을 푼다. 달라지는 것이 없으면 이력에 넣지 않는다. */
-  openFolder(id: string): void;
+  /**
+   * 그래프에서 누른 선 keys를 따라 그 선의 한쪽 끝 노드 to로 간다. to가 폴더면 그 폴더를 펼치고 선택을 풀며, 그 밖의 노드면 그 노드를
+   * 고른다(이미 고른 노드여도 선택을 풀지 않는다). 두 경우 모두 누른 선을 via에 담아 이력에 한 단계를 넣는다.
+   */
+  follow(keys: EdgeKey[], to: string): void;
   /** 파일 상자의 손잡이를 눌러 전부 펼침과 펼침을 오간다. 선택과 초점은 바꾸지 않는다. */
   togglePack(id: string): void;
   setDepth(depth: Depth): void;
@@ -155,12 +167,15 @@ export interface AtlasStore {
   setTheme(theme: Theme): void;
   setPanel(rect: Rect | null): void;
   setSplit(split: number | null): void;
+  /** 정보 패널의 "정보" 구역과 "LLM 요약" 구역을 접거나 편다. */
+  toggleFacts(): void;
+  toggleSummary(): void;
   toggleLegend(): void;
   toggleMinimap(): void;
   setPalette(open: boolean): void;
 }
 
-type Ui = Pick<AtlasStore, "panel" | "split" | "legendOpen" | "minimapOpen" | "theme" | "depth" | "autoSummary">;
+type Ui = Pick<AtlasStore, "panel" | "split" | "factsOpen" | "summaryOpen" | "legendOpen" | "minimapOpen" | "theme" | "depth" | "autoSummary">;
 
 const UI_KEY = "code-atlas:ui:v2";
 
@@ -188,6 +203,8 @@ export function parseUi(raw: string | null, theme: Theme): Ui {
       ? { x: saved.panel.x, y: saved.panel.y, width: saved.panel.width, height: saved.panel.height }
       : null,
     split: typeof saved.split === "number" && saved.split > 0 && saved.split < 1 ? saved.split : null,
+    factsOpen: saved.factsOpen !== false,
+    summaryOpen: saved.summaryOpen !== false,
     legendOpen: saved.legendOpen === true,
     minimapOpen: saved.minimapOpen !== false,
     theme: saved.theme === "light" || saved.theme === "dark" ? saved.theme : theme,
@@ -196,8 +213,8 @@ export function parseUi(raw: string | null, theme: Theme): Ui {
   };
 }
 
-function placeOf(state: Pick<AtlasStore, "view" | "selection" | "collapsed" | "unpacked">): Place {
-  return { view: state.view, selection: state.selection, collapsed: [...state.collapsed].sort(), unpacked: [...state.unpacked].sort() };
+function placeOf(state: Pick<AtlasStore, "view" | "selection" | "via" | "collapsed" | "unpacked">): Place {
+  return { view: state.view, selection: state.selection, via: state.via, collapsed: [...state.collapsed].sort(), unpacked: [...state.unpacked].sort() };
 }
 
 /**
@@ -257,9 +274,10 @@ export function barred(): boolean {
   return true;
 }
 
-const START: Pick<AtlasStore, "view" | "selection" | "collapsed" | "unpacked"> = {
+const START: Pick<AtlasStore, "view" | "selection" | "via" | "collapsed" | "unpacked"> = {
   view: { kind: "structure" },
   selection: null,
+  via: null,
   collapsed: new Set(),
   unpacked: new Set(),
 };
@@ -279,9 +297,15 @@ function cover(graph: Graph, toggles: { showTests: boolean; showExternal: boolea
 }
 
 export const useAtlas = create<AtlasStore>()((set, get) => {
-  /** 뷰·선택·접은 폴더·전부 펼친 상자를 바꾸고 바뀐 뒤의 단계를 이력에 넣는다. */
-  const visit = (change: Partial<Pick<AtlasStore, "view" | "selection" | "collapsed" | "unpacked">>) =>
-    set((state) => ({ ...change, history: push(state.history, placeOf({ ...state, ...change })) }));
+  /**
+   * 뷰·선택·지나온 선·접은 폴더·전부 펼친 상자를 바꾸고 바뀐 뒤의 단계를 이력에 넣는다. 선택을 바꾸는 change가 지나온 선을
+   * 주지 않으면 지나온 선을 지운다.
+   */
+  const visit = (change: Partial<Pick<AtlasStore, "view" | "selection" | "via" | "collapsed" | "unpacked">>) =>
+    set((state) => {
+      const next = { ...("selection" in change ? { via: null } : {}), ...change };
+      return { ...next, history: push(state.history, placeOf({ ...state, ...next })) };
+    });
 
   /** 이력의 지금 단계를 화면에 되돌린다. 이력에 새 단계를 넣지 않는다. */
   const restore = (history: History) => {
@@ -289,14 +313,14 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       return;
     }
     const place = history.entries[history.index];
-    set({ history, view: place.view, selection: place.selection, collapsed: new Set(place.collapsed), unpacked: new Set(place.unpacked) });
+    set({ history, view: place.view, selection: place.selection, via: place.via, collapsed: new Set(place.collapsed), unpacked: new Set(place.unpacked) });
   };
 
   /** 화면 설정을 바꾸고 localStorage에 쓴다. */
   const keep = (change: Partial<Ui>) => {
     set(change);
-    const { panel, split, legendOpen, minimapOpen, theme, depth, autoSummary } = get();
-    localStorage.setItem(UI_KEY, JSON.stringify({ panel, split, legendOpen, minimapOpen, theme, depth, autoSummary }));
+    const { panel, split, factsOpen, summaryOpen, legendOpen, minimapOpen, theme, depth, autoSummary } = get();
+    localStorage.setItem(UI_KEY, JSON.stringify({ panel, split, factsOpen, summaryOpen, legendOpen, minimapOpen, theme, depth, autoSummary }));
   };
 
   /** 경로 고정 중에는 액션을 실행하지 않는다. */
@@ -385,6 +409,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     finder: FINDER,
     panel: null,
     split: null,
+    factsOpen: true,
+    summaryOpen: true,
     legendOpen: false,
     minimapOpen: true,
     paletteOpen: false,
@@ -439,13 +465,20 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       })(),
     selectEdge: guarded((key) => visit({ selection: { type: "edge", key, focus: focusOf(get().selection) } })),
     toggleFolder: guarded(toggle),
-    openFolder: guarded((id) => {
-      const { collapsed, selection } = get();
-      if (kindOf(id) !== "package" || (selection === null && !collapsed.has(id))) {
-        return;
-      }
-      visit({ collapsed: new Set([...collapsed].filter((folder) => folder !== id)), selection: null });
-    }),
+    follow: (keys, to) =>
+      focused(to) ||
+      guarded(() => {
+        const kind = kindOf(to);
+        if (kind === undefined) {
+          return;
+        }
+        const via = [...keys].sort();
+        if (kind === "package") {
+          visit({ collapsed: new Set([...get().collapsed].filter((folder) => folder !== to)), selection: null, via });
+        } else {
+          visit({ selection: { type: "node", id: to }, collapsed: revealed(to), via });
+        }
+      })(),
     togglePack: guarded((id) => {
       const unpacked = new Set(get().unpacked);
       if (!unpacked.delete(id)) {
@@ -472,7 +505,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       if (!centered && kind !== "function" && kind !== "method") {
         return;
       }
-      set({ history: from, view: place.view, selection: place.selection, collapsed: new Set(place.collapsed), unpacked: new Set(place.unpacked) });
+      set({ history: from, view: place.view, selection: place.selection, via: place.via, collapsed: new Set(place.collapsed), unpacked: new Set(place.unpacked) });
       if (!centered) {
         enter(id);
       }
@@ -525,6 +558,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     },
     setPanel: (rect) => keep({ panel: rect }),
     setSplit: (split) => keep({ split }),
+    toggleFacts: () => keep({ factsOpen: !get().factsOpen }),
+    toggleSummary: () => keep({ summaryOpen: !get().summaryOpen }),
     toggleLegend: () => keep({ legendOpen: !get().legendOpen }),
     toggleMinimap: () => keep({ minimapOpen: !get().minimapOpen }),
     setPalette: (open) => set({ paletteOpen: open }),

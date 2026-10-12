@@ -18,7 +18,7 @@ import type { AtlasNode, Graph } from "../api/types";
 import { useOpened } from "../panel/opened";
 import { focusOf, type History } from "../state/history";
 import { useOverlay } from "../state/overlay";
-import { chosenOf, litOf, useAtlas } from "../state/store";
+import { litOf, useAtlas } from "../state/store";
 import { makingKey, makingOf, useSummaries } from "../state/summaries";
 import { useAim } from "./aim";
 import { Arranging, keepLayout, watchLayout } from "./arranging";
@@ -36,7 +36,7 @@ import { nodeType, nodeTypes } from "./nodes";
 import { isPack, type PackFlowNode } from "./nodes/PackNode";
 import { cycleLines, cycleMarks, UNUSED_OPACITY, unusedCounts } from "./overlay";
 import type { Lit } from "./route";
-import { drawn, type EdgeKey } from "./scope";
+import { drawn, followed, type EdgeKey } from "./scope";
 import { clipped, nodeTip, packTip, tipOf } from "./tips";
 import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
@@ -208,7 +208,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const select = useAtlas((s) => s.select);
   const selectEdge = useAtlas((s) => s.selectEdge);
   const toggleFolder = useAtlas((s) => s.toggleFolder);
-  const openFolder = useAtlas((s) => s.openFolder);
+  const follow = useAtlas((s) => s.follow);
+  const via = useAtlas((s) => s.via);
   const togglePack = useAtlas((s) => s.togglePack);
   const unpacked = useAtlas((s) => s.unpacked);
   const open = useAtlas((s) => s.open);
@@ -448,20 +449,20 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     if (scene === null || loops === null) {
       return { edges: [], keys: new Set<EdgeKey>() };
     }
-    const edges = drawn(scene.graph, scene.shown, scene.flow, hovered, scene.lit);
+    const all = drawn(scene.graph, scene.shown, scene.flow, hovered, scene.lit);
+    const edges = scene.lit === null && index !== null ? followed(all, index.nodes, via) : all;
     return overlay === "cycles" ? cycleLines(scene.graph, scene.shown, scene.flow, scene.lit, edges, loops) : { edges, keys: new Set<EdgeKey>() };
-  }, [scene, loops, overlay, hovered]);
+  }, [scene, index, loops, overlay, hovered, via]);
   const views = useMemo(
     (): Lines => (scene === null || index === null ? NO_LINES : edgeViews(lines.edges, scene.layout, index.nodes)),
     [scene, index, lines],
   );
-  const chosen = chosenOf({ finder, selection });
   const nameOf = (id: string) => {
     const node = index?.nodes.get(id);
     return node === undefined ? id : titleOf(node);
   };
   /**
-   * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 도착 노드를 고르고 이미 고른 노드면 그대로 둔다. 도착 노드가 폴더면 그 폴더로 간다(`go`). Shift를 누른 채면 그 선을 골라
+   * 선의 hover와 클릭(`aim.tsx`). 선을 누르면 그 선을 따라 도착 노드로 간다(`go`). Shift를 누른 채면 그 선을 골라
    * 정보 패널에 지점 목록을 연다. 경로 고정 중에는 경로의 걸음만 강조하고, 그 밖의 선은 말풍선만 띄운다.
    */
   const aim = useAim({
@@ -474,13 +475,9 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       clicked.current = null;
       return again;
     },
-    pick: (target) => {
+    pick: (target, keys) => {
       clicked.current = null;
-      if (index?.nodes.get(target)?.kind === "package") {
-        go(target);
-      } else if (target !== chosen) {
-        select(target);
-      }
+      go(target, keys);
     },
     open: selectEdge,
   });
@@ -516,19 +513,14 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   };
 
   /**
-   * 선이 가리키는 폴더로 간다. 접힌 폴더면 펼치고 선택을 푼 뒤, 새 배치가 오면 펼친 폴더 영역으로 화면을 옮긴다(`arrive`).
-   * 이미 펼쳐 있고 고른 노드도 없어 배치가 그대로면 바로 옮긴다.
+   * 누른 선 keys를 따라 도착 노드 id로 간다(`follow`). 도착 노드가 폴더면 그 폴더를 펼친 새 배치가 올 때 펼친 폴더 영역으로 화면을
+   * 옮긴다(`arrive`). 그 밖의 노드는 고른 노드로 화면을 옮기는 규칙을 따른다.
    */
-  const go = (id: string) => {
+  const go = (id: string, keys: EdgeKey[]) => {
     const before = useAtlas.getState().history;
-    openFolder(id);
-    if (useAtlas.getState().history !== before) {
+    follow(keys, id);
+    if (index?.nodes.get(id)?.kind === "package" && useAtlas.getState().history !== before) {
       bound.current = id;
-      return;
-    }
-    const box = onScreen.current?.boxes.get(id);
-    if (lit === null && box !== undefined) {
-      arrive(id, box);
     }
   };
 

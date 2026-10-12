@@ -3,7 +3,7 @@ import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { repoFixture, routeFixture } from "./fixture";
 import { flow } from "./flow";
 import { lit, route } from "./route";
-import { arriving, degrees, drawn, neighbors, picked, trunkTarget, type DrawnEdge } from "./scope";
+import { along, arriving, drawn, endsOf, followed, picked, trunkTarget, type DrawnEdge } from "./scope";
 import { hidden, nodeIndex, shown, unitOf } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
@@ -15,45 +15,6 @@ function draw(selection: string | null, collapsed: string[] = [], hover: string 
   const visible = shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), flow: focus, lit: null });
   return new Map(drawn(repoFixture, visible, focus, hover, null).map((e) => [e.key, e]));
 }
-
-describe("degrees", () => {
-  it("노드마다 들어오는 선과 나가는 선을 센다", () => {
-    const result = degrees(repoFixture);
-    expect(result.get("main:helper")).toEqual({ incoming: 3, outgoing: 0 });
-    expect(result.get("pkg.mod:Store.load")).toEqual({ incoming: 2, outgoing: 2 });
-    expect(result.has("scratch:todo")).toBe(false);
-  });
-});
-
-describe("neighbors", () => {
-  const nodes = nodeIndex(repoFixture);
-  const count = (selection: string, collapsed: string[] = []) => neighbors([...draw(selection, collapsed).values()], nodes, selection);
-
-  it("파일 상자는 경계를 넘는 선을 올린 집계 선으로 이어진 상자를 센다", () => {
-    // main은 pkg.mod, cli, common을 쓰고 pkg.mod와 cli가 main을 쓴다. degrees는 import 선 세 개만 센다.
-    expect(count("main")).toEqual({ incoming: 2, outgoing: 3, external: 0 });
-    expect(degrees(repoFixture).get("main")).toEqual({ incoming: 1, outgoing: 3 });
-  });
-
-  it("접힌 폴더 상자는 안에 든 노드의 선을 올려 세고, 상대 상자가 접힌 폴더면 그 폴더를 하나로 센다", () => {
-    expect(count("pkg", ["pkg"])).toEqual({ incoming: 1, outgoing: 2, external: 0 });
-    expect(degrees(repoFixture).has("pkg")).toBe(false);
-    expect(count("main", ["pkg"])).toEqual({ incoming: 2, outgoing: 3, external: 0 });
-    expect(count("common", ["app"])).toEqual({ incoming: 4, outgoing: 0, external: 0 });
-  });
-
-  it("외부 모듈은 쓰는 상자 수에 넣지 않고 따로 센다", () => {
-    const on = { showTests: false, showExternal: true };
-    const hiddenOn = hidden(repoFixture, on);
-    const user = repoFixture.edges.find((e) => e.target === "ext:json")!.source;
-    const box = unitOf(nodes, user);
-    const focus = flow(repoFixture, box, 2, hiddenOn);
-    const visible = shown(repoFixture, { ...on, collapsed: new Set(), flow: focus, lit: null });
-    const withExternal = neighbors(drawn(repoFixture, visible, focus, null, null), nodes, box);
-    expect(withExternal.external).toBe(1);
-    expect(withExternal.outgoing).toBe(count(box).outgoing);
-  });
-});
 
 describe("drawn", () => {
   it("규칙 1: 고른 노드가 없으면 상자 사이의 선을 그리고, 올린 선은 집계 선 하나로 합친다", () => {
@@ -347,5 +308,33 @@ describe("trunkTarget, arriving", () => {
     expect(arriving(repoFixture, closed, null, "common").map((e) => e.source).sort()).toEqual(["app.__init__", "app.web", "cli", "main", "pkg.mod"]);
     expect(drawn(repoFixture, closed, null, null, null).some((e) => e.target === "pkg.util" && e.deferred)).toBe(true);
     expect(arriving(repoFixture, closed, null, "pkg.util").some((e) => e.deferred)).toBe(false);
+  });
+});
+
+describe("along, followed", () => {
+  const nodes = nodeIndex(repoFixture);
+  const call = repoFixture.edges.find((e) => e.source === "main:run" && e.kind === "call")!;
+
+  it("선 키의 출발 노드와 도착 노드를 읽는다", () => {
+    expect(endsOf("agg|main|pkg.mod")).toEqual({ source: "main", target: "pkg.mod" });
+    expect(endsOf(`${call.source}|${call.target}|call`)).toEqual({ source: call.source, target: call.target });
+  });
+
+  it("집계 선 키는 양 끝이 그 키의 양 끝 안에 든 선을 모두 가리키고, 그 밖의 키는 그 선 하나를 가리킨다", () => {
+    const into = repoFixture.edges.filter((e) => along(nodes, ["agg|main|pkg"], e));
+    expect(into.length).toBeGreaterThan(0);
+    expect(into.every((e) => unitOf(nodes, e.source) === "main" && e.target.startsWith("pkg."))).toBe(true);
+    expect(repoFixture.edges.filter((e) => along(nodes, [`${call.source}|${call.target}|call`], e))).toEqual([call]);
+  });
+
+  it("지나온 선에 든 선을 합친 선만 strong에 불투명도 1로 올리고 via 표시를 단다. 접힌 폴더로 들어간 선은 펼친 뒤 갈라진 선이 모두 받는다", () => {
+    const folded = [...draw(null, ["pkg"]).values()];
+    expect(folded.filter((e) => e.via)).toEqual([]);
+    expect(followed(folded, nodes, null)).toBe(folded);
+    const opened = followed([...draw(null).values()], nodes, ["agg|main|pkg"]);
+    const marked = opened.filter((e) => e.via);
+    expect(marked.map((e) => e.key)).toEqual(["agg|main|pkg.mod"]);
+    expect(marked.every((e) => e.tone === "strong" && e.opacity === 1)).toBe(true);
+    expect(opened.filter((e) => !e.via).every((e) => e.tone === "muted" && e.opacity === 0.5)).toBe(true);
   });
 });

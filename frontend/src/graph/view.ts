@@ -48,6 +48,8 @@ export type EdgeView = {
   kinds: Partial<Record<EdgeKind, number>>;
   /** 강조하는 경로의 걸음을 그리는 선이면 그 걸음의 종류 */
   route: StepKind | null;
+  /** 선을 눌러 온 상태에서 지나온 선이다 */
+  via: boolean;
   /** 도착이나 출발이 같은 선과 합류하는 선인지. 함수 안 import 선, 한쪽이 다른 쪽을 품은 선, 실행 선이 없는 이음은 합류하지 않는다. */
   joins: boolean;
   /** 함수 안 import만 합친 선이어서 두 노드 아래로 돌아가는 경로다. 이 경로는 사이에 놓인 상자를 지날 수 있다. */
@@ -320,6 +322,7 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
       sites: edge.weight,
       kinds: edge.kinds,
       route: edge.route,
+      via: edge.via,
       joins,
       below,
       branch: points,

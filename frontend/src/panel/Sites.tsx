@@ -1,13 +1,9 @@
-// 고른 선의 관계가 일어난 지점 목록. 줄기를 골랐으면 출발 노드마다 묶어 보인다. 줄을 누르면 코드 뷰어가 그 줄을 연다.
+// 관계가 일어난 코드 줄 목록. 고른 선, 줄기, "정보" 구역에서 누른 연결의 코드 줄을 묶음마다 보인다. 줄을 누르면 코드 뷰어가 그 줄을 열고,
+// 연 줄을 다시 누르면 닫는다.
 import { useEffect, useState } from "react";
 import { getFile } from "../api/client";
 import type { SiteRef } from "../api/types";
-
-/** 지점 묶음. name이 있으면 묶음 앞에 그 이름을 적는다. */
-export interface SiteGroup {
-  name: string | null;
-  sites: SiteRef[];
-}
+import type { SiteGroup } from "./links";
 
 interface SitesProps {
   groups: SiteGroup[];

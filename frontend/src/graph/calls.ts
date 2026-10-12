@@ -193,6 +193,7 @@ export function callEdges(calls: Calls, center: string, layout: Layout): Lines {
       sites: edge.sites.length,
       kinds: { [edge.kind]: edge.sites.length },
       route: null,
+      via: false,
       joins: true,
       below: false,
       branch: points,
