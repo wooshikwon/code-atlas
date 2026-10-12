@@ -396,7 +396,7 @@ ul {
   min-width: 0;
 }
 
-/* 상단 줄은 뒤로·앞으로 버튼, 진입점 버튼, 탐색 경로를 담은 .toolbar-nav와 필터 버튼, 화면 맞춤, 화면 색, 새로고침 버튼을 담은 .toolbar-tools로 나뉜다.
+/* 상단 줄은 뒤로·앞으로 버튼, 진입점 버튼, 탐색 경로를 담은 .toolbar-nav와 필터 버튼, 새로고침 버튼, 화면 맞춤, 화면 초기화, 화면 색 버튼을 담은 .toolbar-tools로 나뉜다.
    줄 폭이 모자라면 탐색 경로가 줄어든다. 줄 폭에 따라 틈과 진입점 버튼을 줄이므로(아래 @container) 줄을 크기 컨테이너로 두고,
    컨테이너가 만드는 겹침 맥락 안의 필터 창이 정보 패널 위에 그려지게 줄을 메뉴 층에 둔다. */
 .toolbar {
@@ -430,15 +430,20 @@ ul {
   flex: none;
 }
 
-/* 새로고침 버튼. 글자 앞에 새로고침 기호를, 분석 뒤 바뀐 파일 수를 글자 뒤에 적고, 분석하는 동안에는 기호 대신 도는 원을 그린다. */
+/* 새로고침 버튼. 필터 버튼과 같은 크기로 새로고침 기호만 그리고, 분석하는 동안에는 기호 대신 도는 원을 그린다.
+   분석 뒤 바뀐 파일이 있으면 오른쪽 위 모서리에 변경 표시와 같은 6px 점을 critical 색으로 그린다. */
 .toolbar-reload {
   flex: none;
 }
 
 .reload-button {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  width: 28px;
+  height: 22px;
+  padding: 0;
 }
 
 .reload-button[aria-disabled="true"] {
@@ -446,16 +451,14 @@ ul {
   cursor: default;
 }
 
-.toolbar-stale {
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 7px;
-  color: var(--surface);
-  background: var(--changed);
-  font-size: 9px;
-  line-height: 14px;
-  text-align: center;
+.reload-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--critical);
 }
 
 .reload-spin {
@@ -543,9 +546,9 @@ ul {
   display: none;
 }
 
-/* 뷰 이름과 돌아가는 버튼이 탐색 경로의 폭에서 149px를 쓴다(뷰 이름과 그 앞의 틈·여백 67, 버튼과 그 앞의 틈 82). 좁은 상단 줄의 기준 545px에
-   이 폭을 더한 694px보다 줄이 좁으면 뷰 이름을 그리지 않는다. */
-@container toolbar (max-width: 694px) {
+/* 뷰 이름과 돌아가는 버튼이 탐색 경로의 폭에서 149px를 쓴다(뷰 이름과 그 앞의 틈·여백 67, 버튼과 그 앞의 틈 82). 좁은 상단 줄의 기준 566px에
+   이 폭을 더한 715px보다 줄이 좁으면 뷰 이름을 그리지 않는다. */
+@container toolbar (max-width: 715px) {
   .trail-view {
     display: none;
   }
@@ -600,11 +603,12 @@ ul {
   border-left: 1px solid var(--line);
 }
 
-/* 좁은 상단 줄. 줄에 늘 그리는 요소의 폭은 499px다: 양끝 여백 16, 오른쪽 칸의 버튼 네 개와 바뀐 파일 수 270, 뒤로·앞으로 버튼 59,
-   진입점 버튼 57, 세로선과 그 여백 13, 틈 일곱 개 84. 여기에 탐색 경로가 `… >`와 마지막 단계의 글자 서너 자를 적는 46px를 더한
-   545px보다 줄이 좁으면 진입점 버튼은 수를 감추고 세로선을 지우며 틈을 12px에서 4px로 줄인다. 줄인 틈 여섯 개가 48px이고
-   진입점 글자와 화살표, 그 틈이 49px여서 탐색 경로의 폭은 진입점 버튼이 없을 때와 1px 안에서 같다. */
-@container toolbar (max-width: 545px) {
+/* 좁은 상단 줄. 줄에 늘 그리는 요소의 폭은 520px다: 양끝 여백 16, 오른쪽 칸의 버튼 다섯 개 279, 뒤로·앞으로 버튼 59,
+   진입점 버튼 57, 세로선과 그 여백 13, 틈 여덟 개 96. 여기에 탐색 경로가 `… >`와 마지막 단계의 글자 서너 자를 적는 46px를 더한
+   566px보다 줄이 좁으면 진입점 버튼은 수를 감추고 세로선을 지우며 틈을 12px에서 4px로 줄이고, "화면 맞춤"과 "화면 초기화"는
+   앞의 "화면"을 감춰 "맞춤", "초기화"만 적는다. 줄인 틈 일곱 개가 56px이고 진입점 글자와 화살표, 그 틈이 49px여서 탐색 경로의 폭은
+   진입점 버튼이 없을 때보다 좁지 않다. */
+@container toolbar (max-width: 566px) {
   .toolbar-nav,
   .toolbar-tools {
     gap: 4px;
@@ -615,7 +619,8 @@ ul {
     margin-left: -8px;
   }
 
-  .toolbar-entries-count {
+  .toolbar-entries-count,
+  .toolbar-wide {
     display: none;
   }
 
@@ -3236,7 +3241,7 @@ ol.summary-list {
 
 /* 분석 상태 */
 
-/* 새로고침 기호. 분석 뒤 바뀐 파일이 있으면 수정 표시의 색으로 그린다. */
+/* 새로고침 기호 */
 .reload-mark {
   flex: none;
   fill: none;
@@ -3244,10 +3249,6 @@ ol.summary-list {
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-
-.reload-button[data-stale] .reload-mark {
-  stroke: var(--changed);
 }
 
 /* 진행 표시. 분석 결과가 없는 동안 관계 그래프 영역 가운데에 단계의 이름과 가로 막대를 그린다. */

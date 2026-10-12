@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorOn, autoView, bottomSpan, boundsOf, centerOn, fitPadding, frameOn, freeRect } from "./viewport";
+import { anchorOn, autoView, bottomSpan, boundsOf, centerOn, fitPadding, frameOn, freeRect, nearest } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -206,5 +206,22 @@ describe("frameOn", () => {
       y: 300 - 109 * 0.8,
       zoom: 0.8,
     });
+  });
+});
+
+describe("nearest", () => {
+  const box = (x: number, y: number, width: number, height: number) => ({ x, y, width, height });
+
+  it("점을 품은 상자 가운데 가장 작은 상자를 고른다", () => {
+    const boxes: [string, ReturnType<typeof box>][] = [["folder", box(0, 0, 400, 300)], ["file", box(40, 40, 200, 100)], ["far", box(600, 0, 50, 50)]];
+    expect(nearest(boxes, { x: 100, y: 80 })).toBe("file");
+    expect(nearest(boxes, { x: 300, y: 250 })).toBe("folder");
+  });
+
+  it("점을 품은 상자가 없으면 변까지의 거리가 가장 짧은 상자를 고르고, 상자가 없으면 null이다", () => {
+    const boxes: [string, ReturnType<typeof box>][] = [["left", box(0, 0, 100, 100)], ["right", box(300, 0, 100, 100)]];
+    expect(nearest(boxes, { x: 180, y: 50 })).toBe("left");
+    expect(nearest(boxes, { x: 230, y: 400 })).toBe("right");
+    expect(nearest([], { x: 0, y: 0 })).toBeNull();
   });
 });

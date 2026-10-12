@@ -30,6 +30,7 @@ function Toolbar() {
   const back = useAtlas((s) => s.back);
   const forward = useAtlas((s) => s.forward);
   const setTheme = useAtlas((s) => s.setTheme);
+  const resetView = useAtlas((s) => s.resetView);
   const { fit } = useFlight();
 
   /**
@@ -62,13 +63,16 @@ function Toolbar() {
       </div>
       <div className="toolbar-tools">
         <Filters />
-        <button className="toolbar-button" onClick={fitGraph}>
-          화면 맞춤
+        <Reload />
+        <button className="toolbar-button" aria-label="화면 맞춤" onClick={fitGraph}>
+          <span className="toolbar-wide">화면 </span>맞춤
+        </button>
+        <button className="toolbar-button" aria-label="화면 초기화" onClick={resetView} disabled={pin}>
+          <span className="toolbar-wide">화면 </span>초기화
         </button>
         <button className="toolbar-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
           {theme === "light" ? "어두운 화면" : "밝은 화면"}
         </button>
-        <Reload />
       </div>
     </div>
   );
@@ -126,7 +130,7 @@ export function App() {
         onLayoutChanged={main.onLayoutChanged}
       >
         <Panel id="explorer" defaultSize={260} minSize={160} maxSize="40">
-          <FileTree key={epoch} />
+          <FileTree />
         </Panel>
         <Separator className="separator" />
         <Panel id="workspace" minSize="30">
@@ -134,8 +138,8 @@ export function App() {
             <div className="workspace">
               <Toolbar />
               <div className="stage">
-                {opened ? <GraphView key={epoch} /> : <Progress />}
-                {opened && <InfoPanel />}
+                {opened ? <GraphView /> : <Progress />}
+                {opened && <InfoPanel key={epoch} />}
                 <SummaryNotice />
                 <SummaryQueue />
               </div>

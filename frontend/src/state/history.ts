@@ -56,3 +56,21 @@ export function jump(history: History, index: number): History {
   }
   return { entries: history.entries, index };
 }
+
+/**
+ * 모든 단계를 change로 바꾼 이력. 바꾼 뒤에 바로 앞 단계와 같아진 단계는 빼고, 지금 단계의 번호는 빠진 단계만큼 줄인다.
+ */
+export function remap(history: History, change: (place: Place) => Place): History {
+  const entries: Place[] = [];
+  let index = 0;
+  history.entries.forEach((place, at) => {
+    const next = change(place);
+    if (entries.length === 0 || JSON.stringify(entries[entries.length - 1]) !== JSON.stringify(next)) {
+      entries.push(next);
+    }
+    if (at === history.index) {
+      index = entries.length - 1;
+    }
+  });
+  return { entries, index };
+}

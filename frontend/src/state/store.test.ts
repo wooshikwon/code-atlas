@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { node as made, repoFixture, routeFixture } from "../graph/fixture";
-import { back, jump, push, type History, type Place } from "./history";
+import { back, jump, push, remap, type History, type Place } from "./history";
 import { useOverlay } from "./overlay";
-import { barred, chosenOf, litOf, parseUi, pinned, startFolds, undoable, useAtlas, type AtlasStore } from "./store";
+import { barred, chosenOf, litOf, parseUi, pinned, placeIn, startFolds, undoable, useAtlas, type AtlasStore } from "./store";
 
 const [a, b, c] = repoFixture.nodes.filter((n) => n.kind === "function" || n.kind === "method").map((n) => n.id);
 const folder = repoFixture.nodes.find((n) => n.kind === "package")!.id;
@@ -973,57 +973,173 @@ describe("화면 설정", () => {
   });
 });
 
-describe("reopen", () => {
+/** 노드 ids와 그 노드에 닿는 선을 뺀 그래프 */
+const without = (...ids: string[]) => ({
+  nodes: repoFixture.nodes.filter((n) => !ids.includes(n.id)),
+  edges: repoFixture.edges.filter((e) => !ids.includes(e.source) && !ids.includes(e.target)),
+});
+
+describe("placeIn", () => {
+  const place = (extra: Partial<Place>): Place => ({ view: { kind: "structure" }, selection: null, via: null, collapsed: [], unpacked: [], ...extra });
+
+  it("그래프에 있는 노드만 가리키는 단계는 뷰와 선택을 받은 객체 그대로 돌려준다", () => {
+    const before = place({ view: { kind: "function", center: a, expanded: [b] }, selection: { type: "node", id: a }, via: [`${b}|${a}|call`], collapsed: ["pkg"], unpacked: ["main"] });
+    const after = placeIn(before, repoFixture, repoFixture);
+    expect(after).toEqual(before);
+    expect([after.view, after.selection]).toEqual([before.view, before.selection]);
+    expect(after.view).toBe(before.view);
+    expect(after.selection).toBe(before.selection);
+  });
+
+  it("없어진 노드를 접은 폴더와 전부 펼친 상자, 펼친 이웃에서 빼고 앞의 그래프에 없던 폴더를 접어 둔다", () => {
+    const before = place({ view: { kind: "function", center: a, expanded: [b, c] }, collapsed: ["app", "pkg"], unpacked: ["main", "pkg.mod"] });
+    const graph = { nodes: [...without("pkg", "pkg.mod", c).nodes, made("new", "package", null)], edges: [] };
+    expect(placeIn(before, graph, repoFixture)).toEqual(place({ view: { kind: "function", center: a, expanded: [b] }, collapsed: ["app", "new"], unpacked: ["main"] }));
+  });
+
+  it("고른 노드가 없어지면 선택과 지나온 선을 풀고, 가운데 함수가 없어지면 구조 뷰로 돌아간다", () => {
+    const before = place({ view: { kind: "function", center: a, expanded: [] }, selection: { type: "node", id: a }, via: [`${b}|${a}|call`] });
+    expect(placeIn(before, without(a), repoFixture)).toEqual(place({}));
+    const other = place({ view: { kind: "function", center: a, expanded: [] }, selection: { type: "node", id: b } });
+    expect(placeIn(other, without(a), repoFixture)).toEqual(place({ selection: { type: "node", id: b } }));
+  });
+
+  it("고른 선의 끝 노드가 없어지면 초점을 둔 노드를 고르고, 끝 노드가 없어진 지나온 선을 지운다", () => {
+    const before = place({ selection: { type: "edge", key: `${b}|${c}|call`, focus: b }, via: [`${b}|${c}|call`, `agg|main|pkg`] });
+    expect(placeIn(before, without(c), repoFixture)).toEqual(place({ selection: { type: "node", id: b } }));
+    const kept = place({ selection: { type: "node", id: b }, via: [`${b}|${c}|call`, `agg|main|pkg`] });
+    expect(placeIn(kept, without(c), repoFixture)).toEqual(place({ selection: { type: "node", id: b }, via: [`agg|main|pkg`] }));
+  });
+});
+
+describe("remap", () => {
+  it("바꾼 뒤에 앞 단계와 같아진 단계를 빼고 지금 단계의 번호를 맞춘다", () => {
+    const at = (id: string | null): Place => ({ view: { kind: "structure" }, selection: id === null ? null : { type: "node", id }, via: null, collapsed: [], unpacked: [] });
+    const history = { entries: [at(null), at(a), at(b), at(a), at(c)], index: 3 };
+    const dropped = remap(history, (place) => placeIn(place, without(b), repoFixture));
+    expect(dropped.entries.map((place) => place.selection)).toEqual([null, node(a), null, node(a), node(c)]);
+    expect(dropped.index).toBe(3);
+    const merged = remap(history, (place) => placeIn(place, without(a), repoFixture));
+    expect(merged.entries.map((place) => place.selection)).toEqual([null, node(b), null, node(c)]);
+    expect(merged.index).toBe(2);
+  });
+});
+
+describe("refresh", () => {
   const repo = { name: "repo", root: "/repo", source_root: "", python: null, stats: {} } as unknown as NonNullable<AtlasStore["repo"]>;
   const tree = { entries: [] };
 
-  it("보기 설정, 선택과 뷰, 탐색 이력, 접은 폴더, 경로 고정을 레포를 처음 연 상태로 되돌린다", () => {
-    const saved = new Map<string, string>();
-    vi.stubGlobal("localStorage", { setItem: (key: string, value: string) => saved.set(key, value) });
+  it("보기 설정, 선택과 뷰, 탐색 이력, 접은 폴더, 전부 펼친 상자, 전체 맞춤 상태를 그대로 둔다", () => {
+    vi.stubGlobal("localStorage", { setItem: () => undefined });
     store().setDepth(3);
     store().toggleAutoSummary();
     store().toggleTests();
     store().toggleExternal();
+    store().toggleFolder("app");
+    store().togglePack("pkg.mod");
     store().select(a);
     store().enterFunction(b);
+    useOverlay.getState().set("unused");
+    useAtlas.setState({ fitted: true, paletteOpen: true });
+    const before = store();
+    const graph = { ...repoFixture };
+    store().refresh(repo, graph, tree);
+    vi.unstubAllGlobals();
+    const now = store();
+    expect([now.depth, now.autoSummary, now.showTests, now.showExternal, now.fitted, now.paletteOpen]).toEqual([3, true, true, true, true, true]);
+    expect([now.view, now.selection, now.via]).toEqual([before.view, before.selection, before.via]);
+    expect(now.selection).toBe(before.selection);
+    expect([now.collapsed, now.unpacked]).toEqual([new Set(["app"]), new Set(["pkg.mod"])]);
+    expect(now.history).toEqual(before.history);
+    expect(useOverlay.getState().kind).toBe("unused");
+    expect([now.repo, now.graph, now.tree, now.epoch, now.arranged]).toEqual([repo, graph, tree, 1, null]);
+  });
+
+  it("고른 노드가 없어지면 선택만 풀고 접은 폴더와 이력의 나머지 단계는 그대로 둔다", () => {
+    store().toggleFolder("app");
+    store().select(b);
+    store().select(a);
+    store().refresh(repo, without(a), tree);
+    const now = store();
+    expect(now.selection).toBeNull();
+    expect(now.collapsed).toEqual(new Set(["app"]));
+    expect(selected()).toEqual([null, null, node(b), null]);
+    expect(now.history.index).toBe(3);
+    store().back();
+    expect(store().selection).toEqual(node(b));
+  });
+
+  it("함수 시점 뷰의 가운데 함수가 없어지면 구조 뷰로 돌아간다", () => {
+    store().select(b);
+    store().enterFunction(a);
+    store().refresh(repo, without(a), tree);
+    expect([store().view, store().selection]).toEqual([{ kind: "structure" }, null]);
+    store().refresh(repo, repoFixture, tree);
+    store().enterFunction(b);
+    store().refresh(repo, without(a), tree);
+    expect([store().view, store().selection]).toEqual([{ kind: "function", center: b, expanded: [] }, node(b)]);
+  });
+
+  it("경로 고정은 출발과 도착이 남아 있으면 경로를 다시 찾아 유지하고, 없어지면 푼다", () => {
+    const [from, mid, to] = ["flow.walk:begin", "flow.walk:left", "flow.walk:finish"];
+    useAtlas.setState({ graph: routeFixture });
+    store().setEnd("from", from);
+    store().setEnd("to", to);
+    store().pickPath(1);
+    store().select("flow.walk:right");
+    const { aimed } = store().finder;
+    store().refresh(repo, { ...routeFixture }, tree);
+    expect(store().finder).toMatchObject({ from, to, pick: 1, focus: "flow.walk:right", aimed });
+    expect(pinned(store().finder)).toBe(true);
+    store().refresh(repo, { nodes: routeFixture.nodes.filter((n) => n.id !== "flow.walk:right"), edges: routeFixture.edges.filter((e) => e.source !== "flow.walk:right" && e.target !== "flow.walk:right") }, tree);
+    expect(store().finder).toMatchObject({ from, to, focus: from });
+    expect(litOf(store().finder)?.path).toContain(mid);
+    store().refresh(repo, { nodes: routeFixture.nodes.filter((n) => n.id !== to), edges: routeFixture.edges.filter((e) => e.source !== to && e.target !== to) }, tree);
+    expect(store().finder).toMatchObject({ from, to: null, route: null, focus: null });
+    expect(pinned(store().finder)).toBe(false);
+  });
+});
+
+describe("resetView", () => {
+  it("구조 뷰로 돌아가 선택과 지나온 선을 풀고 폴더를 처음 화면처럼 접어 이력에 한 단계를 넣는다", () => {
+    store().toggleTests();
     store().togglePack("pkg.mod");
-    store().toggleFinder();
-    useOverlay.getState().set("unused");
-    useAtlas.setState({ reloadError: "앞의 실패" });
-    store().reopen(repo, repoFixture, tree);
-    vi.unstubAllGlobals();
+    store().follow([`${b}|${c}|call`], c);
+    store().enterFunction(a);
+    const before = store().history;
+    store().resetView();
     const now = store();
-    expect([now.depth, now.autoSummary, now.showTests, now.showExternal]).toEqual([2, false, false, false]);
-    expect([now.view, now.selection]).toEqual([{ kind: "structure" }, null]);
-    expect(now.collapsed).toEqual(new Set(["app", "pkg"]));
-    expect(now.unpacked).toEqual(new Set());
-    expect(now.history).toEqual({ entries: [{ unpacked: [], view: { kind: "structure" }, selection: null, via: null, collapsed: ["app", "pkg"] }], index: 0 });
-    expect([now.arranging, now.arranged]).toEqual([false, null]);
-    expect([now.finder.open, now.finder.from, now.finder.route]).toEqual([false, null, null]);
-    expect([now.repo, now.graph, now.tree, now.epoch]).toEqual([repo, repoFixture, tree, 1]);
-    expect(useOverlay.getState().kind).toBe("cycles");
-    expect(parseUi(saved.get("code-atlas:ui:v2")!, "light")).toMatchObject({ depth: 2, autoSummary: false });
+    expect([now.view, now.selection, now.via]).toEqual([{ kind: "structure" }, null, null]);
+    expect([now.collapsed, now.unpacked]).toEqual([startFolds(repoFixture, true), new Set()]);
+    expect([now.showTests, now.homed]).toEqual([true, 1]);
+    expect(now.history).toMatchObject({ index: before.index + 1, entries: { length: before.entries.length + 1 } });
   });
 
-  it("화면 색, 정보 패널의 사각형과 요약 칸 비율, 미니맵·범례의 접힘은 그대로 둔다", () => {
-    vi.stubGlobal("localStorage", { setItem: () => undefined });
-    vi.stubGlobal("document", { documentElement: { style: { setProperty: () => undefined }, dataset: {} } });
-    store().setTheme("dark");
-    store().setPanel({ x: 10, y: 20, width: 300, height: 200 });
-    store().setSplit(0.4);
-    store().toggleLegend();
-    store().toggleMinimap();
-    store().reopen(repo, repoFixture, tree);
-    vi.unstubAllGlobals();
+  it("뒤로 가면 초기화하기 전의 화면으로 돌아간다", () => {
+    store().toggleFolder("app");
+    store().select(c);
+    const before = store();
+    store().resetView();
+    store().back();
     const now = store();
-    expect([now.theme, now.panel, now.split, now.legendOpen, now.minimapOpen]).toEqual(["dark", { x: 10, y: 20, width: 300, height: 200 }, 0.4, true, false]);
+    expect([now.view, now.selection, now.collapsed, now.unpacked]).toEqual([before.view, before.selection, before.collapsed, before.unpacked]);
+    store().forward();
+    expect([store().selection, store().collapsed]).toEqual([null, startFolds(repoFixture, false)]);
   });
 
-  it("순환 묶음이 없는 그래프를 받으면 분석 표시를 끈다", () => {
-    vi.stubGlobal("localStorage", { setItem: () => undefined });
-    useOverlay.getState().set("unused");
-    store().reopen(repo, { ...repoFixture, edges: [] }, tree);
-    vi.unstubAllGlobals();
-    expect(useOverlay.getState().kind).toBeNull();
+  it("이미 처음 화면이면 이력에 넣지 않고 화면을 다시 맞추게만 한다", () => {
+    const collapsed = startFolds(repoFixture, false);
+    useAtlas.setState({ collapsed, history: { entries: [{ view: { kind: "structure" }, selection: null, via: null, collapsed: [...collapsed].sort(), unpacked: [] }], index: 0 } });
+    store().resetView();
+    expect([store().history.entries.length, store().homed]).toEqual([1, 1]);
+  });
+
+  it("경로 고정 중에는 막힌다", () => {
+    useAtlas.setState({ graph: routeFixture });
+    store().select("flow.walk:probe");
+    store().setEnd("from", "flow.walk:begin");
+    store().setEnd("to", "flow.walk:finish");
+    store().resetView();
+    expect([store().selection, store().homed, store().finder.blocked]).toEqual([node("flow.walk:probe"), 0, 1]);
   });
 });

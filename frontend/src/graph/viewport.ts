@@ -106,6 +106,22 @@ export function anchorOn(before: Point, after: Point, view: View): View {
 }
 
 /**
+ * 상자 boxes 가운데 점 point에 가장 가까운 상자의 id. 점을 품은 상자는 거리가 0이고, 거리가 같으면 넓이가 작은 상자를 고른다.
+ * 상자가 없으면 null이다. 다시 분석한 그래프의 배치가 올 때 화면 가운데의 상자를 찾아 그 상자를 화면의 같은 좌표에 둔다(`anchorOn`).
+ */
+export function nearest(boxes: Iterable<[string, Box]>, point: Point): string | null {
+  let best: { id: string; far: number; size: number } | null = null;
+  for (const [id, box] of boxes) {
+    const far = Math.hypot(Math.max(box.x - point.x, 0, point.x - box.x - box.width), Math.max(box.y - point.y, 0, point.y - box.y - box.height));
+    const size = box.width * box.height;
+    if (best === null || far < best.far || (far === best.far && size < best.size)) {
+      best = { id, far, size };
+    }
+  }
+  return best?.id ?? null;
+}
+
+/**
  * 코드가 스스로 맞추는 화면(레포를 연 처음 화면, 전체 맞춤 상태에서 배치가 바뀐 뒤). whole은 그래프 전체를 free에 맞춘 화면이다.
  * whole의 확대 비율이 `NAMED_ZOOM` 이상이면 whole을 쓴다. 그보다 작으면 이름표가 읽히도록 확대 비율을 `NAMED_ZOOM`에 두고
  * corner(선을 눌러 간 폴더의 왼쪽 위, 그런 폴더가 없으면 그래프의 왼쪽 위)를 free의 왼쪽 위에서 24px 안쪽에 놓는다.

@@ -19,6 +19,8 @@ import { chromium } from "playwright";
 
 const VIEW = { width: 1700, height: 1000 };
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
+/** 화면이 말풍선에 적는 Mod+R의 이름 */
+const MOD_R = MOD === "Meta" ? "⌘R" : "Ctrl+R";
 const OUT = join(homedir(), "data", "code-atlas", "screenshots");
 const FILE = "arbiter";
 const FUNCTION = "arbiter:_rebuild_note_sections";
@@ -34,7 +36,7 @@ const PANEL_MIN = 260;
 const INSET = 20;
 const DARK = { surface: "#1a1a19", ink: "#ffffff" };
 /** 상단 줄 오른쪽 칸의 버튼. 왼쪽부터다. */
-const TOOLS = ["필터", "화면 맞춤", "어두운 화면", "새로고침"];
+const TOOLS = ["필터", "새로고침", "화면 맞춤", "화면 초기화", "어두운 화면"];
 /** 좁은 창에서 상단 줄을 확인할 때 고르는 함수와 창 폭 */
 const NARROW = { owner: "parser.plan", id: "parser.plan:_parse_week_header", label: "_parse_week_header()", widths: [1700, 1440, 1280, 1160, 980, 900, 720] };
 /** 글자 요소가 그리는 글자와 배지. 이 요소의 가운데 점에서는 늘 그 노드가 눌린다. */
@@ -3594,12 +3596,12 @@ async function initFile(t, page) {
   );
 }
 
-/** 상단 줄 오른쪽 칸에 그린 요소의 이름. 버튼은 접근성 이름이나 글자다. */
+/** 상단 줄 오른쪽 칸에 그린 요소의 이름. 버튼은 접근성 이름이나 글자다. 새로고침 버튼이 이름 뒤에 적는 상태는 뺀다. */
 const toolsOf = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll(".toolbar-tools > *")].map((element) => {
       const button = element.matches("button") ? element : element.querySelector("button");
-      return button?.getAttribute("aria-label") ?? element.textContent.trim();
+      return (button?.getAttribute("aria-label") ?? element.textContent.trim()).split(" · ")[0];
     }),
   );
 
@@ -3732,7 +3734,7 @@ async function toolbar(t, page) {
     await page.click(`.tree-row.tree-symbol[data-node="${NARROW.id}"]`);
     await waitSelected(page, NARROW.id);
     if (stale) {
-      await page.waitForSelector(".toolbar-stale", { timeout: 10_000 }).catch(() => {});
+      await page.waitForSelector(".reload-dot", { timeout: 10_000 }).catch(() => {});
     }
     /** 상단 줄 안에 보이는 버튼과 입력 가운데 창이나 상단 줄 밖에 있거나 가운데 점에서 눌리지 않는 것 */
     const read = () =>
@@ -3761,7 +3763,7 @@ async function toolbar(t, page) {
           missed: missed.map(title),
           last: last === null ? null : { text: last.textContent, width: Math.round(last.getBoundingClientRect().width), whole: last.scrollWidth <= last.clientWidth, inside: last.getBoundingClientRect().right <= area.right },
           cut: document.querySelector(".trail-cut")?.dataset.tip ?? null,
-          stale: document.querySelector(".toolbar-stale")?.textContent ?? null,
+          stale: document.querySelector(".reload-dot") !== null,
           gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom, Math.round(stage.width * 0.01)],
           filters: filters === undefined ? null : { inside: filters.left >= area.left && filters.right <= Math.min(area.right, window.innerWidth) && filters.bottom <= window.innerHeight },
         };
@@ -3769,7 +3771,7 @@ async function toolbar(t, page) {
     const bar = await read();
     t.check(
       `${name}: 상단 줄이 한 줄이고 ${["뒤로", "앞으로", ...TOOLS].join("·")} 버튼이 모두 창 안에서 가운데 점으로 눌린다`,
-      bar.height < 40 && bar.fits && bar.missed.length === 0 && ["뒤로", "앞으로", ...TOOLS].every((title) => bar.controls.includes(title)) && (!stale || bar.stale === "1"),
+      bar.height < 40 && bar.fits && bar.missed.length === 0 && ["뒤로", "앞으로", ...TOOLS].every((title) => bar.controls.some((name) => name === title || name.startsWith(`${title} · `))) && bar.stale === stale,
       `상단 줄 ${bar.width}×${bar.height}, 눌리지 않는 요소 ${bar.missed.join("·") || "없음"}, 요소 ${bar.controls.join("·")}`,
     );
     t.check(
@@ -3802,8 +3804,9 @@ async function toolbar(t, page) {
 }
 
 /**
- * 새로고침. 고정 레포의 임시 복사본에서 보기 설정과 선택을 바꾸고 파일에 함수를 더한 뒤 새로고침을 눌러, 분석하는 동안의 표시와
- * 끝난 뒤의 그래프·화면 상태를 본다. 더한 함수는 시나리오가 끝날 때 지운다.
+ * 새로고침과 화면 초기화. 고정 레포의 임시 복사본에서 폴더를 펴고 보기 설정과 선택을 바꾼 뒤 파일에 함수를 더하고 새로고침을 눌러,
+ * 분석하는 동안의 표시와 끝난 뒤에 보던 화면이 그대로인지를 본다. 고른 함수를 지운 뒤, 함수 시점 뷰에서도 새로고침하고,
+ * "화면 초기화"로 레포를 처음 연 화면에 돌아가는지 본다. 더한 함수는 시나리오가 끝날 때 지운다.
  */
 async function reloadScenario(t, page) {
   const repo = await api("/api/repo", reloadUrl);
@@ -3814,26 +3817,56 @@ async function reloadScenario(t, page) {
   const core = join(repo.root, "src", "app", "core.py");
   const source = readFileSync(core, "utf8");
   const [file, target, added] = ["app.core", "app.core:helper", "app.core:added"];
+  const folders = ["app.plugins", "tests"];
   const buttonOf = () =>
     page.evaluate(() => {
       const button = document.querySelector(".reload-button");
-      return { text: button.textContent, busy: button.getAttribute("aria-busy"), spin: button.querySelector(".reload-spin") !== null, stale: button.querySelector(".toolbar-stale")?.textContent ?? null };
+      return { text: button.getAttribute("aria-label"), busy: button.getAttribute("aria-busy"), spin: button.querySelector(".reload-spin") !== null, stale: button.querySelector(".reload-dot") !== null };
     });
   const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
   const numbers = (transform) => (transform.match(/-?[\d.]+/g) ?? []).map(Number);
-  /** 다시 분석하는 요청. 붙잡아 두었다가 release를 부르면 서버로 보낸다. */
+  const corner = (id) => page.evaluate((selector) => (({ left, top }) => [left, top])(document.querySelector(selector).getBoundingClientRect()), node(id));
+  /** 보던 화면. 보기 설정, 선택, 펼친 폴더, 뷰, 확대 비율, 파일트리 검색어다. */
+  const seen = async () => ({
+    ...(await inFilters(page, async () => {
+      const filters = page.locator(".filter-panel");
+      return {
+        tests: await filters.getByLabel("테스트 코드").isChecked(),
+        auto: await filters.getByLabel("자동 요약").isChecked(),
+        depth: await filters.locator('input[type="range"]').inputValue(),
+        overlay: (await overlayOptions(page)).find((option) => option.checked)?.kind,
+      };
+    })),
+    selected: await selectedOf(page),
+    regions: await page.evaluate(() => [...document.querySelectorAll(".react-flow__node > .node-region")].map((region) => region.parentElement.dataset.id).sort()),
+    lineage: await count(page, ".trail-view"),
+    zoom: numbers(await viewport())[2],
+    query: await page.inputValue(".tree-search-input"),
+  });
+  /** 다시 분석하는 요청. 붙잡아 두었다가 continue를 부르면 서버로 보낸다. */
   const posts = [];
   let failing = false;
   await page.route(
     (at) => at.pathname === "/api/reload",
     (route) => (failing ? route.fulfill({ status: 500, json: { error: "다시 분석하지 못했다: 분석이 멈췄다" } }) : void posts.push(route)),
   );
+  /** 새로고침을 누르고 분석이 끝나 새 배치가 멈출 때까지 기다린다. */
+  const refresh = async () => {
+    const revision = (await api("/api/status", reloadUrl)).revision;
+    await page.click(".reload-button");
+    await page.waitForFunction(() => document.querySelector(".reload-button").getAttribute("aria-busy") === "true", null, { timeout: 5_000 }).catch(() => {});
+    await posts.at(-1).continue();
+    await page.waitForFunction(() => document.querySelector(".reload-button").getAttribute("aria-busy") === "false", null, { timeout: 120_000 });
+    await page.waitForSelector(".react-flow__node", { timeout: 60_000 });
+    await settle(page);
+    return (await api("/api/status", reloadUrl)).revision - revision;
+  };
   try {
-    await load(page, reloadUrl);
+    await load(page, reloadUrl, false);
     const home = await viewport();
     const boxed = Object.keys(await flowBoxes(page)).length;
 
-    // 보기 설정, 화면 색, 범례, 선택, 파일트리 검색어를 바꾼다.
+    // 화면 색, 범례, 보기 설정을 바꾸고 폴더 둘을 펴고 함수를 고른 뒤 화면을 확대한다.
     await page.getByRole("button", { name: "어두운 화면" }).click();
     await page.click(".legend-button");
     await inFilters(page, async () => {
@@ -3844,20 +3877,23 @@ async function reloadScenario(t, page) {
       await page.click('.overlay-option[data-kind="unused"]');
     });
     await settle(page);
+    for (const folder of folders) {
+      await openFolder(page, folder);
+    }
     await pickInTree(page, { id: target, owner: file });
     await page.mouse.move(600, 500);
     await page.mouse.wheel(0, -300);
-    await page.fill(".tree-search-input", "help");
+    await settle(page);
     appendFileSync(core, "\n\ndef added():\n    return helper(1)\n");
-    await page.waitForSelector(".reload-button .toolbar-stale", { timeout: 10_000 }).catch(() => {});
+    await page.waitForSelector(".reload-button .reload-dot", { timeout: 10_000 }).catch(() => {});
     await page.mouse.move(0, 0);
     await page.hover(".reload-button");
     await page.waitForSelector(".tooltip", { timeout: 5_000 }).catch(() => {});
     const tip = await page.evaluate(() => document.querySelector(".tooltip")?.textContent.split("\n") ?? []);
     const idle = await buttonOf();
     t.check(
-      "파일을 고치면 새로고침 버튼이 분석 뒤 바뀐 파일 수 1을 적고 말풍선이 그 뜻과 파일 경로를 적는다",
-      idle.text === "새로고침1" && idle.stale === "1" && idle.busy === "false" && tip.at(-2) === "분석 뒤 바뀐 파일 1개" && tip.at(-1) === "  src/app/core.py" && tip[0].startsWith("새로고침"),
+      "파일을 고치면 새로고침 버튼에 점이 생기고 접근성 이름과 말풍선이 바뀐 파일 수를, 말풍선이 파일 경로를 적는다",
+      idle.text === "새로고침 · 분석 뒤 바뀐 파일 1개" && idle.stale && idle.busy === "false" && same(tip, [`분석 뒤 바뀐 파일 1개 · 새로고침 ${MOD_R}`, "  src/app/core.py"]),
       `버튼 "${idle.text}", 말풍선 ${tip.join(" / ")}`,
     );
 
@@ -3867,15 +3903,17 @@ async function reloadScenario(t, page) {
     await page.click(".reload-button", { force: true });
     await page.waitForTimeout(300);
     t.check(
-      "새로고침을 누르면 버튼이 도는 원과 \"분석 중\"으로 바뀌고, 그동안 다시 눌러도 요청을 한 번만 보낸다",
-      busy.text === "분석 중" && busy.spin && busy.busy === "true" && posts.length === 1,
+      "새로고침을 누르면 버튼이 점 없이 도는 원을 그리고 접근성 이름이 \"분석 중\"을 적으며, 그동안 다시 눌러도 요청을 한 번만 보낸다",
+      busy.text === "새로고침 · 분석 중" && busy.spin && !busy.stale && busy.busy === "true" && posts.length === 1,
       `버튼 "${busy.text}", POST ${posts.length}번`,
     );
-    await page.fill(".tree-search-input", "");
     await page.click(`.tree-row.tree-file[data-node="app.models"]`);
     await waitSelected(page, "app.models").catch(() => {});
     t.check("분석하는 동안 앞의 그래프에서 다른 노드를 고를 수 있다", (await selectedOf(page)) === "app.models" && (await count(page, `.tree-row[data-node="${added}"]`)) === 0, `선택 ${await selectedOf(page)}`);
+    await pickInTree(page, { id: target, owner: file });
     await page.fill(".tree-search-input", "help");
+    await settle(page);
+    const before = { ...(await seen()), at: await corner(target), back: await page.getByRole("button", { name: "뒤로" }).isDisabled() };
     await t.shot();
 
     await posts[0].continue();
@@ -3883,66 +3921,109 @@ async function reloadScenario(t, page) {
     await page.waitForSelector(".react-flow__node", { timeout: 60_000 });
     await settle(page);
     const done = await buttonOf();
-    const state = await inFilters(page, async () => {
-      const filters = page.locator(".filter-panel");
-      return {
-        tests: await filters.getByLabel("테스트 코드").isChecked(),
-        auto: await filters.getByLabel("자동 요약").isChecked(),
-        depth: await filters.locator('input[type="range"]').inputValue(),
-        overlay: (await overlayOptions(page)).find((option) => option.checked)?.kind,
-        nodes: await page.evaluate(() => document.querySelector(".filter-stats").textContent),
-      };
-    });
     const fresh = await api("/api/repo", reloadUrl);
+    const stats = await inFilters(page, () => page.evaluate(() => document.querySelector(".filter-stats").textContent));
     t.check(
-      "분석이 끝나면 버튼이 \"새로고침\"으로 돌아오고 바뀐 파일 수가 사라지며 레포 정보가 새 분석 결과의 수를 적는다",
-      done.text === "새로고침" && done.stale === null && fresh.stats.nodes === repo.stats.nodes + 1 && state.nodes.includes(`노드 ${fresh.stats.nodes} `),
-      `버튼 "${done.text}", ${state.nodes}`,
+      "분석이 끝나면 버튼이 새로고침 기호로 돌아오고 점이 사라지며 레포 정보가 새 분석 결과의 수를 적는다",
+      done.text === "새로고침" && !done.stale && !done.spin && fresh.stats.nodes === repo.stats.nodes + 1 && stats.includes(`노드 ${fresh.stats.nodes} `),
+      `버튼 "${done.text}", ${stats}`,
     );
-    const groups = cyclesOf(await api("/api/graph", reloadUrl), hiddenOf(await api("/api/graph", reloadUrl))).groups.length;
+    const after = { ...(await seen()), at: await corner(target), back: await page.getByRole("button", { name: "뒤로" }).isDisabled() };
     t.check(
-      "보기 설정이 기본값으로 돌아온다. 흐름 단계 2, 테스트 코드와 자동 요약 꺼짐, 분석 표시는 레포를 처음 열 때의 규칙이다",
-      !state.tests && !state.auto && state.depth === "2" && state.overlay === (groups > 0 ? "cycles" : "none") && (await count(page, ".filter-count")) === (groups > 0 ? 1 : 0),
-      JSON.stringify(state),
+      "새로고침 뒤에 보기 설정, 고른 함수, 펼친 폴더, 확대 비율, 탐색 이력, 파일트리 검색어가 그대로다",
+      same({ ...after, at: null }, { ...before, at: null }) && after.tests && after.auto && after.depth === "3" && after.overlay === "unused" && after.selected === target && folders.every((folder) => after.regions.includes(folder)) && !after.back,
+      JSON.stringify({ ...after, at: undefined }),
     );
-    const now = numbers(await viewport());
-    const first = numbers(home);
     t.check(
-      "선택, 탐색 경로, 탐색 이력, 파일트리 검색어가 비고 폴더와 파일 상자가 처음 연 상태로 접히며 화면이 그래프 전체에 맞춰진다",
-      (await selectedOf(page)) === null &&
-        (await count(page, ".trail-step")) === 0 &&
-        (await page.getByRole("button", { name: "뒤로" }).isDisabled()) &&
-        (await page.inputValue(".tree-search-input")) === "" &&
-        (await count(page, ".react-flow__node .node-body.node-function")) === 0 &&
-        Object.keys(await flowBoxes(page)).length === boxed &&
-        now.length === 3 && now.every((n, i) => near(n, first[i], 1)),
-      `선택 ${await selectedOf(page)}, 상자 ${Object.keys(await flowBoxes(page)).length}개(처음 ${boxed}개), 화면 ${now.join(", ")}(처음 ${first.join(", ")})`,
+      "고른 함수의 왼쪽 위 모서리가 새로고침 앞과 같은 화면 좌표에 있다",
+      near(after.at[0], before.at[0], 1) && near(after.at[1], before.at[1], 1),
+      `앞 ${before.at.map(Math.round).join(", ")}, 뒤 ${after.at.map(Math.round).join(", ")}`,
     );
     t.check(
       "화면 색과 범례의 펼침은 그대로다",
       (await page.evaluate(() => document.documentElement.dataset.theme)) === "dark" && (await count(page, ".legend")) === 1,
       `화면 색 ${await page.evaluate(() => document.documentElement.dataset.theme)}, 범례 ${await count(page, ".legend")}개`,
     );
-    await page.click(`.tree-row.tree-file[data-node="${file}"]`);
+    await page.fill(".tree-search-input", "");
     await page.waitForSelector(`.tree-row.tree-symbol[data-node="${added}"]`, { timeout: 10_000 }).catch(() => {});
     await page.click(`.tree-row.tree-symbol[data-node="${added}"]`).catch(() => {});
     await waitSelected(page, added).catch(() => {});
     await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 }).catch(() => {});
     await page.waitForTimeout(500);
-    const shownCode = await page.evaluate(() => [...document.querySelectorAll(".info-panel .monaco-editor .view-line")].map((line) => line.textContent.replaceAll("\u00a0", " ")).join("\n"));
+    const shownCode = await page.evaluate(() => [...document.querySelectorAll(".info-panel .monaco-editor .view-line")].map((line) => line.textContent.replaceAll(" ", " ")).join("\n"));
     t.check(
       "새 그래프에 더한 함수 added()가 있고 코드 뷰어가 고친 파일의 본문을 보인다",
       (await selectedOf(page)) === added && shownCode.includes("def added():") && (await count(page, `${node(added)}`)) === 1,
       `선택 ${await selectedOf(page)}`,
     );
 
+    // 고른 함수를 지우고 새로고침하면 선택만 풀린다.
+    const picked = await seen();
+    writeFileSync(core, source);
+    const dropped = await refresh();
+    const gone = await seen();
+    t.check(
+      "고른 함수를 지운 뒤 새로고침하면 선택만 풀리고 보기 설정, 펼친 폴더, 확대 비율은 그대로다",
+      dropped === 1 && gone.selected === null && (await count(page, node(added))) === 0 && same({ ...gone, selected: null }, { ...picked, selected: null }),
+      `판 번호 +${dropped}, ${JSON.stringify(gone)}`,
+    );
+    await page.getByRole("button", { name: "뒤로" }).click();
+    await waitSelected(page, target).catch(() => {});
+    t.check("뒤로 가면 지운 함수를 고르기 전의 선택으로 돌아간다", (await selectedOf(page)) === target, `선택 ${await selectedOf(page)}`);
+
+    // 함수 시점 뷰에서 새로고침하면 그 뷰에 머문다.
+    await clickNode(page, target, 2);
+    await page.waitForSelector(".trail-view", { timeout: 10_000 });
+    await settle(page);
+    const calls = await count(page, ".node-call");
+    appendFileSync(core, "\n\ndef added():\n    return helper(1)\n");
+    const grown = await refresh();
+    await page.waitForSelector(node(added), { timeout: 10_000 }).catch(() => {});
+    await settle(page);
+    const lineage = await seen();
+    t.check(
+      "함수 시점 뷰에서 새로고침하면 그 뷰에 머물고 가운데 함수를 부르는 새 함수가 그려진다",
+      grown === 1 && lineage.lineage === 1 && lineage.selected === target && (await count(page, `${node(added)} .node-call`)) === 1 && lineage.tests && lineage.depth === "3",
+      `판 번호 +${grown}, 뷰 표시 ${lineage.lineage}개, 선택 ${lineage.selected}, 노드 ${calls}개 → ${await count(page, ".node-call")}개`,
+    );
+
+    // 화면 초기화. 테스트 코드 토글을 꺼 처음 화면과 같은 조건에서 본다.
+    await inFilters(page, () => page.locator(".filter-panel").getByLabel("테스트 코드").uncheck());
+    await settle(page);
+    await page.getByRole("button", { name: "화면 초기화" }).click();
+    await page.waitForFunction(() => document.querySelector(".trail-view") === null, null, { timeout: 10_000 }).catch(() => {});
+    await settle(page);
+    const reset = await seen();
+    const now = numbers(await viewport());
+    const first = numbers(home);
+    t.check(
+      "화면 초기화를 누르면 구조 뷰로 돌아가 선택이 풀리고 폴더가 처음 연 상태로 접히며 화면이 레포를 연 처음 화면에 맞춰진다",
+      reset.lineage === 0 && reset.selected === null && (await count(page, ".trail-step")) === 0 && (await count(page, ".react-flow__node .node-body.node-function")) === 0 && Object.keys(await flowBoxes(page)).length === boxed && now.length === 3 && now.every((n, i) => near(n, first[i], 1)),
+      `선택 ${reset.selected}, 상자 ${Object.keys(await flowBoxes(page)).length}개(처음 ${boxed}개), 화면 ${now.join(", ")}(처음 ${first.join(", ")})`,
+    );
+    t.check(
+      "화면 초기화는 보기 설정과 파일트리 검색어, 화면 색을 바꾸지 않는다",
+      !reset.tests && reset.auto && reset.depth === "3" && reset.overlay === "unused" && (await page.evaluate(() => document.documentElement.dataset.theme)) === "dark",
+      JSON.stringify(reset),
+    );
+    await page.getByRole("button", { name: "뒤로" }).click();
+    await page.waitForSelector(".trail-view", { timeout: 10_000 }).catch(() => {});
+    await settle(page);
+    const undone = await seen();
+    t.check("뒤로 가면 초기화하기 전의 함수 시점 뷰와 선택이 되살아난다", undone.lineage === 1 && undone.selected === target, `뷰 표시 ${undone.lineage}개, 선택 ${undone.selected}`);
+    await page.getByRole("button", { name: "앞으로" }).click();
+    await page.waitForFunction(() => document.querySelector(".trail-view") === null, null, { timeout: 10_000 }).catch(() => {});
+    await settle(page);
+
     // 다시 분석하지 못하면 화면을 바꾸지 않고 까닭을 적는다.
+    await page.click(`.tree-row.tree-file[data-node="${file}"]`);
+    await waitSelected(page, file).catch(() => {});
     failing = true;
     t.expected.push("status of 500");
     await page.click(".reload-button");
     await page.waitForSelector(".reload-error", { timeout: 10_000 }).catch(() => {});
     const error = await page.evaluate(() => document.querySelector(".reload-error")?.textContent ?? null);
-    const kept = (await selectedOf(page)) === added && (await buttonOf()).text === "새로고침";
+    const kept = (await selectedOf(page)) === file && (await buttonOf()).text === "새로고침";
     await page.click(".reload-error").catch(() => {});
     t.check(
       "다시 분석하지 못하면 선택과 그래프를 그대로 두고 까닭을 적으며, 그 글을 누르면 닫힌다",
@@ -3995,7 +4076,7 @@ async function reloadKey(t, page) {
   })();
   t.check(
     "새로고침 버튼의 말풍선이 첫 줄에 단축키를 적는다",
-    tip.lines[0] === `새로고침 (${MOD === "Meta" ? "⌘R" : "Ctrl+R"}) · 레포를 다시 분석한다` && !tip.title,
+    tip.lines[0] === `새로고침 ${MOD_R}` && !tip.title,
     tip.lines[0],
   );
 
@@ -4105,7 +4186,7 @@ const waitingOf = (page) =>
       explorer: document.querySelector(".explorer-body").textContent,
       panels: document.querySelectorAll(".info-panel").length,
       bar: { height: Math.round(toolbar.height), fits: document.querySelector(".toolbar").scrollWidth <= document.querySelector(".toolbar").clientWidth },
-      button: { text: button.textContent, busy: button.getAttribute("aria-busy"), spin: button.querySelector(".reload-spin") !== null, mark: button.querySelector(".reload-mark") !== null },
+      button: { text: button.getAttribute("aria-label"), busy: button.getAttribute("aria-busy"), spin: button.querySelector(".reload-spin") !== null, mark: button.querySelector(".reload-mark") !== null },
     };
   });
 
@@ -4160,8 +4241,8 @@ async function progress(t, page) {
   await page.waitForSelector(".tooltip", { timeout: 5_000 }).catch(() => {});
   const tip = await tipText(page);
   t.check(
-    "새로고침 버튼이 도는 원과 단계 이름을 그리고 말풍선이 진행 수를 적으며, 눌러도 요청을 보내지 않는다",
-    resolve.button.text === "호출 대상 확인" && resolve.button.spin && !resolve.button.mark && resolve.button.busy === "true" && tip === "레포를 분석하는 중 · 끝나면 그래프를 그린다\n호출 대상 확인 12,000 / 19,292" && posts.length === 0,
+    "새로고침 버튼이 도는 원을 그리고 접근성 이름이 단계 이름을, 말풍선이 진행 수를 적으며, 눌러도 요청을 보내지 않는다",
+    resolve.button.text === "새로고침 · 호출 대상 확인" && resolve.button.spin && !resolve.button.mark && resolve.button.busy === "true" && tip === "레포를 분석하는 중 · 끝나면 그래프를 그린다\n호출 대상 확인 12,000 / 19,292" && posts.length === 0,
     `버튼 "${resolve.button.text}", 말풍선 ${tip.replaceAll("\n", " / ")}, POST ${posts.length}번`,
   );
   await page.mouse.move(0, 0);
@@ -4245,8 +4326,9 @@ async function progressFailed(t, page) {
 }
 
 /**
- * 변경 감지. 고정 레포의 임시 복사본에서 파일을 내용이 같게 저장하고, 고치고, 새 파일을 만들면서 새로고침 버튼의 기호와 수,
+ * 변경 감지. 고정 레포의 임시 복사본에서 파일을 내용이 같게 저장하고, 고치고, 새 파일을 만들면서 새로고침 버튼의 점과 접근성 이름,
  * 말풍선을 본다. 다시 분석은 버튼을 누를 때만 한다. 고친 파일과 만든 파일은 시나리오가 끝날 때 되돌린다.
+ * 사진은 `hf5-reload-{idle,stale,stale-dark,narrow}.png`에 남긴다.
  */
 async function staleScenario(t, page) {
   const repo = await api("/api/repo", reloadUrl);
@@ -4261,15 +4343,22 @@ async function staleScenario(t, page) {
   const extras = [1, 2, 3, 4, 5, 6].map((n) => join(repo.root, "src", "app", `fresh_${n}.py`));
   const markOf = () =>
     page.evaluate(() => {
+      const rect = (element) => (({ left, top, right, bottom, width, height }) => ({ left, top, right, bottom, width, height }))(element.getBoundingClientRect());
       const button = document.querySelector(".reload-button");
-      const mark = button.querySelector(".reload-mark");
+      const [mark, dot, filter] = [button.querySelector(".reload-mark"), button.querySelector(".reload-dot"), document.querySelector(".filter-button")];
       return {
+        name: button.getAttribute("aria-label"),
         text: button.textContent,
+        title: button.hasAttribute("title"),
         stale: button.hasAttribute("data-stale"),
-        count: button.querySelector(".toolbar-stale")?.textContent ?? null,
+        box: rect(button),
+        filter: rect(filter),
+        border: [getComputedStyle(button).border, getComputedStyle(filter).border],
+        dot: dot === null ? null : { ...rect(dot), color: getComputedStyle(dot).backgroundColor, radius: getComputedStyle(dot).borderRadius },
         stroke: mark === null ? null : getComputedStyle(mark).stroke,
         ink: getComputedStyle(button).color,
         busy: button.getAttribute("aria-busy"),
+        order: [...document.querySelectorAll(".toolbar-tools button")].map((each) => each.getAttribute("aria-label") ?? each.textContent),
       };
     });
   const tipLines = async () => {
@@ -4278,60 +4367,89 @@ async function staleScenario(t, page) {
     await page.waitForSelector(".tooltip", { timeout: 5_000 }).catch(() => {});
     return (await tipText(page)).split("\n");
   };
+  /** 상단 줄의 오른쪽 칸을 찍는다. */
+  const snap = async (name) => {
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(200);
+    const tools = await page.evaluate(() => (({ left, top, width, height }) => ({ x: Math.max(left - 120, 0), y: 0, width: width + 128, height: top + height + 12 }))(document.querySelector(".toolbar-tools").getBoundingClientRect()));
+    await page.screenshot({ path: join(OUT, `hf5-reload-${name}.png`), clip: tools });
+  };
   const revisionOf = async () => (await api("/api/status", reloadUrl)).revision;
   try {
     await load(page, reloadUrl, false);
     const revision = await revisionOf();
     const calm = await markOf();
+    const calmTip = await tipLines();
     t.check(
-      "바뀐 파일이 없으면 새로고침 기호가 버튼 글자와 같은 색이고 수가 없다",
-      calm.text === "새로고침" && !calm.stale && calm.count === null && calm.stroke === calm.ink,
-      `버튼 "${calm.text}", 기호 색 ${calm.stroke}`,
+      "새로고침 버튼은 글자 없이 기호만 그리고 접근성 이름이 있으며 title 속성을 쓰지 않는다",
+      calm.text === "" && calm.name === "새로고침" && !calm.title && calm.stroke === calm.ink,
+      `글자 "${calm.text}", 접근성 이름 "${calm.name}"`,
     );
+    t.check(
+      "새로고침 버튼이 필터 버튼의 바로 오른쪽에 같은 크기와 테두리로 놓이고 그 뒤에 글자 버튼이 온다",
+      same(calm.order, TOOLS) && near(calm.box.width, calm.filter.width, 0.5) && near(calm.box.height, calm.filter.height, 0.5) && near(calm.box.top, calm.filter.top, 0.5) && near(calm.box.left - calm.filter.right, 12, 0.5) && calm.border[0] === calm.border[1],
+      `순서 ${calm.order.join("·")}, 새로고침 ${calm.box.width}×${calm.box.height}, 필터 ${calm.filter.width}×${calm.filter.height}, 틈 ${calm.box.left - calm.filter.right}`,
+    );
+    t.check(
+      "바뀐 파일이 없으면 점이 없고 말풍선이 새로고침과 단축키, 하는 일을 적는다",
+      !calm.stale && calm.dot === null && same(calmTip, [`새로고침 ${MOD_R}`, "레포를 다시 분석해 그래프를 바꾸고 보던 화면은 그대로 둔다"]),
+      calmTip.join(" / "),
+    );
+    await snap("idle");
 
     // 내용이 같은 저장은 표시하지 않는다.
     writeFileSync(core, source);
     await page.waitForTimeout(WITHIN + 1_000);
     const saved = await markOf();
-    t.check("내용이 같게 저장한 파일은 표시하지 않는다", !saved.stale && saved.count === null, `버튼 "${saved.text}"`);
+    t.check("내용이 같게 저장한 파일은 표시하지 않는다", !saved.stale && saved.dot === null, `접근성 이름 "${saved.name}"`);
 
     appendFileSync(core, "\n\ndef added():\n    return helper(1)\n");
     const wrote = Date.now();
     await page.waitForSelector(".reload-button[data-stale]", { timeout: 15_000 }).catch(() => {});
     const took = Date.now() - wrote;
     const one = await markOf();
-    const changed = (await colorOf(page, "--changed")).rgb;
+    const critical = (await colorOf(page, "--critical")).rgb;
     t.check(
-      `파일을 고치면 ${WITHIN / 1000}초 안에 새로고침 기호가 수정 표시의 색이 되고 바뀐 파일 수 1이 붙는다`,
-      one.stale && one.count === "1" && one.text === "새로고침1" && one.stroke === changed && one.stroke !== one.ink && took <= WITHIN,
-      `${(took / 1000).toFixed(2)}초 뒤, 버튼 "${one.text}", 기호 색 ${one.stroke}`,
+      `파일을 고치면 ${WITHIN / 1000}초 안에 버튼의 오른쪽 위 모서리에 critical 색의 6px 점이 생기고 기호의 색은 그대로다`,
+      one.stale && one.dot !== null && one.dot.color === critical && near(one.dot.width, 6, 0.1) && near(one.dot.height, 6, 0.1) && one.dot.radius === "50%" && near((one.dot.left + one.dot.right) / 2, one.box.right, 1) && near((one.dot.top + one.dot.bottom) / 2, one.box.top, 1) && one.text === "" && one.stroke === one.ink && took <= WITHIN,
+      `${(took / 1000).toFixed(2)}초 뒤, 점 ${JSON.stringify(one.dot)}, 버튼 오른쪽 위 ${one.box.right}, ${one.box.top}`,
     );
     const first = await tipLines();
     t.check(
-      "말풍선이 새로고침의 뜻 아래에 바뀐 파일 수와 경로를 적는다",
-      first[0].startsWith("새로고침") && first.at(-2) === "분석 뒤 바뀐 파일 1개" && first.at(-1) === "  src/app/core.py",
-      first.join(" / "),
+      "접근성 이름과 말풍선의 첫 줄이 바뀐 파일 수를 적고 말풍선이 그 아래에 경로를 적는다",
+      one.name === "새로고침 · 분석 뒤 바뀐 파일 1개" && same(first, [`분석 뒤 바뀐 파일 1개 · 새로고침 ${MOD_R}`, "  src/app/core.py"]),
+      `접근성 이름 "${one.name}", 말풍선 ${first.join(" / ")}`,
     );
     await t.shot();
-    await page.screenshot({ path: join(OUT, "s4-u5-stale.png") });
+
+    // 필터의 수와 새로고침의 점이 나란히 있는 화면
+    await inFilters(page, () => page.locator(".filter-panel").locator('input[type="range"]').fill("3"));
+    const both = await page.evaluate(() => {
+      const [count, dot] = [document.querySelector(".filter-count"), document.querySelector(".reload-dot")];
+      return count === null || dot === null ? null : { count: count.textContent, countWidth: count.getBoundingClientRect().width, countColor: getComputedStyle(count).backgroundColor, dotText: dot.textContent, dotWidth: dot.getBoundingClientRect().width, dotColor: getComputedStyle(dot).backgroundColor };
+    });
+    t.check(
+      "필터 버튼의 수는 숫자를 적은 잉크 색 배지이고 새로고침의 점은 숫자 없는 critical 색 점이다",
+      both !== null && both.count === "1" && both.dotText === "" && both.countColor !== both.dotColor && both.countWidth >= 14 && near(both.dotWidth, 6, 0.1),
+      JSON.stringify(both),
+    );
+    await snap("stale");
 
     extras.forEach((path, index) => writeFileSync(path, `def fresh_${index + 1}():\n    return ${index + 1}\n`));
-    await page.waitForFunction(() => document.querySelector(".reload-button .toolbar-stale")?.textContent === "7", null, { timeout: 15_000 }).catch(() => {});
+    await page.waitForFunction(() => document.querySelector(".reload-button").getAttribute("aria-label").includes("7개"), null, { timeout: 15_000 }).catch(() => {});
     const many = await tipLines();
-    const listed = many.slice(many.indexOf("분석 뒤 바뀐 파일 7개") + 1);
     t.check(
-      "바뀐 파일이 일곱 개면 수 7을 적고 말풍선이 경로 다섯 개와 \"외 2개\"를 적는다",
-      (await markOf()).count === "7" && listed.length === 6 && listed.slice(0, 5).every((line) => line.startsWith("  src/app/")) && listed[5] === "  외 2개",
+      "바뀐 파일이 일곱 개여도 점은 하나이고 말풍선이 수 7과 경로 다섯 개, \"외 2개\"를 적는다",
+      (await count(page, ".reload-dot")) === 1 && many[0] === `분석 뒤 바뀐 파일 7개 · 새로고침 ${MOD_R}` && many.length === 7 && many.slice(1, 6).every((line) => line.startsWith("  src/app/")) && many[6] === "  외 2개",
       many.join(" / "),
     );
     await page.getByRole("button", { name: "어두운 화면" }).click();
-    await tipLines();
+    await page.mouse.move(0, 0);
     const night = await markOf();
-    t.check("어두운 화면에서도 기호가 수정 표시의 색이다", night.stroke === (await colorOf(page, "--changed")).rgb && night.stroke !== night.ink, `기호 색 ${night.stroke}`);
-    await page.screenshot({ path: join(OUT, "s4-u5-stale-dark.png") });
+    t.check("어두운 화면에서도 점이 critical 색이다", night.dot?.color === (await colorOf(page, "--critical")).rgb && night.stroke === night.ink, `점 색 ${night.dot?.color}`);
+    await snap("stale-dark");
     await page.setViewportSize({ width: 720, height: 900 });
     await page.waitForTimeout(300);
-    await tipLines();
     const narrow = await page.evaluate(() => {
       const toolbar = document.querySelector(".toolbar");
       const area = toolbar.getBoundingClientRect();
@@ -4343,11 +4461,11 @@ async function staleScenario(t, page) {
       return { height: Math.round(area.height), fits: toolbar.scrollWidth <= toolbar.clientWidth, missed: missed.map((button) => button.getAttribute("aria-label") ?? button.textContent) };
     });
     t.check(
-      "창 폭 720px에서 수를 붙인 채로 상단 줄이 한 줄이고 버튼이 모두 창 안에서 눌린다",
-      narrow.height < 40 && narrow.fits && narrow.missed.length === 0 && (await markOf()).count === "7",
+      "창 폭 720px에서 점을 그린 채로 상단 줄이 한 줄이고 버튼이 모두 창 안에서 눌린다",
+      narrow.height < 40 && narrow.fits && narrow.missed.length === 0 && (await markOf()).dot !== null,
       `상단 줄 높이 ${narrow.height}, 눌리지 않는 버튼 ${narrow.missed.join("·") || "없음"}`,
     );
-    await page.screenshot({ path: join(OUT, "s4-u5-stale-720.png") });
+    await page.screenshot({ path: join(OUT, "hf5-reload-narrow.png"), clip: { x: 0, y: 0, width: 720, height: 60 } });
     await page.setViewportSize(VIEW);
     await page.getByRole("button", { name: "밝은 화면" }).click();
     await page.mouse.move(0, 0);
@@ -4365,13 +4483,12 @@ async function staleScenario(t, page) {
     const done = await markOf();
     const fresh = await api("/api/repo", reloadUrl);
     t.check(
-      "새로고침이 끝나면 기호와 수가 평소 모습으로 돌아가고 판 번호가 1 늘며 그래프에 새 파일과 함수가 있다",
-      done.text === "새로고침" && !done.stale && done.count === null && done.stroke === done.ink && (await revisionOf()) === revision + 1 && fresh.stats.nodes === repo.stats.nodes + 13 && (await count(page, node("app.fresh_1"))) === 1,
-      `버튼 "${done.text}", 판 번호 ${await revisionOf()}, 노드 ${fresh.stats.nodes}개(처음 ${repo.stats.nodes}개)`,
+      "새로고침이 끝나면 점이 사라지고 접근성 이름이 평소대로 돌아가며 판 번호가 1 늘고 그래프에 새 파일과 함수가 있다",
+      done.name === "새로고침" && !done.stale && done.dot === null && (await revisionOf()) === revision + 1 && fresh.stats.nodes === repo.stats.nodes + 13 && (await count(page, node("app.fresh_1"))) === 1,
+      `접근성 이름 "${done.name}", 판 번호 ${await revisionOf()}, 노드 ${fresh.stats.nodes}개(처음 ${repo.stats.nodes}개)`,
     );
     await page.waitForTimeout(WITHIN);
-    t.check("그 뒤로 파일을 고치지 않으면 표시가 다시 뜨지 않는다", !(await markOf()).stale, `버튼 "${(await markOf()).text}"`);
-    await page.screenshot({ path: join(OUT, "s4-u5-reloaded.png") });
+    t.check("그 뒤로 파일을 고치지 않으면 점이 다시 생기지 않는다", !(await markOf()).stale, `접근성 이름 "${(await markOf()).name}"`);
   } finally {
     writeFileSync(core, source);
     extras.forEach((path) => rmSync(path, { force: true }));

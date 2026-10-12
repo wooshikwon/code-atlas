@@ -4,10 +4,10 @@ import { getGraph, getRepo, getTree } from "../api/client";
 import type { AtlasNode, Graph, Repo, Tree } from "../api/types";
 import { cycles } from "../graph/cycles";
 import { lit, route, type Lit, type Route } from "../graph/route";
-import type { EdgeKey } from "../graph/scope";
+import { endsOf, type EdgeKey } from "../graph/scope";
 import { hidden, packedIn } from "../graph/visible";
 import { applyTheme, preferredTheme, type Theme } from "../theme";
-import { back, focusOf, forward, jump, push, type History, type Place, type Selection, type View } from "./history";
+import { back, focusOf, forward, jump, push, remap, type History, type Place, type Selection, type View } from "./history";
 import { useOverlay } from "./overlay";
 
 export type { Place, Selection, View } from "./history";
@@ -83,8 +83,10 @@ export interface AtlasStore {
   reloading: boolean;
   /** 마지막 새로고침이 실패한 까닭. 실패하지 않았으면 null이다. */
   reloadError: string | null;
-  /** 레포를 다시 연 횟수. 파일트리와 그래프가 이 값이 바뀌면 처음 상태로 다시 그린다. */
+  /** 다시 분석한 결과를 받은 횟수. 정보 패널이 이 값이 바뀌면 보이던 노드의 본문과 요약을 다시 받는다. */
   epoch: number;
+  /** 화면을 초기화한 횟수(`resetView`). 구조 뷰가 이 값이 늘 때마다 화면을 레포를 연 처음 화면처럼 맞춘다. */
+  homed: number;
   /** 배치 계산이 펼치기·접기의 움직임 시간을 넘겨 도는 중이다(`graph/arranging.tsx`). 그동안 그래프는 앞의 배치를 그대로 그린다. */
   arranging: boolean;
   /** 화면에 그린 배치를 계산하기 시작한 때의 탐색 이력. 그린 배치가 없으면 null이다. */
@@ -101,14 +103,18 @@ export interface AtlasStore {
   /** 레포·그래프·파일트리를 받는다. 받지 못하면 까닭을 error에 적는다. */
   load(): Promise<void>;
   /**
-   * 다시 분석한 결과를 받아 화면 상태를 레포를 처음 연 상태로 되돌린다. 보기 설정(흐름 단계, 테스트 코드, 외부 노드, 자동 요약, 분석 표시),
-   * 선택과 뷰, 탐색 이력, 접은 폴더, 경로 탐색 창과 경로 고정을 되돌리고, 화면 색, 정보 패널의 사각형과 요약 칸 비율,
-   * 정보 패널 구역과 미니맵·범례의 접힘은 그대로 둔다.
+   * 다시 분석한 결과를 받는다. 보기 설정과 화면 상태는 그대로 두고, 뷰·선택·지나온 선·접은 폴더·전부 펼친 상자와 탐색 이력의 모든 단계를
+   * 새 그래프에 맞춘다(`placeIn`). 경로 탐색 창의 출발과 도착은 새 그래프에 없으면 비우고, 두 칸이 차 있으면 경로를 다시 찾는다.
    */
-  reopen(repo: Repo, graph: Graph, tree: Tree): void;
+  refresh(repo: Repo, graph: Graph, tree: Tree): void;
+  /**
+   * 화면을 레포를 처음 연 상태로 되돌린다. 구조 뷰로 돌아가 선택과 지나온 선을 풀고, 폴더를 처음 화면처럼 접고(`startFolds`), 전부 펼친
+   * 상자를 비운 단계를 이력에 넣는다. 보기 설정은 그대로 둔다. 경로 고정 중에는 막힌다.
+   */
+  resetView(): void;
   /**
    * 경로 고정 중에는 selectEdge, toggleFolder, togglePack, setDepth, enterFunction, expandFunction, open, back, forward, jump,
-   * toggleTests, toggleExternal이 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다(`barred`). select와 show, follow는
+   * toggleTests, toggleExternal, resetView가 상태를 바꾸지 않고 finder.blocked를 1 늘리며 경로 탐색 창을 편다(`barred`). select와 show, follow는
    * 강조한 경로 위의 노드를 받으면 finder.focus만 그 노드로 바꾸고, 그 밖의 노드를 받으면 같은 방식으로 막힌다.
    * select(null)과 show(null)은 고정 중에 아무것도 하지 않는다.
    *
@@ -240,6 +246,44 @@ export function startFolds(graph: Graph, showTests: boolean): Set<string> {
     folds.delete(layer[0].id);
   }
   return folds;
+}
+
+/**
+ * 탐색 이력의 단계 place를 다시 분석한 그래프 graph에 맞춘다. before는 앞의 그래프다. graph에 없는 노드는 접은 폴더와 전부 펼친 상자에서
+ * 빼고, before에 없던 폴더는 접어 둔다. 고른 노드가 없으면 선택을 풀고, 고른 선의 끝 노드가 없으면 초점을 둔 노드를 고른다.
+ * 선택이 바뀌었거나 끝 노드가 없는 지나온 선은 지운다. 함수 시점 뷰의 가운데 함수가 없으면 구조 뷰로 돌아간다.
+ * 바뀌지 않은 뷰와 선택은 받은 객체 그대로 돌려준다.
+ */
+export function placeIn(place: Place, graph: Graph, before: Graph | null): Place {
+  const ids = new Set(graph.nodes.map((n) => n.id));
+  const known = new Set(before?.nodes.map((n) => n.id));
+  const drawn = (key: EdgeKey) => ids.has(endsOf(key).source) && ids.has(endsOf(key).target);
+  const added = before === null ? [] : graph.nodes.filter((n) => n.kind === "package" && !known.has(n.id)).map((n) => n.id);
+
+  let view = place.view;
+  if (view.kind === "function") {
+    const expanded = view.expanded.filter((id) => ids.has(id));
+    view = !ids.has(view.center) ? { kind: "structure" } : expanded.length === view.expanded.length ? view : { ...view, expanded };
+  }
+  let selection = place.selection;
+  if (selection?.type === "node" && !ids.has(selection.id)) {
+    selection = null;
+  } else if (selection?.type === "edge") {
+    const focus = selection.focus !== null && ids.has(selection.focus) ? selection.focus : null;
+    if (!drawn(selection.key)) {
+      selection = focus === null ? null : { type: "node", id: focus };
+    } else if (focus !== selection.focus) {
+      selection = { ...selection, focus };
+    }
+  }
+  const via = selection === place.selection && place.via !== null ? place.via.filter(drawn) : [];
+  return {
+    view,
+    selection,
+    via: via.length === 0 ? null : via,
+    collapsed: [...place.collapsed.filter((id) => ids.has(id)), ...added].sort(),
+    unpacked: place.unpacked.filter((id) => ids.has(id)),
+  };
 }
 
 /** 경로 고정 상태인지. 찾은 경로가 하나라도 있으면 고정이다. */
@@ -439,6 +483,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     reloading: false,
     reloadError: null,
     epoch: 0,
+    homed: 0,
     arranging: false,
     arranged: null,
     fitted: false,
@@ -455,11 +500,41 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
           cover(graph, get());
         })
         .catch((caught: unknown) => set({ error: caught instanceof Error ? caught.message : String(caught) })),
-    reopen: (repo, graph, tree) => {
-      set({ ...opened(repo, graph, tree, false), showTests: false, showExternal: false, finder: FINDER, paletteOpen: false, epoch: get().epoch + 1 });
-      keep({ depth: 2, autoSummary: false });
-      cover(graph, get());
-    },
+    refresh: (repo, graph, tree) =>
+      set((state) => {
+        const fit = (place: Place) => placeIn(place, graph, state.graph);
+        const { view, selection, via, collapsed, unpacked } = fit(placeOf(state));
+        const toggles = { showTests: state.showTests, showExternal: state.showExternal };
+        const has = (id: string | null) => (id !== null && graph.nodes.some((n) => n.id === id) ? id : null);
+        const [from, to] = [has(state.finder.from), has(state.finder.to)];
+        const found = from !== null && to !== null ? route(graph, from, to, hidden(graph, toggles)) : null;
+        const pick = found !== null && state.finder.pick < found.paths.length ? state.finder.pick : 0;
+        const path = found?.paths[pick];
+        const focus = state.finder.focus !== null && path?.includes(state.finder.focus) === true ? state.finder.focus : (path?.[0] ?? null);
+        return {
+          repo,
+          graph,
+          tree,
+          error: null,
+          view,
+          selection,
+          via,
+          collapsed: new Set(collapsed),
+          unpacked: unpackedFor({ graph, ...toggles, selection, unpacked: new Set(unpacked) }),
+          history: remap(state.history, fit),
+          finder: { ...state.finder, from, to, route: found, pick, focus },
+          arranged: null,
+          epoch: state.epoch + 1,
+        };
+      }),
+    resetView: guarded(() => {
+      const { graph, showTests } = get();
+      if (graph === null) {
+        return;
+      }
+      visit({ view: { kind: "structure" }, selection: null, collapsed: startFolds(graph, showTests), unpacked: new Set() });
+      set((state) => ({ homed: state.homed + 1 }));
+    }),
 
     select: (id) =>
       focused(id) ||

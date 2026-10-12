@@ -1,6 +1,7 @@
 // 켠 분석 표시와 미사용 후보. 탐색 이력과 무관하므로 화면 상태 저장소와 따로 두고, 켠 분석 표시는 저장하지 않는다.
 import { create } from "zustand";
 import { getUnused } from "../api/client";
+import type { Unused } from "../api/types";
 
 export type OverlayKind = "cycles" | "unused";
 
@@ -13,19 +14,19 @@ export interface OverlayStore {
   definitions: number;
   /** 미사용 후보를 받는다. 받지 못하면 직전 값을 그대로 둔다. */
   load(): void;
+  /** 받은 미사용 후보를 담는다. */
+  mark(unused: Unused): void;
   /** 분석 표시를 켜거나 바꾼다. null이면 끈다. */
   set(kind: OverlayKind | null): void;
 }
 
-export const useOverlay = create<OverlayStore>()((put) => ({
+export const useOverlay = create<OverlayStore>()((put, get) => ({
   kind: null,
   unused: new Set(),
   definitions: 0,
   load: () => {
-    getUnused().then(
-      (unused) => put({ unused: new Set(unused.candidates), definitions: unused.definitions }),
-      () => undefined,
-    );
+    getUnused().then(get().mark, () => undefined);
   },
+  mark: (unused) => put({ unused: new Set(unused.candidates), definitions: unused.definitions }),
   set: (kind) => put({ kind }),
 }));
