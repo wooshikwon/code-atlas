@@ -784,6 +784,16 @@ async def unavailable() -> str | None:
     return note
 
 
+async def answering() -> tuple[bool, float, str]:
+    """`claude -p`에 한 낱말을 답하게 해 응답이 오는지 본다. 응답이 왔는지, 걸린 초, 오지 않은 까닭을 낸다."""
+    started = time.monotonic()
+    try:
+        await _ask("한 낱말로만 답한다.", "'예'라고 답한다.")
+    except SummaryError as exc:
+        return False, round(time.monotonic() - started, 2), str(exc)
+    return True, round(time.monotonic() - started, 2), ""
+
+
 def usage_of(body: object) -> Usage | None:
     """CLI 응답의 `usage`에서 읽은 토큰 수. 네 값 가운데 하나라도 정수로 적혀 있지 않으면 None이다."""
     usage = body.get("usage") if isinstance(body, dict) else None

@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .collect import disk_path
+
 if TYPE_CHECKING:
     from .settings import Settings
 
@@ -218,8 +220,9 @@ def _find(
 ) -> Found:
     """도구 하나를 찾는다. 세 도구가 모두 이 함수를 지난다.
 
-    메모리에 통과한 값이 있고 그 파일의 네 값이 그대로면 그 값을 낸다. 아니면 후보를 차례로 실행해 처음 통과한
-    것을 쓰고, 그 뒤 후보는 만들지도 실행하지도 않는다. `finish`는 통과한 결과를 메모리에 두기 전에 한 번 부른다.
+    메모리에 통과한 값이 있고 그 파일의 네 값이 그대로면 그 값을 낸다. `given`은 메모리의 값을 찾을 때 준 값이나
+    그때 통과한 경로와 같아야 한다. 아니면 후보를 차례로 실행해 처음 통과한 것을 쓰고, 그 뒤 후보는 만들지도
+    실행하지도 않는다. `finish`는 통과한 결과를 메모리에 두기 전에 한 번 부른다.
     """
     key = (tool.name, repo)
     with _guard:
@@ -228,7 +231,7 @@ def _find(
         kept = _memory.get(key)
         if kept is not None:
             found, stamp, asked = kept
-            if asked == given and found.path is not None and _stamp(found.path) == stamp:
+            if given in (asked, found.path) and _stamp(found.path) == stamp:
                 return found
             _memory.pop(key, None)
         found = Found(tool.name, None, None, None, [])
@@ -442,7 +445,7 @@ def python(repo: Path, given: str | None = None, settings: Settings | None = Non
     확인을 통과하지 못하면 다른 출처로 가지 않는다.
     """
     _use(settings)
-    root = Path(repo).resolve()
+    root = disk_path(repo)
 
     def candidates() -> Iterator[_Candidate]:
         if given is not None:
@@ -456,6 +459,11 @@ def python(repo: Path, given: str | None = None, settings: Settings | None = Non
         yield from _managed(root)
 
     return _find(PYTHON, candidates, repo=str(root), given=given)
+
+
+def attempt(tool: str, path: str) -> Attempt:
+    """사용자가 직접 고른 `claude`·`git` 실행 파일 하나를 확인 명령으로 실행한 기록."""
+    return _try({CLAUDE.name: CLAUDE, GIT.name: GIT}[tool], SAVED, os.path.abspath(os.path.expanduser(path)), "/")[0]
 
 
 def probe(python: str) -> dict | None:

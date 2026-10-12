@@ -6,8 +6,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
-from code_atlas import tools
+from code_atlas import shellenv, summary, tools
+from code_atlas.api import create_app
+from code_atlas.settings import Settings
 from code_atlas.tools import ENV, KNOWN, SAVED, Attempt
 
 VERSION = 'if [ "$1" = "--version" ]; then echo "9.8.7 (가짜)"; exit 0; fi\n'
@@ -354,3 +357,69 @@ def test_interpreters_lists_what_path_and_the_managers_hold(machine, tmp_path, m
     ]
     assert all(f.tool == "python" and f.venv and f.version and f.attempts[0].ok for f in found)
     assert found[0].prefix == str(tmp_path / "pyenv" / "versions" / "3.12.4")
+
+
+@pytest.fixture
+def served(machine, tmp_path, monkeypatch):
+    """연 레포 없이 뜬 서버와 그 서버의 설정 파일."""
+    monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+    settings = Settings(tmp_path / "config" / "settings.json")
+    with TestClient(create_app(settings=settings)) as client:
+        yield client, settings
+
+
+def test_tools_route_gives_what_was_found_and_check_looks_again(served, machine, monkeypatch):
+    client, _ = served
+    on_path, known = machine
+    git = script(on_path / "git", VERSION)
+    monkeypatch.setattr(shellenv, "last", shellenv.ShellEnv("/bin/zsh", True, "", 1.5, {"PATH": "/x"}))
+
+    found = client.get("/api/tools").json()
+    assert found["shell"] == {"shell": "/bin/zsh", "ok": True, "detail": "", "seconds": 1.5}
+    assert (found["git"]["path"], found["git"]["source"], found["git"]["version"]) == (git, ENV, "9.8.7")
+    assert found["claude"]["path"] is None and found["claude"]["attempts"][0]["detail"] == "없는 파일"
+    assert found["python"] is None  # 연 레포가 없다
+
+    cli = script(known / "claude", VERSION + LOGGED_OUT)
+    assert client.get("/api/tools").json()["git"]["path"] == git and len(runs(git)) == 1
+    found = client.post("/api/tools/check").json()
+    assert (found["claude"]["path"], found["claude"]["note"]) == (cli, "Claude Code에 로그인돼 있지 않다")
+    assert len(runs(git)) == 2
+
+
+def test_a_chosen_tool_is_saved_only_when_it_passes_and_is_forgotten_on_delete(served, machine, tmp_path):
+    client, settings = served
+    on_path, _ = machine
+    on_path_git = script(on_path / "git", VERSION)
+    chosen = script(tmp_path / "chosen" / "git", VERSION.replace("9.8.7", "1.2.3"))
+    broken = script(tmp_path / "broken" / "git", "exit 2\n")
+
+    refused = client.put("/api/tools/git", json={"path": broken})
+    assert refused.status_code == 400 and settings.tool("git") is None
+    assert refused.json()["attempt"] == {"source": SAVED, "path": broken, "ok": False, "detail": "종료 코드 2"}
+    assert client.put("/api/tools/python", json={"path": chosen}).status_code == 404
+
+    saved = client.put("/api/tools/git", json={"path": chosen}).json()
+    assert (saved["path"], saved["source"], saved["version"]) == (chosen, SAVED, "1.2.3")
+    assert settings.tool("git") == chosen and tools.git().path == chosen
+
+    found = client.delete("/api/tools/git").json()
+    assert (found["path"], found["source"]) == (on_path_git, ENV) and settings.tool("git") is None
+
+
+def test_interpreters_route_and_the_answer_check(served, machine, tmp_path, monkeypatch):
+    client, _ = served
+    on_path, _ = machine
+    held = Path(make_venv(tmp_path / "held")).parent
+    monkeypatch.setenv("PATH", f"{on_path}:{held}")
+    found = client.get("/api/interpreters").json()["found"]
+    assert [(f["path"], f["venv"]) for f in found] == [(str(held / "python3"), True)]
+
+    assert client.post("/api/tools/claude/ask").json()["detail"] == "Claude Code CLI를 찾지 못했다"
+    answer = """printf '%s\\n' '{"is_error": false, "result": "예"}'\n"""
+    cli = script(on_path / "claude", VERSION + LOGGED_IN + answer)
+    asked = client.post("/api/tools/claude/ask").json()
+    assert (asked["ok"], asked["detail"]) == (True, "") and runs(cli)[-1].startswith("-p ")
+    script(on_path / "claude", VERSION + LOGGED_IN + "echo '망에 닿지 못했다' >&2\nexit 7\n")
+    asked = client.post("/api/tools/claude/ask").json()
+    assert asked["ok"] is False and "종료 코드 7" in asked["detail"] and "망에 닿지 못했다" in asked["detail"]
