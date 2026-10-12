@@ -1801,7 +1801,7 @@ ul {
   background: var(--hover-bg);
 }
 
-/* 왼쪽 아래 칸. 아랫줄에 둥근 버튼을, 그 위에 펼친 미니맵과 범례, 경로 탐색 창을 나란히 둔다. 폭이 모자라면 오른쪽 칸부터 위로 올라간다.
+/* 왼쪽 아래 칸. 아랫줄에 둥근 버튼을, 그 위에 펼친 미니맵과 경로 탐색 창, 범례를 나란히 둔다. 폭이 모자라면 오른쪽 칸부터 위로 올라간다.
    칸의 빈 곳은 마우스를 받지 않아 그래프를 가리지 않는다. */
 .dock {
   position: absolute;
@@ -2968,7 +2968,7 @@ ol.summary-list {
 
 /* 경로 탐색 창 */
 
-/* 왼쪽 아래 칸의 셋째 칸. 폭은 330px이고 높이는 내용을 따른다. Finder가 넣는 최대 높이를 넘으면 단계 목록 안에서 스크롤한다. */
+/* 왼쪽 아래 칸의 둘째 칸. 폭은 330px이고 높이는 내용을 따른다. Finder가 넣는 최대 높이를 넘으면 단계 목록 안에서 스크롤한다. */
 .finder {
   display: flex;
   flex-direction: column;
@@ -3296,6 +3296,290 @@ ol.summary-list {
   border-color: var(--ink);
   color: var(--surface);
   background: var(--ink);
+}
+
+/* 비교 버튼과 비교 창 */
+
+/* 관계 그래프 영역의 왼쪽 위에 뜨는 버튼. 창을 편 동안 본문 잉크로 채운다. 버튼과 창은 왼쪽 아래 칸과 같은 겹침 순서여서 정보 패널과 겹쳐도 눌린다. */
+.compare-button {
+  position: absolute;
+  z-index: var(--z-dock);
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  overflow: hidden;
+  background: var(--panel-bg);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.compare-button > * {
+  flex: none;
+}
+
+.compare-button svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.compare-button[aria-expanded="true"] {
+  border-color: var(--ink);
+  color: var(--surface);
+  background: var(--ink);
+}
+
+.compare-button[aria-expanded="true"] :is(.compare-added, .compare-deleted) {
+  color: inherit;
+}
+
+.compare-button-dot {
+  opacity: 0.6;
+}
+
+/* 추가된 줄 수와 삭제된 줄 수. 초록은 줄 수 숫자의 색이고 빨강은 critical에 본문 잉크를 섞어 칸 바탕 위에서 대비 4.5:1을 넘긴다. */
+.compare-lines {
+  display: flex;
+  gap: 6px;
+}
+
+.compare-added {
+  color: var(--loc);
+}
+
+.compare-deleted,
+.compare-failed {
+  color: color-mix(in srgb, var(--ink) 25%, var(--critical));
+}
+
+/* 비교 버튼 아래에 떠서 관계 그래프를 덮는 창. 크기는 Window가 넣는다. 테두리와 그림자는 정보 패널과 같다. */
+.compare-window {
+  position: absolute;
+  z-index: var(--z-dock);
+  top: 50px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--ink) 12%, transparent);
+  font-size: 12px;
+}
+
+/* 커밋 그래프. 줄은 높이 24px이고 Rows가 보이는 줄만 세로 위치를 넣어 그린다. */
+.compare-rows {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  outline: none;
+}
+
+.compare-rows-body {
+  position: relative;
+}
+
+/* 세로 줄과 잇는 선, 커밋의 점. 색은 muted 잉크와 본문 잉크만 쓴다. */
+.compare-lanes {
+  position: absolute;
+  left: 0;
+  pointer-events: none;
+}
+
+.compare-lane {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.compare-lane[data-loose] {
+  stroke-dasharray: 3 3;
+}
+
+.compare-dot {
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.compare-dot[data-loose] {
+  stroke-dasharray: 2 2;
+}
+
+.compare-dot[data-fork] {
+  stroke: var(--ink);
+  stroke-width: 2.5;
+}
+
+.compare-dot[data-pick],
+.compare-dot-core {
+  fill: var(--ink);
+  stroke: var(--ink);
+}
+
+.compare-dot-core {
+  stroke: none;
+}
+
+.compare-row {
+  position: absolute;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding-right: 14px;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.compare-row:hover,
+.compare-row:is([aria-selected="true"], :has(.compare-mark)) {
+  background: var(--hover-bg);
+}
+
+.compare-row[data-active] {
+  background: var(--active-bg);
+}
+
+.compare-row > * {
+  flex: none;
+}
+
+/* 줄의 글이 폭을 넘으면 제목과 이름표를 함께 줄이고 끝을 말줄임으로 적는다. 표시와 해시는 줄이지 않는다. */
+.compare-row > :is(.compare-subject, .compare-ref) {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compare-row[data-worktree] .compare-subject {
+  color: color-mix(in srgb, var(--ink) 60%, var(--muted));
+  font-style: italic;
+}
+
+.compare-ref {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: color-mix(in srgb, var(--ink) 55%, var(--muted));
+  font-size: 10.5px;
+  line-height: 15px;
+}
+
+:is(.compare-row, .compare-bar) > .compare-gap {
+  flex: 1;
+}
+
+.compare-hash {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* 줄의 표시. `대상`은 본문 잉크로 채우고 `기준`과 `갈라진 지점`은 테두리만 그린다. */
+.compare-mark {
+  padding: 0 5px;
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.compare-mark[data-mark="target"] {
+  color: var(--surface);
+  background: var(--ink);
+}
+
+/* 아래쪽 한 줄. 왼쪽에 고른 두 시점 사이의 줄 수를, 오른쪽에 끄기와 확인을 둔다. */
+.compare-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  margin-top: auto;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-bg);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.compare-bar > * {
+  flex: none;
+}
+
+.compare-bar .compare-lines {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.compare-hint {
+  color: var(--muted);
+}
+
+.compare-bar > .compare-failed {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compare-confirm,
+.compare-off {
+  height: 24px;
+  padding: 0 14px;
+  border-radius: 4px;
+}
+
+.compare-confirm {
+  color: var(--surface);
+  background: var(--ink);
+  font-weight: 600;
+}
+
+.compare-confirm:disabled {
+  color: var(--muted);
+  background: var(--active-bg);
+  cursor: default;
+}
+
+.compare-off {
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.compare-off:hover {
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+}
+
+/* 창의 오른쪽 아래 모서리의 크기 조절 손잡이 */
+.compare-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  background: linear-gradient(135deg, transparent 0 50%, var(--muted) 50% 58%, transparent 58% 70%, var(--muted) 70% 78%, transparent 78%);
+  cursor: nwse-resize;
+  touch-action: none;
 }
 
 /* 정보 패널 머리 줄의 출발로·도착으로 버튼 */

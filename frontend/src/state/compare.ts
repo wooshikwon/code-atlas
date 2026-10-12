@@ -36,6 +36,8 @@ export interface CompareStore {
   result: Comparison | null;
   /** 켜져 있는 비교의 두 시점과 줄 수. 줄 수는 result의 files를 더한 값이다. */
   shown: Stat | null;
+  /** 켜져 있는 비교에서 `기준`으로 고른 줄. 갈라진 지점이 있으면 shown의 base와 다르다. 비교가 꺼져 있으면 null이다. */
+  chosen: string | null;
   /** 창을 펴거나 접는다. 펼 때마다 커밋 그래프의 첫 묶음을 다시 받고, 처음 펼 때 `firstPicks`의 줄을 골라 둔다. */
   toggle(): void;
   /** 커밋 그래프의 다음 묶음을 받아 잇는다. 더 받을 줄이 없거나 받는 중이면 아무것도 하지 않는다. */
@@ -103,15 +105,15 @@ export const useCompare = create<CompareStore>()((set, get) => {
     );
   };
 
-  /** 받은 비교로 그래프와 파일트리를 바꾼다. fork는 그 비교의 갈라진 지점이다. */
-  const draw = (result: Comparison, fork: string | null) => {
+  /** 받은 비교로 그래프와 파일트리를 바꾼다. fork는 그 비교의 갈라진 지점이고 chosen은 `기준`으로 고른 줄이다. */
+  const draw = (result: Comparison, fork: string | null, chosen: string) => {
     const atlas = useAtlas.getState();
     if (atlas.repo === null) {
       return;
     }
     const lines = (side: "added" | "deleted") => result.files.reduce((sum, file) => sum + file[side], 0);
     const shown = { base: result.base, target: result.target, fork, files: result.files.length, added: lines("added"), deleted: lines("deleted") };
-    set({ result, shown });
+    set({ result, shown, chosen });
     atlas.refresh(atlas.repo, result.graph, result.tree);
     useOverlay.getState().mark(result.unused);
     useOverlay.getState().set("compare");
@@ -120,7 +122,7 @@ export const useCompare = create<CompareStore>()((set, get) => {
   const restore = async () => {
     try {
       const [repo, graph, tree, unused] = await Promise.all([getRepo(), getGraph(), getTree(), getUnused().catch(() => null)]);
-      set({ result: null, shown: null, error: null });
+      set({ result: null, shown: null, chosen: null, error: null });
       useAtlas.getState().refresh(repo, graph, tree);
       if (unused !== null) {
         useOverlay.getState().mark(unused);
@@ -143,6 +145,7 @@ export const useCompare = create<CompareStore>()((set, get) => {
     error: null,
     result: null,
     shown: null,
+    chosen: null,
 
     toggle: () => {
       opened += 1;
@@ -193,17 +196,18 @@ export const useCompare = create<CompareStore>()((set, get) => {
       localStorage.setItem(SIZE_KEY, JSON.stringify(size));
     },
     confirm: async () => {
-      const { stat } = get();
+      const { stat, picks } = get();
       if (stat === null) {
         return;
       }
+      const chosen = picks.find((id) => id !== stat.target) ?? stat.base;
       asked += 1;
       const turn = asked;
       set({ open: false, running: true, error: null });
       try {
         const result = await postCompare(stat.base, stat.target);
         if (turn === asked) {
-          draw(result, stat.fork);
+          draw(result, stat.fork, chosen);
         }
       } catch (caught) {
         if (turn === asked) {
@@ -215,13 +219,13 @@ export const useCompare = create<CompareStore>()((set, get) => {
       }
     },
     renew: async () => {
-      const { result, shown } = get();
+      const { result, shown, chosen } = get();
       if (result === null) {
         return;
       }
       const next = await postCompare(result.base, result.target);
       if (get().result === result) {
-        draw(next, shown?.fork ?? null);
+        draw(next, shown?.fork ?? null, chosen ?? result.base);
       }
     },
     clear: () => {

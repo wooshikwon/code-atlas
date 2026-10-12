@@ -1,4 +1,4 @@
-// 관계 그래프. 저장소의 뷰 종류에 따라 구조 뷰나 함수 시점 뷰를 그린다. 구조 뷰는 저장소 상태에서 보이는 노드와
+// 관계 그래프. 저장소의 뷰 종류에 따라 구조 뷰나 함수 시점 뷰를 그리고, 그 위에 비교 버튼과 비교 창을 띄운다. 구조 뷰는 저장소 상태에서 보이는 노드와
 // 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드나 선이 가리킨 폴더로 화면을 옮긴다. 경로 고정 중에는 고른 노드의 흐름 대신
 // 강조하는 경로를 그리고, finder.focus를 정할 때마다 그 노드와 다음 걸음이 보이게 화면을 옮긴다. 폴더나 손잡이를 눌러 상자 하나를
 // 펼치거나 접으면 화면을 옮기지 않고 그 상자의 모서리를 붙잡는다. 전체 맞춤 상태(저장소의 fitted)에서 그 밖의 까닭으로 배치가 바뀌면
@@ -18,6 +18,8 @@ import {
 import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import type { AtlasNode, Graph } from "../api/types";
+import { CompareButton } from "../compare/Button";
+import { CompareWindow } from "../compare/Window";
 import { useNodeMenu } from "../nav/NodeMenu";
 import { useCompare } from "../state/compare";
 import { focusOf, type History } from "../state/history";
@@ -218,10 +220,12 @@ export function GraphView() {
   const home = useRef<Viewport | null>(null);
   /** 구조 뷰가 화면을 맞춰 둔 화면 초기화의 횟수(`homed`) */
   const reset = useRef(useAtlas.getState().homed);
-  return view.kind === "function" ? (
-    <CallView center={view.center} expanded={view.expanded} />
-  ) : (
-    <StructureView home={home} reset={reset} />
+  return (
+    <>
+      {view.kind === "function" ? <CallView center={view.center} expanded={view.expanded} /> : <StructureView home={home} reset={reset} />}
+      <CompareButton />
+      <CompareWindow />
+    </>
   );
 }
 

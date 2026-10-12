@@ -174,7 +174,7 @@ function columnsOf(list, skip = () => false) {
 }
 
 /**
- * 관계 그래프 영역 area, 정보 패널 panel, 패널이 가리지 않는 가장 넓은 사각형 free, 패널과 왼쪽 아래 칸(펼친 칸과 버튼 줄)이
+ * 관계 그래프 영역 area, 정보 패널 panel, 패널이 가리지 않는 가장 넓은 사각형 free, 패널과 왼쪽 아래 칸(펼친 칸과 버튼 줄), 비교 버튼이
  * 모두 가리지 않는 가장 넓은 사각형 clear(frontend/src/graph/viewport.ts의 freeRect와 같은 계산)
  */
 const stageOf = (page) =>
@@ -182,7 +182,7 @@ const stageOf = (page) =>
     const plain = (r) => ({ x: r.left, y: r.top, width: r.width, height: r.height });
     const area = plain(document.querySelector(".graph").getBoundingClientRect());
     const panel = plain(document.querySelector(".info-panel").getBoundingClientRect());
-    const dock = [...document.querySelectorAll(".dock-panels > *, .dock-buttons")].map((element) => plain(element.getBoundingClientRect()));
+    const dock = [...document.querySelectorAll(".dock-panels > *, .dock-buttons, .compare-button")].map((element) => plain(element.getBoundingClientRect()));
     const [right, bottom] = [area.x + area.width, area.y + area.height];
     const clampX = (x) => Math.max(area.x, Math.min(x, right));
     const clampY = (y) => Math.max(area.y, Math.min(y, bottom));
@@ -4893,8 +4893,8 @@ async function setOverlay(page, kind) {
 
 async function finderOpen(t, page) {
   await load(page);
-  t.check("경로 탐색 창이 접힌 채로 열리고 왼쪽 아래 버튼 줄이 미니맵, 범례, 경로 찾기 순서다", (await count(page, ".finder")) === 0 &&
-    same(await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label"))), ["미니맵", "범례", "경로 찾기"]),
+  t.check("경로 탐색 창이 접힌 채로 열리고 왼쪽 아래 버튼 줄이 미니맵, 경로 찾기, 범례 순서다", (await count(page, ".finder")) === 0 &&
+    same(await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label"))), ["미니맵", "경로 찾기", "범례"]),
     (await page.evaluate(() => [...document.querySelectorAll(".dock-buttons > *")].map((b) => b.getAttribute("aria-label")))).join("·"));
   await page.click(".finder-button");
   await page.waitForSelector(".finder", { timeout: 5_000 });
@@ -4910,15 +4910,15 @@ async function finderOpen(t, page) {
   };
   const wide = await laid();
   t.check(
-    "경로 찾기 버튼을 누르면 창이 버튼 줄 위에 펼쳐지고 미니맵·범례·창이 왼쪽부터 아래 끝을 맞춰 놓이며 서로 겹치지 않고 관계 그래프 영역 안에 있다",
+    "경로 찾기 버튼을 누르면 창이 버튼 줄 위에 펼쳐지고 미니맵·창·범례가 왼쪽부터 아래 끝을 맞춰 놓이며 서로 겹치지 않고 관계 그래프 영역 안에 있다",
     wide.ok &&
       wide.finder.y > wide.area.y + wide.area.height / 2 &&
       near(wide.finder.y + wide.finder.height, wide.map.y + wide.map.height) &&
       near(wide.legend.y + wide.legend.height, wide.map.y + wide.map.height) &&
-      wide.map.x < wide.legend.x &&
-      wide.legend.x < wide.finder.x &&
+      wide.map.x < wide.finder.x &&
+      wide.finder.x < wide.legend.x &&
       wide.finder.y + wide.finder.height < wide.buttons.y,
-    `미니맵 ${rectText(wide.map)}, 범례 ${rectText(wide.legend)}, 창 ${rectText(wide.finder)}`,
+    `미니맵 ${rectText(wide.map)}, 창 ${rectText(wide.finder)}, 범례 ${rectText(wide.legend)}`,
   );
   const empty = await page.evaluate(() => ({
     fields: [...document.querySelectorAll(".finder-field .finder-input")].map((input) => input.placeholder),

@@ -222,6 +222,7 @@ describe("confirm과 clear", () => {
     expect(store().running).toBe(false);
     expect(store().result).toBe(compareFixture);
     expect(store().shown).toEqual({ base: compareFixture.base, target: compareFixture.target, fork: "f", files: 6, added: 13, deleted: 21 });
+    expect(store().chosen).toBe("x");
     expect([atlas().graph, atlas().tree]).toEqual([compareFixture.graph, compareFixture.tree]);
     expect(useOverlay.getState().kind).toBe("compare");
     expect(useOverlay.getState().unused).toEqual(new Set(["scratch:todo"]));
@@ -236,7 +237,7 @@ describe("confirm과 clear", () => {
     expect(atlas().selection).toBe(before.selection);
     await store().clear();
     expect(getGraph).toHaveBeenCalledTimes(1);
-    expect([store().result, store().shown]).toEqual([null, null]);
+    expect([store().result, store().shown, store().chosen]).toEqual([null, null, null]);
     expect([atlas().graph, atlas().tree]).toEqual([before.graph, before.tree]);
     expect([atlas().selection, atlas().collapsed, atlas().history]).toEqual([before.selection, before.collapsed, before.history]);
     expect(useOverlay.getState().kind).toBeNull();

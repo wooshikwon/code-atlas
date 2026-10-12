@@ -150,8 +150,8 @@ export function boundsOf(boxes: Iterable<Box>): Box {
 
 /**
  * 관계 그래프 영역과 그 안의 빈 사각형 두 개. free는 정보 패널이 가리지 않는 사각형이고 그래프 전체를 맞출 때 쓴다.
- * clear는 정보 패널과 왼쪽 아래 칸(펼친 미니맵·범례·경로 탐색 창, 버튼 줄)이 모두 가리지 않는 사각형이고
- * 노드나 그래프의 한 점으로 화면을 옮길 때 쓴다. covers는 정보 패널과 왼쪽 아래 칸의 사각형이다.
+ * clear는 정보 패널과 왼쪽 아래 칸(펼친 미니맵·범례·경로 탐색 창, 버튼 줄), 왼쪽 위의 비교 버튼이 모두 가리지 않는 사각형이고
+ * 노드나 그래프의 한 점으로 화면을 옮길 때 쓴다. covers는 정보 패널과 왼쪽 아래 칸, 비교 버튼의 사각형이다.
  */
 export interface Stage {
   area: Rect;
@@ -171,7 +171,7 @@ export function fitPadding(area: Rect, room: Rect) {
   };
 }
 
-/** 화면에서 관계 그래프 영역 root와 정보 패널, 왼쪽 아래 칸의 사각형을 읽는다. */
+/** 화면에서 관계 그래프 영역 root와 정보 패널, 왼쪽 아래 칸, 비교 버튼의 사각형을 읽는다. */
 export function stageOf(root: Element): Stage {
   const outer = root.getBoundingClientRect();
   const within = (element: Element): Rect => {
@@ -181,6 +181,7 @@ export function stageOf(root: Element): Stage {
   const area = { x: 0, y: 0, width: outer.width, height: outer.height };
   const panel = [...document.querySelectorAll(".info-panel")].map(within);
   const dock = [...root.querySelectorAll(".dock-panels > *, .dock-buttons")].map(within);
-  const covers = [...panel, ...dock];
+  const button = [...document.querySelectorAll(".compare-button")].map(within);
+  const covers = [...panel, ...dock, ...button];
   return { area, free: freeRect(area, panel), clear: freeRect(area, covers), covers };
 }
