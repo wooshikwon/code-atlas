@@ -7,6 +7,7 @@ from history import run
 
 from code_atlas import git as reader
 from code_atlas.git import (
+    Ref,
     WORKTREE,
     Changed,
     Commit,
@@ -197,7 +198,7 @@ def test_detached_head_has_no_branch(git_repo):
     git(git_repo, "checkout", "-q", "--detach")
     assert branch(git_repo) is None
     assert status(git_repo) == {}
-    assert [c.refs for c in commits(git_repo, 0, 10)] == [["main"]]
+    assert [c.refs for c in commits(git_repo, 0, 10)] == [[Ref("main", "branch")]]
 
 
 def test_outside_git_nothing_is_read(sample_repo, tmp_path):
@@ -265,7 +266,8 @@ def test_default_branch_follows_origin_head(history_repo):
     run(repo, "update-ref", "refs/remotes/origin/topic", at["topic"])
     run(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/topic")
     assert default_branch(repo) == at["topic"]
-    assert sorted(commits(repo, 0, 1)[0].refs) == ["origin/topic", "topic"]
+    run(repo, "tag", "t1", at["topic"])
+    assert commits(repo, 0, 1)[0].refs == [Ref("topic", "branch"), Ref("t1", "tag"), Ref("origin/topic", "remote")]
     run(repo, "branch", "-q", "-m", "main", "trunk")
     run(repo, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
     assert default_branch(repo) is None
@@ -277,8 +279,10 @@ def test_commits_come_in_date_order_with_parents_and_refs(module_history):
     repo, at = module_history
     found = commits(repo, 0, 200)
     assert [c.hash for c in found] == [at[k] for k in ("topic", "merge", "move", "feature", "edit", "base")]
-    assert found[1] == Commit(at["merge"], [at["move"], at["feature"]], 1_750_014_400, "쿠폰을 합친다", ["main"])
-    assert [c.refs for c in found] == [["topic"], ["main"], [], ["feature"], ["v0.1"], []]
+    assert found[1] == Commit(at["merge"], [at["move"], at["feature"]], 1_750_014_400, "쿠폰을 합친다", [Ref("main", "branch")])
+    assert [[(r.name, r.kind) for r in c.refs] for c in found] == [
+        [("topic", "branch")], [("main", "branch")], [], [("feature", "branch")], [("v0.1", "tag")], [],
+    ]  # fmt: skip
     assert [c.parents for c in found[2:]] == [[at["edit"]], [at["edit"]], [at["base"]], []]
     assert commits(repo, 2, 2) == found[2:4]
     assert commits(repo, 6, 200) == []
@@ -290,7 +294,7 @@ def test_commits_leave_out_the_stash(history_repo):
     assert [c.hash for c in commits(repo, 0, 200)] == [
         at[k] for k in ("topic", "merge", "move", "feature", "edit", "base")
     ]
-    assert all("stash" not in ref for c in commits(repo, 0, 200) for ref in c.refs)
+    assert all("stash" not in ref.name for c in commits(repo, 0, 200) for ref in c.refs)
 
 
 def test_ancestors_and_merge_base(module_history):

@@ -74,12 +74,12 @@ export function shortHash(hash: string): string {
   return hash.slice(0, SHORT);
 }
 
-/** 비교 버튼에 적는 시점의 이름. 그 줄을 가리키는 첫 브랜치·태그 이름이고, 없으면 짧은 해시다. 작업 중인 상태는 `작업 중`이다. */
+/** 비교 버튼에 적는 시점의 이름. 그 줄의 첫 이름표(로컬 브랜치, 태그, 원격 브랜치 순서)이고, 없으면 짧은 해시다. 작업 중인 상태는 `작업 중`이다. */
 export function pointName(id: string, commits: Commit[]): string {
   if (id === WORKTREE) {
     return "작업 중";
   }
-  return commits.find((commit) => commit.hash === id)?.refs[0] ?? shortHash(id);
+  return commits.find((commit) => commit.hash === id)?.refs[0]?.name ?? shortHash(id);
 }
 
 /** 스크롤 위치 top과 보이는 높이 height에서 그릴 줄의 범위 [start, end). 보이는 줄의 위와 아래로 AHEAD줄을 더 그린다. */

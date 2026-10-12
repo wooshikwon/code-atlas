@@ -3482,6 +3482,12 @@ ol.summary-list {
   line-height: 15px;
 }
 
+/* 태그의 이름표는 둥근 점선 테두리로 브랜치와 가른다. */
+.compare-ref[data-kind="tag"] {
+  border-style: dashed;
+  border-radius: 8px;
+}
+
 :is(.compare-row, .compare-bar) > .compare-gap {
   flex: 1;
 }

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { WORKTREE, type Commit, type History, type Stat } from "../api/types";
+import { WORKTREE, type Commit, type History, type Ref, type Stat } from "../api/types";
 import { historyFixture } from "../graph/history.fixture";
 import { laneCount, markOf, pointName, reveal, ROW, rowsOf, spanOf } from "./log";
 
-const commit = (hash: string, parents: string[], refs: string[] = []): Commit => ({ hash, parents, time: 0, subject: hash, refs });
+const commit = (hash: string, parents: string[], refs: Ref[] = []): Commit => ({ hash, parents, time: 0, subject: hash, refs });
 const history = (commits: Commit[], head: string | null): History => ({ git: true, head, branch: null, default: null, dirty: false, commits, more: false });
 const stat = (base: string, target: string, fork: string | null = null): Stat => ({ base, target, fork, files: 1, added: 1, deleted: 1 });
 
@@ -66,7 +66,7 @@ describe("markOf", () => {
 });
 
 describe("pointName", () => {
-  const commits = [commit("0123456789abcdef", [], ["main", "origin/main"]), commit("fedcba9876543210", [])];
+  const commits = [commit("0123456789abcdef", [], [{ name: "main", kind: "branch" }, { name: "origin/main", kind: "remote" }]), commit("fedcba9876543210", [])];
 
   it("첫 브랜치·태그 이름, 없으면 짧은 해시, 작업 중인 상태는 작업 중이다", () => {
     expect(pointName("0123456789abcdef", commits)).toBe("main");

@@ -274,6 +274,12 @@ export interface Status {
 /** 비교할 시점의 이름. 커밋은 40자 해시, 작업 중인 상태는 `worktree`다. */
 export const WORKTREE = "worktree";
 
+/** 커밋을 가리키는 이름표 하나. kind는 로컬 브랜치(branch), 태그(tag), 원격 브랜치(remote)이고 원격 브랜치의 name은 `origin/main` 꼴이다. */
+export interface Ref {
+  name: string;
+  kind: "branch" | "tag" | "remote";
+}
+
 export interface Commit {
   hash: string;
   /** 부모 커밋의 해시. 첫째 부모가 앞이다. */
@@ -281,8 +287,8 @@ export interface Commit {
   /** 커밋한 시각(초) */
   time: number;
   subject: string;
-  /** 이 커밋을 가리키는 브랜치와 태그의 이름. 원격 브랜치는 `origin/main` 꼴이다. */
-  refs: string[];
+  /** 이 커밋을 가리키는 이름표. 로컬 브랜치, 태그, 원격 브랜치 순서다. */
+  refs: Ref[];
 }
 
 /** 커밋 그래프의 한 묶음. git 저장소가 아니면 git이 거짓이고 commits가 비어 있다. */

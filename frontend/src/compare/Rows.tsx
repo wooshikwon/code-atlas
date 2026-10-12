@@ -53,7 +53,7 @@ export function naturalWidth(rows: Row[], gutter: number, files: number): number
   const hash = measure(shortHash("0".repeat(40)), HASH_FONT, style.getPropertyValue("--font-mono"));
   const longest = rows.reduce((most, row) => {
     const subject = measure(row.commit?.subject ?? worktreeText(files), SUBJECT_FONT, style.fontFamily);
-    const refs = (row.commit?.refs ?? []).reduce((sum, ref) => sum + GAP + measure(ref, REF_FONT, style.fontFamily) + REF_FRAME, 0);
+    const refs = (row.commit?.refs ?? []).reduce((sum, ref) => sum + GAP + measure(ref.name, REF_FONT, style.fontFamily) + REF_FRAME, 0);
     return Math.max(most, subject + refs);
   }, 0);
   return Math.ceil(gutter + longest + GAP + mark + GAP + hash + ROW_RIGHT);
@@ -199,8 +199,8 @@ export function Rows({ rows, gutter }: { rows: Row[]; gutter: number }) {
                 {subject}
               </span>
               {row.commit?.refs.map((ref) => (
-                <span key={ref} className="compare-ref">
-                  {ref}
+                <span key={`${ref.kind}:${ref.name}`} className="compare-ref" data-kind={ref.kind}>
+                  {ref.name}
                 </span>
               ))}
               <span className="compare-gap" />

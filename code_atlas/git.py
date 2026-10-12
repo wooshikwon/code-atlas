@@ -35,9 +35,15 @@ _OLD_FILE = "--- a/"
 _NEW_FILE = "+++ b/"
 _FIELD = "%x00"
 _LOG_FORMAT = f"--format=%H{_FIELD}%P{_FIELD}%ct{_FIELD}%D{_FIELD}%s%x01"
-_DECORATED = ("refs/heads", "refs/tags", "refs/remotes")
+_REF_KINDS = {"branch": "refs/heads/", "tag": "refs/tags/", "remote": "refs/remotes/"}  # 이름표의 종류 → 앞머리. 내는 순서다
 _STATES = {"A": ADDED, "D": DELETED, "R": RENAMED}
 _DIFF = ("--relative", "-M", "--no-color", "--no-ext-diff", "--no-textconv")
+
+
+@dataclass
+class Ref:
+    name: str  # 브랜치·태그 이름. 원격 브랜치는 `origin/main` 꼴
+    kind: str  # branch(로컬 브랜치)·tag·remote(원격 브랜치)
 
 
 @dataclass
@@ -46,7 +52,7 @@ class Commit:
     parents: list[str]
     time: int  # 커밋한 때의 유닉스 시각(초)
     subject: str
-    refs: list[str]  # 브랜치·태그 이름. 원격 브랜치는 `origin/main` 꼴
+    refs: list[Ref]  # 그 커밋을 가리키는 이름표. 로컬 브랜치, 태그, 원격 브랜치 순서다
 
 
 @dataclass
@@ -143,14 +149,15 @@ def status(root: Path) -> dict[str, str] | None:
     return found
 
 
-def _refs(decoration: str) -> list[str]:
-    """`%D`의 브랜치·태그 이름. `HEAD ->`와 `tag:`를 떼고 `HEAD`와 원격의 `HEAD`는 뺀다."""
-    found: list[str] = []
+def _refs(decoration: str) -> list[Ref]:
+    """`--decorate=full`로 읽은 `%D`의 이름표. `HEAD`와 원격의 `HEAD`는 빼고 로컬 브랜치, 태그, 원격 브랜치 순서로 낸다."""
+    found: list[Ref] = []
     for name in decoration.split(", "):
         name = name.removeprefix("HEAD -> ").removeprefix("tag: ")
-        if name and name != "HEAD" and not name.endswith("/HEAD"):
-            found.append(name)
-    return found
+        for kind, prefix in _REF_KINDS.items():
+            if name.startswith(prefix) and not (kind == "remote" and name.endswith("/HEAD")):
+                found.append(Ref(name[len(prefix) :], kind))
+    return sorted(found, key=lambda ref: list(_REF_KINDS).index(ref.kind))
 
 
 def commits(root: Path, skip: int, limit: int) -> list[Commit]:
@@ -164,7 +171,8 @@ def commits(root: Path, skip: int, limit: int) -> list[Commit]:
         "HEAD",
         "--date-order",
         "--no-show-signature",
-        *(f"--decorate-refs={ref}" for ref in _DECORATED),
+        "--decorate=full",
+        *(f"--decorate-refs={prefix}" for prefix in _REF_KINDS.values()),
         f"--skip={skip}",
         f"--max-count={limit}",
         _LOG_FORMAT,

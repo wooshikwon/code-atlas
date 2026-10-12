@@ -1126,9 +1126,9 @@ def test_history_lists_the_commit_graph(history_client):
         "parents": [at["move"], at["feature"]],
         "time": 1_750_014_400,
         "subject": "쿠폰을 합친다",
-        "refs": ["main"],
+        "refs": [{"name": "main", "kind": "branch"}],
     }
-    assert body["commits"][4]["refs"] == ["v0.1"]
+    assert body["commits"][4]["refs"] == [{"name": "v0.1", "kind": "tag"}]
     page = client.get("/api/history", params={"skip": 1, "limit": 2}).json()
     assert [c["hash"] for c in page["commits"]] == order[1:3] and page["more"] is True
     assert client.get("/api/history", params={"skip": 4, "limit": 2}).json()["more"] is False
