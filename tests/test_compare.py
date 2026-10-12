@@ -37,13 +37,13 @@ class Point:
     texts: dict[str, str]
 
 
-def point(texts: dict[str, str], edges=(), variables=(), externals=()) -> Point:
+def point(texts: dict[str, str], edges=(), variables=(), externals=(), source_root="") -> Point:
     """본문으로 노드를 만들고 선, 변수 노드, 외부 노드를 손으로 더한다. 선은 (종류, 출발, 도착, 지점 수)다."""
     paths = sorted(texts)
-    files = [SourceFile(p, module_id(p, ""), is_test_path(p), p.endswith("__init__.py")) for p in paths]
+    files = [SourceFile(p, module_id(p, source_root), is_test_path(p), p.endswith("__init__.py")) for p in paths]
     packages = sorted({"/".join(p.split("/")[:i]) for p in paths for i in range(1, p.count("/") + 1)})
     facts = [extract(f, texts[f.path], frozenset()) for f in files]
-    analysis = build(RepoFiles(Path("."), "", files, packages), facts, Resolution([]), texts)
+    analysis = build(RepoFiles(Path("."), source_root, files, packages), facts, Resolution([]), texts)
     by_id = {v.node_id: (f, v) for f in facts for v in f.variables}
     for node_id in variables:
         f, v = by_id[node_id]
@@ -328,6 +328,34 @@ def test_init_file_losing_definitions_keeps_parent_chain():
     }
     nodes = {n.id: n for n in result.nodes}
     assert nodes["pkg:make"].parent == "pkg.__init__" and nodes["pkg.__init__"].parent == "pkg"
+
+
+def test_changed_source_root_keeps_definitions_and_edges():
+    texts = {"lib/a.py": "def f():\n    return 1\n", "lib/sub/b.py": "LIMIT = 1\n\n\ndef g():\n    return 1\n", "lib/sub/old.py": "x = 1\n"}
+    base = point(
+        texts,
+        [("call", "a:f", "sub.b:g", 1), ("read", "a:f", "sub.b:LIMIT", 1)],
+        variables=["sub.b:LIMIT"],
+        source_root="lib",
+    )
+    assert {n.id for n in base.analysis.nodes} == {"a", "a:f", "sub", "sub.b", "sub.b:g", "sub.b:LIMIT", "sub.old"}
+    # 레포 루트에 파일이 생겨 소스 루트가 레포 루트로 바뀐 시점이다.
+    edited = {"lib/a.py": "def f():\n    return 2\n", "lib/sub/b.py": texts["lib/sub/b.py"], "setup.py": "x = 1\n"}
+    target = point(
+        edited, [("call", "lib.a:f", "lib.sub.b:g", 1), ("read", "lib.a:f", "lib.sub.b:LIMIT", 1)], variables=["lib.sub.b:LIMIT"]
+    )
+    result = compared(base, target)
+    assert result.node_changes == {
+        "lib.a": NodeChange("modified", 1, 1),
+        "lib.a:f": NodeChange("modified", 1, 1),
+        "sub.old": NodeChange("deleted", 0, 1),
+        "lib.sub": NodeChange(None, 0, 1),
+        "lib": NodeChange(None, 1, 2),
+        "setup": NodeChange("added", 1, 0),
+    }
+    assert result.edge_changes == {}
+    [gone] = result.nodes[len(target.analysis.nodes) :]
+    assert (gone.id, gone.parent) == ("sub.old", "lib.sub")
 
 
 def test_variable_assigned_on_both_sides_is_neither_added_nor_deleted():

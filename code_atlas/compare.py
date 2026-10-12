@@ -152,25 +152,37 @@ def _files(
     return found
 
 
-def _moved(
-    base: dict[str, FileFacts], file_nodes: dict[str, Node], files: list[_File]
-) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
-    """이름이 바뀐 파일의 기준 시점 노드 id를 새 모듈 id로 옮기는 표와, 그 파일에 든 노드의 부모를 옮기는 표.
+def _folder(node: Node) -> str:
+    """패키지 노드가 가리키는 폴더의 경로."""
+    return (node.path or "").removesuffix("/__init__.py")
 
-    정의가 없는 `__init__.py`의 노드는 폴더의 패키지 노드이므로 id를 옮기지 않는다. 옛 폴더는 기준 시점에만 있는 폴더로
-    남고, 그 파일에 든 변수의 부모만 새 패키지 노드로 옮긴다.
+
+def _moved(
+    base: dict[str, FileFacts], target: list[Node], file_nodes: dict[str, Node], files: list[_File], folders: list[Node]
+) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
+    """기준 시점의 노드 id를 대상 시점의 id로 옮기는 표와, 파일에 든 노드의 부모를 옮기는 표.
+
+    같은 파일(이름이 바뀐 파일은 새 경로)의 모듈 id가 두 시점에서 다르면 그 파일의 정의·변수·모듈 노드의 id를 옮긴다.
+    이름이 바뀐 파일과 소스 루트가 달라진 레포의 파일이 해당한다. `folders`는 기준 시점의 패키지 노드이고 같은 폴더를
+    가리키는 대상 시점의 패키지 노드로 옮긴다. 정의가 없는 `__init__.py`의 노드는 폴더의 패키지 노드이므로 파일을 따라
+    옮기지 않고, 그 파일에 든 변수의 부모만 새 패키지 노드로 옮긴다.
     """
+    renamed = {f.base: f.path for f in files if not f.shallow and f.base is not None}
     moved: dict[str, str] = {}
     homes: dict[tuple[str, str], str] = {}
-    for f in files:
-        if f.shallow or f.base is None or f.base == f.path or f.path not in file_nodes:
+    for path, facts in base.items():
+        at = file_nodes.get(renamed.get(path, path))
+        old, new = facts.file.module_id, _module_id(at) if at is not None else facts.file.module_id
+        if old == new:
             continue
-        facts = base[f.base]
-        old, new = facts.file.module_id, _module_id(file_nodes[f.path])
         for node_id in [*(n.id for n in facts.nodes), *(v.node_id for v in facts.variables)]:
             moved[node_id] = new + node_id[len(old) :]
         if facts.nodes[0].kind == "package":
-            homes[f.base, facts.nodes[0].id] = moved.pop(facts.nodes[0].id)
+            homes[path, facts.nodes[0].id] = moved.pop(facts.nodes[0].id)
+    at_folder = {_folder(n): n.id for n in target if n.kind == "package"}
+    for n in folders:
+        if at_folder.get(_folder(n), n.id) != n.id:
+            moved[n.id] = at_folder[_folder(n)]
     return moved, homes
 
 
@@ -197,13 +209,14 @@ def _definitions(
     files: list[Changed],
     hunks: dict[str, list[Hunk]],
     skip: set[str] | frozenset[str],
+    folders: list[Node],
 ) -> tuple[_Definitions, dict[str, list[str]], dict[str, list[str]]]:
     file_nodes = _file_nodes(target)
     live = {n.id for n in target}
     old_lines = {path: text.splitlines() for path, text in base_texts.items()}
     new_lines = {path: text.splitlines() for path, text in target_texts.items()}
     paired = _files(base, file_nodes, old_lines, new_lines, files, hunks, skip)
-    moved, homes = _moved(base, file_nodes, paired)
+    moved, homes = _moved(base, target, file_nodes, paired, folders)
     found = _Definitions(paired, moved, homes, {}, [])
     changes, deleted = found.changes, found.deleted
     by_path: dict[str, dict[str, Node]] = {f.path: {} for f in paired}
@@ -217,7 +230,7 @@ def _definitions(
         if f.node is not None and change is not None and (at_target or f.node not in live):
             changes[f.node] = NodeChange(change, len(f.inserted), len(f.removed))
             if not at_target:
-                deleted.append(base[f.base].nodes[0])
+                deleted.append(replace(base[f.base].nodes[0], parent=_parent(base[f.base].nodes[0], found)))
         if f.shallow:
             continue
         facts = base[f.base] if f.base is not None else None
@@ -253,7 +266,7 @@ def definitions(
     대상 쪽은 추가, 짝이 없는 기준 쪽은 삭제, 두 시점에서 줄 범위에 든 글이 다른 짝은 수정이고 글이 같은 짝은 내지 않는다.
     `skip`은 분석한 뒤 본문이 바뀐 파일의 경로이고 그 파일은 파일 노드의 상태와 줄 수만 낸다.
     """
-    found, _, _ = _definitions(base, target, base_texts, target_texts, files, hunks, skip)
+    found, _, _ = _definitions(base, target, base_texts, target_texts, files, hunks, skip, [])
     return found.changes, found.deleted
 
 
@@ -317,7 +330,10 @@ def compare(
     하나라도 바뀐 파일 목록에 있는 선만 견준다. 삭제된 선의 끝이 기준 시점에만 노드로 있던 변수나 외부 노드면 그 노드를
     `only`가 base인 노드로 더한다. 패키지 노드의 줄 수는 아래 파일의 합이다.
     """
-    found, old_lines, new_lines = _definitions(base_facts, target.nodes, base_texts, target_texts, files, hunks, skip)
+    folders = [n for n in base.nodes if n.kind == "package"]
+    found, old_lines, new_lines = _definitions(
+        base_facts, target.nodes, base_texts, target_texts, files, hunks, skip, folders
+    )
     _variables(found, base, base_facts, target, target_facts, old_lines, new_lines)
     moved, changes = found.moved, found.changes
     nodes: dict[str, Node] = {n.id: n for n in target.nodes}
