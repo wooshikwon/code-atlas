@@ -2,6 +2,7 @@
 import type { AtlasEdge, AtlasNode, EdgeGroup, EdgeKind, Graph } from "../api/types";
 import type { Flow } from "./flow";
 import type { Lit, StepKind } from "./route";
+import { COUNTED_KINDS } from "./names";
 import { lift, local, nodeIndex, unitOf, within, type Shown } from "./visible";
 
 export type EdgeKey = string;
@@ -18,7 +19,9 @@ export interface DrawnEdge {
   source: string;
   target: string;
   group: EdgeGroup;
+  /** 합친 원래 선의 sites 가운데 세는 관계(`COUNTED_KINDS`)의 수. 선 위의 수와 도착 노드 앞의 합계로 적는다. */
   weight: number;
+  /** 합친 원래 선의 종류마다 sites 수 */
   kinds: Partial<Record<EdgeKind, number>>;
   tone: Tone;
   opacity: number;
@@ -77,7 +80,7 @@ function merge(key: EdgeKey, source: string, target: string, edges: AtlasEdge[],
   let group = edges[0]?.group ?? "run";
   let weight = 0;
   for (const edge of edges) {
-    weight += edge.sites.length;
+    weight += COUNTED_KINDS.includes(edge.kind) ? edge.sites.length : 0;
     kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
     if (GROUP_ORDER.indexOf(edge.group) < GROUP_ORDER.indexOf(group)) {
       group = edge.group;

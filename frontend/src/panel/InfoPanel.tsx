@@ -12,7 +12,7 @@ import { focusOf } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { chosenOf, litOf, useAtlas, type Selection } from "../state/store";
 import { drag } from "./drag";
-import { contentsOf, followedOf, linksOf, linksText, sizeText, type Links, type SiteGroup } from "./links";
+import { contentsOf, followedOf, linksOf, linksText, relationText, restText, sizeText, type Links, type SiteGroup, type Split } from "./links";
 import { Facts, type FactRow } from "./Facts";
 import { Header, type HeaderItem } from "./Header";
 import { useOpened } from "./opened";
@@ -27,8 +27,8 @@ const SUMMARIZED = new Set<AtlasNode["kind"]>(["module", "class", "dataclass", "
 /** 안에 든 노드의 미확인 호출 수까지 합쳐 적는 종류 */
 const UNITS = new Set<AtlasNode["kind"]>(["module", "package"]);
 
-/** "정보" 구역의 줄 가운데 코드 줄 목록을 여는 줄: 지나온 선의 `관계`, `나가는 연결`, `들어오는 연결` */
-type Listed = "via" | "out" | "into";
+/** "정보" 구역에서 코드 줄 목록을 여는 글: 지나온 선의 `관계`, `나가는 연결`·`들어오는 연결`의 세는 관계와 `그 밖` 묶음 */
+type Listed = "via" | "out" | "into" | "out-rest" | "into-rest";
 
 /** 지점을 품은 가장 안쪽 정의의 줄 범위. 파일 안 어느 정의에도 들지 않으면 null이다. */
 function rangeAround(graph: Graph, site: SiteRef): [number, number] | null {
@@ -149,14 +149,18 @@ export function InfoPanel() {
 
   /** "정보" 구역의 줄을 눌러 그 줄의 코드 줄 목록을 열거나 닫는다. 목록을 바꾸면 코드 뷰어에 연 코드 줄을 닫는다. */
   const list = (which: Listed) => setShownAt({ selection, via, listed: listed === which ? null : which, site: null });
-  const linkRow = (id: Listed, topic: string, links: Links): FactRow => ({
-    id,
-    topic,
-    text: linksText(links.kinds),
-    brief: `${topic} ${links.total}개`,
-    press: links.total === 0 ? undefined : () => list(id),
-    pressed: listed === id,
-  });
+  const linkRow = (id: "out" | "into", topic: string, { counted, rest }: Split): FactRow => {
+    const more = restText(rest.kinds);
+    return {
+      id,
+      topic,
+      text: linksText(counted.kinds),
+      brief: `${topic} ${counted.total}곳`,
+      press: counted.total === 0 ? undefined : () => list(id),
+      pressed: listed === id,
+      more: more === null ? undefined : { text: more, press: () => list(`${id}-rest`), pressed: listed === `${id}-rest` },
+    };
+  };
 
   /** "정보" 구역의 줄. 선을 눌러 온 상태의 `연결`·`관계`가 맨 위에 오고, 고른 노드의 크기·포함·연결·미확인 호출이 그 아래에 온다. */
   const rows: FactRow[] = [];
@@ -168,7 +172,7 @@ export function InfoPanel() {
     const from = arrived.sources.length === 1 ? name(arrived.sources[0]) : `노드 ${arrived.sources.length}개`;
     const text = `${from} → ${name(arrived.target)}`;
     rows.push({ id: "link", topic: "연결", text, brief: text });
-    rows.push({ id: "via", topic: "관계", text: linksText(arrived.links.kinds), press: () => list("via"), pressed: listed === "via" });
+    rows.push({ id: "via", topic: "관계", text: relationText(arrived.links.kinds), press: () => list("via"), pressed: listed === "via" });
   }
   if (node !== undefined && facts !== null) {
     const size = sizeText(node);
@@ -183,14 +187,14 @@ export function InfoPanel() {
       rows.push({ id: "unresolved", topic: "미확인 호출", text: `${facts.unresolved}곳` });
     }
   } else if (edge !== null) {
-    const text = linksText(edge.kinds);
+    const text = relationText(edge.kinds);
     rows.push({ id: "kinds", topic: "관계", text, brief: text });
   } else if (trunk !== null) {
     const kinds: Links["kinds"] = {};
     for (const line of trunk.edges.flatMap((e) => e.edges)) {
       kinds[line.kind] = (kinds[line.kind] ?? 0) + line.sites.length;
     }
-    const text = linksText(kinds);
+    const text = relationText(kinds);
     rows.push({ id: "kinds", topic: "관계", text, brief: text });
   }
 
@@ -220,7 +224,10 @@ export function InfoPanel() {
       return found.length === 1 ? [{ name: null, sites: found[0].sites }] : found;
     }
     if (listed === "out" || listed === "into") {
-      return facts?.[listed].groups ?? null;
+      return facts?.[listed].counted.groups ?? null;
+    }
+    if (listed === "out-rest" || listed === "into-rest") {
+      return facts?.[listed === "out-rest" ? "out" : "into"].rest.groups ?? null;
     }
     return null;
   }, [index, edge, trunk, listed, arrived, facts]);

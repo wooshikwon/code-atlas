@@ -42,7 +42,7 @@ export type EdgeView = {
    */
   into: Point | null;
 
-  /** 합친 선의 sites 수 합 */
+  /** 합친 선의 sites 가운데 세는 관계(`names.ts`의 `COUNTED_KINDS`)의 수 합 */
   sites: number;
   /** 합친 선의 종류마다 sites 수 합 */
   kinds: Partial<Record<EdgeKind, number>>;

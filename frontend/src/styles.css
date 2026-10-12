@@ -1877,6 +1877,11 @@ ul {
   text-align: left;
 }
 
+/* 내용 뒤에 적는 `그 밖` 묶음 */
+.info-more {
+  margin-left: 8px;
+}
+
 .info-link:hover,
 .info-link[aria-expanded="true"] {
   text-decoration: underline;

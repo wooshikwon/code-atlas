@@ -112,7 +112,7 @@ describe("edgeViews", () => {
 
   it("따로 들어가는 선은 sites 수가 2 이상일 때 도착 노드 앞에 그 수를 적고, sites 수는 늘 담는다", () => {
     const closed = views(null);
-    expect(closed.get("agg|main|pkg.mod")).toMatchObject({ trunks: { in: null }, sites: 4 });
+    expect(closed.get("agg|main|pkg.mod")).toMatchObject({ trunks: { in: null }, sites: 3 });
     expect(closed.get("agg|main|pkg.mod")!.into).not.toBeNull();
     expect(closed.get("agg|pkg.mod|main")).toMatchObject({ into: null, sites: 1 });
     expect(views("main:run").get("main:run|main:helper|call")).toMatchObject({ into: null, sites: 1 });

@@ -1,6 +1,6 @@
 // 정보 패널의 "정보" 구역에 적는 값. 노드의 크기와 안에 든 정의 수, 나가는 연결과 들어오는 연결, 선을 눌러 온 상태의 지나온 선을 계산한다.
 import type { AtlasEdge, AtlasNode, EdgeKind, Graph, SiteRef } from "../api/types";
-import { EDGE_KIND_NAMES, nameOf, relationOf } from "../graph/names";
+import { COUNTED_KINDS, countedOf, kindsOf, nameOf, relationOf, relationsOf } from "../graph/names";
 import { along, endsOf, type EdgeKey } from "../graph/scope";
 import { unitOf, within } from "../graph/visible";
 
@@ -19,6 +19,12 @@ export interface Links {
 
 const BOXES = new Set<AtlasNode["kind"]>(["module", "package"]);
 const CLASSES = new Set<AtlasNode["kind"]>(["class", "dataclass"]);
+
+/** 노드의 한쪽 방향 연결. counted는 세는 관계(`COUNTED_KINDS`)의 묶음이고 rest는 그 밖의 관계의 묶음이다. */
+export interface Split {
+  counted: Links;
+  rest: Links;
+}
 
 /** 원래 선 edges를 관계 묶음 하나로 합친다. peer는 선마다 코드 줄을 묶을 상대 노드의 id다. */
 function linked(nodes: Map<string, AtlasNode>, edges: AtlasEdge[], peer: (edge: AtlasEdge) => string): Links {
@@ -39,10 +45,11 @@ function linked(nodes: Map<string, AtlasNode>, edges: AtlasEdge[], peer: (edge: 
 }
 
 /**
- * 노드 id에서 나가는 연결(out)과 그 노드로 들어오는 연결(into). 노드와 그 안에 든 노드의 경계를 넘는 선을 세고, off에 든 노드(토글로 숨긴
- * 테스트 코드와 외부 노드)와의 선은 세지 않는다. 코드 줄은 상대 노드마다 묶고, 파일 상자와 폴더 상자를 골랐으면 상대 노드가 든 파일 상자마다 묶는다.
+ * 노드 id에서 나가는 연결(out)과 그 노드로 들어오는 연결(into). 노드와 그 안에 든 노드의 경계를 넘는 선을 세는 관계와 그 밖의 관계로 나눠 담고,
+ * off에 든 노드(토글로 숨긴 테스트 코드와 외부 노드)와의 선은 담지 않는다. 코드 줄은 상대 노드마다 묶고, 파일 상자와 폴더 상자를 골랐으면
+ * 상대 노드가 든 파일 상자마다 묶는다.
  */
-export function linksOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<string>, id: string): { out: Links; into: Links } {
+export function linksOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<string>, id: string): { out: Split; into: Split } {
   const boxed = BOXES.has(nodes.get(id)?.kind ?? "function");
   const peer = (other: string) => (boxed ? unitOf(nodes, other) : other);
   const out: AtlasEdge[] = [];
@@ -58,7 +65,11 @@ export function linksOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<st
       into.push(edge);
     }
   }
-  return { out: linked(nodes, out, (edge) => peer(edge.target)), into: linked(nodes, into, (edge) => peer(edge.source)) };
+  const split = (edges: AtlasEdge[], other: (edge: AtlasEdge) => string): Split => ({
+    counted: linked(nodes, edges.filter((edge) => COUNTED_KINDS.includes(edge.kind)), other),
+    rest: linked(nodes, edges.filter((edge) => !COUNTED_KINDS.includes(edge.kind)), other),
+  });
+  return { out: split(out, (edge) => peer(edge.target)), into: split(into, (edge) => peer(edge.source)) };
 }
 
 /** 지나온 선 하나. sources와 target은 누른 선의 출발 노드와 도착 노드이고(지금 고른 노드와 무관하다) links는 그 선에 든 관계를 출발 노드마다 묶은 것이다. */
@@ -96,19 +107,30 @@ export function contentsOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set
 }
 
 /**
- * 종류마다의 수 kinds를 합과 함께 `12개 (호출 9곳, import 3줄)`로 적는다. 종류가 하나면 `호출 12곳`이고 관계가 없으면 `없음`이다.
- * 종류의 이름과 단위, 순서는 `relationOf`와 `EDGE_KIND_NAMES`를 따른다.
+ * 세는 관계의 종류마다의 수 kinds를 합과 함께 `13곳 (호출 10곳, 생성 3곳)`으로 적는다. 종류가 하나면 `호출 12곳`이고 관계가 없으면 `없음`이다.
+ * 종류의 이름과 순서는 `relationOf`와 `EDGE_KIND_NAMES`를 따른다.
  */
 export function linksText(kinds: Links["kinds"]): string {
-  const list = (Object.keys(EDGE_KIND_NAMES) as EdgeKind[]).filter((kind) => kinds[kind] !== undefined).map((kind) => relationOf(kind, kinds[kind]!));
+  const list = kindsOf(kinds, true).map((kind) => relationOf(kind, kinds[kind]!));
   if (list.length === 0) {
     return "없음";
   }
-  if (list.length === 1) {
-    return list[0];
-  }
-  const total = Object.values(kinds).reduce((sum, count) => sum + count, 0);
-  return `${total}개 (${list.join(", ")})`;
+  return list.length === 1 ? list[0] : `${countedOf(kinds)}곳 (${list.join(", ")})`;
+}
+
+/** 세지 않는 관계의 종류마다의 수 kinds를 `그 밖 import 3줄, 타입 2곳`으로 적는다. 그런 관계가 없으면 null이다. */
+export function restText(kinds: Links["kinds"]): string | null {
+  const list = kindsOf(kinds, false).map((kind) => relationOf(kind, kinds[kind]!));
+  return list.length === 0 ? null : `그 밖 ${list.join(", ")}`;
+}
+
+/**
+ * 선 하나에 든 관계를 적은 글. 선의 말풍선과 같은 글(`relationsOf`)이고, 세는 관계와 그 밖의 관계가 함께 있으면 뒤에 그 밖의 관계를 덧붙인다:
+ * `호출 2곳 · 그 밖 import 1줄`.
+ */
+export function relationText(kinds: Links["kinds"]): string {
+  const rest = restText(kinds);
+  return countedOf(kinds) > 0 && rest !== null ? `${relationsOf(kinds)} · ${rest}` : relationsOf(kinds);
 }
 
 /** 노드의 줄 수와 정의의 줄 범위를 `42줄 (120~161)`로 적는다. 파일 상자와 폴더 상자는 줄 수만 적고, 외부 노드는 null이다. */

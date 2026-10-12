@@ -14,6 +14,8 @@ export interface FactRow {
   press?: () => void;
   /** 이 줄의 코드 줄 목록이 열려 있는지 */
   pressed?: boolean;
+  /** 내용 뒤에 적는 둘째 글. 세지 않는 관계의 `그 밖` 묶음이고 누르면 그 묶음의 코드 줄 목록을 열거나 닫는다. */
+  more?: { text: string; press: () => void; pressed: boolean };
 }
 
 export function Facts({ rows }: { rows: FactRow[] }) {
@@ -34,6 +36,11 @@ export function Facts({ rows }: { rows: FactRow[] }) {
                 ) : (
                   <button type="button" className="info-link" aria-expanded={row.pressed === true} onClick={row.press}>
                     {row.text}
+                  </button>
+                )}
+                {row.more !== undefined && (
+                  <button type="button" className="info-link info-more" aria-expanded={row.more.pressed} onClick={row.more.press}>
+                    {row.more.text}
                   </button>
                 )}
               </dd>

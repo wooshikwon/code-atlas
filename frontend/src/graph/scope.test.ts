@@ -35,7 +35,7 @@ describe("drawn", () => {
       ].sort(),
     );
     expect(edges.get("agg|main|pkg.mod")).toMatchObject({
-      weight: 4,
+      weight: 3,
       group: "run",
       kinds: { import: 1, call: 3 },
       tone: "muted",
@@ -45,9 +45,9 @@ describe("drawn", () => {
     expect(edges.get("pkg.mod|pkg.util|import")?.deferred).toBe(true);
   });
 
-  it("접은 폴더로 올린 선은 폴더에서 잇고 무게를 합친다. 폴더 안의 선과 숨긴 테스트 코드의 선은 넣지 않는다", () => {
+  it("접은 폴더로 올린 선은 폴더에서 잇고 세는 관계의 수를 무게로 합친다. 폴더 안의 선과 숨긴 테스트 코드의 선은 넣지 않는다", () => {
     const edges = draw(null, ["pkg"]);
-    expect(edges.get("agg|main|pkg")).toMatchObject({ weight: 4, kinds: { import: 1, call: 3 } });
+    expect(edges.get("agg|main|pkg")).toMatchObject({ weight: 3, kinds: { import: 1, call: 3 } });
     expect(edges.get("agg|pkg|main")?.weight).toBe(1);
     expect([...edges.keys()].some((key) => key.includes("pkg.mod"))).toBe(false);
   });
@@ -104,7 +104,7 @@ describe("drawn", () => {
   it("규칙 2: 파일 상자를 고르면 안의 선은 원래 선으로, 경계를 넘는 선은 파일 상자 사이 집계 선으로 그린다", () => {
     const edges = draw("pkg.mod");
     expect(edges.get("pkg.mod:Store.load|pkg.mod:Store.save|call")).toMatchObject({ tone: "muted", opacity: 1 });
-    expect(edges.get("agg|main|pkg.mod")).toMatchObject({ weight: 4, tone: "strong", opacity: 1 });
+    expect(edges.get("agg|main|pkg.mod")).toMatchObject({ weight: 3, tone: "strong", opacity: 1 });
     expect(edges.get("agg|pkg.mod|main")).toMatchObject({ weight: 1, tone: "strong", opacity: 1 });
     expect(edges.get("pkg.mod|pkg.util|import")).toMatchObject({ tone: "strong", deferred: true });
     expect(edges.get("agg|cli|main")).toMatchObject({ tone: "muted", opacity: 1 });
@@ -113,9 +113,9 @@ describe("drawn", () => {
 
   it("규칙 2: 접힌 폴더 상자를 고르면 그 상자에서 나가고 들어오는 집계 선만 strong이다", () => {
     const edges = draw("pkg", ["pkg"]);
-    expect(edges.get("agg|main|pkg")).toMatchObject({ weight: 4, tone: "strong", opacity: 1 });
+    expect(edges.get("agg|main|pkg")).toMatchObject({ weight: 3, tone: "strong", opacity: 1 });
     expect(edges.get("agg|pkg|main")).toMatchObject({ weight: 1, tone: "strong", opacity: 1 });
-    expect(edges.get("agg|pkg|common")).toMatchObject({ weight: 1, tone: "strong", opacity: 1 });
+    expect(edges.get("agg|pkg|common")).toMatchObject({ weight: 0, kinds: { import: 1 }, tone: "strong", opacity: 1 });
     expect(edges.get("agg|cli|main")).toMatchObject({ tone: "muted", opacity: 1 });
     expect(edges.get("agg|app.web|app.text")).toMatchObject({ tone: "muted", opacity: 0.2 });
     expect([...edges.values()].filter((e) => e.tone === "strong").every((e) => e.source === "pkg" || e.target === "pkg")).toBe(true);
@@ -143,13 +143,13 @@ describe("drawn", () => {
   it("여러 상자가 쓰는 상자를 고르면 들어오는 선이 고른 노드에 닿는 선이다", () => {
     const edges = draw("common");
     expect(edges.get("main|common|import")?.tone).toBe("strong");
-    expect(edges.get("agg|cli|common")).toMatchObject({ weight: 2, tone: "strong" });
+    expect(edges.get("agg|cli|common")).toMatchObject({ weight: 1, tone: "strong" });
     expect(edges.has("app.web|common|import")).toBe(true);
   });
 
   it("여러 상자가 쓰는 상자를 쓰는 노드를 고르면 그 선만 고른 노드에 닿는 선이다", () => {
     const edges = draw("cli");
-    expect(edges.get("agg|cli|common")).toMatchObject({ weight: 2, tone: "strong", opacity: 1 });
+    expect(edges.get("agg|cli|common")).toMatchObject({ weight: 1, tone: "strong", opacity: 1 });
     expect(edges.get("pkg.mod|common|import")).toMatchObject({ tone: "muted", opacity: 1 });
     expect(edges.get("app.web|common|import")?.opacity).toBe(0.2);
   });
@@ -224,7 +224,7 @@ describe("picked", () => {
     const off = hidden(repoFixture, toggles);
     const closed = shown(repoFixture, { ...toggles, collapsed: new Set(), flow: null, lit: null });
     expect(off.size).toBeGreaterThan(0);
-    expect(picked(repoFixture, closed, null, "agg|cli|common")?.weight).toBe(2);
+    expect(picked(repoFixture, closed, null, "agg|cli|common")?.weight).toBe(1);
     expect(picked(repoFixture, closed, null, "agg|scratch|common")).toBeNull();
     expect(picked(repoFixture, closed, null, "x|y|call")).toBeNull();
   });

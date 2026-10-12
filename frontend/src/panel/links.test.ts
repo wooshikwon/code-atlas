@@ -1,35 +1,44 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture } from "../graph/fixture";
 import { hidden, nodeIndex } from "../graph/visible";
-import { contentsOf, followedOf, linksOf, linksText, pathOf, sizeText } from "./links";
+import { COUNTED_KINDS } from "../graph/names";
+import { contentsOf, followedOf, linksOf, linksText, pathOf, relationText, restText, sizeText } from "./links";
 
 const nodes = nodeIndex(repoFixture);
 const off = hidden(repoFixture, { showTests: false, showExternal: false });
 const sites = (list: { sites: unknown[] }[]) => list.reduce((sum, item) => sum + item.sites.length, 0);
+const counted = <E extends { kind: (typeof COUNTED_KINDS)[number] | string }>(edges: E[], yes = true) => edges.filter((e) => COUNTED_KINDS.includes(e.kind as never) === yes);
 
 describe("linksOf", () => {
-  it("함수는 자기에게 닿는 선의 코드 줄을 종류마다 세고 상대 노드마다 묶는다", () => {
+  it("함수는 자기에게 닿는 선의 코드 줄을 세는 관계와 그 밖의 관계로 나눠 종류마다 세고 상대 노드마다 묶는다", () => {
     const { out, into } = linksOf(repoFixture, nodes, off, "main:helper");
     const incoming = repoFixture.edges.filter((e) => e.target === "main:helper" && !off.has(e.source));
-    expect(out).toEqual({ total: 0, kinds: {}, groups: [] });
-    expect(into.total).toBe(sites(incoming));
-    expect(sites(into.groups)).toBe(into.total);
-    expect(into.groups).toHaveLength(new Set(incoming.map((e) => e.source)).size);
+    const none = { total: 0, kinds: {}, groups: [] };
+    expect(out).toEqual({ counted: none, rest: none });
+    expect(into.counted.total).toBe(sites(counted(incoming)));
+    expect(into.rest.total).toBe(sites(counted(incoming, false)));
+    expect(sites(into.counted.groups)).toBe(into.counted.total);
+    expect(into.counted.groups).toHaveLength(new Set(counted(incoming).map((e) => e.source)).size);
   });
 
   it("파일 상자는 경계를 넘는 선만 세고 상대 노드가 든 파일 상자마다 묶는다", () => {
     const { out, into } = linksOf(repoFixture, nodes, off, "main");
     const crossing = (from: boolean) =>
       repoFixture.edges.filter((e) => !off.has(e.source) && !off.has(e.target) && e.source.split(":")[0] !== e.target.split(":")[0] && (from ? e.source : e.target).split(":")[0] === "main");
-    expect(out.total).toBe(sites(crossing(true)));
-    expect(into.total).toBe(sites(crossing(false)));
-    expect(out.groups.map((group) => group.name).sort()).toEqual([...new Set(crossing(true).map((e) => nodes.get(e.target.split(":")[0])!.path!.split("/").pop()))].sort());
+    expect(out.counted.total).toBe(sites(counted(crossing(true))));
+    expect(out.rest.total).toBe(sites(counted(crossing(true), false)));
+    expect(out.rest.total).toBeGreaterThan(0);
+    expect(into.counted.total + into.rest.total).toBe(sites(crossing(false)));
+    const files = (edges: typeof repoFixture.edges) => [...new Set(edges.map((e) => nodes.get(e.target.split(":")[0])!.path!.split("/").pop()))].sort();
+    expect(out.counted.groups.map((group) => group.name).sort()).toEqual(files(counted(crossing(true))));
+    expect(out.rest.groups.map((group) => group.name).sort()).toEqual(files(counted(crossing(true), false)));
   });
 
   it("토글로 숨긴 노드와의 선은 세지 않는다", () => {
     const user = repoFixture.edges.find((e) => e.target === "ext:json")!.source;
     const shownAll = hidden(repoFixture, { showTests: false, showExternal: true });
-    expect(linksOf(repoFixture, nodes, shownAll, user).out.total - linksOf(repoFixture, nodes, off, user).out.total).toBe(
+    const total = ({ counted: a, rest: b }: ReturnType<typeof linksOf>["out"]) => a.total + b.total;
+    expect(total(linksOf(repoFixture, nodes, shownAll, user).out) - total(linksOf(repoFixture, nodes, off, user).out)).toBe(
       sites(repoFixture.edges.filter((e) => e.source === user && e.target === "ext:json")),
     );
   });
@@ -66,11 +75,23 @@ describe("contentsOf", () => {
 });
 
 describe("글", () => {
-  it("종류가 하나면 종류와 수를, 여럿이면 합과 종류마다의 수를 적는다", () => {
+  it("연결 합계는 세는 관계만 `곳`으로 적고, 종류가 하나면 종류와 수를, 여럿이면 합과 종류마다의 수를 적는다", () => {
     expect(linksText({ call: 2 })).toBe("호출 2곳");
-    expect(linksText({ import: 3 })).toBe("import 3줄");
-    expect(linksText({ import: 3, call: 9 })).toBe("12개 (호출 9곳, import 3줄)");
+    expect(linksText({ import: 3, call: 10, construct: 3 })).toBe("13곳 (호출 10곳, 생성 3곳)");
+    expect(linksText({ import: 3, type: 1 })).toBe("없음");
     expect(linksText({})).toBe("없음");
+  });
+
+  it("그 밖 묶음은 세지 않는 관계를 종류마다 적고 없으면 null이다", () => {
+    expect(restText({ call: 9, import: 3, type: 2 })).toBe("그 밖 import 3줄, 타입 2곳");
+    expect(restText({ call: 9 })).toBeNull();
+  });
+
+  it("선 하나의 관계는 말풍선과 같은 글이고 세는 관계와 함께 있는 그 밖의 관계를 덧붙인다", () => {
+    expect(relationText({ call: 2, import: 1 })).toBe("호출 2곳 · 그 밖 import 1줄");
+    expect(relationText({ call: 2, construct: 1 })).toBe("호출 2곳 · 생성 1곳");
+    expect(relationText({ type: 2, import: 1 })).toBe("타입에만 쓰임");
+    expect(relationText({ import: 1 })).toBe("import 관계만 있음");
   });
 
   it("정의는 줄 수와 줄 범위를, 파일과 폴더는 줄 수만 적고 외부 노드는 적지 않는다", () => {
