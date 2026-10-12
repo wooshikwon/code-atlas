@@ -11436,6 +11436,418 @@ async function trailRoot(t, page) {
   }
 }
 
+// ── 모듈 변수 노드 ────────────────────────────────────────────────
+
+/** 변수 노드의 이름표 뒤에 적는 값의 종류와 원소 수(`graph/names.ts`의 `valueAside`) */
+const asideOf = (n) => (n.value.size === null ? n.value.kind : `${n.value.kind} · ${n.value.size}개`);
+
+/**
+ * 변수 시나리오가 쓰는 파일과 노드를 그래프에서 고른다.
+ * - file: 토글이 꺼진 화면에서 손잡이에 든 변수가 가장 많고 외부 값 변수도 있는 파일
+ * - read: 같은 파일의 함수가 안쪽 자식인 변수를 읽는 선 가운데 읽은 곳이 가장 많은 선
+ * - write: 테스트 코드가 아닌 함수가 변수를 바꾸는 선. 같은 두 노드 사이에 다른 선이 없는 선을 먼저 고른다(종류가 다른 선은 따로 그려 겹친다)
+ * - held: 값이 레포의 정의를 생성하거나 부르는 변수 가운데 들어오는 읽음이 가장 많은 변수
+ */
+function variableCase(graph) {
+  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const variable = (id) => nodes.get(id).kind === "variable" && !veiled(nodes.get(id));
+  const files = packedFiles(graph)
+    .map((file) => ({ ...file, inside: file.inner.filter(variable), external: graph.nodes.filter((n) => n.parent === file.id && n.external_value && !n.test).map((n) => n.id) }))
+    .sort((a, b) => Math.sign(b.external.length) - Math.sign(a.external.length) || b.inside.length - a.inside.length);
+  const file = files.find((each) => each.inside.length > 0);
+  const callable = (id) => ["function", "method"].includes(nodes.get(id).kind) && !nodes.get(id).test;
+  const reads = graph.edges.filter((e) => e.kind === "read" && callable(e.source) && variable(e.target)).sort((a, b) => b.sites.length - a.sites.length);
+  const read = reads.find((e) => file !== undefined && file.inside.includes(e.target) && nodes.get(e.source).parent === file.id && file.outer.includes(e.source)) ?? reads[0];
+  const writes = graph.edges.filter((e) => e.kind === "write" && callable(e.source) && variable(e.target));
+  const alone = (edge) => graph.edges.filter((e) => e.source === edge.source && e.target === edge.target).length === 1;
+  const write = writes.find(alone) ?? writes[0];
+  const incoming = (id) => graph.edges.filter((e) => e.target === id && e.kind === "read" && !veiled(nodes.get(e.source))).reduce((sum, e) => sum + e.sites.length, 0);
+  const held = graph.edges
+    .filter((e) => (e.kind === "construct" || e.kind === "call") && variable(e.source) && !veiled(nodes.get(e.target)))
+    .map((e) => e.source)
+    .sort((a, b) => incoming(b) - incoming(a))[0];
+  return { nodes, file, read, write, held };
+}
+
+/** 화면에 그린 변수 노드의 id */
+const variablesDrawn = (page) =>
+  page.evaluate(() => [...document.querySelectorAll(".react-flow__node > .node-body.node-variable")].map((body) => body.closest(".react-flow__node").dataset.id));
+
+/**
+ * from에서 to로 가는 그린 선에 마우스를 올린 말풍선의 줄과 그 선의 요소가 담은 지점 수, 선 위의 수. 두 노드 사이에 종류가 다른 선이
+ * 여럿이면 종류 kind의 선을 본다. 누를 점이 없으면 null이다.
+ */
+async function lineOver(page, from, to, kind) {
+  const found = await hittable(page, (await linesOf(page)).filter((line) => same(endsOfKey(line.key), [from, to]) && (line.key.startsWith("agg|") || line.key.endsWith(`|${kind}`))));
+  if (found === null) {
+    return null;
+  }
+  const bubble = await bubbleOver(page, found.at);
+  const drawn = await page.evaluate((key) => {
+    const edge = [...document.querySelectorAll(".react-flow__edge .edge[data-key]:not(.edge-trunk)")].find((e) => e.dataset.key === key);
+    return { sites: Number(edge.dataset.sites), weight: edge.querySelector(".edge-weight")?.textContent ?? null };
+  }, found.line.key);
+  await page.mouse.move(1, 1);
+  return { row: bubble?.rows.find((row) => same(row.nodes, [from, to])) ?? null, ...drawn };
+}
+
+/** 파일을 고른 펼침 단계와 전부 펼침 단계에서 변수 노드와 손잡이의 수, 접힌 상자의 배지 말풍선을 본다. */
+async function varFile(t, page) {
+  const graph = await api("/api/graph");
+  const { nodes, file } = variableCase(graph);
+  await load(page, url, false);
+  await page.click(`.tree-row.tree-file[data-node="${file.id}"]`);
+  await waitSelected(page, file.id);
+  await page.click(`.tree-row.tree-file[data-node="${file.id}"]`);
+  await rest(page);
+  const tip = await tipOver(page, `${face(file.id)} .badge-inside`);
+  t.check(
+    `접힌 ${file.id}의 배지 말풍선이 변수까지 센 수 ${insideOf(graph, file.id)}개를 적는다`,
+    tip === `안에 든 함수·클래스·변수 ${insideOf(graph, file.id)}개 · 고르면 보인다`,
+    tip,
+  );
+  await pickFile(page, file.id);
+  const variable = (id) => nodes.get(id).kind === "variable";
+  const [pack, staged] = [await packOf(page, file.id), await variablesDrawn(page)];
+  t.check(
+    `펼침 단계에는 밖과 이어진 변수 ${file.outer.filter(variable).length}개만 보이고 손잡이가 "${packWords(graph, file.inner)}"로 변수 ${file.inside.length}개를 센다`,
+    same(staged, file.outer.filter(variable)) && pack !== null && !pack.open && pack.text.startsWith(packWords(graph, file.inner)),
+    `그린 변수 ${staged.length}개, 손잡이 "${pack?.text ?? "없음"}"`,
+  );
+  await clickPack(page, file.id);
+  const [all, boxesNow] = [await drawnIn(page, graph, file.id), await flowBoxes(page)];
+  const shownVariables = file.kids.filter(variable);
+  t.check(
+    `전부 펼침 단계에는 외부 값이 아닌 변수 ${shownVariables.length}개가 다른 정의와 함께 보이고 외부 값 변수 ${file.external.length}개는 없다`,
+    same(all, file.kids) && same(await variablesDrawn(page), shownVariables) && file.external.every((id) => !all.includes(id)),
+    `그린 정의 ${all.length}/${file.kids.length}개, 그린 변수 ${(await variablesDrawn(page)).length}개`,
+  );
+  const columnsNow = [...new Set(all.map((id) => boxesNow[id].x))];
+  t.check(
+    "같은 열의 변수와 다른 정의는 소스 정의 순서대로 위에서 아래로 놓인다",
+    columnsNow.every((x) => {
+      const column = all.filter((id) => boxesNow[id].x === x);
+      return same([...column].sort((a, b) => boxesNow[a].y - boxesNow[b].y), column);
+    }) && columnsNow.some((x) => all.filter((id) => boxesNow[id].x === x && variable(id)).length > 0),
+    `열 ${columnsNow.length}개`,
+  );
+  const shape = await page.evaluate((id) => {
+    const wrapper = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}#face"]`);
+    return { diamond: document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"] .node-diamond polygon`) !== null, text: [...wrapper.querySelectorAll(".node-label, .loc, .node-aside")].map((e) => e.textContent) };
+  }, shownVariables[0]);
+  const first = nodes.get(shownVariables[0]);
+  t.check(
+    "변수 노드는 마름모와 괄호 없는 이름, 줄 수, 값의 종류와 원소 수를 그린다",
+    shape.diamond && same(shape.text, [first.name, String(first.loc), asideOf(first)]),
+    shape.text.join(" | "),
+  );
+}
+
+/** 외부 노드 토글이 외부 값 변수를 그래프, 검색, 파일트리에서 보이고 숨기는지 본다. */
+async function varExternal(t, page) {
+  const graph = await api("/api/graph");
+  const { nodes, file } = variableCase(graph);
+  const outside = graph.edges.filter((e) => nodes.get(e.source).kind === "variable" && nodes.get(e.target).kind === "external");
+  t.check("변수에서 외부 노드로 가는 선이 분석 결과에 없다", outside.length === 0, `${outside.length}개`);
+  const hiddenOne = nodes.get(file.external[0]);
+  await load(page, url, false);
+  await pickFile(page, file.id);
+  /** 검색 팔레트와 파일트리의 고른 파일 아래 목록에 외부 값 변수가 있는지 */
+  const listed = async () => {
+    await page.keyboard.press(`${MOD}+p`);
+    await page.waitForSelector(".palette-input", { timeout: 5_000 });
+    await page.keyboard.type(hiddenOne.name);
+    await page.waitForTimeout(300);
+    const found = { palette: (await count(page, `.palette-option[data-node="${hiddenOne.id}"]`)) > 0, tree: (await count(page, `.tree-row.tree-symbol[data-node="${hiddenOne.id}"]`)) > 0 };
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".palette", { state: "detached", timeout: 3_000 }).catch(() => {});
+    return found;
+  };
+  const off = await listed();
+  t.check(`토글이 꺼져 있으면 Mod+P 검색과 파일트리에 외부 값 변수 ${hiddenOne.name}이 없다`, !off.palette && !off.tree, JSON.stringify(off));
+  await setToggle(page, "외부 노드", true);
+  await rest(page);
+  const wide = stagesOf(graph, file.id, true);
+  if ((await packOf(page, file.id))?.open === false) {
+    await clickPack(page, file.id);
+  }
+  const drawnNow = await variablesDrawn(page);
+  const lines = (await linesOf(page)).map((line) => endsOfKey(line.key)).filter(([from, to]) => file.external.includes(from) && nodes.get(to)?.kind === "external");
+  t.check(
+    `외부 노드를 켜고 ${file.id}를 전부 펼치면 외부 값 변수 ${file.external.length}개가 보이고 그 변수에서 외부 노드로 가는 선은 없다`,
+    file.external.every((id) => drawnNow.includes(id)) && same(await drawnIn(page, graph, file.id), wide.kids) && lines.length === 0 && (await count(page, ".node-body.node-external")) > 0,
+    `그린 변수 ${drawnNow.length}개, 외부 노드로 가는 선 ${lines.length}개`,
+  );
+  const on = await listed();
+  t.check("토글을 켜면 Mod+P 검색과 파일트리에 그 변수가 있다", on.palette && on.tree, JSON.stringify(on));
+  await t.shot();
+  // 외부 값 변수가 가장 많은 다른 파일
+  const most = graph.nodes
+    .filter((n) => n.kind === "module" && !n.test && n.id !== file.id)
+    .map((n) => ({ id: n.id, external: graph.nodes.filter((each) => each.parent === n.id && each.external_value).map((each) => each.id) }))
+    .sort((a, b) => b.external.length - a.external.length)[0];
+  if (most === undefined || most.external.length === 0) {
+    t.skip("외부 값 변수가 든 다른 파일을 고르면 그 변수가 보인다", "외부 값 변수가 든 다른 파일이 없다");
+  } else {
+    await palettePick(page, nodes.get(most.id).path.split("/").at(-1), most.id);
+    await waitSelected(page, most.id);
+    await rest(page);
+    if ((await packOf(page, most.id))?.open === false) {
+      await clickPack(page, most.id);
+    }
+    const seen = await variablesDrawn(page);
+    t.check(`${most.id}를 고르면 외부 값 변수 ${most.external.length}개가 보인다`, most.external.every((id) => seen.includes(id)), `그린 변수 ${seen.length}개`);
+  }
+  await setToggle(page, "외부 노드", false);
+  await rest(page);
+  t.check("토글을 끄면 외부 값 변수가 그래프에서 사라진다", (await variablesDrawn(page)).every((id) => !nodes.get(id).external_value));
+}
+
+/** 값이 레포의 정의를 생성하는 변수를 골랐을 때의 그래프, 정보 패널, 코드 뷰어를 본다. --wide-url을 받으면 그 레포에서 본다. */
+async function varSelect(t, page) {
+  const at = wideUrl ?? url;
+  const graph = await api("/api/graph", at);
+  const { nodes, held } = variableCase(graph);
+  if (held === undefined) {
+    t.skip("값이 레포의 정의를 생성하는 변수를 고른다", `그런 변수가 없다${wideUrl === null ? "(--wide-url을 주지 않았다)" : ""}`);
+    return;
+  }
+  const target = nodes.get(held);
+  const off = hiddenOf(graph);
+  await load(page, at, false);
+  await palettePick(page, target.name, held);
+  await waitSelected(page, held);
+  await rest(page);
+  const links = crossing(graph, held);
+  const readers = [...new Set(links.into.map((e) => e.source))];
+  /** 접힌 폴더 안의 노드는 꺼내 그리지 않으므로, 읽는 노드마다 그 노드가 보이거나 그 노드를 품은 접힌 폴더가 보이는지 본다. */
+  const drawnReaders = await page.evaluate(
+    ([ids, parents]) =>
+      ids.filter((id) => {
+        const shownId = (at) => document.querySelector(`.react-flow__node[data-id="${CSS.escape(at)}"]`) !== null;
+        for (let at = id; at != null; at = parents[at]) {
+          if (shownId(at)) {
+            return at === id || document.querySelector(`.react-flow__node[data-id="${CSS.escape(at)}"] > .node-package`) !== null;
+          }
+        }
+        return false;
+      }),
+    [readers, Object.fromEntries(graph.nodes.map((n) => [n.id, n.parent]))],
+  );
+  const trunk = (await trunksOf(page)).find((each) => each.target === held);
+  const total = countedSites(links.into);
+  t.check(
+    `${target.name}를 고르면 읽는 노드 ${readers.length}개가 각자의 파일 상자나 접힌 폴더에 보이고 줄기의 합계가 들어오는 지점 수 ${total}이다`,
+    same(drawnReaders, readers) && (readers.length < 2 || trunk?.sum === total),
+    `그린 노드 ${drawnReaders.length}개, 합계 ${trunk?.sum ?? "없음"}`,
+  );
+  const facts = await factsOf(page);
+  const want = [
+    ["크기", `${asideOf(target)} · ${target.loc}줄 (${target.range[0]}~${target.range[1]})`],
+    ["나가는 연결", linksWords(links.out).text],
+    ["들어오는 연결", linksWords(links.into).text],
+  ];
+  t.check(
+    `정보 패널의 이름 줄이 ${target.path}::${target.name}, 종류 칩이 변수이고 크기와 연결 줄이 읽음·생성을 센다`,
+    facts.path === `${target.path}::` && facts.name === target.name && same(facts.chips, ["변수"]) && same(facts.rows.map((row) => [row.topic, row.text]), want),
+    `${facts.path}${facts.name} [${facts.chips.join(", ")}] ${facts.rows.map((row) => `${row.topic}: ${row.text}`).join(" / ")}`,
+  );
+  t.check("변수의 정보 패널에는 요약 구역이 없다", (await count(page, ".info-panel-summary")) === 0);
+  await page.waitForFunction((name) => document.querySelector(".info-panel .monaco-editor .view-lines")?.textContent.includes(name), target.name, { timeout: 10_000 }).catch(() => {});
+  const code = await page.evaluate((name) => {
+    const lines = [...document.querySelectorAll(".info-panel .monaco-editor .view-lines .view-line")];
+    const line = lines.find((each) => each.textContent.replaceAll(" ", " ").trimStart().startsWith(name));
+    return { shown: line !== undefined, colors: new Set([...(line?.querySelectorAll("span span") ?? [])].map((span) => getComputedStyle(span).color)).size };
+  }, target.name);
+  t.check("코드 뷰어가 대입문을 문법 색으로 그린다", code.shown && code.colors > 1, `대입문 ${code.shown ? "보임" : "안 보임"}, 글자색 ${code.colors}가지`);
+  await t.shot();
+  await clickNode(page, held);
+  await rest(page);
+  t.check("고른 변수를 다시 눌러도 선택이 유지된다", (await selectedOf(page)) === held, `${await selectedOf(page)}`);
+  t.check("숨긴 노드에서 들어오는 읽음은 세지 않는다", links.into.every((e) => !off.has(e.source)));
+}
+
+/** 손잡이에 든 변수를 Mod+P로 고르면 그 파일 상자가 전부 펼침 단계가 되고 뒤로·앞으로에서 유지되는지 본다. */
+async function varInner(t, page) {
+  const graph = await api("/api/graph");
+  const { nodes, file } = variableCase(graph);
+  const inner = file.inside[0];
+  await load(page, url, false);
+  const full = async () => {
+    const [pack, drawnNow] = [await packOf(page, file.id), await drawnIn(page, graph, file.id)];
+    return { ok: pack?.open === true && same(drawnNow, file.kids) && (await selectedOf(page)) === inner, text: `선택 ${await selectedOf(page)}, 그린 정의 ${drawnNow.length}/${file.kids.length}개, 손잡이 "${pack?.text ?? "없음"}"` };
+  };
+  await palettePick(page, nodes.get(inner).name, inner);
+  await waitSelected(page, inner);
+  await rest(page);
+  const picked = await full();
+  t.check(`Mod+P로 안쪽 변수 ${inner}를 고르면 ${file.id}가 전부 펼침 단계가 된다`, picked.ok, picked.text);
+  await t.shot();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await rest(page);
+  const before = await selectedOf(page);
+  await page.keyboard.press("Alt+ArrowRight");
+  await waitSelected(page, inner).catch(() => {});
+  await rest(page);
+  const again = await full();
+  t.check("뒤로 갔다가 앞으로 오면 선택과 전부 펼침이 그대로다", before !== inner && again.ok, `뒤로 ${before}, 앞으로 ${again.text}`);
+}
+
+/** 변수를 읽는 함수를 골랐을 때 그 선의 말풍선과 선 위의 수를 본다. */
+async function varLine(t, page) {
+  const graph = await api("/api/graph");
+  const { nodes, read } = variableCase(graph);
+  const kinds = kindsOf([read]);
+  await load(page, url, false);
+  await palettePick(page, nodes.get(read.source).name, read.source);
+  await waitSelected(page, read.source);
+  await rest(page);
+  const over = await lineOver(page, read.source, read.target, "read");
+  const want = `${nodes.get(read.source).name}() → ${nodes.get(read.target).name} · ${relationWords(kinds)}`;
+  t.check(
+    `${read.source}를 고르면 ${nodes.get(read.target).name}로 가는 선의 말풍선 줄이 "${want}"다`,
+    over?.row != null && rowText(over.row).endsWith(want) && relationWords(kinds).includes(`읽음 ${kinds.read}곳`),
+    over?.row == null ? "말풍선의 줄 없음" : rowText(over.row),
+  );
+  const sites = COUNTED.reduce((sum, kind) => sum + (kinds[kind] ?? 0), 0);
+  t.check(`선이 담은 지점 수와 선 위의 수가 ${sites}다`, over !== null && over.sites === sites && (over.weight === null ? sites === 1 : Number(over.weight) === sites), `지점 ${over?.sites}, 선 위의 수 ${over?.weight ?? "없음"}`);
+  await t.shot();
+}
+
+/** 변수를 바꾸는 함수의 g 배지와 그 변수로 가는 선을 본다. --wide-url을 받으면 그 레포에서 본다. */
+async function varWrite(t, page) {
+  const pickedIn = async (at) => ({ at, graph: await api("/api/graph", at) });
+  let { at, graph } = await pickedIn(url);
+  if (variableCase(graph).write === undefined && wideUrl !== null) {
+    ({ at, graph } = await pickedIn(wideUrl));
+  }
+  const { nodes, write } = variableCase(graph);
+  if (write === undefined) {
+    t.skip("변수를 바꾸는 함수에 g 배지가 달린다", `함수가 바꾸는 변수가 없다${wideUrl === null ? "(--wide-url을 주지 않았다)" : ""}`);
+    return;
+  }
+  const names = [...new Set(graph.edges.filter((e) => e.kind === "write" && e.source === write.source).map((e) => nodes.get(e.target).name))];
+  await load(page, at, false);
+  await palettePick(page, nodes.get(write.source).name, write.source);
+  await waitSelected(page, write.source);
+  await rest(page);
+  const tip = (await count(page, `${face(write.source)} .badge-global`)) === 0 ? "" : await tipOver(page, `${face(write.source)} .badge-global`);
+  t.check(`${write.source}에 g 배지가 있고 말풍선이 바꾸는 변수 ${names.join(", ")}을 적는다`, tip === `모듈 변수 변경: ${names.join(", ")}을 바꾼다`, tip);
+  await page.mouse.move(1, 1);
+  const kinds = kindsOf([write]);
+  const over = await lineOver(page, write.source, write.target, "write");
+  t.check(
+    `${nodes.get(write.target).name}로 가는 선의 말풍선 관계 칸이 "${relationWords(kinds)}"다`,
+    over?.row?.relation === relationWords(kinds) && relationWords(kinds).includes(`바꿈 ${kinds.write}곳`),
+    over === null ? "바꿈 선에 누를 점이 없다" : over.row == null ? "말풍선의 줄 없음" : rowText(over.row),
+  );
+  const badges = await page.evaluate(() => [...document.querySelectorAll(".node-face .badge-global")].map((badge) => badge.closest(".react-flow__node").dataset.id.replace(/#face$/, "")));
+  const writers = new Set(graph.edges.filter((e) => e.kind === "write").map((e) => e.source));
+  t.check("g 배지는 바꿈 선이 나가는 함수·메서드에만 달린다", badges.length > 0 && badges.every((id) => writers.has(id)), badges.join(", "));
+  await t.shot();
+}
+
+/** 변수 노드의 말풍선과 커서를 올린 모양, 우클릭 메뉴, 파일의 "모두 요약" 수를 본다. */
+async function varTip(t, page) {
+  const graph = await api("/api/graph");
+  const { nodes, file } = variableCase(graph);
+  const id = file.inside.find((each) => nodes.get(each).value.text !== "") ?? file.inside[0];
+  const variable = nodes.get(id);
+  await load(page, url, false);
+  await palettePick(page, variable.name, id);
+  await waitSelected(page, id);
+  await rest(page);
+  const other = file.inside.find((each) => each !== id) ?? id;
+  const diamond = `${node(other)} .node-diamond`;
+  const before = { rect: await rectOf(page, diamond), opacity: await page.evaluate((sel) => Number(document.querySelector(sel).style.opacity), node(other)) };
+  const wanted = nodes.get(other);
+  const tip = await tipOver(page, `${face(other)} .node-label`);
+  await page.waitForTimeout(300);
+  const want = wanted.value.text === "" ? asideOf(wanted) : `${asideOf(wanted)} · ${wanted.value.text}`;
+  t.check("변수 노드의 말풍선이 값의 종류·원소 수와 값의 글을 적는다", tip === want, tip);
+  const after = { rect: await rectOf(page, diamond), opacity: await page.evaluate((sel) => Number(document.querySelector(sel).style.opacity), node(other)), pointed: await page.evaluate((sel) => document.querySelector(sel).classList.contains("pointed"), node(other)) };
+  t.check(
+    "커서를 올리면 진하기가 한 단계 오르고 마름모가 찌그러지지 않고 커진다",
+    after.pointed && after.opacity >= before.opacity && after.rect.width > before.rect.width + 1 && near(after.rect.width, after.rect.height, 0.2) && near(before.rect.width, before.rect.height, 0.2),
+    `불투명도 ${before.opacity} → ${after.opacity}, 마름모 ${before.rect.width.toFixed(1)}×${before.rect.height.toFixed(1)} → ${after.rect.width.toFixed(1)}×${after.rect.height.toFixed(1)}`,
+  );
+  await t.shot();
+  await clickNode(page, other, 1, "right");
+  await page.waitForTimeout(300);
+  t.check("변수 노드를 우클릭해도 메뉴가 열리지 않는다", (await count(page, ".menu")) === 0);
+  await page.mouse.move(1, 1);
+  await page.click(`.tree-row.tree-file[data-node="${file.id}"]`, { button: "right" });
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  const items = await page.evaluate(() => [...document.querySelectorAll(".menu .menu-item")].map((item) => item.textContent));
+  const summarized = 1 + definedIn(graph, file.id).filter((n) => !n.test && n.kind !== "variable").length;
+  t.check(
+    `${file.id}의 "이 파일과 안에 든 정의 모두 요약"의 수 ${summarized}는 변수를 세지 않는다`,
+    items.includes(`이 파일과 안에 든 정의 모두 요약 (${summarized}개)`),
+    items.join(" / "),
+  );
+  await page.keyboard.press("Escape");
+}
+
+/** 경로 탐색 창의 검색 칸과 정보 패널의 출발로·도착으로 버튼이 변수를 받지 않는지 본다. */
+async function varFinder(t, page) {
+  const graph = await api("/api/graph");
+  const { nodes, file, read } = variableCase(graph);
+  const variable = nodes.get(file.inside[0]);
+  await load(page, url, false);
+  await openFinder(page);
+  if ((await count(page, '.finder-field[data-end="from"] .finder-input')) === 0) {
+    await page.click('.finder-field[data-end="from"] .finder-value');
+  }
+  await page.click('.finder-field[data-end="from"] .finder-input');
+  await page.keyboard.type(variable.name);
+  await page.waitForTimeout(400);
+  const hits = await page.evaluate(() => [...document.querySelectorAll(".finder-hit")].map((hit) => hit.dataset.node));
+  t.check(
+    `출발 칸에 ${variable.name}를 넣으면 검색 결과에 변수가 없다`,
+    hits.every((id) => nodes.get(id)?.kind !== "variable"),
+    `결과 ${hits.length}개: ${hits.slice(0, 5).join(", ")}`,
+  );
+  await t.shot();
+  await page.keyboard.press("Escape");
+  await palettePick(page, variable.name, variable.id);
+  await waitSelected(page, variable.id);
+  await rest(page);
+  const onVariable = await count(page, ".info-panel-end");
+  await palettePick(page, nodes.get(read.source).name, read.source);
+  await waitSelected(page, read.source);
+  await rest(page);
+  t.check("변수를 고른 정보 패널에는 출발로·도착으로 버튼이 없고 함수를 고르면 있다", onVariable === 0 && (await count(page, ".info-panel-end")) === 2, `변수 ${onVariable}개, 함수 ${await count(page, ".info-panel-end")}개`);
+}
+
+/** 코드 뷰어에서 변수 이름을 Mod+클릭하면 그 변수 노드를 고르는지 본다. */
+async function varJump(t, page) {
+  const graph = await api("/api/graph");
+  const { nodes, read } = variableCase(graph);
+  const name = nodes.get(read.target).name;
+  await load(page, url, false);
+  await palettePick(page, nodes.get(read.source).name, read.source);
+  await waitSelected(page, read.source);
+  await rest(page);
+  await page.waitForFunction((text) => document.querySelector(".info-panel .monaco-editor .view-lines")?.textContent.includes(text), name, { timeout: 10_000 }).catch(() => {});
+  const word = await callRect(page, name);
+  if (word === null) {
+    t.check(`코드 뷰어에 ${name}를 읽는 줄이 보인다`, false, "보이지 않는다");
+    return;
+  }
+  await page.keyboard.down(MOD);
+  await page.mouse.move(word.x + word.width / 2 - 6, word.y + word.height / 2);
+  await page.mouse.move(word.x + word.width / 2, word.y + word.height / 2, { steps: 3 });
+  await page.waitForSelector(".info-panel .code-link", { timeout: 3_000 }).catch(() => {});
+  await page.mouse.click(word.x + word.width / 2, word.y + word.height / 2);
+  await page.keyboard.up(MOD);
+  await waitSelected(page, read.target).catch(() => {});
+  await page.mouse.move(5, 5);
+  await rest(page);
+  t.check(`코드 뷰어에서 ${name}를 Mod+클릭하면 변수 노드 ${read.target}를 고른다`, (await selectedOf(page)) === read.target, `${await selectedOf(page)}`);
+  const facts = await factsOf(page);
+  t.check("정보 패널이 그 변수를 보인다", facts.name === name && same(facts.chips, ["변수"]), `${facts.path}${facts.name} [${facts.chips.join(", ")}]`);
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -11531,6 +11943,15 @@ const SCENARIOS = [
   ["progress", progress],
   ["progress-failed", progressFailed],
   ["stale", staleScenario],
+  ["var-file", varFile],
+  ["var-external", varExternal],
+  ["var-select", varSelect],
+  ["var-inner", varInner],
+  ["var-line", varLine],
+  ["var-write", varWrite],
+  ["var-tip", varTip],
+  ["var-finder", varFinder],
+  ["var-jump", varJump],
 ];
 
 /** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
@@ -11573,6 +11994,8 @@ const STAGE4 = new Set([
   "progress-failed",
   "stale",
 ]);
+/** 모듈 변수 노드의 시나리오. 스크린샷 이름이 mv-로 시작한다. */
+const VARIABLES = new Set(SCENARIOS.filter(([name]) => name.startsWith("var-")).map(([name]) => name));
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 
@@ -11597,7 +12020,7 @@ async function run(browser, name, scenario) {
   });
   const results = [];
   const errors = [];
-  const path = join(OUT, `${STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
+  const path = join(OUT, `${VARIABLES.has(name) ? "mv" : STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
   const page = await context.newPage();
   let shot = false;
   const t = {
