@@ -14,7 +14,7 @@ from conftest import FIXTURE, git, group_ended
 
 from code_atlas import api, lsp, runner, summary
 from code_atlas.api import create_app
-from code_atlas.summary import Subject, Summaries, SummaryError
+from code_atlas.summary import Made, Subject, Summaries, SummaryError, Usage
 
 RUN_ENGINE_CALL = {"path": "src/app/cli.py", "line": 10, "col": 21}  # 한글 문자열 뒤의 run_engine
 
@@ -45,6 +45,10 @@ def client(module_repo, tmp_path_factory):
             yield analysed(client)
 
 
+USED = Usage(input=2, cache_write=1487, cache_read=16411, output=527)
+USAGE = {"input": 2, "cache_write": 1487, "cache_read": 16411, "output": 527}
+
+
 @pytest.fixture
 def generated(client, tmp_path, monkeypatch):
     """빈 요약 캐시로 바꾸고 `claude` 호출을 가짜로 바꾼다. 가짜가 받은 (시스템 프롬프트, 프롬프트)를 돌려준 목록에 담는다."""
@@ -52,14 +56,14 @@ def generated(client, tmp_path, monkeypatch):
 
     async def generate(system, prompt):
         calls.append((system, prompt))
-        return f"{name_in(prompt)} 요약 {len(calls)}"
+        return Made(f"{name_in(prompt)} 요약 {len(calls)}", USED)
 
     async def unavailable():
         return None
 
     async def explain(system, prompt):
         calls.append((system, prompt))
-        return f"{prompt.split(chr(10) + '위치: ', 1)[1].split(chr(10), 1)[0]} 설명 {len(calls)}"
+        return Made(f"{prompt.split(chr(10) + '위치: ', 1)[1].split(chr(10), 1)[0]} 설명 {len(calls)}", USED)
 
     monkeypatch.setattr(summary, "generate", generate)
     monkeypatch.setattr(summary, "explain", explain)
@@ -482,7 +486,7 @@ async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects
     async def generate(system, prompt):
         made.append(name_in(prompt))
         await release.wait()
-        return f"{name_in(prompt)} 요약"
+        return Made(f"{name_in(prompt)} 요약")
 
     async def unavailable():
         return None
@@ -493,27 +497,32 @@ async def test_summary_waiting_for_a_slot_is_dropped_when_the_caller_disconnects
     app = create_app(sample_repo, sys.executable)
     async with app.router.lifespan_context(app):
         await app.state.running
-        nodes = ["app.core:helper", "app.core:run_engine", "app.core:Engine.start"]
-        gone = [asyncio.Event() for _ in nodes]
-        posts = [
-            asyncio.create_task(call(app, "POST", "/api/summary", {"node": node}, left))
-            for node, left in zip(nodes, gone)
-        ]
+        names = {
+            "app.core:helper": "app/core.py::helper",
+            "app.core:run_engine": "app/core.py::run_engine",
+            "app.core:Engine.start": "app/core.py::Engine.start",
+        }
+        gone = {node: asyncio.Event() for node in names}
+        posts = {node: asyncio.create_task(call(app, "POST", "/api/summary", {"node": node}, gone[node])) for node in names}
         while len(made) < 2:
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.1)
-        assert made == ["app/core.py::helper", "app/core.py::run_engine"]
+        # 세 요청 가운데 어느 둘이 먼저 동시 실행 자리를 얻는지는 정해져 있지 않다.
+        assert len(made) == 2
+        left, kept = (node for node in names if names[node] in made)
+        (late,) = (node for node in names if names[node] not in made)
+        started = list(made)
 
-        gone[0].set()
-        gone[2].set()
-        assert (await posts[0])[0] == (await posts[2])[0] == 499
+        gone[left].set()
+        gone[late].set()
+        assert (await posts[left])[0] == (await posts[late])[0] == 499
         release.set()
-        assert await posts[1] == (200, {"summary": "app/core.py::run_engine 요약"})
+        assert await posts[kept] == (200, {"summary": f"{names[kept]} 요약", "usage": None})
         await asyncio.sleep(0.1)
-        assert made == ["app/core.py::helper", "app/core.py::run_engine"]
-        _, cached = await call(app, "GET", "/api/summary", {"node": nodes[0]})
-        assert cached["summary"] == "app/core.py::helper 요약"
-        _, skipped = await call(app, "GET", "/api/summary", {"node": nodes[2]})
+        assert made == started
+        _, cached = await call(app, "GET", "/api/summary", {"node": left})
+        assert cached["summary"] == f"{names[left]} 요약"
+        _, skipped = await call(app, "GET", "/api/summary", {"node": late})
         assert skipped["summary"] is None
 
 
@@ -522,7 +531,7 @@ def test_summary_is_made_on_post_and_read_from_cache(client, generated):
     assert client.get("/api/summary", params=node).json() == {"summary": None, "stale": False, "available": True, "reason": None}
     assert generated == []
 
-    assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 1"}
+    assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 1", "usage": USAGE}
     system, prompt = generated[0]
     assert system == summary.system_prompt_of(None)
     assert prompt.startswith(
@@ -532,11 +541,11 @@ def test_summary_is_made_on_post_and_read_from_cache(client, generated):
     assert "- app/core.py::Engine.start\n    def start(self, label: 'Config') -> Optional[Config]:" in prompt
     assert "- app/models.py::Config: name: str, retries: int" in prompt
 
-    assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 1"}
+    assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 1", "usage": None}
     assert client.get("/api/summary", params=node).json()["summary"] == "app/core.py::run_engine 요약 1"
     assert len(generated) == 1
 
-    assert client.post("/api/summary", params={**node, "refresh": "true"}).json() == {"summary": "app/core.py::run_engine 요약 2"}
+    assert client.post("/api/summary", params={**node, "refresh": "true"}).json() == {"summary": "app/core.py::run_engine 요약 2", "usage": USAGE}
     assert client.get("/api/summary", params=node).json()["summary"] == "app/core.py::run_engine 요약 2"
 
 
@@ -544,7 +553,7 @@ def test_summaries_list_the_lead_of_every_kept_summary(client, generated, monkey
     assert client.get("/api/summaries").json() == {"summaries": []}
 
     async def generate(system, prompt):
-        return f"{name_in(prompt)}의 요지\n\n하는 일\n첫 문단\n\n앞뒤 흐름\n둘째 문단"
+        return Made(f"{name_in(prompt)}의 요지\n\n하는 일\n첫 문단\n\n앞뒤 흐름\n둘째 문단")
 
     monkeypatch.setattr(summary, "generate", generate)
     client.post("/api/summary", params={"node": "app.core:run_engine"})
@@ -565,7 +574,7 @@ def test_explanation_is_made_listed_and_deleted(client, generated):
     assert client.get("/api/explanations", params={"path": path}).json() == {"explanations": []}
 
     made = client.post("/api/explanation", params=span).json()
-    assert made == {"start": 32, "end": 33, "text": "src/app/core.py 32~33줄 설명 1", "stale": False}
+    assert made == {"start": 32, "end": 33, "text": "src/app/core.py 32~33줄 설명 1", "stale": False, "usage": USAGE}
     system, prompt = generated[0]
     assert system == summary.system_prompt_of(None, "range")
     assert "범위가 든 정의: app/core.py::run_engine (함수, 31~35줄)" in prompt
@@ -581,7 +590,8 @@ def test_explanation_is_made_listed_and_deleted(client, generated):
     ]
     assert all(e["created"] for e in listed)
 
-    assert client.post("/api/explanation", params=span).json()["text"] == "src/app/core.py 32~33줄 설명 1"
+    again = client.post("/api/explanation", params=span).json()
+    assert (again["text"], again["usage"]) == ("src/app/core.py 32~33줄 설명 1", None)
     assert len(generated) == 3
     assert client.post("/api/explanation", params={**span, "refresh": "true"}).json()["text"] == "src/app/core.py 32~33줄 설명 4"
 
@@ -632,7 +642,7 @@ def test_summary_made_before_the_code_changed_is_returned_as_stale(client, gener
         changed = client.get("/api/summary", params=node).json()
         assert (changed["summary"], changed["stale"]) == ("app/core.py::run_engine 요약 1", True)
         assert len(generated) == 1
-        assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 2"}
+        assert client.post("/api/summary", params=node).json() == {"summary": "app/core.py::run_engine 요약 2", "usage": USAGE}
         again = client.get("/api/summary", params=node).json()
         assert (again["summary"], again["stale"]) == ("app/core.py::run_engine 요약 2", False)
     finally:
@@ -664,7 +674,7 @@ def guided(module_repo, tmp_path, monkeypatch):
 
     async def generate(system, prompt):
         calls.append((system, prompt))
-        return "요약"
+        return Made("요약")
 
     async def unavailable():
         return None
@@ -687,7 +697,7 @@ def test_summary_reports_unreadable_style_guide_and_reads_it_for_every_request(g
 
     guide.write_text("문장은 서술어로 끝낸다.")
     assert client.get("/api/summary", params=node).json() == {"summary": None, "stale": False, "available": True, "reason": None}
-    assert client.post("/api/summary", params=node).json() == {"summary": "요약"}
+    assert client.post("/api/summary", params=node).json() == {"summary": "요약", "usage": None}
     assert "<서술 규약 문서>\n문장은 서술어로 끝낸다.\n</서술 규약 문서>" in calls[0][0]
     assert client.get("/api/summary", params=node).json()["summary"] == "요약"
 

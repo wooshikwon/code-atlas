@@ -3,7 +3,9 @@
 // 나머지는 차례를 기다리며, 차례를 기다리는 요청은 취소한다.
 import { create } from "zustand";
 import { getSummaries, getSummary, makeSummary } from "../api/client";
+import type { Usage } from "../api/types";
 import { partsOf } from "../panel/parts";
+import { added } from "./usage";
 
 /**
  * 서버로 한꺼번에 보내는 요약 요청의 수. 서버가 요약을 둘씩 만들고(`summary.py`의 `MAX_PROCESSES`) 브라우저는 한 서버에 연결을
@@ -11,12 +13,15 @@ import { partsOf } from "../panel/parts";
  */
 export const MAX_REQUESTS = 2;
 
-/** stale은 요약을 만든 뒤 코드나 앞뒤 흐름이 바뀌었다는 뜻이고, refresh는 캐시에 있어도 다시 만든 요청이다. 차례를 기다리는 요청도 making이다. */
+/**
+ * stale은 요약을 만든 뒤 코드나 앞뒤 흐름이 바뀌었다는 뜻이고, refresh는 캐시에 있어도 다시 만든 요청이다. 차례를 기다리는 요청도 making이다.
+ * usage는 이 화면의 요청으로 요약을 만든 호출의 사용량이고, 캐시에서 읽은 요약은 null이다.
+ */
 export type SummaryState =
   | { phase: "reading" }
   | { phase: "empty" }
   | { phase: "making" }
-  | { phase: "done"; summary: string; available: boolean; stale: boolean }
+  | { phase: "done"; summary: string; available: boolean; stale: boolean; usage: Usage | null }
   | { phase: "failed"; error: string; refresh: boolean }
   | { phase: "unavailable"; reason: string };
 
@@ -35,9 +40,11 @@ export interface Batch {
   held: boolean;
   /** 차례를 기다리던 요청을 취소했는지 */
   cancelled: boolean;
+  /** 묶음에서 끝난 요청의 사용량 합. 사용량을 담은 응답이 아직 없으면 null이다. 취소해도 그대로 둔다. */
+  usage: Usage | null;
 }
 
-const IDLE: Batch = { total: 0, ended: 0, failed: 0, held: false, cancelled: false };
+const IDLE: Batch = { total: 0, ended: 0, failed: 0, held: false, cancelled: false, usage: null };
 
 export interface SummaryStore {
   /** 노드 id → 요약 상태. 한 번도 읽지 않은 노드는 없다. */
@@ -83,7 +90,15 @@ export const useSummaries = create<SummaryStore>()((set, get) => {
       set({ waiting, sent: get().sent + 1 });
       const finish = (state: SummaryState) => {
         const { sent, batch } = get();
-        set({ sent: sent - 1, batch: { ...batch, ended: batch.ended + 1, failed: batch.failed + (state.phase === "failed" ? 1 : 0) } });
+        set({
+          sent: sent - 1,
+          batch: {
+            ...batch,
+            ended: batch.ended + 1,
+            failed: batch.failed + (state.phase === "failed" ? 1 : 0),
+            usage: added(batch.usage, state.phase === "done" ? state.usage : null),
+          },
+        });
         put(node, state);
         send();
         if (get().sent === 0) {
@@ -91,7 +106,7 @@ export const useSummaries = create<SummaryStore>()((set, get) => {
         }
       };
       makeSummary(node, refresh).then(
-        (made) => finish({ phase: "done", summary: made.summary, available: true, stale: false }),
+        (made) => finish({ phase: "done", summary: made.summary, available: true, stale: false, usage: made.usage }),
         (error: unknown) => finish({ phase: "failed", error: message(error), refresh }),
       );
     }
@@ -130,7 +145,7 @@ export const useSummaries = create<SummaryStore>()((set, get) => {
             return;
           }
           if (cached.summary !== null) {
-            put(node, { phase: "done", summary: cached.summary, available: cached.available, stale: cached.stale });
+            put(node, { phase: "done", summary: cached.summary, available: cached.available, stale: cached.stale, usage: null });
           } else if (!cached.available) {
             put(node, { phase: "unavailable", reason: cached.reason ?? "Claude Code CLI를 부르지 못한다" });
           } else {
@@ -162,7 +177,7 @@ export const useSummaries = create<SummaryStore>()((set, get) => {
             states[node] = before;
           }
         }
-        return { states, waiting: [], batch: store.sent === 0 ? IDLE : { total: store.sent, ended: 0, failed: 0, held: true, cancelled: true } };
+        return { states, waiting: [], batch: store.sent === 0 ? IDLE : { total: store.sent, ended: 0, failed: 0, held: true, cancelled: true, usage: store.batch.usage } };
       }),
     forget: () =>
       set((store) => ({

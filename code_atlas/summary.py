@@ -185,6 +185,32 @@ class SummaryError(Exception):
     """설명을 만들지 못한 까닭. 메시지를 그대로 사용자에게 보인다."""
 
 
+@dataclass(frozen=True)
+class Usage:
+    """`claude` 호출 한 번이 쓴 토큰 수. CLI가 응답의 `usage`에 적은 값 그대로다."""
+
+    input: int  # 캐시에서 읽지도 캐시에 넣지도 않은 입력 (`input_tokens`)
+    cache_write: int  # 캐시에 새로 넣은 입력 (`cache_creation_input_tokens`)
+    cache_read: int  # 캐시에서 읽은 입력 (`cache_read_input_tokens`)
+    output: int  # `output_tokens`
+
+
+USAGE_FIELDS = {
+    "input": "input_tokens",
+    "cache_write": "cache_creation_input_tokens",
+    "cache_read": "cache_read_input_tokens",
+    "output": "output_tokens",
+}
+
+
+@dataclass(frozen=True)
+class Made:
+    """설명과 그 설명을 만든 호출의 사용량. 캐시에서 읽은 설명과 CLI가 사용량을 적지 않은 설명은 `usage`가 None이다."""
+
+    text: str
+    usage: Usage | None = None
+
+
 def find_cli() -> str | None:
     """`PATH`와 `~/.local/bin/claude`에서 Claude Code 실행 파일을 찾는다."""
     found = shutil.which("claude")
@@ -717,8 +743,19 @@ async def unavailable() -> str | None:
     return "Claude Code에 로그인돼 있지 않다" if logged_in is False else None
 
 
-async def _ask(system: str, prompt: str) -> str:
-    """`claude -p`에 시스템 프롬프트를 인자로, 프롬프트를 표준 입력으로 넘겨 CLI가 낸 글을 받는다."""
+def usage_of(body: object) -> Usage | None:
+    """CLI 응답의 `usage`에서 읽은 토큰 수. 네 값 가운데 하나라도 정수로 적혀 있지 않으면 None이다."""
+    usage = body.get("usage") if isinstance(body, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    counts = {name: usage.get(field) for name, field in USAGE_FIELDS.items()}
+    if not all(type(count) is int for count in counts.values()):
+        return None
+    return Usage(**counts)
+
+
+async def _ask(system: str, prompt: str) -> Made:
+    """`claude -p`에 시스템 프롬프트를 인자로, 프롬프트를 표준 입력으로 넘겨 CLI가 낸 글과 사용량을 받는다."""
     cli = find_cli()
     if cli is None:
         raise SummaryError("Claude Code CLI를 찾지 못했다")
@@ -732,23 +769,25 @@ async def _ask(system: str, prompt: str) -> str:
         body = json.loads(out)
         result, failed = str(body["result"]).strip(), bool(body["is_error"])
     except (ValueError, KeyError, TypeError):
-        result, failed = "", True
+        body, result, failed = None, "", True
     if returncode != 0 or failed or not result:
         detail = result or (err.strip().splitlines() or [""])[-1][:200]
         if "Not logged in" in detail:
             raise SummaryError("Claude Code에 로그인돼 있지 않다")
         raise SummaryError(f"Claude Code CLI가 설명을 내지 못했다(종료 코드 {returncode}): {detail}")
-    return result
+    return Made(result, usage_of(body))
 
 
-async def generate(system: str, prompt: str) -> str:
+async def generate(system: str, prompt: str) -> Made:
     """노드 설명을 만들어 요지, 하는 일, 앞뒤 흐름 세 부분으로 맞춘다."""
-    return shaped(await _ask(system, prompt))
+    made = await _ask(system, prompt)
+    return replace(made, text=shaped(made.text))
 
 
-async def explain(system: str, prompt: str) -> str:
+async def explain(system: str, prompt: str) -> Made:
     """코드 범위 설명을 만들어 문단마다 한 줄로 맞춘다."""
-    return plain(await _ask(system, prompt))
+    made = await _ask(system, prompt)
+    return replace(made, text=plain(made.text))
 
 
 class Cache:
@@ -841,7 +880,7 @@ class Latest:
 class _Making:
     """만드는 중인 설명 하나."""
 
-    task: asyncio.Task[str]
+    task: asyncio.Task[Made]
     waiting: int = 0  # 결과를 기다리는 호출자 수
     started: bool = False  # 동시 실행 자리를 얻어 `claude` 프로세스를 띄웠다
 
@@ -893,8 +932,8 @@ class Summaries:
         kept = self.latest.get(subject.repo, subject.kind, subject.name)
         return (kept.text, True) if kept is not None else (None, False)
 
-    async def make(self, prompt: str, refresh: bool = False, kind: str = "node", subject: Subject | None = None) -> str:
-        """캐시에 있으면 그 설명을, 없거나 `refresh`면 새로 만든 설명을 돌려준다. 같은 프롬프트의 요청이 겹치면 한 번만 만든다.
+    async def make(self, prompt: str, refresh: bool = False, kind: str = "node", subject: Subject | None = None) -> Made:
+        """캐시에 있으면 그 설명을, 없거나 `refresh`면 새로 만든 설명을 돌려준다. 같은 프롬프트의 요청이 겹치면 한 번만 만들고, 기다린 호출자가 모두 그 호출의 사용량을 받는다.
 
         서술 규약 문서는 부를 때마다 읽는다. 기다리는 호출자가 모두 취소되면 동시 실행 자리를 기다리는 설명은 만들지 않고,
         프로세스를 띄운 설명은 끝까지 만들어 캐시에 넣는다. `kind`는 노드 설명인지 코드 범위 설명인지이고,
@@ -910,7 +949,7 @@ class Summaries:
             if cached is not None:
                 if subject is not None:
                     self.latest.put(subject, cached)
-                return cached
+                return Made(cached)
             making = _Making(asyncio.create_task(self._generate(key, system, prompt, kind, subject)))
             self._making[key] = making
             making.task.add_done_callback(lambda task: self._made(key, task))
@@ -923,7 +962,7 @@ class Summaries:
                 del self._making[key]
                 making.task.cancel()
 
-    def _made(self, key: str, task: asyncio.Task[str]) -> None:
+    def _made(self, key: str, task: asyncio.Task[Made]) -> None:
         """끝난 태스크를 만드는 중 목록에서 빼고, 기다리는 호출자 없이 실패한 태스크의 예외를 받아 둔다."""
         making = self._making.get(key)
         if making is not None and making.task is task:
@@ -931,13 +970,13 @@ class Summaries:
         if not task.cancelled():
             task.exception()
 
-    async def _generate(self, key: str, system: str, prompt: str, kind: str, subject: Subject | None) -> str:
+    async def _generate(self, key: str, system: str, prompt: str, kind: str, subject: Subject | None) -> Made:
         async with self._slots:
             self._making[key].started = True
             started = time.monotonic()
-            summary = await (generate if kind == "node" else explain)(system, prompt)
+            made = await (generate if kind == "node" else explain)(system, prompt)
             logger.info("summary %s made in %.1fs", key[:12], time.monotonic() - started)
-        self.cache.put(key, summary)
+        self.cache.put(key, made.text)
         if subject is not None:
-            self.latest.put(subject, summary)
-        return summary
+            self.latest.put(subject, made.text)
+        return made

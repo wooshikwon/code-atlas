@@ -1605,7 +1605,7 @@ async function tips(t, page) {
     (route) => {
       const node = new URL(route.request().url()).searchParams.get("node");
       if (route.request().method() === "POST") {
-        return route.fulfill({ json: { summary: `${MADE}\n\n하는 일\n문단\n\n앞뒤 흐름\n문단` } });
+        return route.fulfill({ json: { summary: `${MADE}\n\n하는 일\n문단\n\n앞뒤 흐름\n문단`, usage: null } });
       }
       const lead = leads.find((each) => each.node === node)?.lead ?? null;
       return route.fulfill({ json: { summary: lead === null ? null : `${lead}\n\n하는 일\n문단\n\n앞뒤 흐름\n문단`, stale: false, available: true, reason: null } });
@@ -2685,8 +2685,15 @@ async function answerSummaryReads(page, reply) {
   );
 }
 
-/** 요약을 만들지 않고 서버 대신 답해 요약 칸의 크기를 본다. */
+/** 요약을 만들지 않고 서버 대신 답해 요약 칸의 크기와, 다시 만든 요약의 머리 줄에 적는 토큰 수를 본다. 사진은 `hf5-tokens-panel.png`로 남긴다. */
 async function summaryPanel(t, page) {
+  await page.route(
+    (at) => at.pathname === "/api/summary",
+    (route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({ json: { summary: longSummary(6), usage: { input: 2, cache_write: 1885, cache_read: 16411, output: 840 } } })
+        : route.fallback(),
+  );
   await answerSummaryReads(page, () => ({ summary: longSummary(6), stale: false, available: true, reason: null }));
   await load(page);
   await pick(page, FILE);
@@ -2703,6 +2710,30 @@ async function summaryPanel(t, page) {
     near(summary.height, panel.height / 4, 1.5) && scrolls && near(code.y + code.height, panel.y + panel.height - 1),
     `패널 ${panel.height.toFixed(0)}, 요약 칸 ${summary.height.toFixed(1)}, 코드 뷰어 ${code.height.toFixed(0)}`,
   );
+
+  const cached = await count(page, ".summary-usage");
+  await page.click(".summary-head .summary-action");
+  await page.waitForSelector(".summary-usage", { timeout: 5_000 }).catch(() => {});
+  const usage = await page.evaluate(() => {
+    const [text, button, label, probe] = [document.querySelector(".summary-usage"), document.querySelector(".summary-head .summary-action"), document.querySelector(".summary-head .info-panel-label"), document.body.appendChild(document.createElement("span"))];
+    probe.style.color = "var(--muted)";
+    const muted = getComputedStyle(probe).color;
+    probe.remove();
+    if (text === null || button === null || label === null) {
+      return null;
+    }
+    const [at, next, name, look] = [text.getBoundingClientRect(), button.getBoundingClientRect(), label.getBoundingClientRect(), getComputedStyle(text)];
+    return { text: text.textContent, gap: next.left - at.right, level: at.top + at.height / 2 - (next.top + next.height / 2), far: at.left - name.right, muted: look.color === muted, fontSize: look.fontSize };
+  });
+  t.check(
+    "캐시에서 읽은 요약에는 토큰 수가 없고, 다시 만든 요약은 머리 줄의 오른쪽 끝 \"다시 생성\" 앞에 11px의 muted 글자로 \"입력 1.9k · 출력 840\"을 적는다",
+    cached === 0 && usage !== null && usage.text === "입력 1.9k · 출력 840" && usage.gap >= 4 && usage.gap <= 12 && Math.abs(usage.level) <= 1.5 && usage.far > 20 && usage.muted && usage.fontSize === "11px",
+    usage === null ? "토큰 수 없음" : `"${usage.text}", 버튼과의 틈 ${usage.gap.toFixed(1)}px, 세로 차이 ${usage.level.toFixed(1)}px, 구역 이름과의 틈 ${usage.far.toFixed(0)}px, ${usage.fontSize}`,
+  );
+  const tip = await tipOver(page, ".summary-usage");
+  t.check("요약 칸의 토큰 수에 마우스를 올리면 말풍선이 \"캐시에서 읽은 입력 16k\"를 적는다", tip === "캐시에서 읽은 입력 16k", tip);
+  await page.mouse.move(1, 1);
+  await page.screenshot({ path: HF5("panel") });
   await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="s"]')), 0, -300);
   await page.waitForTimeout(300);
   const [smaller, shrunk] = [await rectOf(page, ".info-panel"), await rectOf(page, ".info-panel-summary")];
@@ -2795,7 +2826,7 @@ async function holdSummaryPosts(page) {
       if (request.method() !== "POST") {
         return route.fallback();
       }
-      held.push({ node: new URL(request.url()).searchParams.get("node"), answer: (summary) => route.fulfill({ json: { summary } }) });
+      held.push({ node: new URL(request.url()).searchParams.get("node"), answer: (summary) => route.fulfill({ json: { summary, usage: null } }) });
     },
   );
   return held;
@@ -2832,6 +2863,7 @@ const cornerText = (at) => (at === null ? "도는 원 없음" : `왼쪽으로 ${
 
 /** hotfix 4의 사진. `hf4-{이름}.png`로 남긴다. */
 const HF4 = (name) => join(OUT, `hf4-${name}.png`);
+const HF5 = (name) => join(OUT, `hf5-tokens-${name}.png`);
 /** LLM 요약을 만드는 중인 노드의 도는 표시. 원이 있는 노드는 원 위의 고리, 상자는 왼쪽 위 모서리의 도는 원이다. */
 const BUSY = ".badge-busy, .busy-ring";
 /** 펼친 폴더 영역이 안에 든 노드의 요청을 세어 다는 도는 원을 뺀 도는 표시 */
@@ -9995,7 +10027,7 @@ async function menu(t, page) {
           node: id,
           refresh: new URL(route.request().url()).searchParams.get("refresh") === "true",
           done: false,
-          answer: () => route.fulfill({ json: { summary: text(leadOf(id)) } }),
+          answer: () => route.fulfill({ json: { summary: text(leadOf(id)), usage: null } }),
           fail: (error) => route.fulfill({ status: 503, json: { error } }),
         });
         return undefined;
@@ -10436,7 +10468,7 @@ async function folderSum(t, page) {
   }
 }
 
-/** 요약 요청 묶음의 진행 칸. 글, 막대가 찬 비율, 취소 버튼, 화면 사각형과 색. 칸이 없으면 null이다. */
+/** 요약 요청 묶음의 진행 칸. 글, 만들지 못한 수와 토큰 수의 글·사각형·글자 모양, 막대가 찬 비율, 취소 버튼, 화면 사각형과 색. 칸이 없으면 null이다. */
 const queueOf = (page) =>
   page.evaluate(() => {
     const box = document.querySelector(".summary-queue");
@@ -10446,8 +10478,17 @@ const queueOf = (page) =>
     const rect = box.getBoundingClientRect();
     const button = box.querySelector("button");
     const style = getComputedStyle(box);
+    const [failed, usage] = [box.querySelector(".summary-queue-failed"), box.querySelector(".summary-queue-usage")];
+    const shape = (element) => {
+      const [at, look] = [element.getBoundingClientRect(), getComputedStyle(element)];
+      return { rect: { x: at.left, y: at.top, width: at.width, height: at.height }, color: look.color, fontSize: look.fontSize, numeric: look.fontVariantNumeric };
+    };
     return {
       text: box.querySelector('[role="status"]')?.textContent ?? null,
+      failed: failed === null ? null : shape(failed),
+      usage: usage === null ? null : { text: usage.textContent, tip: usage.dataset.tip ?? null, last: usage === box.lastElementChild, ...shape(usage) },
+      lean: box.dataset.lean !== undefined,
+      fontSize: style.fontSize,
       share: box.querySelector(".progress-bar")?.dataset.share ?? null,
       cancel: button?.textContent ?? null,
       tab: button?.tabIndex ?? null,
@@ -10460,7 +10501,8 @@ const queueOf = (page) =>
 /**
  * 요약 요청 묶음의 진행 칸과 취소. 폴더의 "모두 요약"으로 요청을 여럿 넣고 서버 대신 하나씩 답해, 칸의 수와 막대가 진행에 따라 바뀌는지,
  * 칸이 영역의 바닥 줄에서 정보 패널·왼쪽 아래 칸을 피하는지, "취소" 뒤에 요청이 더 가지 않고 도는 표시가 줄어드는지 본다. 요청 하나에는 칸이 뜨지 않는다.
- * `--wide-url`을 받으면 그 레포에서도 본다. 사진은 `hf4-queue-bottom-{이름}.png`로 남긴다.
+ * 사용량을 담은 응답으로 칸의 토큰 수(합, k 표기, 말풍선의 캐시 읽기, 좁은 구간에서 감추는 순서)도 본다.
+ * `--wide-url`을 받으면 그 레포에서도 본다. 사진은 `hf4-queue-bottom-{이름}.png`, `hf5-tokens-queue.png`, `hf5-tokens-queue-dark.png`로 남긴다.
  */
 async function summaryQueue(t, page) {
   const posts = [];
@@ -10475,18 +10517,18 @@ async function summaryQueue(t, page) {
       posts.push({
         node: id,
         done: false,
-        answer: () => route.fulfill({ json: { summary: `${id}의 요지다.\n\n하는 일\n문단\n\n앞뒤 흐름\n문단` } }),
+        answer: (usage) => route.fulfill({ json: { summary: `${id}의 요지다.\n\n하는 일\n문단\n\n앞뒤 흐름\n문단`, usage } }),
         fail: () => route.fulfill({ status: 503, json: { error: "Claude Code CLI가 응답하지 않았다" } }),
       });
       return undefined;
     },
   );
   t.expected.push("503");
-  /** 붙잡아 둔 요청 가운데 앞의 count개를 끝낸다. failed면 만들지 못했다고 답한다. */
-  const end = async (count, failed = false) => {
+  /** 붙잡아 둔 요청 가운데 앞의 count개를 끝낸다. failed면 만들지 못했다고 답하고, usage를 주면 응답에 그 사용량을 담는다. */
+  const end = async (count, failed = false, usage = null) => {
     for (const post of posts.filter((each) => !each.done).slice(0, count)) {
       post.done = true;
-      await (failed ? post.fail() : post.answer());
+      await (failed ? post.fail() : post.answer(usage));
     }
     await page.waitForTimeout(250);
   };
@@ -10539,7 +10581,8 @@ async function summaryQueue(t, page) {
       text: `${mode}: 칸 ${rectText(queue.rect)}, 패널 ${rectText(stage.panel)}, 버튼 줄 ${rectText(buttons)}, 덮지 않는 구간 ${span.x.toFixed(0)}~${(span.x + span.width).toFixed(0)}, 가운데 차이 ${off.toFixed(1)}px, 아래 ${gap.toFixed(1)}px`,
     };
   };
-  const round = async (name, at, shoot) => {
+  /** 레포를 열고, 화면의 접힌 폴더 상자 가운데 파일이 다섯 개 이상 든 가장 작은 폴더와 그 파일 수를 고른다. 없으면 id가 undefined다. */
+  const opened = async (at) => {
     posts.length = 0;
     const graph = await api("/api/graph", at);
     const byId = new Map(graph.nodes.map((n) => [n.id, n]));
@@ -10547,11 +10590,14 @@ async function summaryQueue(t, page) {
     const filesOf = (id) => graph.nodes.filter((n) => n.kind === "module" && !n.test && under(n, id)).map((n) => n.id);
     await load(page, at, false);
     const id = (await folded()).filter((each) => filesOf(each).length >= 5).sort((a, b) => filesOf(a).length - filesOf(b).length)[0];
+    return { id, total: id === undefined ? 0 : filesOf(id).length };
+  };
+  const round = async (name, at, shoot) => {
+    const { id, total } = await opened(at);
     if (id === undefined) {
       t.skip(`${name}: 요약 요청 묶음의 진행 칸`, "파일이 다섯 개 이상 든 접힌 폴더 상자가 화면에 없다");
       return;
     }
-    const total = filesOf(id).length;
     const item = (count) => `안에 든 파일 모두 요약 (${count}개)`;
     const busyTip = () => page.evaluate((sel) => document.querySelector(`${sel} > * > .badge-busy`)?.dataset.tip ?? null, face(id));
 
@@ -10594,10 +10640,12 @@ async function summaryQueue(t, page) {
     await end(1, true);
     const two = await queueOf(page);
     t.check(
-      `${name}: 요청이 끝날 때마다 수와 막대가 늘고, 만들지 못한 요청은 "실패 1"로 함께 적는다`,
-      one?.text === `요약 1 / ${total}` && near(Number(one.share), 1 / total, 0.001) && two?.text === `요약 2 / ${total} · 실패 1` && near(Number(two.share), 2 / total, 0.001) && posts.length === 4,
-      `"${one?.text}" 막대 ${one?.share} → "${two?.text}" 막대 ${two?.share}, POST ${posts.length}번`,
+      `${name}: 요청이 끝날 때마다 수와 막대가 늘고, 만들지 못한 요청은 "실패 1"을 가운데 점 없이 간격을 두고 다른 글자색으로 적는다`,
+      one?.text === `요약 1 / ${total}` && near(Number(one.share), 1 / total, 0.001) && one.failed === null && two?.text === `요약 2 / ${total} 실패 1` && near(Number(two.share), 2 / total, 0.001) && posts.length === 4 &&
+        two.failed !== null && two.failed.color !== two.style.color && two.failed.rect.x - (two.rect.x + 15) > 40,
+      `"${one?.text}" 막대 ${one?.share} → "${two?.text}" 막대 ${two?.share}, POST ${posts.length}번, 실패 글자색 ${two?.failed?.color}, 칸 글자색 ${two?.style.color}`,
     );
+    t.check(`${name}: 사용량이 없는 응답과 실패만 끝난 동안에는 칸에 토큰 수가 없다`, one?.usage === null && two?.usage === null, `${one?.usage?.text ?? "없음"}, ${two?.usage?.text ?? "없음"}`);
     if (shoot) {
       await page.screenshot({ path: HF4("queue-bottom-light") });
       await page.getByRole("button", { name: "어두운 화면" }).click();
@@ -10670,7 +10718,103 @@ async function summaryQueue(t, page) {
     t.check(`${name}: 화면에 title 속성과 SVG title이 없다`, (await nativeTips(page)).length === 0, (await nativeTips(page)).join(", "));
     await page.click(".summary-notice").catch(() => {});
   };
+  /**
+   * 칸의 토큰 수. 사용량을 담은 응답 둘을 받아 합과 k 표기, 말풍선의 캐시 읽기, 글자 모양과 위치를 보고, 창을 좁혀 칸이 바닥 줄의 구간에
+   * 들어가지 않게 되면 칸이 물러나기 전에 토큰 수부터 감추는지 본다. 취소한 뒤에도 합은 그대로다.
+   */
+  const spent = async (name, at) => {
+    const { id, total } = await opened(at);
+    if (id === undefined) {
+      t.skip(`${name}: 진행 칸의 토큰 수`, "파일이 다섯 개 이상 든 접힌 폴더 상자가 화면에 없다");
+      return;
+    }
+    const muted = () =>
+      page.evaluate(() => {
+        const probe = document.body.appendChild(document.createElement("span"));
+        probe.style.color = "var(--muted)";
+        const { color } = getComputedStyle(probe);
+        probe.remove();
+        return color;
+      });
+    const used = [
+      { input: 2, cache_write: 1487, cache_read: 16411, output: 527 },
+      { input: 3, cache_write: 19500, cache_read: 164110, output: 8486 },
+    ];
+    await menuOf(() => clickNode(page, id, 1, "right"));
+    await page.click('.menu-item[data-key="all"]');
+    await page.waitForTimeout(300);
+    const none = await queueOf(page);
+    await end(1, false, used[0]);
+    const one = await queueOf(page);
+    await end(1, false, used[1]);
+    const two = await queueOf(page);
+    t.check(
+      `${name}: 첫 응답 전에는 토큰 수가 없고, 응답이 끝날 때마다 사용량을 더해 "입력 1.5k · 출력 527", "입력 21k · 출력 9.0k"로 적는다(입력은 input과 cache_write의 합 1,489와 20,992, 출력 527과 9,013)`,
+      none?.usage === null && one?.usage?.text === "입력 1.5k · 출력 527" && two?.usage?.text === "입력 21k · 출력 9.0k" && two.text === `요약 2 / ${total}`,
+      `"${none?.usage?.text ?? "없음"}" → "${one?.usage?.text}" → "${two?.text}", "${two?.usage?.text}"`,
+    );
+    t.check(
+      `${name}: 토큰 수는 칸의 맨 오른쪽 끝, 취소 버튼 뒤에 있고 칸의 글자(12px)보다 작은 11px의 muted 글자, tabular-nums다`,
+      two?.usage != null && two.usage.last && near(two.rect.x + two.rect.width - (two.usage.rect.x + two.usage.rect.width), 15, 1.5) && two.fontSize === "12px" && two.usage.fontSize === "11px" &&
+        two.usage.color === (await muted()) && two.usage.color !== two.style.color && two.usage.numeric.includes("tabular-nums") && !two.lean,
+      `칸 ${rectText(two.rect)} ${two.fontSize}, 토큰 수 ${two.usage === null ? "없음" : `${rectText(two.usage.rect)} ${two.usage.fontSize} ${two.usage.color} ${two.usage.numeric}`}`,
+    );
+    const tip = await tipOver(page, ".summary-queue-usage");
+    t.check(`${name}: 토큰 수에 마우스를 올리면 말풍선이 캐시에서 읽은 입력의 합 180,521을 "캐시에서 읽은 입력 181k"로 적는다`, tip === "캐시에서 읽은 입력 181k" && two?.usage?.tip === tip, tip);
+    await page.mouse.move(1, 1);
+    const where = await placed();
+    t.check(`${name}: 토큰 수를 적은 칸도 바닥 줄에서 버튼 줄과 정보 패널이 덮지 않는 구간의 가로 가운데에 있다`, where.ok && where.mode === "바닥", where.text);
+    await page.screenshot({ path: HF5("queue") });
+    await page.getByRole("button", { name: "어두운 화면" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    await page.mouse.move(1, 1);
+    const dark = await queueOf(page);
+    t.check(`${name}: 어두운 화면에서도 토큰 수는 muted 글자이고 칸의 글자색과 다르다`, dark?.usage != null && dark.usage.color === (await muted()) && dark.usage.color !== dark.style.color, `${dark?.usage?.color}, 칸 ${dark?.style.color}`);
+    await page.screenshot({ path: HF5("queue-dark") });
+    await page.getByRole("button", { name: "밝은 화면" }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme !== "dark");
+
+    // 창을 20px씩 좁힌다. 칸이 바닥 줄의 구간에 들어가지 않게 되는 폭에서 토큰 수가 먼저 사라지고 칸은 바닥 줄에 남는다.
+    const size = page.viewportSize();
+    const steps = [];
+    for (let width = size.width; width >= 700 && !steps.some((step) => step.mode !== "바닥"); width -= 20) {
+      await page.setViewportSize({ width, height: size.height });
+      await page.waitForTimeout(250);
+      const [queue, at] = [await queueOf(page), await placed()];
+      steps.push({ width, lean: queue.lean, shown: queue.usage.rect.width > 0, mode: at.mode, ok: at.ok, box: queue.rect.width });
+    }
+    const lean = steps.findIndex((step) => step.lean);
+    const away = steps.findIndex((step) => step.mode !== "바닥");
+    t.check(
+      `${name}: 창을 좁혀 칸이 바닥 줄의 구간에 들어가지 않게 되면 토큰 수를 먼저 감춰 칸이 바닥 줄에 남고, 감춘 칸도 들어가지 않을 때에야 물러난다`,
+      lean > 0 && steps.slice(0, lean).every((step) => step.shown && step.mode === "바닥" && step.ok) && steps[lean].mode === "바닥" && !steps[lean].shown && steps[lean].ok &&
+        steps[lean].box < steps[lean - 1].box && (away === -1 || away > lean) && steps.every((step) => step.ok),
+      steps.filter((step, index) => index === 0 || step.lean !== steps[index - 1].lean || step.mode !== steps[index - 1].mode).map((step) => `창 ${step.width}px: ${step.mode}, 토큰 수 ${step.shown ? "있음" : "감춤"}, 칸 폭 ${step.box.toFixed(0)}`).join(" → "),
+    );
+    await page.setViewportSize(size);
+    await page.waitForTimeout(300);
+    const back = await queueOf(page);
+    t.check(`${name}: 창을 되돌리면 토큰 수가 다시 보인다`, back?.usage != null && !back.lean && back.usage.rect.width > 0, `${back?.usage?.text}`);
+
+    await page.focus(".summary-queue-cancel");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(600);
+    const stopped = await queueOf(page);
+    t.check(
+      `${name}: 취소한 뒤의 칸은 "요약 만드는 중 2개"와 오른쪽 끝의 토큰 수를 적고 합은 그대로다`,
+      stopped?.text === "요약 만드는 중 2개" && stopped.usage?.text === "입력 21k · 출력 9.0k" && stopped.usage.last && posts.length === 4,
+      `"${stopped?.text}", "${stopped?.usage?.text}", POST ${posts.length}번`,
+    );
+    await end(1, true);
+    const failed = await queueOf(page);
+    t.check(`${name}: 취소한 뒤 보낸 요청이 실패하면 "실패 1"을 같은 배치로 적는다`, failed?.text === "요약 만드는 중 1개 실패 1" && failed.usage?.text === "입력 21k · 출력 9.0k", `"${failed?.text}"`);
+    await end(1);
+    await page.waitForTimeout(400);
+    t.check(`${name}: 묶음이 끝나면 칸이 사라진다`, (await queueOf(page)) === null);
+    await page.click(".summary-notice").catch(() => {});
+  };
   await round("sync-engine", url, true);
+  await spent("sync-engine", url);
   await t.shot();
   if (wideUrl === null) {
     t.skip("폴더가 여러 겹인 레포에서 요약 요청 묶음의 진행 칸", "--wide-url을 주지 않았다");

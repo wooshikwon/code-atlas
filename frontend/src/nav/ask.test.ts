@@ -4,7 +4,7 @@ import { hidden } from "../graph/visible";
 import type { SummaryState } from "../state/summaries";
 import { asksOf } from "./ask";
 
-const done: SummaryState = { phase: "done", summary: "요지", available: true, stale: false };
+const done: SummaryState = { phase: "done", summary: "요지", available: true, stale: false, usage: null };
 const empty = { states: {}, leads: {} };
 const off = hidden(graph, { showTests: false, showExternal: false });
 /** `pkg` 아래에 하위 폴더 `pkg.sub`과 그 안의 파일, 함수를 더한 그래프 */
