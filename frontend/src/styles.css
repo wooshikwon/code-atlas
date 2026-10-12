@@ -505,6 +505,12 @@ ul {
   text-overflow: ellipsis;
 }
 
+.trail-root {
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.trail-root:hover,
 .trail-step:hover {
   background: var(--hover-bg);
 }

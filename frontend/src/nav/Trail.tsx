@@ -1,5 +1,5 @@
 // 상단 줄의 탐색 경로 표시. 고른 노드(함수 시점 뷰에서는 가운데 함수, 경로 고정 중에는 정보 패널이 보이는 경로 위 노드)까지의
-// 폴더·파일·클래스·함수를 단계로 그린다.
+// 폴더·파일·클래스·함수를 단계로 그린다. 맨 앞의 소스 루트 폴더 이름을 누르면 선택을 푼다.
 // 줄 폭이 모자라면 앞 단계부터 `…`로 줄이고 마지막 단계는 늘 남긴다.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AtlasNode } from "../api/types";
@@ -26,6 +26,7 @@ export function Trail() {
   const selection = useAtlas((s) => s.selection);
   const finder = useAtlas((s) => s.finder);
   const show = useAtlas((s) => s.show);
+  const select = useAtlas((s) => s.select);
   const nodes = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
 
   const target = view.kind === "function" ? view.center : chosenOf({ finder, selection });
@@ -71,7 +72,11 @@ export function Trail() {
           …
         </span>
       )}
-      {rooted && hidden === 0 && <span className="trail-root">{source}</span>}
+      {rooted && hidden === 0 && (
+        <button className="trail-root" data-tip="선택 풀기" onClick={() => select(null)}>
+          {source}
+        </button>
+      )}
       {steps.map(
         (node, index) =>
           index + offset >= hidden && (

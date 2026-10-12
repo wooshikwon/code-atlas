@@ -239,7 +239,6 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       return;
     }
     clicked.current = null;
-    select(null);
   };
   /**
    * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 말풍선(`nodeTip`)을 띄운다. 올린 노드는 선의 hover처럼 진하기를 한 단계 올려 그린다.

@@ -896,9 +896,63 @@ async function functionScenario(t, page) {
   await rest(page);
   const onTree = await state();
   t.check("고른 함수의 파일트리 행을 다시 눌러도 그대로다", same(onTree, before), `선택 ${onTree.selected}, 펼친 파일 상자 ${onTree.open.length}개`);
+
+  // 그래프의 빈 곳을 눌러도 선택이 풀리지 않고, Esc와 탐색 경로의 소스 루트 이름, 고른 파일 상자의 머리 줄이 선택을 푼다.
+  const blank = async () => {
+    const { free } = await stageOf(page);
+    return page.evaluate(({ x, y, width, height }) => {
+      for (let dy = 8; dy < height; dy += 16) {
+        for (let dx = 8; dx < width; dx += 16) {
+          if (document.elementFromPoint(x + dx, y + dy)?.classList.contains("react-flow__pane")) {
+            return { x: x + dx, y: y + dy };
+          }
+        }
+      }
+      return null;
+    }, free);
+  };
+  const whole = async () => ({ ...(await state()), head: await headOf(page), code: await count(page, ".info-panel .code") });
+  const kept = await whole();
+  const empty = await blank();
+  await page.mouse.click(empty.x, empty.y);
+  await page.waitForTimeout(600);
+  await rest(page);
+  const onPane = await whole();
+  t.check("함수를 고른 채 그래프의 빈 곳을 눌러도 선택, 펼친 파일 상자, 정보 패널, 탐색 이력이 그대로다", kept.selected === FUNCTION && kept.code === 1 && same(onPane, kept), `누른 곳 (${empty.x}, ${empty.y}), 선택 ${onPane.selected}`);
+  const line = await hittable(page, await linesOf(page));
+  if (line === null) {
+    t.skip("고정한 말풍선은 빈 곳을 누르면 닫히고 선택은 남는다", "화면에 누를 선이 없다");
+  } else {
+    const pinned = await pinBubble(page, line.at);
+    const spot = await blank();
+    await page.mouse.click(spot.x, spot.y);
+    await page.waitForSelector(".line-bubble", { state: "detached", timeout: 3_000 }).catch(() => {});
+    await page.mouse.move(5, 5);
+    await rest(page);
+    t.check("고정한 말풍선은 빈 곳을 누르면 닫히고 선택은 남는다", pinned?.pinned === true && (await count(page, ".line-bubble[data-pinned]")) === 0 && same(await whole(), kept), `선택 ${await selectedOf(page)}`);
+  }
   await page.keyboard.press("Escape");
   await rest(page);
   t.check("Esc는 선택을 풀고 파일 상자를 접는다", (await selectedOf(page)) === null && !(await boxes(page)).some((b) => b.open));
+  await palettePick(page, FUNCTION.split(":")[1], FUNCTION);
+  await waitSelected(page, FUNCTION);
+  const steps = await count(page, ".trail-step");
+  await page.click(".trail-root");
+  await page.mouse.move(5, 5);
+  await rest(page);
+  const cleared = (await selectedOf(page)) === null && (await count(page, ".trail-step")) === 0;
+  await page.keyboard.press("Alt+ArrowLeft");
+  await waitSelected(page, FUNCTION).catch(() => {});
+  t.check("탐색 경로의 소스 루트 이름을 누르면 선택이 풀리고, 뒤로 가면 그 함수를 고른 화면으로 돌아온다", steps > 0 && cleared && (await selectedOf(page)) === FUNCTION, `선택 ${await selectedOf(page)}`);
+  await pickFile(page, FILE);
+  // 펼친 상자의 머리 줄이 화면 안에 오도록 그래프 전체를 맞춘 뒤 누른다.
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await page.mouse.move(1, 1);
+  await settle(page);
+  await clickNode(page, FILE);
+  await page.mouse.move(5, 5);
+  await rest(page);
+  t.check("고른 파일 상자의 머리 줄을 다시 누르면 선택이 풀리고 파일 상자가 접힌다", (await selectedOf(page)) === null && !(await boxes(page)).some((b) => b.open));
 }
 
 async function body(t, page) {
@@ -3300,7 +3354,7 @@ async function initFile(t, page) {
   await waitSelected(page, FUNCTION);
   t.check("그래프에서 다른 노드를 고르면 연 파일이 닫히고 그 노드의 코드를 보인다", (await headOf(page)).includes(spanOf(await api("/api/graph"), FUNCTION).text), (await headOf(page)).replaceAll("\n", " / "));
 
-  // 선택 없이 연 파일은 그래프 바탕을 누르거나 그 파일이 든 폴더를 접으면 닫힌다.
+  // 선택 없이 연 파일은 그래프 바탕을 눌러도 닫히지 않고, Esc를 누르거나 그 파일이 든 폴더를 접으면 닫힌다.
   await page.keyboard.press("Escape");
   await settle(page);
   const blank = async () => {
@@ -3324,8 +3378,11 @@ async function initFile(t, page) {
   const opened = (await count(page, ".info-panel .code")) === 1 && (await selectedOf(page)) === null;
   const at = await blank();
   await page.mouse.click(at.x, at.y);
+  await page.waitForTimeout(600);
+  const stayed = (await count(page, ".info-panel .code")) === 1;
+  await page.keyboard.press("Escape");
   await page.waitForSelector(".info-panel .code", { state: "detached", timeout: 5_000 }).catch(() => {});
-  t.check("선택 없이 연 파일은 그래프 바탕을 누르면 닫힌다", opened && (await count(page, ".info-panel .code")) === 0, (await headOf(page)).replaceAll("\n", " / "));
+  t.check("선택 없이 연 파일은 그래프 바탕을 눌러도 닫히지 않고 Esc에 닫힌다", opened && stayed && (await count(page, ".info-panel .code")) === 0, (await headOf(page)).replaceAll("\n", " / "));
   await page.click(row);
   await page.waitForSelector(".info-panel .code", { timeout: 10_000 }).catch(() => {});
   await page.click('.tree-row.tree-dir[data-node="parser"]');
