@@ -15,7 +15,7 @@ export interface Colors {
   changed: string;
   /** 변경 표시: 마지막 커밋에 없다 */
   added: string;
-  /** 순환 덮개의 순환 선 */
+  /** 순환 의존 표시의 순환 선 */
   critical: string;
 }
 

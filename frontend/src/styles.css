@@ -2425,7 +2425,7 @@ ol.summary-list {
   background: none;
 }
 
-/* 분석 덮개 */
+/* 분석 표시 */
 
 /* 필터 버튼. 기본값과 다른 보기 설정이 있으면 그 수를 아이콘 옆에 적는다. */
 .filter-button {
@@ -2550,7 +2550,7 @@ ol.summary-list {
   font-size: 11px;
 }
 
-/* 순환 아이콘은 덮개와 관계없이 muted 잉크로 적는다. 아이콘을 더해도 파일 상자 폭을 넘지 않게 이름표를 줄인다. */
+/* 순환 아이콘은 분석 표시와 관계없이 muted 잉크로 적는다. 아이콘을 더해도 파일 상자 폭을 넘지 않게 이름표를 줄인다. */
 .cycle-mark {
   display: inline-block;
   width: 12px;
@@ -2575,12 +2575,12 @@ ol.summary-list {
   text-overflow: ellipsis;
 }
 
-/* 순환 덮개가 칠하는 순환 선과 그 화살촉, 숫자 */
+/* 순환 의존 표시가 칠하는 순환 선과 그 화살촉, 숫자 */
 .tone-critical {
   --tone: var(--critical);
 }
 
-/* 순환 덮개를 켠 동안에는 critical과 수정 표시 색을 한 화면에 두지 않는다. 그래프의 변경 표시는 색 막대와 테두리 색을 빼고
+/* 순환 의존 표시를 켠 동안에는 critical과 수정 표시 색을 한 화면에 두지 않는다. 그래프의 변경 표시는 색 막대와 테두리 색을 빼고
    글자만 남기고, 범례와 파일트리, 정보 패널의 수정 표시는 muted 잉크로 그린다. */
 .graph[data-overlay="cycles"] .node-body:is(.node-module, .node-dataclass, .node-package)[data-change] {
   border-left-color: var(--muted);
@@ -2603,7 +2603,7 @@ ol.summary-list {
   --change: var(--muted);
 }
 
-/* 미사용 덮개는 후보의 테두리를 점선으로 그린다. 색은 쓰지 않는다. */
+/* 미사용 후보 표시는 후보의 테두리를 점선으로 그린다. 색은 쓰지 않는다. */
 .node-body[data-unused] .node-circle,
 .node-body.node-dataclass[data-unused] {
   border-style: dashed;
@@ -2619,7 +2619,7 @@ ol.summary-list {
   stroke-width: 3;
 }
 
-/* 정보 패널의 덮개 요약 */
+/* 정보 패널의 분석 표시 요약 */
 .overview {
   flex: 1 1 0;
   min-height: 0;

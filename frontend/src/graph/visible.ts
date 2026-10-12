@@ -139,7 +139,7 @@ export function outward(graph: Graph, off: Set<string>): Map<string, Set<string>
 /**
  * 파일 상자마다 손잡이가 묶는 바로 아래 자식(안쪽 자식). 밖과 이어진 자식(`outward`)도 진입점도 아닌 자식이다. 밖과 이어진 자식이 하나도
  * 없는 파일 상자는 가를 기준이 없고 안쪽 자식이 하나뿐인 파일 상자는 그 자식을 그리므로, 두 경우의 파일 상자는 담지 않는다.
- * 선택과 덮개에 따라 달라지지 않게 밖과 이어진 자식과 진입점만으로 판정한다.
+ * 선택과 분석 표시에 따라 달라지지 않게 밖과 이어진 자식과 진입점만으로 판정한다.
  */
 export function inward(graph: Graph, off: Set<string>): Map<string, Set<string>> {
   const linked = outward(graph, off);
@@ -198,7 +198,7 @@ export function drawnOut(graph: Graph, flow: Flow | null, lit: Lit | null): Set<
  *   밖과 이어진 자식이 하나도 없는 파일 상자는 모든 자식을 그린다.
  * - 펼침 이상인 파일 상자의 클래스는 그려지면 메서드를 모두 그린다. 접힌 파일 상자의 클래스는 꺼낸 메서드만 그린다.
  * - 강조하는 경로 lit이 있으면 흐름을 보지 않는다. 경로 위 노드를 품은 접은 폴더는 펼친 것으로 다루고, 파일 상자는 모두 접힘이다.
- * marked는 미사용 덮개를 켰을 때의 미사용 후보이고 candidates는 덮개와 무관한 미사용 후보 전체다.
+ * marked는 미사용 후보 표시를 켰을 때의 미사용 후보이고 candidates는 분석 표시와 무관한 미사용 후보 전체다.
  */
 export function shown(
   graph: Graph,

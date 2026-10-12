@@ -101,7 +101,7 @@ export interface AtlasStore {
   /** 레포·그래프·파일트리를 받는다. 받지 못하면 까닭을 error에 적는다. */
   load(): Promise<void>;
   /**
-   * 다시 분석한 결과를 받아 화면 상태를 레포를 처음 연 상태로 되돌린다. 보기 설정(흐름 단계, 테스트 코드, 외부 노드, 자동 요약, 덮개),
+   * 다시 분석한 결과를 받아 화면 상태를 레포를 처음 연 상태로 되돌린다. 보기 설정(흐름 단계, 테스트 코드, 외부 노드, 자동 요약, 분석 표시),
    * 선택과 뷰, 탐색 이력, 접은 폴더, 경로 탐색 창과 경로 고정을 되돌리고, 화면 색, 정보 패널의 사각형과 요약 칸 비율,
    * 정보 패널 구역과 미니맵·범례의 접힘은 그대로 둔다.
    */
@@ -309,7 +309,7 @@ function opened(repo: Repo, graph: Graph, tree: Tree, showTests: boolean) {
   return { repo, graph, tree, error: null, ...START, collapsed, history: { entries: [place], index: 0 }, arranging: false, arranged: null };
 }
 
-/** 레포를 열 때의 덮개. 지금 토글에서 순환 묶음이 하나라도 있으면 순환 덮개를 켜고 없으면 끈다. */
+/** 레포를 열 때의 분석 표시. 지금 토글에서 순환 묶음이 하나라도 있으면 순환 의존 표시를 켜고 없으면 끈다. */
 function cover(graph: Graph, toggles: { showTests: boolean; showExternal: boolean }): void {
   useOverlay.getState().set(cycles(graph, hidden(graph, toggles)).groups.length > 0 ? "cycles" : null);
 }

@@ -1,5 +1,5 @@
 // 관계 그래프 위에 떠 있는 정보 패널. 저장소의 선택을 머리 줄, "정보" 구역, 코드 줄 목록, LLM 요약 칸, 코드 뷰어로 바꾼다.
-// 아무것도 고르지 않았으면 레포 머리 줄 아래에 켠 분석 덮개의 요약을 보인다.
+// 아무것도 고르지 않았으면 레포 머리 줄 아래에 켠 분석 표시의 요약을 보인다.
 // 경로 고정 중에는 선택 대신 finder.focus의 노드를 보인다.
 import { useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { AtlasNode, Graph, SiteRef } from "../api/types";

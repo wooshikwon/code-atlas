@@ -60,7 +60,7 @@ export function darkness(shade: Shade): number {
 
 /**
  * 마우스를 올린 선과 노드의 진하기. 지금 진하기에서 사다리의 한 단계 위다: muted 흐림은 muted 50%, muted 50%는 muted 100%,
- * muted 100%는 본문 잉크 100%가 되고, 가장 진한 본문 잉크 100%는 그대로다. 단계 사이의 값(미사용 덮개의 40%)은 바로 위 단계로 올린다.
+ * muted 100%는 본문 잉크 100%가 되고, 가장 진한 본문 잉크 100%는 그대로다. 단계 사이의 값(미사용 후보 표시의 40%)은 바로 위 단계로 올린다.
  */
 export function lifted(shade: Shade): Shade {
   return SHADES.find((step) => darkness(step) > darkness(shade)) ?? shade;

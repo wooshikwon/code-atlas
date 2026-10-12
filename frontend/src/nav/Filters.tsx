@@ -1,4 +1,4 @@
-// 상단 줄의 필터 버튼과 그 아래에 열리는 필터 창. 창은 보기 설정(흐름 단계, 분석 덮개, 토글 세 개)과
+// 상단 줄의 필터 버튼과 그 아래에 열리는 필터 창. 창은 보기 설정(흐름 단계, 분석 표시, 토글 세 개)과
 // 레포 정보(통계, 브랜치) 두 구역이다. 버튼은 기본값과 다른 보기 설정의 수를 적는다.
 import { useRef, useState } from "react";
 import { useBranch } from "../state/changes";
@@ -11,7 +11,7 @@ import { useDismiss } from "./menu";
 const NONE = "없음";
 const KINDS: (OverlayKind | null)[] = [null, "cycles", "unused"];
 
-/** 덮개를 고르는 행. 이름 오른쪽에 순환 묶음 수와 미사용 후보 수를 적는다. */
+/** 분석 표시를 고르는 행. 이름 오른쪽에 순환 묶음 수와 미사용 후보 수를 적는다. */
 function OverlayOptions() {
   const kind = useOverlay((s) => s.kind);
   const unused = useOverlay((s) => s.unused.size);
@@ -19,8 +19,8 @@ function OverlayOptions() {
   const groups = useCycles()?.groups.length ?? 0;
   const counts: Record<OverlayKind, string> = { cycles: `묶음 ${groups}`, unused: `${unused}개` };
   return (
-    <div className="filter-overlays" role="radiogroup" aria-label="분석 덮개">
-      <span className="filter-label">분석 덮개</span>
+    <div className="filter-overlays" role="radiogroup" aria-label="분석 표시">
+      <span className="filter-label">분석 표시</span>
       {KINDS.map((option) => (
         <button
           key={option ?? "none"}

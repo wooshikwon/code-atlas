@@ -1,7 +1,7 @@
 // 배치가 정한 직각 경로를 모서리를 둥글려 그린다. 선 분류는 선 모양과 화살촉으로, 초점은 선의 진하기로 가른다.
 // 마우스를 올린 선은 `data-pointed`를 받아 1px 굵게, 진하기를 한 단계 올려(`scope.ts`의 `lifted`) 다른 선 위의 층에 그린다.
 // 강조하는 경로의 걸음은 `data-route`에 걸음 종류를 받아 굵게 그리고, 선을 눌러 온 상태에서 지나온 선은 `data-via`를 받아 1px 굵게 그린다.
-// 순환 덮개가 켜진 동안의 순환 선만 critical 색으로 그린다.
+// 순환 의존 표시가 켜진 동안의 순환 선만 critical 색으로 그린다.
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
 import { useMemo, useRef } from "react";
 import type { EdgeGroup } from "../../api/types";
@@ -12,7 +12,7 @@ import { emphasized, ownNumbers, roundedPath, trunkShade, type EdgeView, type Li
 import { Trunk } from "./Trunk";
 
 /**
- * pointed는 마우스를 올린 선이고 cycle은 순환 덮개가 칠하는 순환 선이다. whole은 줄기에 든 선이 줄기 위에 전체 경로를 그리는지다.
+ * pointed는 마우스를 올린 선이고 cycle은 순환 의존 표시가 칠하는 순환 선이다. whole은 줄기에 든 선이 줄기 위에 전체 경로를 그리는지다.
  * own은 활성화된 선이 그 선 위에 적는 sites 수의 가운데 점이고, 적지 않으면 null이다. sum은 들어오는 줄기 위에 전체 경로를 그리는 선이
  * 줄기의 들어오는 합계를 자기 선 위에 한 번 더 적을 점과 값이다. 전체 경로가 줄기의 합계를 덮기 때문이다.
  */

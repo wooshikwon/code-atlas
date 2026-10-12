@@ -30,9 +30,9 @@ export interface AtlasNodeData extends Record<string, unknown> {
   route: RouteEnd | "via" | null;
   /** 순환 아이콘을 다는 상자면 묶음마다 든 파일의 이름표. 아니면 null이다. */
   cycle: string[][] | null;
-  /** 미사용 덮개가 표시하는 후보다 */
+  /** 미사용 후보 표시가 표시하는 후보다 */
   unused: boolean;
-  /** 접힌 파일 상자와 접힌 폴더 상자 아래에 적는 미사용 후보 수. 미사용 덮개를 껐으면 0이다. */
+  /** 접힌 파일 상자와 접힌 폴더 상자 아래에 적는 미사용 후보 수. 미사용 후보 표시를 껐으면 0이다. */
   candidates: number;
 }
 
@@ -137,7 +137,7 @@ export function Handles({ data }: { data: AtlasNodeData }) {
  * 노드 뿌리 요소의 속성. 바탕 요소는 `node-body`, 글자 요소는 `node-face`를 받는다. 흐름에 든 노드는 `data-flow`를,
  * 선택한 노드가 든 파일 상자 안의 노드는 `data-local`을, 마지막 커밋 뒤에 바뀐 노드는 `data-change`를,
  * 강조하는 경로 위의 노드는 `data-route`를 받는다.
- * 순환 아이콘을 다는 상자는 `data-cycle`을, 미사용 덮개가 표시하는 후보는 `data-unused`를 받는다.
+ * 순환 아이콘을 다는 상자는 `data-cycle`을, 미사용 후보 표시가 표시하는 후보는 `data-unused`를 받는다.
  */
 export function nodeProps(base: string, data: AtlasNodeData, change: Change | null) {
   return {
@@ -265,7 +265,7 @@ export function Circle({ data }: { data: AtlasNodeData }) {
   );
 }
 
-/** 접힌 파일 상자와 접힌 폴더 상자 아래의 글자. 미사용 덮개를 켰을 때의 미사용 후보 수를 적고 그 뜻을 말풍선 글에 담는다. */
+/** 접힌 파일 상자와 접힌 폴더 상자 아래의 글자. 미사용 후보 표시를 켰을 때의 미사용 후보 수를 적고 그 뜻을 말풍선 글에 담는다. */
 export function Below({ data }: { data: AtlasNodeData }) {
   const text = boxCaption(data.candidates);
   return text === "" ? null : (

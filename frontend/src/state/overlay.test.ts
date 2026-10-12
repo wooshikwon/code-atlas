@@ -35,7 +35,7 @@ describe("load", () => {
     expect(store().definitions).toBe(3);
   });
 
-  it("켠 덮개를 바꾸지 않는다", async () => {
+  it("켠 분석 표시를 바꾸지 않는다", async () => {
     received.mockResolvedValue({ definitions: 3, candidates: [] });
     store().set("cycles");
     store().load();
@@ -45,7 +45,7 @@ describe("load", () => {
 });
 
 describe("set", () => {
-  it("덮개 없이 시작하고, 덮개를 켜고 바꾸고 끈다", () => {
+  it("분석 표시 없이 시작하고, 분석 표시를 켜고 바꾸고 끈다", () => {
     expect(store().kind).toBeNull();
     store().set("unused");
     expect(store().kind).toBe("unused");
