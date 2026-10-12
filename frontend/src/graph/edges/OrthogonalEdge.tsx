@@ -4,7 +4,7 @@
 // 순환 의존 표시가 켜진 동안의 순환 선만 critical 색으로 그린다.
 // 시점 비교에서 삭제된 관계만 든 선은 `data-gone`을 받아 마우스를 올려도 진하기를 올리지 않고, 수 대신 빨강 점(`.edge-gone`)을 그린다.
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, type CSSProperties } from "react";
 import type { EdgeGroup } from "../../api/types";
 import { LAYER } from "../layers";
 import { lifted, type EdgeKey, type Tone } from "../scope";
@@ -156,6 +156,8 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
   const arrow = `url(#${markerId(data.group, ink)})`;
   /** 따로 들어가는 선은 도착 노드 앞의 합계를 늘 적고, 들어오는 줄기에 든 선은 활성화됐을 때만 그 선 위에 그 선의 수를 적는다. */
   const number = data.into ?? data.own;
+  const tipped = data.whole || data.trunks.in === null;
+  const lone = !tipped && number === null && data.sum === null && data.dot === null && !data.pointed;
   return (
     <g
       className={`edge edge-${data.group} tone-${ink}`}
@@ -170,13 +172,13 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
       data-route={data.route ?? undefined}
       data-via={data.via ? "" : undefined}
       data-gone={data.gone ? "" : undefined}
-      style={{ opacity: data.opacity }}
+      style={shadeStyle(data.opacity, lone)}
     >
       <path className="edge-hit" d={branch} />
       {data.whole ? (
         <path className="edge-line" d={roundedPath(data.points)} markerEnd={arrow} />
       ) : (
-        <path className="edge-line" d={branch} markerEnd={data.trunks.in === null ? arrow : undefined} />
+        <path className="edge-line" d={branch} markerEnd={tipped ? arrow : undefined} />
       )}
       {number !== null && (
         <text className="edge-weight" x={number.x} y={number.y} dy="0.35em" textAnchor="middle">
@@ -191,6 +193,15 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
       {data.dot !== null && <circle className="edge-gone" cx={data.dot.x} cy={data.dot.y} r={MARK_SIZE / 2} />}
     </g>
   );
+}
+
+/**
+ * 선 묶음의 진하기. 묶음에 그리는 것이 선 하나뿐이면(화살촉, 숫자, 점, 원이 없고 빛도 두르지 않는다) 묶음의 불투명도 대신 선의
+ * 불투명도(`stroke-opacity`)로 준다. 선 하나는 겹치는 부분이 없어 두 방식의 모습이 같고, 묶음의 불투명도는 브라우저가 묶음마다
+ * 그 묶음을 덮는 크기의 버퍼를 따로 만들어 합성하므로 선이 길수록 그리는 비용이 크다.
+ */
+export function shadeStyle(opacity: number, lone: boolean): CSSProperties {
+  return lone ? { strokeOpacity: opacity } : { opacity };
 }
 
 export const edgeTypes: EdgeTypes = { orthogonal: OrthogonalEdge, trunk: Trunk };
