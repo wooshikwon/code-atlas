@@ -4,9 +4,14 @@ import { COUNTED_KINDS, countedOf, kindsOf, nameOf, relationOf, relationsOf } fr
 import { along, endsOf, type EdgeKey } from "../graph/scope";
 import { unitOf, within } from "../graph/visible";
 
-/** 코드 줄 묶음. name이 있으면 묶음 앞에 그 이름을 적는다. */
+/**
+ * 코드 줄 묶음. id는 묶은 노드이고 name은 묶음 줄에 적는 그 노드의 이름, kinds는 묶음에 든 관계의 종류마다의 수다.
+ * 묶음 줄 없이 코드 줄만 적는 묶음은 id와 name이 null이다.
+ */
 export interface SiteGroup {
+  id: string | null;
   name: string | null;
+  kinds: Partial<Record<EdgeKind, number>>;
   sites: SiteRef[];
 }
 
@@ -26,22 +31,33 @@ export interface Split {
   rest: Links;
 }
 
+/** "정보" 구역의 `연결` 줄과 코드 줄 묶음에 적는 노드 id의 이름. 그래프에 없는 id는 id를 그대로 적는다. */
+export function labelOf(nodes: Map<string, AtlasNode>, id: string): string {
+  const node = nodes.get(id);
+  return node === undefined ? id : nameOf(nodes, node);
+}
+
+/** 원래 선 edges를 노드 id의 코드 줄 묶음 하나로 합친다. */
+export function groupOf(nodes: Map<string, AtlasNode>, id: string, edges: AtlasEdge[]): SiteGroup {
+  const kinds: SiteGroup["kinds"] = {};
+  for (const edge of edges) {
+    kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
+  }
+  return { id, name: labelOf(nodes, id), kinds, sites: edges.flatMap((edge) => edge.sites) };
+}
+
 /** 원래 선 edges를 관계 묶음 하나로 합친다. peer는 선마다 코드 줄을 묶을 상대 노드의 id다. */
 function linked(nodes: Map<string, AtlasNode>, edges: AtlasEdge[], peer: (edge: AtlasEdge) => string): Links {
   const kinds: Links["kinds"] = {};
-  const groups = new Map<string, SiteRef[]>();
+  const groups = new Map<string, AtlasEdge[]>();
   let total = 0;
   for (const edge of edges) {
     total += edge.sites.length;
     kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
     const id = peer(edge);
-    groups.set(id, [...(groups.get(id) ?? []), ...edge.sites]);
+    groups.set(id, [...(groups.get(id) ?? []), edge]);
   }
-  const name = (id: string) => {
-    const node = nodes.get(id);
-    return node === undefined ? id : nameOf(nodes, node);
-  };
-  return { total, kinds, groups: [...groups].map(([id, sites]) => ({ name: name(id), sites })) };
+  return { total, kinds, groups: [...groups].map(([id, among]) => groupOf(nodes, id, among)) };
 }
 
 /**
@@ -122,6 +138,11 @@ export function linksText(kinds: Links["kinds"]): string {
 export function restText(kinds: Links["kinds"]): string | null {
   const list = kindsOf(kinds, false).map((kind) => relationOf(kind, kinds[kind]!));
   return list.length === 0 ? null : `그 밖 ${list.join(", ")}`;
+}
+
+/** 코드 줄 묶음에 든 관계를 종류마다 수와 함께 적은 글: `호출 2곳, 타입 1곳`. 세는 관계를 앞에 적는다. */
+export function groupText(kinds: SiteGroup["kinds"]): string {
+  return [...kindsOf(kinds, true), ...kindsOf(kinds, false)].map((kind) => relationOf(kind, kinds[kind]!)).join(", ");
 }
 
 /**
