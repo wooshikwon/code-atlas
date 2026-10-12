@@ -76,7 +76,7 @@ export function unresolvedWithin(graph: Graph, off: Set<string>): Map<string, nu
 }
 
 /**
- * 접힌 상자의 배지에 적는 수. 파일 상자는 바로 아래에 든 함수·클래스·변수 수이고 폴더는 안에 든 파일 수다. off에 든 노드는 세지 않는다.
+ * 접힌 상자의 배지에 적는 수. 파일 상자는 바로 아래에 든 함수·클래스 수이고 폴더는 안에 든 파일 수다. 변수와 off에 든 노드는 세지 않는다.
  */
 export function insideCounts(graph: Graph, off: Set<string>): Map<string, number> {
   const nodes = nodeIndex(graph);
@@ -87,7 +87,7 @@ export function insideCounts(graph: Graph, off: Set<string>): Map<string, number
       continue;
     }
     if (node.kind !== "module") {
-      if (nodes.get(node.parent)?.kind === "module") {
+      if (node.kind !== "variable" && nodes.get(node.parent)?.kind === "module") {
         add(node.parent);
       }
       continue;
@@ -99,7 +99,7 @@ export function insideCounts(graph: Graph, off: Set<string>): Map<string, number
   return result;
 }
 
-/** 폴더마다 오른쪽 위 배지에 적는 줄 수. 하위 폴더까지 그 폴더 아래에 든 파일의 줄 수 합이고, off에 든 파일은 세지 않는다. */
+/** 폴더마다 정보 패널의 `크기` 줄에 적는 줄 수. 하위 폴더까지 그 폴더 아래에 든 파일의 줄 수 합이고, off에 든 파일은 세지 않는다. */
 export function folderLines(graph: Graph, off: Set<string>): Map<string, number> {
   const nodes = nodeIndex(graph);
   const result = new Map<string, number>(graph.nodes.filter((n) => n.kind === "package").map((n) => [n.id, 0]));

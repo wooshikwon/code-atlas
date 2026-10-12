@@ -1416,6 +1416,11 @@ ul {
   color: var(--ink);
 }
 
+/* 접힌 상자의 배지는 바탕을 --loc 색으로 바꾼다. 글자는 화면 바탕색 그대로이고 불투명도는 상자의 단계를 따른다. */
+.react-flow__node.pointed .badge-inside {
+  background: var(--loc);
+}
+
 .react-flow__node.pointed :is(.node-module-head, .node-region-head) .node-label {
   text-shadow: 0 0 2px color-mix(in srgb, var(--ink) 45%, transparent);
 }
@@ -1455,7 +1460,7 @@ ul {
   visibility: hidden;
 }
 
-/* 배지는 감싼 모양의 모서리에 세로 가운데를 맞춘다. 상자의 줄 수는 오른쪽 위, 모듈 변수 변경은 오른쪽 아래, 원이 없는 모양의 도는 원은 왼쪽 위다.
+/* 배지는 감싼 모양의 모서리에 세로 가운데를 맞춘다. 접힌 상자 안에 든 것의 수는 오른쪽 위, 모듈 변수 변경은 오른쪽 아래, 원이 없는 모양의 도는 원은 왼쪽 위다.
    모양 밖으로 나가는 폭 --overhang은 layout.ts의 BADGE_OVERHANG을 컴포넌트가 넣는다. 글자 요소는 테두리가 없으므로 배지의 위치를
    모양의 바깥 변에서 잰다. */
 .badge {
@@ -1471,8 +1476,8 @@ ul {
   white-space: nowrap;
 }
 
-/* 상자의 줄 수 */
-.badge-lines {
+/* 접힌 상자 안에 든 것의 수 */
+.badge-inside {
   top: -7px;
   right: calc(0px - var(--overhang));
   color: var(--surface);
@@ -1981,11 +1986,11 @@ ul {
 }
 
 
-.legend-lines {
+.legend-inside {
   fill: var(--muted);
 }
 
-.legend-lines-count {
+.legend-inside-count {
   fill: var(--surface);
   font-size: 9px;
 }

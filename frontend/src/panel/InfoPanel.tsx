@@ -136,7 +136,7 @@ export function InfoPanel() {
     [graph, index, off, via, lit, file, selection, base],
   );
 
-  /** 고른 노드의 연결과 안에 든 정의 수, 미확인 호출 수, 줄 수. 파일 상자와 폴더 상자는 안에 든 노드의 미확인 호출 수를 합치고, 폴더 상자의 줄 수는 그래프의 폴더가 적는 수(`folderLines`)다. */
+  /** 고른 노드의 연결과 안에 든 정의 수, 미확인 호출 수, 줄 수. 파일 상자와 폴더 상자는 안에 든 노드의 미확인 호출 수를 합치고, 폴더 상자의 줄 수는 안에 든 보이는 파일의 줄 수 합(`folderLines`)이다. */
   const facts = useMemo(() => {
     if (graph === null || index === null || off === null || node === undefined) {
       return null;

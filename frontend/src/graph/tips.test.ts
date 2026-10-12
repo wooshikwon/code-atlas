@@ -1,17 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture, variableFixture } from "./fixture";
-import { busyTip, cycleTip, diffTip, entryTip, globalTip, nodeTip, packCount, packTip, sizeTip, valueTip } from "./tips";
+import { busyTip, cycleTip, diffTip, entryTip, globalTip, insideTip, nodeTip, packCount, packTip, valueTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
 const [file, folder, fn] = [nodes.get("main")!, nodes.get("pkg")!, nodes.get("main:run")!];
 
 describe("배지 말풍선", () => {
-  it("상자의 배지는 줄이지 않은 줄 수 뒤에 파일 상자면 안에 든 함수·클래스·변수 수, 폴더면 안에 든 파일 수를 적는다", () => {
-    expect(sizeTip(file, 221, 9)).toBe("줄 수 221줄 · 빈 줄을 뺀 수 · 안에 든 함수·클래스·변수 9개");
-    expect(sizeTip(folder, 48213, 30)).toBe("줄 수 48213줄 · 빈 줄을 뺀 수 · 안에 든 파일 30개");
-    expect(sizeTip(file, 3, 0)).toBe("줄 수 3줄 · 빈 줄을 뺀 수");
-    expect(sizeTip({ ...fn, kind: "class" }, 40, 0)).toBe("줄 수 40줄 · 빈 줄을 뺀 수");
+  it("접힌 상자의 배지는 파일 상자면 안에 든 함수·클래스 수, 폴더 상자면 안에 든 파일 수를 적는다", () => {
+    expect(insideTip(file, 9)).toBe("안에 든 함수·클래스 9개 · 고르면 보인다");
+    expect(insideTip(folder, 30)).toBe("안에 든 파일 30개 · 펼치면 보인다");
   });
 
   it("손잡이는 안에서만 쓰이는 자식의 수와 이름을 적고 여섯 개부터는 줄인다", () => {

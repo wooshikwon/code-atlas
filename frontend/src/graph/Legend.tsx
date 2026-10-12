@@ -1,4 +1,4 @@
-// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 일곱 개와 이름표 옆 표시와 상자의 배지, 선 모양 세 개와 갈림·합류, 찾은 경로의 선,
+// 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 일곱 개와 이름표 옆 표시와 접힌 상자의 배지, 선 모양 세 개와 갈림·합류, 찾은 경로의 선,
 // 변경 표시 두 색을 보여 주고, 선 모양에 마우스를 올리면 그 분류에 드는 선 종류를 말풍선에 적는다. 분석 표시를 켜면 켠 표시의 견본과 뜻을 끝에 덧붙인다.
 // 시점 비교가 켜져 있으면 그리지 않는 변경 표시 두 색을 빼고 이름 옆 줄 수, 삭제된 연결, 삭제된 정의와 파일의 견본 세 줄을 덧붙인다.
 import type { Change, EdgeGroup } from "../api/types";
@@ -20,7 +20,7 @@ const SHAPES = [
   { key: "variable", name: "모듈 변수" },
   { key: "external", name: "외부 노드" },
   { key: "entry", name: "진입점" },
-  { key: "lines", name: "상자의 배지: 줄 수" },
+  { key: "inside", name: "접힌 상자의 배지: 안에 든 함수·클래스·파일 수" },
 ];
 
 const GROUPS: EdgeGroup[] = ["run", "use", "derive"];
@@ -57,9 +57,9 @@ function Shape({ kind }: { kind: string }) {
     default:
       return (
         <g>
-          <rect x={1} y={1} width={20} height={14} rx={7} className="legend-lines" />
-          <text x={11} y={11.5} textAnchor="middle" className="legend-lines-count">
-            221
+          <rect x={3} y={1} width={16} height={14} rx={7} className="legend-inside" />
+          <text x={11} y={11.5} textAnchor="middle" className="legend-inside-count">
+            12
           </text>
         </g>
       );

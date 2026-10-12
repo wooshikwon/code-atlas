@@ -580,28 +580,26 @@ const tipText = (page) => page.evaluate(() => document.querySelector(".tooltip")
 const COUNTED = ["call", "construct", "pass", "read", "write", "decorate", "inherit", "override"];
 /** 토글로 숨기는 노드인지(`graph/visible.ts`의 `hidden`). 테스트 코드는 늘 숨긴 것으로 보고, 외부 노드와 외부 값 변수는 external이 거짓일 때 숨긴다. */
 const veiled = (n, external = false) => n.test || (!external && (n.kind === "external" || n.external_value === true));
-/** 접힌 파일 상자 id의 배지에 적는 수. 바로 아래에 든 함수·클래스·변수 가운데 토글이 꺼진 화면에 보이는 것의 수다. */
-const insideOf = (graph, id) => graph.nodes.filter((n) => n.parent === id && !veiled(n)).length;
-/** 큰 수를 줄여 적는 글(`graph/names.ts`의 `kilo`) */
-const kilo = (count) => (count < 1000 ? String(count) : `${count / 1000 < 9.95 ? (count / 1000).toFixed(1) : Math.round(count / 1000)}k`);
 /** 폴더 id 아래(하위 폴더 포함) 파일 노드. tests가 거짓이면 테스트 코드를 뺀다. */
 const filesUnder = (graph, id, tests = false) => {
   const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
   const under = (n) => n !== undefined && (n.id === id || under(nodes.get(n.parent)));
   return graph.nodes.filter((n) => n.kind === "module" && (tests || !n.test) && under(nodes.get(n.parent)));
 };
-/** 상자의 오른쪽 위 배지에 적는 줄 수. 폴더는 그 아래 파일의 줄 수 합(`graph/visible.ts`의 `folderLines`)이고 그 밖의 상자는 노드의 줄 수다. */
-const locOf = (graph, id, tests = false) => {
+/**
+ * 접힌 상자 id의 배지에 적는 수(`graph/visible.ts`의 `insideCounts`). 파일 상자는 바로 아래에 든 함수·클래스 수이고 변수는 세지 않는다.
+ * 폴더는 그 아래 파일 수다. tests가 거짓이면 테스트 코드를 뺀다. 그 밖의 노드는 0이다.
+ */
+const insideOf = (graph, id, tests = false) => {
   const found = graph.nodes.find((n) => n.id === id);
-  return found.kind === "package" ? filesUnder(graph, id, tests).reduce((sum, n) => sum + n.loc, 0) : found.loc;
+  if (found.kind === "package") {
+    return filesUnder(graph, id, tests).length;
+  }
+  return found.kind === "module" ? graph.nodes.filter((n) => n.parent === id && n.kind !== "variable" && (tests || !n.test)).length : 0;
 };
-/** 배지의 말풍선(`graph/tips.ts`의 `sizeTip`). 줄이지 않은 줄 수 뒤에 안에 든 것의 수를 적는다. */
-const sizeTipOf = (graph, id, tests = false) => {
-  const found = graph.nodes.find((n) => n.id === id);
-  const lines = `줄 수 ${locOf(graph, id, tests)}줄 · 빈 줄을 뺀 수`;
-  const inside = found.kind === "package" ? filesUnder(graph, id, tests).length : found.kind === "module" ? graph.nodes.filter((n) => n.parent === id && (tests || !n.test) && n.kind !== "external" && n.external_value !== true).length : 0;
-  return inside === 0 ? lines : `${lines} · 안에 든 ${found.kind === "package" ? "파일" : "함수·클래스·변수"} ${inside}개`;
-};
+/** 배지의 말풍선(`graph/tips.ts`의 `insideTip`) */
+const insideTipOf = (graph, id, tests = false) =>
+  graph.nodes.find((n) => n.id === id).kind === "package" ? `안에 든 파일 ${insideOf(graph, id, tests)}개 · 펼치면 보인다` : `안에 든 함수·클래스 ${insideOf(graph, id, tests)}개 · 고르면 보인다`;
 /** 안쪽 자식 ids를 묶은 손잡이의 글 머리(`graph/tips.ts`의 `packCount`): `내부 함수 14개`, `내부 함수 14개 · 변수 5개`, `내부 변수 3개` */
 const packWords = (graph, ids) => {
   const variables = ids.filter((id) => graph.nodes.find((n) => n.id === id).kind === "variable").length;
@@ -765,15 +763,15 @@ async function open(t, page) {
     `테두리 ${frame.widths.join(" ")}, 모서리 ${frame.radius}, 그림자 ${frame.shadow}`,
   );
   const badges = await page.evaluate(() =>
-    [...document.querySelectorAll(".react-flow__node .node-module > .badge-lines")].map((badge) => ({
+    [...document.querySelectorAll(".react-flow__node .node-module > .badge-inside")].map((badge) => ({
       id: badge.closest(".react-flow__node").dataset.id.replace(/#face$/, ""),
-      text: badge.textContent,
+      count: Number(badge.textContent),
     })),
   );
   t.check(
-    "접힌 파일 상자의 배지가 그 파일의 줄 수이고 미확인 호출 수 배지는 없다",
-    badges.length > 0 && badges.every((badge) => badge.text === kilo(locOf(graph, badge.id))) && (await count(page, ".badge-unresolved")) === 0,
-    `배지 ${badges.length}개: ${badges.slice(0, 5).map((badge) => `${badge.id} ${badge.text}`).join(", ")}`,
+    "접힌 파일 상자의 배지가 그 파일에 든 함수·클래스 수이고 미확인 호출 수 배지는 없다",
+    badges.length > 0 && badges.every((badge) => badge.count === insideOf(graph, badge.id)) && (await count(page, ".badge-unresolved")) === 0,
+    `배지 ${badges.length}개의 합 ${badges.reduce((sum, badge) => sum + badge.count, 0)}`,
   );
 }
 
@@ -830,8 +828,8 @@ async function file(t, page) {
   );
   const unresolved = graph.nodes.filter((n) => n.path === `src/${FILE}.py`).reduce((sum, n) => sum + n.unresolved, 0);
   t.check(
-    "펼친 arbiter.py 상자의 배지는 줄 수 하나뿐이고 안의 함수는 배지가 없으며, 정보 구역이 안에 든 함수의 미확인 호출 수 합을 적는다",
-    unresolved > 0 && (await count(page, `${face(FILE)} .badge-lines`)) === 1 && (await count(page, ".node-face:is(.node-function, .node-variable) .badge-lines")) === 0 && (await count(page, ".badge-unresolved")) === 0 && title.includes(`미확인 호출 ${unresolved}곳`),
+    "펼친 arbiter.py 상자와 안의 함수는 배지가 없고, 정보 구역이 안에 든 함수의 미확인 호출 수 합을 적는다",
+    unresolved > 0 && (await count(page, `${face(FILE)} .badge-inside`)) === 0 && (await count(page, ".badge-unresolved")) === 0 && title.includes(`미확인 호출 ${unresolved}곳`),
     `그래프 ${unresolved}, 머리 줄 ${title.replaceAll("\n", " / ")}`,
   );
   const { clear } = await stageOf(page);
@@ -1567,14 +1565,14 @@ async function badgeTip(t, page) {
   const graph = await api("/api/graph");
   const over = (selector) => tipOver(page, selector);
   const counted = await page.evaluate(() => {
-    const badge = document.querySelector(".node-face.node-module:not(.node-module-open) .badge-lines");
+    const badge = document.querySelector(".node-face.node-module .badge-inside");
     return { id: badge.closest(".react-flow__node").dataset.id, text: badge.textContent };
   });
   const id = counted.id.replace(/#face$/, "");
-  const inside = await over(`${face(id)} .badge-lines`);
+  const inside = await over(`${face(id)} .badge-inside`);
   t.check(
-    "접힌 파일 상자의 배지에 올리면 말풍선이 줄이지 않은 줄 수와 안에 든 함수·클래스·변수 수를 적는다",
-    counted.text === kilo(locOf(graph, id)) && inside === sizeTipOf(graph, id),
+    "접힌 파일 상자의 배지에 올리면 말풍선이 안에 든 함수·클래스 수와 보는 방법을 적는다",
+    counted.text === String(insideOf(graph, id)) && inside === insideTipOf(graph, id),
     inside.replaceAll("\n", " / "),
   );
   await t.shot();
@@ -1582,7 +1580,7 @@ async function badgeTip(t, page) {
   /** 배지의 바탕색·글자색·불투명도 */
   const badgeOf = (wrapper) =>
     page.evaluate((selector) => {
-      const badge = getComputedStyle(document.querySelector(`${selector} .badge-lines`));
+      const badge = getComputedStyle(document.querySelector(`${selector} .badge-inside`));
       return { background: badge.backgroundColor, color: badge.color, opacity: badge.opacity };
     }, wrapper);
   const hoverBadge = async (wrapper, rect, theme) => {
@@ -1592,26 +1590,25 @@ async function badgeTip(t, page) {
     await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
     await page.waitForFunction((selector) => document.querySelector(selector).classList.contains("pointed"), wrapper, { timeout: 3_000 }).catch(() => {});
     const over = await badgeOf(wrapper);
-    const pointed = await page.evaluate((selector) => document.querySelector(selector).classList.contains("pointed"), wrapper);
     await page.screenshot({ path: join(OUT, `hf3-badge-hover-${theme}.png`) });
-    return { away, over, pointed, surface: (await colorOf(page, "--surface")).rgb, muted: (await colorOf(page, "--muted")).rgb };
+    return { away, over, surface: (await colorOf(page, "--surface")).rgb, muted: (await colorOf(page, "--muted")).rgb, loc: (await colorOf(page, "--loc")).rgb };
   };
-  /** 배지는 muted 잉크 바탕에 화면 바탕색 글자이고 커서를 올린 상자에서도 그대로다 */
-  const kept = (seen) => seen.pointed && seen.away.background === seen.muted && same(seen.over, seen.away) && seen.over.color === seen.surface;
+  /** 배지는 muted 잉크 바탕에 화면 바탕색 글자이고, 커서를 올린 상자에서는 바탕만 --loc 색으로 바뀐다 */
+  const tinted = (seen) => seen.away.background === seen.muted && seen.over.background === seen.loc && seen.over.background !== seen.muted && seen.over.color === seen.surface && seen.over.opacity === seen.away.opacity;
   const onFile = await hoverBadge(face(id), label, "light");
-  t.check("접힌 파일 상자에 커서를 올려도 배지의 바탕은 muted 잉크, 글자는 화면 바탕색 그대로다", kept(onFile), `바탕 ${onFile.away.background} → ${onFile.over.background}`);
+  t.check("접힌 파일 상자에 커서를 올리면 배지의 바탕이 --loc 색이 되고 글자는 화면 바탕색 그대로다", tinted(onFile), `바탕 ${onFile.away.background} → ${onFile.over.background}`);
   await page.mouse.move(5, 5);
   await page.getByRole("button", { name: "어두운 화면" }).click();
   await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
   const onDark = await hoverBadge(face(id), label, "dark");
-  t.check("어두운 화면에서도 같다", kept(onDark) && onDark.over.color !== onFile.over.color, `바탕 ${onDark.away.background} → ${onDark.over.background}`);
+  t.check("어두운 화면에서도 같고 색은 어두운 화면의 --loc 색이다", tinted(onDark) && onDark.over.background !== onFile.over.background, `바탕 ${onDark.away.background} → ${onDark.over.background}`);
   await page.mouse.move(5, 5);
   await page.getByRole("button", { name: "밝은 화면" }).click();
   await page.waitForFunction(() => document.documentElement.dataset.theme !== "dark");
   await page.mouse.move(label.x + label.width / 2, label.y + label.height / 2);
   await page.waitForFunction(() => !(document.querySelector(".tooltip")?.textContent ?? "").includes("안에 든"), null, { timeout: 3_000 }).catch(() => {});
   const name = await tipText(page);
-  t.check("같은 상자의 이름표로 옮기면 배지의 말풍선이 사라진다", !name.includes("안에 든") && !name.includes("줄 수") && !name.includes(" · 파일"), `말풍선 "${name}"`);
+  t.check("같은 상자의 이름표로 옮기면 배지의 말풍선이 사라진다", !name.includes("안에 든") && !name.includes(" · 파일"), `말풍선 "${name}"`);
   const entry = await over(`${face(FILE)} .node-entry`);
   t.check("진입점 표시에 올리면 진입점임을 적는다", entry.startsWith("진입점"), entry);
   t.check("화면이 브라우저 기본 말풍선(title)을 쓰지 않는다", (await nativeTips(page)).length === 0, (await nativeTips(page)).join(", "));
@@ -1620,10 +1617,10 @@ async function badgeTip(t, page) {
   t.check("노드 밖으로 나가면 말풍선이 사라진다", (await count(page, ".tooltip")) === 0);
   // load가 펼쳐 둔 폴더 하나를 파일트리의 폴더 행으로 접어 접힌 폴더 상자의 배지를 본다.
   await page.click('.tree-row.tree-dir[data-node="parser"]');
-  await page.waitForSelector(`${node("parser")} > .node-package`, { timeout: 30_000 });
+  await page.waitForSelector(`${face("parser")} .badge-inside`, { timeout: 30_000 });
   await rest(page);
   const onFolder = await hoverBadge(face("parser"), await rectOf(page, `${face("parser")} .node-label`), "light-folder");
-  t.check("접힌 폴더 상자에 커서를 올려도 배지의 바탕과 글자가 그대로다", kept(onFolder), `바탕 ${onFolder.away.background} → ${onFolder.over.background}`);
+  t.check("접힌 폴더 상자에 커서를 올리면 배지의 바탕이 파일 상자의 배지와 같은 색이 된다", tinted(onFolder) && onFolder.over.background === onFile.over.background, `바탕 ${onFolder.away.background} → ${onFolder.over.background}`);
   await page.mouse.move(5, 5);
 }
 
@@ -2945,7 +2942,6 @@ const cornerText = (at) => (at === null ? "도는 원 없음" : `왼쪽으로 ${
 
 /** hotfix 4의 사진. `hf4-{이름}.png`로 남긴다. */
 const HF4 = (name) => join(OUT, `hf4-${name}.png`);
-const HF6 = (name) => join(OUT, `hf6-${name}.png`);
 const HF5 = (name) => join(OUT, `hf5-tokens-${name}.png`);
 /** LLM 요약을 만드는 중인 노드의 도는 표시. 원이 있는 노드는 원 위의 고리, 상자는 왼쪽 위 모서리의 도는 원이다. */
 const BUSY = ".badge-busy, .busy-ring";
@@ -3148,7 +3144,7 @@ async function summaryBusy(t, page) {
   await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 1, OWN_BUSY, { timeout: 5_000 }).catch(() => {});
 
   if (extra === null) {
-    t.skip("접힌 상자는 도는 원을 왼쪽 위에, 줄 수 배지를 오른쪽 위에 단다", "미확인 호출이 있는 파일이 없다");
+    t.skip("배지가 있는 접힌 상자는 도는 원을 왼쪽 위에, 안에 든 것의 수 배지를 오른쪽 위에 단다", "미확인 호출이 있는 파일이 없다");
   } else {
     await pickInTree(page, extra);
     await page.click(".info-panel-summary .summary-make");
@@ -3156,13 +3152,13 @@ async function summaryBusy(t, page) {
     await page.waitForSelector(`${face(extra.owner)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
     await settle(page);
     const both = await busyAt(page, extra.owner, node(extra.owner));
-    /** 줄 수 배지가 상자의 오른쪽과 위로 나간 폭. 오른쪽은 배지의 폭이 정수가 아니면 offset 값이 1px 어긋나므로 계산된 `right`로 읽는다. */
+    /** 안에 든 것의 수 배지가 상자의 오른쪽과 위로 나간 폭. 오른쪽은 배지의 폭이 정수가 아니면 offset 값이 1px 어긋나므로 계산된 `right`로 읽는다. */
     const mark = await page.evaluate((sel) => {
       const badge = document.querySelector(sel);
       return badge == null ? null : { right: -parseFloat(getComputedStyle(badge).right), above: -badge.offsetTop };
-    }, `${face(extra.owner)} .badge-lines`);
+    }, `${face(extra.owner)} .badge-inside`);
     t.check(
-      "접힌 상자는 도는 원을 왼쪽 위에, 줄 수 배지를 오른쪽 위에 단다",
+      "배지가 있는 접힌 상자는 도는 원을 왼쪽 위에, 안에 든 것의 수 배지를 오른쪽 위에 단다",
       atCorner(both) && mark !== null && near(mark.right, 6, 0.5) && near(mark.above, 7, 0.5) && (await count(page, ":not(.node-region) > .badge-busy")) === 2,
       `도는 원 ${cornerText(both)}, 배지 ${mark === null ? "없음" : `오른쪽으로 ${mark.right.toFixed(1)}px, 위로 ${mark.above.toFixed(1)}px`}, 도는 원 ${await count(page, ":not(.node-region) > .badge-busy")}개`,
     );
@@ -8081,35 +8077,37 @@ const clickPack = async (page, box) => {
   await rest(page);
 };
 
-/** 상자의 배지와 정보 패널의 미확인 호출 수를 본다. */
+/** 접힌 상자의 배지와 정보 패널의 미확인 호출 수를 본다. */
 async function badge(t, page) {
   const graph = await api("/api/graph");
   await load(page, url, false);
   const shownBadges = await page.evaluate(() =>
-    [...document.querySelectorAll(".node-face .badge-lines")].map((badge) => ({ id: badge.closest(".react-flow__node").dataset.id.replace(/#face$/, ""), text: badge.textContent })),
+    [...document.querySelectorAll(".node-face .badge-inside")].map((badge) => ({ id: badge.closest(".react-flow__node").dataset.id.replace(/#face$/, ""), count: Number(badge.textContent) })),
   );
   const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const want = (id) => insideOf(graph, id);
   t.check(
-    `접힌 파일 상자 ${shownBadges.filter((b) => nodes.get(b.id).kind === "module").length}개의 배지는 그 파일의 줄 수, 접힌 폴더 상자의 배지는 그 폴더 아래 파일의 줄 수 합이다`,
-    shownBadges.length > 1 && shownBadges.some((b) => nodes.get(b.id).kind === "package") && shownBadges.every((b) => b.text === kilo(locOf(graph, b.id))),
-    shownBadges.map((b) => `${b.id} ${b.text}`).join(", "),
+    `접힌 파일 상자 ${shownBadges.filter((b) => nodes.get(b.id).kind === "module").length}개의 배지는 안에 든 함수·클래스 수, 접힌 폴더 상자의 배지는 안에 든 파일 수다`,
+    shownBadges.length > 1 && shownBadges.some((b) => nodes.get(b.id).kind === "package") && shownBadges.every((b) => b.count === want(b.id)),
+    shownBadges.map((b) => `${b.id} ${b.count}`).join(", "),
   );
   const boxesShown = await count(page, ".react-flow__node > .node-body:is(.node-module, .node-package)");
-  t.check("접힌 상자마다 배지가 하나다", shownBadges.length === boxesShown, `상자 ${boxesShown}개, 배지 ${shownBadges.length}개`);
+  const empty = graph.nodes.filter((n) => n.kind === "module" && !n.test && n.parent === null && want(n.id) === 0).length;
+  t.check("안에 든 것이 있는 접힌 상자마다 배지가 하나다", shownBadges.length === boxesShown - empty, `상자 ${boxesShown}개, 안이 빈 파일 ${empty}개, 배지 ${shownBadges.length}개`);
   t.check(
     "미확인 호출 수 배지와 접힌 파일 상자 아래의 함수 수 글자가 없다",
     (await count(page, ".badge-unresolved")) === 0 && (await count(page, ".node-below")) === 0 && !(await page.evaluate(() => document.querySelector(".react-flow__viewport").textContent.includes("?"))),
   );
-  const tip = await tipOver(page, `${face(FILE)} .badge-lines`);
-  t.check("파일 상자의 배지에 올리면 줄 수와 안에 든 함수·클래스·변수 수를 적는다", tip === sizeTipOf(graph, FILE) && tip.includes("안에 든 함수·클래스·변수"), tip);
-  const folderTip = await tipOver(page, `${face("parser")} .badge-lines`);
-  t.check("폴더 상자의 배지에 올리면 줄 수 합과 안에 든 파일 수를 적는다", folderTip === sizeTipOf(graph, "parser") && folderTip.includes("안에 든 파일"), folderTip);
+  const tip = await tipOver(page, `${face(FILE)} .badge-inside`);
+  t.check("파일 상자의 배지에 올리면 안에 든 함수·클래스 수를 적는다", tip === `안에 든 함수·클래스 ${want(FILE)}개 · 고르면 보인다`, tip);
+  const folderTip = await tipOver(page, `${face("parser")} .badge-inside`);
+  t.check("폴더 상자의 배지에 올리면 안에 든 파일 수를 적는다", folderTip === `안에 든 파일 ${want("parser")}개 · 펼치면 보인다`, folderTip);
   await t.shot();
 
   const sum = (id) => graph.nodes.filter((n) => !n.test && (n.id === id || n.id.startsWith(`${id}:`) || n.id.startsWith(`${id}.`))).reduce((total, n) => total + n.unresolved, 0);
   await pickFile(page, FILE);
   t.check(`파일을 고르면 정보 패널의 정보 구역이 안의 합계를 "미확인 호출 ${sum(FILE)}곳"으로 적는다`, sum(FILE) > 0 && (await headOf(page)).includes(`미확인 호출 ${sum(FILE)}곳`), (await headOf(page)).replaceAll("\n", " / "));
-  t.check("펼친 파일 상자도 같은 줄 수 배지를 단다", (await page.evaluate((sel) => document.querySelector(sel)?.textContent ?? null, `${face(FILE)} .node-module-open > .badge-lines`)) === kilo(locOf(graph, FILE)));
+  t.check("펼친 파일 상자에는 배지가 없다", (await count(page, `${face(FILE)} .badge-inside`)) === 0);
   const fn = graph.nodes.find((n) => n.parent === FILE && n.unresolved > 0);
   await page.click(`.tree-row.tree-symbol[data-node="${fn.id}"]`);
   await waitSelected(page, fn.id);
@@ -11680,149 +11678,90 @@ async function folderTint(t, page) {
 }
 
 /**
- * 상자의 줄 수 배지. 파일 상자·폴더·클래스·데이터 클래스의 오른쪽 위 배지가 `/api/graph`에서 계산한 줄 수를 줄여 적은 글이고(폴더는 그 아래
- * 파일의 줄 수 합이고 토글로 숨긴 테스트 코드를 뺀다) 말풍선이 줄이지 않은 줄 수와 안에 든 것의 수를 적는지, 상자와 함수·변수의 이름 옆에
- * 줄 수 숫자가 없는지, 배지가 도는 원·머리 줄의 글자와 겹치지 않는지를 본다. `--wide-url`을 받으면 그 레포에서
- * k 단위로 줄인 배지도 본다. 사진은 `hf6-label-{이름}.png`로 남긴다.
+ * 접힌 상자의 배지. 접힌 파일 상자의 배지가 `/api/graph`에서 센 함수·클래스 수이고(변수는 세지 않는다) 접힌 폴더 상자의 배지가 그 아래
+ * 파일 수이며(토글로 숨긴 테스트 코드를 뺀다) 말풍선이 같은 수를 적는지, 펼친 폴더 영역·펼친 파일 상자·클래스·함수·변수에 배지가 없는지,
+ * 어느 노드도 이름 옆에 줄 수 숫자가 없는지를 본다. 사진은 `hf9-badge.png`와 `hf9-badge-{이름}.png`로 남긴다.
  */
-async function badgeLines(t, page) {
-  /** 화면의 배지마다 적힌 글과 말풍선, 배지가 놓인 곳, 같은 상자의 이름표·머리 줄 글자·도는 원과 겹치는지 */
+async function badgeInside(t, page) {
+  const HF9 = (name) => join(OUT, `hf9-badge${name}.png`);
+  /** 화면의 노드마다 배지에 적힌 글과 말풍선, 이름 옆 줄 수 숫자 */
   const drawn = () =>
-    page.evaluate(() => {
-      const crosses = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
-      return [...document.querySelectorAll(".react-flow__node > .node-face")].map((element) => {
-        const badge = element.querySelector(":scope > .badge-lines");
-        const [at, around] = [badge?.getBoundingClientRect(), element.getBoundingClientRect()];
-        const texts = [...element.querySelectorAll(".node-label, .node-aside, .change-mark, .badge-busy, .node-field")].map((each) => each.getBoundingClientRect());
-        const style = badge && getComputedStyle(badge);
+    page.evaluate(() =>
+      [...document.querySelectorAll(".react-flow__node > .node-face")].map((element) => {
+        const badge = element.querySelector(":scope > .badge-inside");
         return {
           id: element.parentElement.dataset.id.replace(/#face$/, ""),
           open: element.classList.contains("node-region") || element.classList.contains("node-module-open"),
           text: badge?.textContent ?? null,
           tip: badge?.dataset.tip ?? null,
           loc: element.querySelector(".loc")?.textContent ?? null,
-          fill: style?.backgroundColor ?? null,
-          corner: at === undefined ? null : [at.right - around.right, around.top - at.top],
-          clear: at === undefined || texts.every((each) => !crosses(at, each)),
         };
-      });
-    });
-  const zoom = () => zoomOf(page);
-  const BOXES = ["package", "module", "class", "dataclass"];
-  /** 배지를 다는 종류의 상자는 모두 계산한 줄 수의 배지와 말풍선을 달고, 그 밖의 노드는 배지가 없다. 어느 노드도 이름 옆 숫자가 없다 */
+      }),
+    );
+  /** 안에 든 것이 있는 접힌 상자는 모두 계산한 수의 배지와 말풍선을 달고, 그 밖의 노드는 배지가 없다. 어느 노드도 이름 옆 숫자가 없다 */
   const labeled = (seen, graph, tests) => {
-    const kinds = new Map(graph.nodes.map((n) => [n.id, n.kind]));
+    const known = new Set(graph.nodes.map((n) => n.id));
+    const want = (each) => (each.open || !known.has(each.id) ? 0 : insideOf(graph, each.id, tests));
     return (
       seen.some((each) => each.text !== null) &&
-      seen.every((each) =>
-        BOXES.includes(kinds.get(each.id))
-          ? each.text === kilo(locOf(graph, each.id, tests)) && each.tip === sizeTipOf(graph, each.id, tests) && each.loc === null && each.clear
-          : each.text === null && each.loc === null,
-      )
+      seen.every((each) => each.loc === null && (want(each) === 0 ? each.text === null : each.text === String(want(each)) && each.tip === insideTipOf(graph, each.id, tests)))
     );
   };
-  const words = (seen) => seen.filter((each) => each.text !== null).slice(0, 12).map((each) => `${each.id}${each.open ? "(펼침)" : ""} ${each.text}`).join(", ");
-  const fit = async () => {
-    await page.getByRole("button", { name: "화면 맞춤" }).click();
-    await page.mouse.move(1, 1);
-    await rest(page);
-  };
+  const words = (seen) => seen.filter((each) => each.text !== null).slice(0, 12).map((each) => `${each.id} ${each.text}`).join(", ");
 
-  // 기준 레포: 접은 채로 연 화면, 폴더를 펼친 화면, 파일을 펼친 화면
   const graph = await api("/api/graph");
+  const kinds = new Map(graph.nodes.map((n) => [n.id, n.kind]));
   await load(page, url, false);
   const folded = await drawn();
-  t.check("접힌 폴더 상자와 접힌 파일 상자의 배지가 줄 수이고 이름 옆에 줄 수 숫자가 없다", labeled(folded, graph, false) && folded.every((each) => !each.open), words(folded));
-  await load(page);
-  const opened = await drawn();
-  const regions = opened.filter((each) => each.open);
-  const scale = await zoom();
   t.check(
-    "펼친 폴더 영역도 오른쪽 위 모서리에 같은 줄 수 배지를 달고 머리 줄의 폴더 경로와 겹치지 않는다",
-    labeled(opened, graph, false) && regions.length > 0 && regions.every((each) => each.text === folded.find((box) => box.id === each.id)?.text && near(each.corner[0] / scale, 6, 0.6) && near(each.corner[1] / scale, 7, 0.6)),
-    regions.map((each) => `${each.id} ${each.text}, 오른쪽으로 ${(each.corner[0] / scale).toFixed(1)}px 위로 ${(each.corner[1] / scale).toFixed(1)}px`).join(" / "),
+    "접힌 폴더 상자의 배지가 안에 든 파일 수, 접힌 파일 상자의 배지가 안에 든 함수·클래스 수이고 이름 옆에 줄 수 숫자가 없다",
+    labeled(folded, graph, false) && folded.some((each) => each.text !== null && kinds.get(each.id) === "package") && folded.some((each) => each.text !== null && kinds.get(each.id) === "module"),
+    words(folded),
   );
-  const tip = await tipOver(page, `${face(regions[0].id)} .badge-lines`);
-  t.check("폴더 영역의 배지에 올리면 말풍선이 줄이지 않은 줄 수 합과 안에 든 파일 수를 적는다", tip === sizeTipOf(graph, regions[0].id) && tip.includes("안에 든 파일"), tip);
-  await page.screenshot({ path: HF6("label-tip") });
+  const variables = (id) => graph.nodes.filter((n) => n.parent === id && n.kind === "variable" && !n.test).length;
+  const mixed = folded.find((each) => each.text !== null && kinds.get(each.id) === "module" && variables(each.id) > 0);
+  if (mixed === undefined) {
+    t.skip("변수가 든 접힌 파일 상자의 배지는 변수를 세지 않는다", "처음 화면에 변수가 든 접힌 파일 상자가 없다");
+  } else {
+    t.check("변수가 든 접힌 파일 상자의 배지는 변수를 세지 않는다", mixed.text === String(insideOf(graph, mixed.id)), `${mixed.id} 배지 ${mixed.text}, 변수 ${variables(mixed.id)}개`);
+  }
+  const shownFile = (mixed ?? folded.find((each) => each.text !== null && kinds.get(each.id) === "module")).id;
+  const tip = await tipOver(page, `${face(shownFile)} .badge-inside`);
+  t.check("접힌 파일 상자의 배지에 올리면 말풍선이 안에 든 함수·클래스 수를 적는다", tip === insideTipOf(graph, shownFile), tip);
+  await page.screenshot({ path: HF9("") });
   await page.mouse.move(1, 1);
-  await zoomTo(page, 1);
-  await page.mouse.move(1, 1);
-  await page.screenshot({ path: HF6("label-se") });
-  await pickFile(page, FILE);
-  const inFile = await drawn();
-  const own = inFile.find((each) => each.id === FILE);
-  const leaves = inFile.filter((each) => ["function", "method", "variable"].includes(graph.nodes.find((n) => n.id === each.id)?.kind));
-  const muted = (await colorOf(page, "--muted")).rgb;
-  t.check(
-    "펼친 파일 상자도 줄 수 배지를 달고 머리 줄의 이름표·함수 수 글자와 겹치지 않는다",
-    labeled(inFile, graph, false) && own?.open === true && own.text === kilo(locOf(graph, FILE)) && own.clear,
-    `${FILE} ${own?.text}`,
-  );
-  t.check(
-    "함수·변수는 배지도 이름 옆 줄 수 숫자도 없고, 화면에 이름 옆 줄 수 숫자가 하나도 없다",
-    leaves.length > 0 && leaves.every((each) => each.text === null && each.loc === null) && (await count(page, ".react-flow__node .loc")) === 0 && own.fill === muted,
-    `함수·변수 ${leaves.length}개, 배지 바탕 ${own.fill}`,
-  );
-  await page.screenshot({ path: HF6("label-file-open") });
 
-  // 테스트 코드를 켜면 폴더의 합이 달라진다.
-  const before = new Map(inFile.map((each) => [each.id, each.text]));
+  // 테스트 코드를 켜면 폴더의 파일 수가 달라진다.
+  const before = new Map(folded.map((each) => [each.id, each.text]));
   await setToggle(page, "테스트 코드", true);
-  await page.waitForFunction((had) => document.querySelectorAll(".react-flow__node > .node-face .badge-lines").length !== had, inFile.filter((each) => each.text !== null).length, { timeout: 30_000 }).catch(() => {});
+  await page.waitForFunction((had) => document.querySelectorAll(".react-flow__node > .node-face > .badge-inside").length !== had, folded.filter((each) => each.text !== null).length, { timeout: 30_000 }).catch(() => {});
   await rest(page);
   const tested = await drawn();
-  const moved = tested.filter((each) => each.text !== null && graph.nodes.find((n) => n.id === each.id).kind === "package" && before.get(each.id) !== each.text);
+  const moved = tested.filter((each) => each.text !== null && kinds.get(each.id) === "package" && before.get(each.id) !== each.text);
   t.check(
-    "테스트 코드를 켜면 폴더의 배지가 테스트 파일까지 더한 합이 되고, 합이 달라졌거나 새로 보이는 폴더가 있다",
+    "테스트 코드를 켜면 폴더의 배지가 테스트 파일까지 센 수가 되고, 수가 달라졌거나 새로 보이는 폴더가 있다",
     labeled(tested, graph, true) && moved.length > 0,
     moved.map((each) => `${each.id} ${before.get(each.id) ?? "없음"} → ${each.text}`).join(", "),
   );
   await setToggle(page, "테스트 코드", false);
   await rest(page);
-  await page.getByRole("button", { name: "어두운 화면" }).click();
-  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
-  await page.mouse.move(1, 1);
-  await page.waitForTimeout(300);
-  const night = await drawn();
-  const nightMuted = (await colorOf(page, "--muted")).rgb;
-  t.check(
-    "어두운 화면에서도 배지의 바탕이 muted 잉크다",
-    night.filter((each) => each.text !== null).every((each) => each.fill === nightMuted),
-    nightMuted,
-  );
-  await zoomTo(page, 1);
-  await page.mouse.move(1, 1);
-  await page.screenshot({ path: HF6("label-se-dark") });
 
-  if (wideUrl === null) {
-    t.skip("수천 줄이 넘는 폴더의 배지를 k 단위로 줄여 적는다", "--wide-url을 주지 않았다");
-    return;
-  }
-  const wide = await api("/api/graph", wideUrl);
-  await load(page, wideUrl);
-  const outer = await drawn();
-  const short = outer.filter((each) => each.text?.endsWith("k"));
+  // 폴더를 펼친 화면과 파일을 펼친 화면
+  await load(page);
+  const opened = await drawn();
+  const regions = opened.filter((each) => each.open);
+  t.check("펼친 폴더 영역에는 배지가 없고 그 안의 접힌 파일 상자가 배지를 단다", labeled(opened, graph, false) && regions.length > 0 && regions.every((each) => each.text === null), `영역 ${regions.map((each) => each.id).join(", ")} · ${words(opened)}`);
+  await page.screenshot({ path: HF9("-region") });
+  await pickFile(page, FILE);
+  const inFile = await drawn();
+  const own = inFile.find((each) => each.id === FILE);
+  const inner = inFile.filter((each) => ["function", "method", "variable", "class", "dataclass"].includes(kinds.get(each.id)));
   t.check(
-    `폴더가 여러 겹인 레포에서 펼친 폴더 영역과 그 안의 상자가 하위 폴더까지 더한 줄 수를 적고, 1,000줄이 넘는 배지 ${short.length}개는 k 단위로 줄여 적으며 말풍선이 줄이지 않은 수를 적는다`,
-    labeled(outer, wide, false) && short.length > 0 && short.every((each) => each.tip.startsWith(`줄 수 ${locOf(wide, each.id)}줄`)) && outer.some((each) => each.open && locOf(wide, each.id) >= 10_000),
-    words(outer),
+    "펼친 파일 상자와 그 안의 클래스·함수·변수는 배지가 없고, 화면에 이름 옆 줄 수 숫자가 하나도 없다",
+    labeled(inFile, graph, false) && own?.open === true && own.text === null && inner.length > 0 && inner.every((each) => each.text === null) && (await count(page, ".react-flow__node .loc")) === 0,
+    `${FILE} 안의 노드 ${inner.length}개`,
   );
-  await zoomTo(page, 1);
-  await page.mouse.move(1, 1);
-  await page.screenshot({ path: HF6("label-mdp") });
-  const deep = wide.nodes.find((n) => n.kind === "package" && n.parent !== null && !n.test && wide.nodes.some((kid) => kid.parent === n.id && kid.kind === "module" && !kid.test));
-  await openFolder(page, deep.id);
-  await fit();
-  const nested = await drawn();
-  t.check(
-    "안쪽 폴더를 펼쳐도 바깥 폴더 영역과 안쪽 폴더 영역이 저마다의 합을 적는다",
-    labeled(nested, wide, false) && nested.filter((each) => each.open).length >= 2,
-    words(nested.filter((each) => each.open)),
-  );
-  await zoomTo(page, 1);
-  await page.mouse.move(1, 1);
-  await page.screenshot({ path: HF6("label-region") });
+  await page.screenshot({ path: HF9("-file-open") });
 }
 
 /**
@@ -11977,10 +11916,10 @@ async function varFile(t, page) {
   await waitSelected(page, file.id);
   await page.click(`.tree-row.tree-file[data-node="${file.id}"]`);
   await rest(page);
-  const tip = await tipOver(page, `${face(file.id)} .badge-lines`);
+  const tip = await tipOver(page, `${face(file.id)} .badge-inside`);
   t.check(
-    `접힌 ${file.id}의 배지 말풍선이 변수까지 센 수 ${insideOf(graph, file.id)}개를 적는다`,
-    tip === sizeTipOf(graph, file.id) && tip.endsWith(`안에 든 함수·클래스·변수 ${insideOf(graph, file.id)}개`),
+    `접힌 ${file.id}의 배지 말풍선이 변수를 뺀 수 ${insideOf(graph, file.id)}개를 적는다`,
+    tip === insideTipOf(graph, file.id),
     tip,
   );
   await pickFile(page, file.id);
@@ -13252,7 +13191,7 @@ const SCENARIOS = [
   ["region", region],
   ["folder", folder],
   ["folder-tint", folderTint],
-  ["badge-lines", badgeLines],
+  ["badge-inside", badgeInside],
   ["folder-select", folderSelect],
   ["init-file", initFile],
   ["toolbar", toolbar],

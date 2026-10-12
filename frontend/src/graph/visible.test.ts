@@ -378,12 +378,12 @@ describe("변수 노드", () => {
     expect(packedIn(variableFixture, external, "conf:logger")).toBe("conf");
   });
 
-  it("접힌 파일 상자의 배지는 변수까지 세고 숨긴 변수는 세지 않는다", () => {
-    expect(insideCounts(variableFixture, none).get("conf")).toBe(7);
-    expect(insideCounts(variableFixture, external).get("conf")).toBe(8);
-    expect(insideCounts(variableFixture, none).get("app")).toBe(2);
+  it("접힌 파일 상자의 배지는 함수·클래스만 세고 변수는 세지 않는다", () => {
+    expect(insideCounts(variableFixture, none).get("conf")).toBe(3);
+    expect(insideCounts(variableFixture, external).get("conf")).toBe(3);
+    expect(insideCounts(variableFixture, none).get("app")).toBe(1);
     expect(insideCounts(variableFixture, none).has("tests.test_conf")).toBe(false);
-    expect(insideCounts(variableFixture, tests).get("tests.test_conf")).toBe(2);
+    expect(insideCounts(variableFixture, tests).get("tests.test_conf")).toBe(1);
   });
 
   it("손잡이는 안쪽 자식 가운데 함수·클래스의 수와 변수의 수를 따로 담고 숨긴 변수를 세지 않는다", () => {
