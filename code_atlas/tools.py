@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -43,6 +44,11 @@ CLAUDE_TIMEOUT = 10.0
 GIT_TIMEOUT = 5.0  # `git.py`가 git 명령 하나에 두는 값과 같다
 PROBE_TIMEOUT = 5.0
 MANAGER_TIMEOUT = 10.0
+
+# 시간 제한에 걸린 프로세스에 SIGTERM을 보낸 뒤 SIGKILL을 보내기까지 기다리는 시간. Claude Code CLI가 키체인에 한 번
+# 쓰는 명령(`security -i`)에 두는 시간 제한이 2초이므로, 쓰는 중인 토큰 저장 한 번과 잠금 파일 정리가 끝날 시간의
+# 두 배 남짓을 둔다. 언어 서버를 닫을 때 기다리는 `lsp.SHUTDOWN_TIMEOUT`과 같은 값이다.
+TERM_GRACE = 5.0
 
 STATUS_ARGS = ("auth", "status", "--json")
 # 값이 있으면 `claude`를 어떤 인자로도 실행하지 않는다.
@@ -107,12 +113,58 @@ class Found:
 
 @dataclass(frozen=True)
 class _Tool:
-    """도구마다 다른 확인 명령. `read`는 명령의 표준 출력에서 `Found`에 적을 값을 읽고, 읽지 못하면 None을 낸다."""
+    """도구마다 다른 확인 명령. `read`는 명령의 표준 출력에서 `Found`에 적을 값을 읽고, 읽지 못하면 None을 낸다.
+
+    `turns`가 있으면 확인 명령을 그 차례 안에서 혼자 실행한다.
+    """
 
     name: str
     args: tuple[str, ...]
     timeout: float
     read: Callable[[str], dict[str, object] | None]
+    turns: Turns | None = None
+
+
+class Turns:
+    """한 실행 파일을 띄우는 차례. 확인 명령은 혼자 돌고, 그 밖의 호출은 확인 명령이 없는 동안에만 돈다.
+
+    `claude`의 `--version`과 `auth status`는 `alone` 안에서 실행하고, 요약의 `claude -p`는 `enter`가 참을 낸 뒤에
+    실행해 끝나면 `leave`를 부른다. 확인 명령이 기다리는 동안에는 `enter`가 거짓을 내므로 확인 명령이 밀리지 않는다.
+    """
+
+    def __init__(self) -> None:
+        self._changed = threading.Condition()
+        self._alone = False
+        self._waiting = 0
+        self._entered = 0
+
+    @contextmanager
+    def alone(self) -> Iterator[None]:
+        with self._changed:
+            self._waiting += 1
+            try:
+                self._changed.wait_for(lambda: not self._alone and self._entered == 0)
+            finally:
+                self._waiting -= 1
+            self._alone = True
+        try:
+            yield
+        finally:
+            with self._changed:
+                self._alone = False
+                self._changed.notify_all()
+
+    def enter(self) -> bool:
+        with self._changed:
+            if self._alone or self._waiting:
+                return False
+            self._entered += 1
+            return True
+
+    def leave(self) -> None:
+        with self._changed:
+            self._entered -= 1
+            self._changed.notify_all()
 
 
 @dataclass(frozen=True)
@@ -131,7 +183,10 @@ _guard = threading.Lock()
 
 
 def _execute(command: list[str], timeout: float, cwd: str | None) -> tuple[int, str, str]:
-    """자기 프로세스 묶음으로 명령을 띄워 종료 코드, 표준 출력, 표준 오류를 낸다. 시간 안에 끝나지 않으면 묶음을 끝낸다."""
+    """자기 프로세스 묶음으로 명령을 띄워 종료 코드, 표준 출력, 표준 오류를 낸다.
+
+    시간 안에 끝나지 않으면 묶음에 SIGTERM을 보내고, `TERM_GRACE`가 지나도 남아 있으면 SIGKILL을 보낸다.
+    """
     process = subprocess.Popen(
         command,
         stdin=subprocess.DEVNULL,
@@ -144,10 +199,15 @@ def _execute(command: list[str], timeout: float, cwd: str | None) -> tuple[int, 
         out, err = process.communicate(timeout=timeout)
     finally:
         if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            for sent in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(process.pid, sent)
+                    process.wait(TERM_GRACE)
+                except ProcessLookupError:
+                    pass
+                except subprocess.TimeoutExpired:
+                    continue
+                break
             process.wait()
             process.stdout.close()
             process.stderr.close()
@@ -187,7 +247,11 @@ def _try(tool: _Tool, source: str, path: str, cwd: str) -> tuple[Attempt, dict[s
     if sys.platform == "darwin" and os.path.realpath(path) in CLT_STUBS and not _has_clt():
         return failed(NO_CLT)
     try:
-        code, out, err = _execute([path, *tool.args], tool.timeout, cwd)
+        if tool.turns is not None:
+            with tool.turns.alone():
+                code, out, err = _execute([path, *tool.args], tool.timeout, cwd)
+        else:
+            code, out, err = _execute([path, *tool.args], tool.timeout, cwd)
     except subprocess.TimeoutExpired:
         return failed(f"{tool.timeout:g}초 안에 끝나지 않았다")
     except OSError as exc:
@@ -326,7 +390,9 @@ def _interpreter(out: str) -> dict[str, object] | None:
     }
 
 
-CLAUDE = _Tool("claude", ("--version",), CLAUDE_TIMEOUT, _version)
+# code-atlas가 띄우는 `claude` 프로세스의 차례. 로그인 여부를 읽는 호출과 다른 `claude` 프로세스가 겹치지 않는다.
+CLAUDE_TURNS = Turns()
+CLAUDE = _Tool("claude", ("--version",), CLAUDE_TIMEOUT, _version, CLAUDE_TURNS)
 GIT = _Tool("git", ("--version",), GIT_TIMEOUT, _version)
 PYTHON = _Tool("python", ("-c", _PROBE), PROBE_TIMEOUT, _interpreter)
 
@@ -355,7 +421,8 @@ def _claude_refused() -> str | None:
 def _login(found: Found) -> None:
     """`claude auth status`로 로그인 여부와 로그인 방법을 읽어 `note`와 `auth`에 적는다."""
     try:
-        code, out, _ = _execute([found.path, *STATUS_ARGS], CLAUDE_TIMEOUT, "/")
+        with CLAUDE_TURNS.alone():
+            code, out, _ = _execute([found.path, *STATUS_ARGS], CLAUDE_TIMEOUT, "/")
     except (OSError, subprocess.TimeoutExpired):
         found.note = NOT_ANSWERING
         return

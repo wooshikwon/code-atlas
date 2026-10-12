@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -229,6 +230,44 @@ def test_claude_reports_the_login_and_asks_once(machine, monkeypatch):
     script(on_path / "claude", VERSION + "/bin/sleep 30\n")
     monkeypatch.setattr(tools, "CLAUDE_TIMEOUT", 1.0)
     assert tools.claude().note == "Claude Code CLI가 응답하지 않는다"
+
+
+def test_a_process_past_its_time_limit_gets_sigterm_and_is_killed_only_after_the_grace(machine, monkeypatch):
+    on_path, known = machine
+    saves = script(on_path / "git", 'trap \'echo saved > "$0.saved"; exit 0\' TERM\n/bin/sleep 30 &\nwait\n')
+    ignores = script(known / "git", 'trap "" TERM\necho $$ > "$0.pid"\n/bin/sleep 30 &\nwait\n/bin/sleep 30\n')
+    monkeypatch.setattr(tools, "GIT", replace(tools.GIT, timeout=1.0))
+    monkeypatch.setattr(tools, "TERM_GRACE", 1.0)
+
+    started = time.monotonic()
+    found = tools.git()
+    assert found.path is None and [a.detail for a in found.attempts] == ["1초 안에 끝나지 않았다"] * 2
+    assert Path(f"{saves}.saved").read_text() == "saved\n"  # SIGTERM을 받은 프로세스가 하던 일을 마치고 끝난다
+    assert 3.0 <= time.monotonic() - started < 12  # SIGTERM을 무시한 프로세스는 기다린 뒤에 끝낸다
+    with pytest.raises(ProcessLookupError):
+        os.killpg(int(Path(f"{ignores}.pid").read_text()), 0)
+
+
+def test_claude_checks_run_alone_and_other_claude_runs_wait_for_them(machine):
+    on_path, _ = machine
+    turns = tools.CLAUDE_TURNS
+    slow = 'echo "$1 start" >> "$0.order"\n/bin/sleep 0.4\necho "$1 end" >> "$0.order"\n'
+    cli = script(on_path / "claude", slow + VERSION + LOGGED_IN)
+
+    assert turns.enter()  # 요약의 `claude -p` 하나가 도는 중
+    checking = threading.Thread(target=tools.claude)
+    checking.start()
+    time.sleep(0.3)
+    assert runs(cli) == []  # 확인 명령은 도는 `claude`가 끝나기를 기다린다
+    assert not turns.enter()  # 확인 명령이 기다리는 동안 새 `claude`는 시작하지 않는다
+    turns.leave()
+    time.sleep(0.3)
+    assert not turns.enter()  # 확인 명령이 도는 동안에도 시작하지 않는다
+    checking.join()
+    assert Path(f"{cli}.order").read_text().split("\n")[:4] == ["--version start", "--version end", "auth start", "auth end"]
+    assert turns.enter() and turns.enter()  # 확인 명령이 없으면 둘이 함께 돈다
+    turns.leave()
+    turns.leave()
 
 
 @pytest.mark.parametrize(
@@ -474,3 +513,24 @@ def test_interpreters_route_and_the_answer_check(served, machine, tmp_path, monk
     script(on_path / "claude", VERSION + LOGGED_IN + "echo '망에 닿지 못했다' >&2\nexit 7\n")
     asked = client.post("/api/tools/claude/ask").json()
     assert asked["ok"] is False and "종료 코드 7" in asked["detail"] and "망에 닿지 못했다" in asked["detail"]
+
+
+def test_opening_repos_runs_claude_twice_in_all(served, machine, sample_repo):
+    client, _ = served
+    on_path, _ = machine
+    cli = script(on_path / "claude", VERSION + LOGGED_IN)
+
+    def opened() -> None:
+        assert client.post("/api/open", json={"path": str(sample_repo), "python": sys.executable}).status_code == 200
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline and not (runs(cli) and client.get("/api/status").json()["phase"] == "ready"):
+            time.sleep(0.1)
+        for node in ("app.core", "app.cli"):
+            assert client.get("/api/summary", params={"node": node}).json()["available"] is True
+
+    assert runs(cli) == []  # 서버가 뜰 때는 실행하지 않는다
+    opened()
+    assert runs(cli) == ["--version", "auth status --json"]
+    opened()
+    client.get("/api/tools")
+    assert runs(cli) == ["--version", "auth status --json"]  # 레포를 다시 열어도, 요약을 물어도 더 실행하지 않는다

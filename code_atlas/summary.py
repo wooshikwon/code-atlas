@@ -37,6 +37,7 @@ MAX_STYLE_GUIDE = 100_000
 MAX_DOC = 400
 MAX_FILE_DOC = 1_200
 MAX_PROCESSES = 2
+TURN_POLL = 0.05  # `claude`의 확인 명령이 끝났는지 다시 보는 간격
 CACHE_PATH = Path.home() / ".cache" / "code-atlas" / "summaries.db"
 STYLE_GUIDE_ENV = "CODE_ATLAS_STYLE_GUIDE"
 
@@ -751,23 +752,36 @@ def lead_of(summary: str) -> str:
 
 
 async def _run(cli: str, args: tuple[str, ...], stdin: str, timeout: float) -> tuple[int, str, str]:
-    """빈 임시 폴더에서 CLI를 띄워 종료 코드, 표준 출력, 표준 오류를 돌려준다. 시간 안에 끝나지 않으면 프로세스 묶음을 끝낸다."""
-    with tempfile.TemporaryDirectory(prefix="code-atlas-summary-") as cwd:
-        process = await asyncio.create_subprocess_exec(
-            cli,
-            *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            start_new_session=True,
-        )
-        try:
-            out, err = await asyncio.wait_for(process.communicate(stdin.encode()), timeout)
-        finally:
-            if process.returncode is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                await process.wait()
+    """빈 임시 폴더에서 CLI를 띄워 종료 코드, 표준 출력, 표준 오류를 돌려준다.
+
+    `tools`가 `claude`의 확인 명령을 실행하는 동안에는 띄우지 않고 기다린다. 시간 안에 끝나지 않거나 기다리던 쪽이
+    취소되면 프로세스 묶음에 SIGTERM을 보내고, `tools.TERM_GRACE`가 지나도 남아 있으면 SIGKILL을 보낸다.
+    """
+    while not tools.CLAUDE_TURNS.enter():
+        await asyncio.sleep(TURN_POLL)
+    try:
+        with tempfile.TemporaryDirectory(prefix="code-atlas-summary-") as cwd:
+            process = await asyncio.create_subprocess_exec(
+                cli,
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                start_new_session=True,
+            )
+            try:
+                out, err = await asyncio.wait_for(process.communicate(stdin.encode()), timeout)
+            finally:
+                if process.returncode is None:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        await asyncio.wait_for(asyncio.shield(process.wait()), tools.TERM_GRACE)
+                    except asyncio.TimeoutError:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        await process.wait()
+    finally:
+        tools.CLAUDE_TURNS.leave()
     return process.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
 
@@ -999,6 +1013,13 @@ class Summaries:
             reason = await unavailable()
             self._ready = reason is None
             return reason
+
+    async def close(self) -> None:
+        """만드는 중인 설명을 멈추고 그 `claude` 프로세스가 끝날 때까지 기다린다."""
+        tasks = [making.task for making in self._making.values()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     def cached(self, prompt: str) -> str | None:
         """캐시에 있는 설명. 서술 규약 문서를 읽지 못하면 None이다."""

@@ -137,6 +137,44 @@ async def test_generate_times_out_and_ends_process(fake_cli, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_generate_past_its_time_limit_lets_the_cli_finish_on_sigterm(fake_cli, tmp_path, monkeypatch):
+    record = fake_cli(
+        """if [ "$1" = "auth" ]; then echo '{"loggedIn": true}'; exit 0; fi
+trap 'echo saved > "$RECORD/saved"; exit 0' TERM
+sleep 30 &
+wait
+"""
+    )
+    monkeypatch.setattr(summary, "GENERATE_TIMEOUT", 0.5)
+    with pytest.raises(SummaryError, match="응답하지 않았다"):
+        await summary.generate("s", "p")
+    assert (record / "saved").read_text() == "saved\n"
+    assert tools.CLAUDE_TURNS.enter()  # 끝난 호출이 차례를 돌려준다
+    tools.CLAUDE_TURNS.leave()
+
+
+@pytest.mark.asyncio
+async def test_closing_the_summaries_ends_the_running_cli_with_sigterm(fake_cli, tmp_path):
+    record = fake_cli(
+        """if [ "$1" = "auth" ]; then echo '{"loggedIn": true}'; exit 0; fi
+echo started > "$RECORD/started"
+trap 'echo saved > "$RECORD/saved"; exit 0' TERM
+sleep 30 &
+wait
+"""
+    )
+    summaries = Summaries(tmp_path / "summaries.db")
+    making = asyncio.create_task(summaries.make("프롬프트"))
+    while not (record / "started").exists():
+        await asyncio.sleep(0.05)
+    started = time.monotonic()
+    await summaries.close()
+    assert time.monotonic() - started < 4 and (record / "saved").read_text() == "saved\n"
+    with pytest.raises(asyncio.CancelledError):
+        await making
+
+
+@pytest.mark.asyncio
 async def test_generate_reports_nonzero_exit(fake_cli):
     fake_cli(FAILING)
     with pytest.raises(SummaryError, match="종료 코드 3.*인증 서버에 닿지 못했다"):

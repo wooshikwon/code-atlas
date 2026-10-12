@@ -293,8 +293,10 @@ def create_app(
             yield
         finally:
             async with switching:
+                closing = [app.state.summaries.close()]
                 if app.state.workspace is not None:
-                    await shut(app.state.workspace)
+                    closing.append(shut(app.state.workspace))
+                await asyncio.gather(*closing)
 
     app = FastAPI(title="code-atlas", lifespan=lifespan)
     if origin is not None:
