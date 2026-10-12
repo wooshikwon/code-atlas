@@ -1,5 +1,6 @@
 // 정보 패널의 "정보" 구역. 주제와 내용 두 칸의 줄 목록이고, 주제 칸은 가장 긴 주제의 폭에 맞춘다.
-// 누를 수 있는 내용은 --link 색으로 적고, 누르면 그 연결의 코드 줄 목록을 열거나 닫는다.
+// 누를 수 있는 내용은 --link 색으로 적고, 누르면 그 연결의 코드 줄 목록을 줄 목록 아래에 열거나 닫는다. 구역을 접으면 코드 줄 목록도 함께 접힌다.
+import type { ReactNode } from "react";
 import { useAtlas } from "../state/store";
 import { SectionHead } from "./Section";
 
@@ -18,7 +19,13 @@ export interface FactRow {
   more?: { text: string; press: () => void; pressed: boolean };
 }
 
-export function Facts({ rows }: { rows: FactRow[] }) {
+interface FactsProps {
+  rows: FactRow[];
+  /** 줄 목록 아래에 그리는 코드 줄 목록 */
+  children?: ReactNode;
+}
+
+export function Facts({ rows, children }: FactsProps) {
   const open = useAtlas((s) => s.factsOpen);
   const toggle = useAtlas((s) => s.toggleFacts);
   const brief = rows.flatMap((row) => (row.brief === undefined ? [] : [row.brief])).join(", ");
@@ -48,6 +55,7 @@ export function Facts({ rows }: { rows: FactRow[] }) {
           ))}
         </dl>
       )}
+      {open && children}
     </section>
   );
 }

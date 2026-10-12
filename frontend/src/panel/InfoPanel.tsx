@@ -1,18 +1,17 @@
-// 관계 그래프 위에 떠 있는 정보 패널. 저장소의 선택을 머리 줄, "정보" 구역, 코드 줄 목록, LLM 요약 칸, 코드 뷰어로 바꾼다.
+// 관계 그래프 위에 떠 있는 정보 패널. 저장소의 선택을 머리 줄, "정보" 구역과 그 안의 코드 줄 목록, LLM 요약 칸, 코드 뷰어로 바꾼다.
 // 아무것도 고르지 않았으면 레포 머리 줄 아래에 켠 분석 표시의 요약을 보인다.
 // 경로 고정 중에는 선택 대신 finder.focus의 노드를 보인다.
 import { useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { flow } from "../graph/flow";
-import { EDGE_KIND_NAMES, nameOf } from "../graph/names";
 import { arriving, picked, trunkTarget } from "../graph/scope";
 import { hidden, nodeIndex, shown, unresolvedWithin } from "../graph/visible";
 import { focusOf } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { chosenOf, litOf, useAtlas, type Selection } from "../state/store";
 import { drag } from "./drag";
-import { contentsOf, followedOf, linksOf, linksText, relationText, restText, sizeText, type Links, type SiteGroup, type Split } from "./links";
+import { contentsOf, followedOf, groupOf, labelOf, linksOf, linksText, relationText, restText, sizeText, type Links, type SiteGroup, type Split } from "./links";
 import { Facts, type FactRow } from "./Facts";
 import { Header, type HeaderItem } from "./Header";
 import { useOpened } from "./opened";
@@ -29,6 +28,8 @@ const UNITS = new Set<AtlasNode["kind"]>(["module", "package"]);
 
 /** "정보" 구역에서 코드 줄 목록을 여는 글: 지나온 선의 `관계`, `나가는 연결`·`들어오는 연결`의 세는 관계와 `그 밖` 묶음 */
 type Listed = "via" | "out" | "into" | "out-rest" | "into-rest";
+/** 상대 노드마다 묶어 묶음 줄만 보이고 코드 줄은 접어 둔 채로 여는 목록. 그 밖의 목록(고른 선, 줄기, 지나온 선)은 코드 줄을 편 채로 연다. */
+const PEERS = new Set<Listed | null>(["out", "into", "out-rest", "into-rest"]);
 
 /** 지점을 품은 가장 안쪽 정의의 줄 범위. 파일 안 어느 정의에도 들지 않으면 null이다. */
 function rangeAround(graph: Graph, site: SiteRef): [number, number] | null {
@@ -61,15 +62,17 @@ export function InfoPanel() {
   const split = useAtlas((s) => s.split);
   const setSplit = useAtlas((s) => s.setSplit);
   const summaryOpen = useAtlas((s) => s.summaryOpen);
+  const show = useAtlas((s) => s.show);
   /** 그래프 선택과 무관하게 연 파일. 고른 노드나 선 대신 이 파일의 코드를 보인다. */
   const file = useOpened((s) => s.path);
   /**
-   * "정보" 구역에서 눌러 연 코드 줄 목록과, 코드 줄 목록에서 눌러 코드 뷰어에 연 코드 줄. 그때의 선택과 지나온 선을 함께 담아,
-   * 선택이나 지나온 선이 바뀌면 쓰지 않는다.
+   * "정보" 구역에서 눌러 연 코드 줄 목록(한 번에 하나다), 그 목록에서 눌러 처음과 다르게 펴거나 접은 묶음의 번호, 코드 줄 목록에서 눌러
+   * 코드 뷰어에 연 코드 줄. 그때의 선택과 지나온 선을 함께 담아, 선택이나 지나온 선이 바뀌면 쓰지 않는다. "정보" 구역을 접어도 그대로 둔다.
    */
-  const [shownAt, setShownAt] = useState<{ selection: Selection; via: typeof via; listed: Listed | null; site: SiteRef | null } | null>(null);
+  const [shownAt, setShownAt] = useState<{ selection: Selection; via: typeof via; listed: Listed | null; flipped: number[]; site: SiteRef | null } | null>(null);
   const current = shownAt !== null && shownAt.selection === selection && shownAt.via === via ? shownAt : null;
   const listed = current?.listed ?? null;
+  const flipped = current?.flipped ?? [];
   const site = current?.site ?? null;
 
   const index = useMemo(() => (graph === null ? null : { nodes: nodeIndex(graph) }), [graph]);
@@ -147,8 +150,8 @@ export function InfoPanel() {
     item = { type: "repo", name: repo.name };
   }
 
-  /** "정보" 구역의 줄을 눌러 그 줄의 코드 줄 목록을 열거나 닫는다. 목록을 바꾸면 코드 뷰어에 연 코드 줄을 닫는다. */
-  const list = (which: Listed) => setShownAt({ selection, via, listed: listed === which ? null : which, site: null });
+  /** "정보" 구역의 줄을 눌러 그 줄의 코드 줄 목록을 열거나 닫는다. 다른 줄의 목록이 열려 있으면 그 목록을 닫고, 목록을 바꾸면 코드 뷰어에 연 코드 줄을 닫는다. */
+  const list = (which: Listed) => setShownAt({ selection, via, listed: listed === which ? null : which, flipped: [], site: null });
   const linkRow = (id: "out" | "into", topic: string, { counted, rest }: Split): FactRow => {
     const more = restText(rest.kinds);
     return {
@@ -165,12 +168,8 @@ export function InfoPanel() {
   /** "정보" 구역의 줄. 선을 눌러 온 상태의 `연결`·`관계`가 맨 위에 오고, 고른 노드의 크기·포함·연결·미확인 호출이 그 아래에 온다. */
   const rows: FactRow[] = [];
   if (index !== null && arrived !== null) {
-    const name = (id: string) => {
-      const found = index.nodes.get(id);
-      return found === undefined ? id : nameOf(index.nodes, found);
-    };
-    const from = arrived.sources.length === 1 ? name(arrived.sources[0]) : `노드 ${arrived.sources.length}개`;
-    const text = `${from} → ${name(arrived.target)}`;
+    const from = arrived.sources.length === 1 ? labelOf(index.nodes, arrived.sources[0]) : `노드 ${arrived.sources.length}개`;
+    const text = `${from} → ${labelOf(index.nodes, arrived.target)}`;
     rows.push({ id: "link", topic: "연결", text, brief: text });
     rows.push({ id: "via", topic: "관계", text: relationText(arrived.links.kinds), press: () => list("via"), pressed: listed === "via" });
   }
@@ -199,29 +198,22 @@ export function InfoPanel() {
   }
 
   /**
-   * 코드 줄 목록. 고른 선 하나는 묶음 하나이고, 줄기는 출발 노드마다 묶음 하나다. 같은 노드에서 종류가 다른 선이 오면 종류를 함께 적는다.
-   * 노드를 골랐거나 선을 눌러 온 상태에서는 "정보" 구역에서 누른 줄의 목록이다. 지나온 선의 출발 노드가 하나면 묶음 이름을 적지 않는다.
+   * 코드 줄 목록. 고른 선 하나는 묶음 줄이 없는 묶음 하나이고, 줄기는 그린 선마다 출발 노드의 묶음 하나다.
+   * 노드를 골랐거나 선을 눌러 온 상태에서는 "정보" 구역에서 누른 줄의 목록이다. 지나온 선의 출발 노드가 하나면 묶음 줄을 적지 않는다.
    */
   const groups = useMemo((): SiteGroup[] | null => {
     if (index === null) {
       return null;
     }
     if (edge !== null) {
-      return [{ name: null, sites: edge.edges.flatMap((line) => line.sites) }];
+      return [{ ...groupOf(index.nodes, edge.source, edge.edges), id: null, name: null }];
     }
     if (trunk !== null) {
-      const name = (id: string) => {
-        const found = index.nodes.get(id);
-        return found === undefined ? id : nameOf(index.nodes, found);
-      };
-      return trunk.edges.map((e) => {
-        const kind = e.key.startsWith("agg|") || trunk.edges.filter((other) => other.source === e.source).length === 1 ? "" : ` · ${EDGE_KIND_NAMES[e.edges[0].kind]}`;
-        return { name: name(e.source) + kind, sites: e.edges.flatMap((line) => line.sites) };
-      });
+      return trunk.edges.map((e) => groupOf(index.nodes, e.source, e.edges));
     }
     if (listed === "via" && arrived !== null) {
       const { groups: found } = arrived.links;
-      return found.length === 1 ? [{ name: null, sites: found[0].sites }] : found;
+      return found.length === 1 ? [{ ...found[0], id: null, name: null }] : found;
     }
     if (listed === "out" || listed === "into") {
       return facts?.[listed].counted.groups ?? null;
@@ -287,7 +279,7 @@ export function InfoPanel() {
       style={
         rect === null
           ? undefined
-          : ({ left: rect.x, top: rect.y, width: rect.width, height: rect.height, "--summary-min": `${MIN_SUMMARY}px`, "--code-min": `${MIN_CODE}px` } as CSSProperties)
+          : ({ left: rect.x, top: rect.y, width: rect.width, height: rect.height, "--panel-height": `${rect.height}px`, "--summary-min": `${MIN_SUMMARY}px`, "--code-min": `${MIN_CODE}px` } as CSSProperties)
       }
     >
       {rect !== null && item !== null && index !== null && (
@@ -295,9 +287,19 @@ export function InfoPanel() {
           <div className="info-panel-head" onPointerDown={grip("move")} onDoubleClick={restore} data-tip="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다">
             <Header item={item} nodes={index.nodes} />
           </div>
-          {rows.length > 0 && <Facts rows={rows} />}
-          {file === null && groups !== null && (
-            <Sites groups={groups} opened={site} open={(picked) => setShownAt({ selection, via, listed, site: picked === site ? null : picked })} />
+          {rows.length > 0 && (
+            <Facts rows={rows}>
+              {file === null && groups !== null && (
+                <Sites
+                  groups={groups}
+                  spread={new Set(groups.map((_, g) => g).filter((g) => PEERS.has(listed) === flipped.includes(g)))}
+                  toggle={(g) => setShownAt({ selection, via, listed, flipped: flipped.includes(g) ? flipped.filter((other) => other !== g) : [...flipped, g], site })}
+                  go={show}
+                  opened={site}
+                  open={(picked) => setShownAt({ selection, via, listed, flipped, site: picked === site ? null : picked })}
+                />
+              )}
+            </Facts>
           )}
           {item.type === "repo" && <Overview nodes={index.nodes} />}
           {summarized && <Summary node={node.id} split={code === null || !summaryOpen ? null : split} />}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { repoFixture } from "../graph/fixture";
 import { hidden, nodeIndex } from "../graph/visible";
 import { COUNTED_KINDS } from "../graph/names";
-import { contentsOf, followedOf, linksOf, linksText, pathOf, relationText, restText, sizeText } from "./links";
+import { contentsOf, followedOf, groupOf, groupText, labelOf, linksOf, linksText, pathOf, relationText, restText, sizeText } from "./links";
 
 const nodes = nodeIndex(repoFixture);
 const off = hidden(repoFixture, { showTests: false, showExternal: false });
@@ -19,6 +19,19 @@ describe("linksOf", () => {
     expect(into.rest.total).toBe(sites(counted(incoming, false)));
     expect(sites(into.counted.groups)).toBe(into.counted.total);
     expect(into.counted.groups).toHaveLength(new Set(counted(incoming).map((e) => e.source)).size);
+  });
+
+  it("묶음은 상대 노드의 id와 이름, 그 노드와의 관계를 종류마다 센 수를 담는다", () => {
+    const { into } = linksOf(repoFixture, nodes, off, "main:helper");
+    const incoming = counted(repoFixture.edges.filter((e) => e.target === "main:helper" && !off.has(e.source)));
+    for (const group of into.counted.groups) {
+      const among = incoming.filter((e) => e.source === group.id);
+      expect(group).toEqual(groupOf(nodes, group.id!, among));
+      expect(group.name).toBe(labelOf(nodes, group.id!));
+      expect(Object.values(group.kinds).reduce((sum, n) => sum + n, 0)).toBe(sites(among));
+    }
+    expect(labelOf(nodes, "pkg.mod:Store.save")).toBe("Store.save()");
+    expect(labelOf(nodes, "없는 노드")).toBe("없는 노드");
   });
 
   it("파일 상자는 경계를 넘는 선만 세고 상대 노드가 든 파일 상자마다 묶는다", () => {
@@ -86,6 +99,12 @@ describe("글", () => {
   it("그 밖 묶음은 세지 않는 관계를 종류마다 적고 없으면 null이다", () => {
     expect(restText({ call: 9, pass: 1, import: 3, type: 2 })).toBe("그 밖 import 3줄, 타입 2곳");
     expect(restText({ call: 9 })).toBeNull();
+  });
+
+  it("묶음 줄의 관계는 세는 관계를 앞에, 그 밖의 관계를 뒤에 종류마다 수와 함께 적는다", () => {
+    expect(groupText({ call: 2 })).toBe("호출 2곳");
+    expect(groupText({ type: 1, construct: 1, call: 2 })).toBe("호출 2곳, 생성 1곳, 타입 1곳");
+    expect(groupText({ import: 3, type: 2 })).toBe("import 3줄, 타입 2곳");
   });
 
   it("선 하나의 관계는 말풍선과 같은 글이고 세는 관계와 함께 있는 그 밖의 관계를 덧붙인다", () => {
