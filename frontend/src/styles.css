@@ -712,7 +712,7 @@ ul {
   color: var(--muted) !important;
 }
 
-/* 코드 범위 설명. 고른 끝의 "요약 생성" 버튼, 범위 아래에 뜨는 창, 범위 시작 줄 왼쪽의 말풍선 표지다. */
+/* 코드 분석. 고른 끝의 "코드 분석" 버튼과 질문 입력 창, 범위 아래에 뜨는 창, 범위 시작 줄 왼쪽의 말풍선 표지다. */
 .code-notes {
   position: absolute;
   z-index: var(--z-menu);
@@ -777,7 +777,74 @@ ul {
   margin-bottom: 0;
 }
 
-/* 대상이 바뀌기 전에 만든 설명. 문구를 위에 적고 본문을 흐리게 그린다. LLM 요약 칸과 코드 범위 설명 창이 함께 쓴다. */
+/* 창에 쌓는 코드 분석 하나. 질문과 조작 버튼이 한 줄이고 그 아래에 답, 끝에 토큰 수를 적는다. */
+.code-note-item + .code-note-item {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.code-note-asked {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.code-note-question {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-note-usage {
+  display: block;
+  margin-top: 4px;
+  text-align: right;
+}
+
+/* 코드 분석의 질문 입력 창. "코드 분석" 버튼이 있던 곳에 뜬다. */
+.code-ask {
+  position: absolute;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 6px;
+  border: 1px solid var(--muted);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.code-ask-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  outline: none;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--surface);
+  resize: none;
+}
+
+.code-ask-input:focus {
+  border-color: var(--muted);
+}
+
+.code-ask-input::placeholder {
+  color: var(--muted);
+}
+
+.code-ask-send {
+  flex: none;
+}
+
+/* 대상이 바뀌기 전에 만든 설명. 문구를 위에 적고 본문을 흐리게 그린다. LLM 요약 칸과 코드 분석 창이 함께 쓴다. */
 .stale-note {
   margin: 0 0 4px;
   color: var(--muted);
@@ -3366,4 +3433,100 @@ ol.summary-list {
   gap: 4px;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 시점 비교: 파일트리와 정보 패널의 줄 수, 대상 시점에 없는 행, 코드 뷰어의 한 칸 비교 */
+
+/* 두 시점 사이에 추가되고 삭제된 줄 수. 초록은 줄 수 숫자의 색이고 빨강은 critical에 본문 잉크를 섞은 글자색이다. */
+.line-counts {
+  display: flex;
+  flex: none;
+  gap: 5px;
+  margin-left: auto;
+  padding-left: 8px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.lines-added {
+  color: var(--loc);
+}
+
+.lines-deleted {
+  color: color-mix(in srgb, var(--ink) 25%, var(--critical));
+}
+
+/* 이름이 바뀐 파일의 옛 이름. 행이 좁으면 새 이름과 함께 끝을 줄인다. */
+.tree-from,
+.overview-from {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 대상 시점에 없는 파일·폴더·정의는 이름의 색을 그대로 두고 흐린 단계(graph/flow.ts의 DIM)로 그린다. */
+.tree-row[data-gone] > :not(.tree-indent),
+.overview-row[data-gone] > *,
+.overview-file[data-gone] > * {
+  opacity: 0.4;
+}
+
+/* 변경 목록의 묶음 머리: 파일 경로, 옛 이름, 그 파일의 줄 수 */
+.overview-file:has(> .overview-path) {
+  display: flex;
+  align-items: baseline;
+}
+
+.overview-path {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.overview-aside > .line-counts {
+  padding-left: 0;
+}
+
+.info-panel-compared {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  font-size: 11px;
+}
+
+.info-panel-compared > .line-counts {
+  padding-left: 5px;
+}
+
+/* 두 시점을 엮은 문서의 삭제된 줄과 추가된 줄. 바탕은 줄 번호 칸까지 칠하고 줄 번호 칸 옆에 −와 +를 적는다. */
+.code .code-deleted {
+  background: color-mix(in srgb, var(--critical) 12%, transparent);
+}
+
+.code .code-added {
+  background: color-mix(in srgb, var(--loc) 14%, transparent);
+}
+
+.code .code-sign::before {
+  display: block;
+  font-weight: 700;
+  text-align: center;
+}
+
+.code .code-deleted-sign::before {
+  content: "−";
+  color: color-mix(in srgb, var(--ink) 25%, var(--critical));
+}
+
+.code .code-added-sign::before {
+  content: "+";
+  color: var(--loc);
 }

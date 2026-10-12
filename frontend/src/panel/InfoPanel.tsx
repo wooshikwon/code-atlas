@@ -4,10 +4,12 @@
 import { useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
+import { gone } from "../graph/compare";
 import { flow } from "../graph/flow";
 import { routeText } from "../graph/names";
-import { arriving, picked, trunkTarget } from "../graph/scope";
+import { arriving, edgeKey, picked, trunkTarget } from "../graph/scope";
 import { folderLines, hidden, nodeIndex, shown, unitOf, unresolvedWithin } from "../graph/visible";
+import { useCompare } from "../state/compare";
 import { focusOf } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { chosenOf, litOf, useAtlas, type Selection } from "../state/store";
@@ -32,12 +34,12 @@ type Listed = "via" | "out" | "into" | "out-rest" | "into-rest";
 /** 상대 노드마다 묶어 묶음 줄만 보이고 코드 줄은 접어 둔 채로 여는 목록. 그 밖의 목록(고른 선, 줄기, 지나온 선)은 코드 줄을 편 채로 연다. */
 const PEERS = new Set<Listed | null>(["out", "into", "out-rest", "into-rest"]);
 
-/** 지점을 품은 가장 안쪽 정의의 줄 범위. 파일 안 어느 정의에도 들지 않으면 null이다. */
-function rangeAround(graph: Graph, site: SiteRef): [number, number] | null {
+/** 지점을 품은 가장 안쪽 정의의 줄 범위. 파일 안 어느 정의에도 들지 않으면 null이다. among이 거짓인 노드는 보지 않는다. */
+function rangeAround(graph: Graph, site: SiteRef, among: (id: string) => boolean): [number, number] | null {
   let found: [number, number] | null = null;
   for (const node of graph.nodes) {
     const range = node.range;
-    if (node.path !== site.path || range === null || UNITS.has(node.kind)) {
+    if (node.path !== site.path || range === null || UNITS.has(node.kind) || !among(node.id)) {
       continue;
     }
     if (range[0] <= site.line && site.line <= range[1] && (found === null || range[1] - range[0] < found[1] - found[0])) {
@@ -60,6 +62,9 @@ export function InfoPanel() {
   const candidates = useOverlay((s) => s.unused);
   const depth = useAtlas((s) => s.depth);
   const finder = useAtlas((s) => s.finder);
+  /** 시점 비교에서 대상 시점에 없는 노드와 선. 그 노드의 줄 범위와 그 선의 코드 줄은 기준 시점의 값이다. */
+  const compared = useCompare((s) => s.result);
+  const past = useMemo(() => gone(compared), [compared]);
   const split = useAtlas((s) => s.split);
   const setSplit = useAtlas((s) => s.setSplit);
   const summaryOpen = useAtlas((s) => s.summaryOpen);
@@ -231,7 +236,9 @@ export function InfoPanel() {
     return null;
   }, [index, edge, trunk, listed, arrived, facts]);
 
-  const siteRange = graph !== null && site !== null ? rangeAround(graph, site) : null;
+  /** 코드 줄 목록에서 누른 코드 줄이 삭제된 관계의 것이어서 기준 시점의 본문을 가리킨다 */
+  const siteOld = graph !== null && site !== null && graph.edges.some((e) => past.edges.has(edgeKey(e)) && e.sites.includes(site));
+  const siteRange = graph !== null && site !== null ? rangeAround(graph, site, (id) => past.nodes.has(id) === siteOld) : null;
   /**
    * 코드 뷰어에 열 파일과 문법 색으로 그릴 범위. 연 파일은 범위가 파일 전체다. 코드 줄 목록에서 누른 코드 줄이 있으면 그 줄이 든 파일을
    * 열고, 없으면 고른 노드의 파일을 연다. 폴더를 골랐거나 아무것도 고르지 않았으면 null이다.
@@ -240,12 +247,13 @@ export function InfoPanel() {
     file !== null
       ? { path: file, range: null }
       : site !== null
-        ? { path: site.path, range: siteRange, highlight: site.line }
+        ? { path: site.path, range: siteRange, highlight: site.line, base: siteOld }
         : node !== undefined && node.kind !== "package" && node.path !== null
-          ? { path: node.path, range: node.kind === "module" ? null : node.range }
+          ? { path: node.path, range: node.kind === "module" ? null : node.range, base: past.nodes.has(node.id) }
           : null;
   const { ref, rect, grip, reset } = usePanelRect();
-  const summarized = node !== undefined && SUMMARIZED.has(node.kind);
+  /** LLM 요약 칸을 그리는 노드. 대상 시점에 없는 노드는 요약을 요청할 수 없다. */
+  const summarized = node !== undefined && SUMMARIZED.has(node.kind) && !past.nodes.has(node.id);
   /** LLM 요약 칸과 코드 뷰어 사이의 경계선을 끌어 요약 칸의 높이를 바꾸고, 그 높이를 패널 높이로 나눈 값을 저장한다. */
   const part = (event: ReactPointerEvent<HTMLElement>) => {
     const panel = ref.current;

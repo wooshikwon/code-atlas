@@ -51,6 +51,21 @@ export function liveSites(edges: AtlasEdge[], gone: Set<EdgeKey>): AtlasEdge[] {
   return gone.size === 0 ? edges : edges.filter((e) => !gone.has(edgeKey(e)));
 }
 
+/**
+ * 한 파일에 든 정의 list를 소스 정의 순서로 늘어놓는다. 삭제된 정의는 대상 시점의 본문에서 놓였을 줄(`slot`)의 뒤에 끼우고, 같은 줄에
+ * 끼우는 삭제된 정의끼리는 기준 시점의 줄 순서다. changes는 비교 결과의 nodes이고 비교가 꺼져 있으면 null이다.
+ */
+export function inSource(list: AtlasNode[], changes: Comparison["nodes"] | null): AtlasNode[] {
+  const key = (node: AtlasNode) => {
+    const slot = changes?.[node.id]?.slot;
+    return [slot ?? node.range?.[0] ?? 0, slot === undefined ? 0 : 1, node.range?.[0] ?? 0];
+  };
+  return [...list].sort((a, b) => {
+    const [ka, kb] = [key(a), key(b)];
+    return ka[0] - kb[0] || ka[1] - kb[1] || ka[2] - kb[2];
+  });
+}
+
 function parentPath(path: string): string {
   return path.slice(0, Math.max(path.lastIndexOf("/"), 0));
 }
@@ -58,7 +73,7 @@ function parentPath(path: string): string {
 /**
  * 파일 노드와 폴더 노드마다 그 안에서 바뀐 줄 수의 합. 비교 결과의 files를 파일 노드에서 조상 폴더로 올라가며 더하므로 폴더의 수가
  * 아래 파일의 합이고 최상위의 합이 `/api/compare/stat`의 수와 같다. 파일 노드가 없는 파일(정의가 없는 `__init__.py`)의 줄 수는
- * 그 파일이 든 폴더부터 더한다. 줄 수가 0인 노드는 담지 않는다.
+ * 그 파일이 든 폴더부터 더한다. 그 폴더의 패키지 노드는 path가 폴더이거나 그 `__init__.py`다. 줄 수가 0인 노드는 담지 않는다.
  */
 export function lineTotals(graph: Graph, files: ComparedFile[]): Map<string, Lines> {
   const nodes = nodeIndex(graph);
@@ -73,7 +88,7 @@ export function lineTotals(graph: Graph, files: ComparedFile[]): Map<string, Lin
     if (file.added === 0 && file.deleted === 0) {
       continue;
     }
-    const start = boxes.get(`module:${file.path}`) ?? boxes.get(`package:${parentPath(file.path)}`);
+    const start = boxes.get(`module:${file.path}`) ?? boxes.get(`package:${file.path}`) ?? boxes.get(`package:${parentPath(file.path)}`);
     for (let at = start; at !== undefined; at = at.parent === null ? undefined : nodes.get(at.parent)) {
       const sum = totals.get(at.id) ?? { added: 0, deleted: 0 };
       totals.set(at.id, { added: sum.added + file.added, deleted: sum.deleted + file.deleted });

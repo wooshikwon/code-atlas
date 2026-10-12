@@ -3,6 +3,9 @@ import json
 import os
 import time
 
+import sqlite3
+from contextlib import closing
+
 import pytest
 
 from code_atlas import summary
@@ -634,6 +637,84 @@ def test_range_prompt_of_top_level_code_has_no_flow_and_bad_ranges_are_none():
     assert found["범위가 든 정의의 전체 코드"].endswith("10> run_engine(None)")
     for path, start, end in [("src/core.py", 31, 30), ("src/core.py", 30, 99), ("src/none.py", 1, 1), ("src/core.py", 27, 28)]:
         assert summary.range_prompt_of(NODES, EDGES, TEXTS, path, start, end) is None
+
+
+def test_range_prompt_of_marked_code_holds_the_marks_and_what_they_mean():
+    marked = " def run_engine(config: Config) -> Engine:\n-    engine = Engine()\n+    engine = Engine(config)"
+    prompt = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 29, 30, marked, (40, 41))
+    found = sections(prompt)
+    assert found["대상"].startswith("종류: 코드 범위\n위치: src/core.py 29~30줄 (기준 시점 40~41줄)\n범위가 든 정의: core.py::run_engine")
+    assert found["두 시점의 비교"] == f"{summary.MARKED_NOTE} {summary.MARKED_WHOLE}".split("\n", 1)[1]
+    assert found["고른 범위의 코드"] == marked
+    assert "30>     engine = Engine(config)" in found["범위가 든 정의의 전체 코드"] and "대상을 호출하는 쪽" in found
+    assert prompt.endswith(summary.RANGE_TAIL + summary.MARKED_TAIL)
+
+    added = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 30, 30, "+    engine = Engine(config)")
+    assert sections(added)["대상"].startswith("종류: 코드 범위\n위치: src/core.py 30~30줄\n") and "[두 시점의 비교]" in added
+
+
+def test_range_prompt_of_a_range_without_target_lines_holds_only_the_marked_code():
+    marked = "-def gone():\n-    return 1"
+    prompt = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/old.py", 0, 0, marked, (3, 4))
+    found = sections(prompt)
+    assert found["대상"] == "종류: 코드 범위\n위치: src/old.py 기준 시점 3~4줄. 대상 시점에는 없는 줄이다"
+    assert found["두 시점의 비교"] == summary.MARKED_NOTE.split("\n", 1)[1] and found["고른 범위의 코드"] == marked
+    assert "범위가 든 정의의 전체 코드" not in found and prompt.endswith(summary.RANGE_TAIL + summary.MARKED_TAIL)
+    assert summary.range_prompt_of(NODES, EDGES, TEXTS, "src/old.py", 0, 0, " \n", (3, 4)) is None
+    assert summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 0, 0, marked) is None
+    assert summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 30, 99, marked, (3, 4)) is None
+
+
+def test_range_prompt_of_a_question_holds_it_in_its_own_section_before_the_checklist():
+    plain = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 30, 31)
+    asked = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 30, 31, question="config가 None이면 어떻게 되나?")
+    assert "[질문]" not in plain and plain.endswith(summary.RANGE_TAIL)
+    found = sections(asked)
+    assert found["질문"] == "config가 None이면 어떻게 되나?"
+    assert found["고른 범위의 코드"] == sections(plain)["고른 범위의 코드"]
+    assert asked.endswith(f"[질문]\nconfig가 None이면 어떻게 되나?\n\n{summary.QUESTION_TAIL}")
+    assert "첫 문장이 질문의 답인가" in summary.QUESTION_TAIL and summary.QUESTION_TAIL != summary.RANGE_TAIL
+    long = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 30, 31, question="가" * 5000)
+    assert len(sections(long)["질문"]) == summary.MAX_QUESTION
+    marked = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/old.py", 0, 0, "-x = 1", (3, 3), "왜 지웠나?")
+    assert marked.endswith(f"[질문]\n왜 지웠나?\n\n{summary.QUESTION_TAIL}{summary.MARKED_TAIL}")
+    system = summary.system_prompt_of(None, "range")
+    assert "`[질문]` 구획" in summary.RANGE_INTRO and "`[질문]` 구획이 있으면" in system
+
+
+def test_asked_name_differs_by_question_and_latest_keeps_the_question(tmp_path):
+    name = "src/core.py:30-31"
+    assert summary.asked_name(name, "") == name
+    first, second = summary.asked_name(name, "왜?"), summary.asked_name(name, "어떻게?")
+    assert first != second and first.partition("?")[0] == name and first == summary.asked_name(name, "왜?")
+    latest = summary.Latest(tmp_path / "summaries.db")
+    latest.put(summary.Subject("/repo", "range", name, "d"), "설명")
+    latest.put(summary.Subject("/repo", "range", first, "d", "왜?"), "답 1")
+    latest.put(summary.Subject("/repo", "range", second, "d", "어떻게?"), "답 2")
+    assert [(k.question, k.text) for k in latest.listed("/repo", "range")] == [("", "설명"), ("왜?", "답 1"), ("어떻게?", "답 2")]
+    assert latest.get("/repo", "range", first).question == "왜?"
+
+
+def test_latest_reads_a_table_made_before_the_question_column_as_notes_without_a_question(tmp_path):
+    path = tmp_path / "summaries.db"
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute(
+            "CREATE TABLE latest (repo TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, digest TEXT NOT NULL, "
+            "text TEXT NOT NULL, created TEXT NOT NULL, PRIMARY KEY (repo, kind, name))"
+        )
+        db.execute("INSERT INTO latest VALUES ('/repo', 'range', 'src/core.py:1-2', 'd', '옛 설명', '2026-01-01T00:00:00+0900')")
+    latest = summary.Latest(path)
+    assert [(k.name, k.text, k.question) for k in latest.listed("/repo", "range")] == [("src/core.py:1-2", "옛 설명", "")]
+    latest.put(summary.Subject("/repo", "range", "src/core.py:1-2?ab", "d", "왜?"), "답")
+    assert len(summary.Latest(path).listed("/repo", "range")) == 2
+
+
+def test_compared_name_is_read_back_for_the_same_two_points_and_file():
+    name = summary.compared_name("aaa", "worktree", "src/core.py", (3, 4), (0, 0))
+    assert summary.compared_spans(name, "aaa", "worktree", "src/core.py") == ((3, 4), (0, 0))
+    assert summary.compared_spans(name, "aaa", "bbb", "src/core.py") is None
+    assert summary.compared_spans(name, "aaa", "worktree", "src/core") is None
+    assert summary.compared_spans("aaa..worktree:src/core.py:x-4:0-0", "aaa", "worktree", "src/core.py") is None
 
 
 def test_range_prompt_of_cuts_a_long_definition_around_the_range():

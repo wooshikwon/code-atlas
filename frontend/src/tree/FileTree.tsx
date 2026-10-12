@@ -3,6 +3,7 @@ import { hidden } from "../graph/visible";
 import { useNodeMenu } from "../nav/NodeMenu";
 import { useOpened } from "../panel/opened";
 import { useChanges } from "../state/changes";
+import { useCompare } from "../state/compare";
 import { running, useStatus } from "../state/status";
 import { chosenOf, useAtlas } from "../state/store";
 import { build } from "../search/index";
@@ -26,13 +27,15 @@ export function FileTree() {
   const select = useAtlas((s) => s.select);
   const show = useAtlas((s) => s.show);
   const toggleFolder = useAtlas((s) => s.toggleFolder);
-  const changes = useChanges((s) => s.changes);
+  const compared = useCompare((s) => s.result);
+  /** 마지막 커밋 뒤의 변경 내용. 시점 비교가 켜져 있는 동안에는 그리지 않는다. */
+  const changes = useChanges((s) => (compared === null ? s.changes : null));
   const opened = useOpened((s) => s.path);
   const toggleOpened = useOpened((s) => s.toggle);
   const selected = useAtlas(chosenOf);
   const list = useMemo(
-    () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, opened, showTests, showExternal, changes })),
-    [tree, graph, collapsed, selected, opened, showTests, showExternal, changes],
+    () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, opened, showTests, showExternal, changes, compared })),
+    [tree, graph, collapsed, selected, opened, showTests, showExternal, changes, compared],
   );
   /** 지워진 파일은 노드가 없으므로 파일트리 아래에 경로만 적는다. */
   const deleted = useMemo(() => (changes?.files ?? []).filter((file) => file.status === "deleted"), [changes]);

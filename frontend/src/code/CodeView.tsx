@@ -1,10 +1,13 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
 import * as monaco from "monaco-editor/editor";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { getDefinition, getFile } from "../api/client";
-import type { FileText } from "../api/types";
+import { WORKTREE, type Comparison } from "../api/types";
+import { gutter, marked, rowOf, rowsOf, weave, widened, type RowKind, type Woven } from "../graph/weave";
+import { useCompare } from "../state/compare";
+import type { Between } from "../state/explanations";
 import { useAtlas } from "../state/store";
-import { keepModel, monacoTheme } from "./monaco";
+import { keepModel, monacoTheme, place } from "./monaco";
 import { RangeNotes } from "./RangeNotes";
 
 type CodeEditor = Parameters<OnMount>[0];
@@ -15,6 +18,57 @@ interface CodeViewProps {
   range: [number, number] | null;
   /** 바탕을 칠할 줄 번호 */
   highlight?: number;
+  /** path와 range, highlight가 시점 비교의 기준 시점의 값이다. 대상 시점에 없는 정의와 삭제된 관계의 코드 줄이 해당한다. */
+  base?: boolean;
+}
+
+/** 코드 뷰어에 넣는 본문. 시점 비교에서 바뀐 줄이 있는 파일은 두 시점의 본문을 엮은 문서(woven)이고 text가 그 문서의 글이다. */
+interface Shown {
+  key: string;
+  text: string;
+  woven: Woven | null;
+}
+
+/**
+ * 코드 뷰어가 보일 본문의 출처. key는 모델의 주소이고 본문마다 다르다. file은 그 파일이 대상 시점에서 가진 경로(삭제된 파일은 기준 시점의
+ * 경로)이고, live는 대상 시점이 작업 중인 상태여서 언어 서버에 물을 수 있는지다. between은 두 시점의 본문을 엮어 보일 때 기준 시점과
+ * 대상 시점에서 읽을 경로이고, 그 시점에 파일이 없으면 null이다.
+ */
+interface Source {
+  key: string;
+  file: string;
+  live: boolean;
+  compared: Between | null;
+  between: { old: string | null; fresh: string | null } | null;
+}
+
+function sourceOf(compared: Comparison | null, path: string, base: boolean): Source {
+  if (compared === null) {
+    return { key: path, file: path, live: true, compared: null, between: null };
+  }
+  const named = compared.files.find((file) => file.path === path);
+  const found = base ? (compared.files.find((file) => (file.old ?? file.path) === path) ?? named) : named;
+  const file = found?.path ?? path;
+  const live = compared.target === WORKTREE;
+  const shared = { file, live, compared: { base: compared.base, target: compared.target } };
+  if (found === undefined || (found.added === 0 && found.deleted === 0 && found.status !== "added" && found.status !== "deleted")) {
+    return { ...shared, key: live ? file : `${compared.target}/${file}`, between: null };
+  }
+  const between = { old: found.status === "added" ? null : (found.old ?? found.path), fresh: found.status === "deleted" ? null : found.path };
+  return { ...shared, key: `${compared.base}..${compared.target}/${file}`, between };
+}
+
+async function load({ key, file, live, compared, between }: Source): Promise<Shown> {
+  const target = live ? undefined : compared?.target;
+  if (compared === null || between === null) {
+    return { key, text: (await getFile(file, target)).text, woven: null };
+  }
+  const [old, fresh] = await Promise.all([
+    between.old === null ? null : getFile(between.old, compared.base),
+    between.fresh === null ? null : getFile(between.fresh, target),
+  ]);
+  const woven = weave(old?.text ?? null, fresh?.text ?? null);
+  return { key, text: woven.lines.join("\n"), woven };
 }
 
 interface Note {
@@ -32,10 +86,17 @@ const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home
  * 스크롤 위치는 Monaco가 문서의 범위 안으로 자른다. 그래서 뷰어보다 긴 범위는 첫 줄부터 보이고, 파일 맨 위의 범위는 1번 줄부터 보인다.
  */
 function center(editor: CodeEditor, from: number, to: number): void {
+  const height = editor.getLayoutInfo().height;
   const first = editor.getTopForLineNumber(from);
-  const middle = (first + editor.getBottomForLineNumber(to) - editor.getLayoutInfo().height) / 2;
-  editor.setScrollTop(Math.min(first, middle));
+  const middle = (first + editor.getBottomForLineNumber(to) - height) / 2;
+  // 지금 문서의 끝을 넘는 위치를 청하면 Monaco가 그 값을 기억했다가 그리는 도중에 문서 높이가 늘 때(가로 스크롤 막대가 생길 때) 스크롤을
+  // 옮기고, 그때 줄 번호가 한 줄씩 밀려 그려진다. 넘지 않는 위치만 청하고, 문서 높이가 바뀌면 그리기를 마친 뒤에 다시 가운데에 둔다.
+  editor.setScrollTop(Math.min(first, middle, editor.getScrollHeight() - height));
 }
+
+/** 엮은 문서에서 삭제된 줄과 추가된 줄의 바탕과 줄 번호 칸 옆의 `−`·`+` */
+const CHANGED: Partial<Record<RowKind, string>> = { deleted: "code-deleted", added: "code-added" };
+
 const OPTIONS = {
   readOnly: true,
   domReadOnly: true,
@@ -50,10 +111,12 @@ const OPTIONS = {
   fixedOverflowWidgets: true,
 };
 
-export function CodeView({ path, range, highlight }: CodeViewProps) {
+export function CodeView({ path, range, highlight, base = false }: CodeViewProps) {
   const theme = useAtlas((s) => s.theme);
   const select = useAtlas((s) => s.select);
-  const [file, setFile] = useState<FileText | null>(null);
+  const compared = useCompare((s) => s.result);
+  const source = useMemo(() => sourceOf(compared, path, base), [compared, path, base]);
+  const [shown, setShown] = useState<Shown | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<CodeEditor | null>(null);
   /** 코드 뷰어 위에 비우는 높이. 코드 한 줄의 높이다. */
@@ -61,27 +124,96 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
   /** 정의가 레포 밖에 있을 때 누른 곳 옆에 잠시 띄우는 말풍선 */
   const [note, setNote] = useState<Note | null>(null);
 
-  const [start, end] = range ?? [null, null];
-  const code = file?.path === path ? file.text : undefined;
+  const { key, file, live } = source;
+  const code = shown?.key === key ? shown.text : undefined;
+  const woven = shown?.key === key ? shown.woven : null;
+  /** path와 range, highlight의 줄 번호가 속한 시점 */
+  const side = base ? "base" : "target";
+  /** 문법 색으로 그릴 코드 뷰어의 줄 범위. 엮은 문서에서는 정의의 줄 범위가 놓인 줄이고, 대상 시점의 정의는 그 정의에서 삭제된 줄을 품는다. */
+  const [start, end] = useMemo((): [number, number] | [null, null] => {
+    if (woven === null || range === null) {
+      return range ?? [null, null];
+    }
+    const rows = rowsOf(woven, side, range);
+    return rows === null ? [null, null] : side === "target" ? widened(woven, rows) : rows;
+  }, [woven, side, range]);
+  const lit = highlight === undefined ? undefined : woven === null ? highlight : (rowOf(woven, side, highlight) ?? undefined);
+  /** 모델의 줄이 작업 중인 상태의 파일에서 몇째 줄인지. 언어 서버에 물을 수 없는 줄이면 null이다. */
+  const fileLine = useMemo(() => (line: number) => (!live ? null : woven === null ? line : (woven.rows[line - 1]?.target ?? null)), [live, woven]);
+  const options = useMemo(() => {
+    if (woven === null) {
+      return OPTIONS;
+    }
+    const { chars, label } = gutter(woven);
+    return { ...OPTIONS, lineNumbers: label, lineNumbersMinChars: chars };
+  }, [woven]);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    // 파일이 바뀌면 코드 뷰어를 새로 만들므로 앞 파일의 코드 뷰어를 쓰지 않는다.
-    setEditor(null);
-    getFile(path)
-      .then((got) => !cancelled && setFile(got))
+    load(source)
+      .then((got) => !cancelled && setShown(got))
       .catch((caught: unknown) => !cancelled && setError(caught instanceof Error ? caught.message : String(caught)));
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [source]);
+
+  // 본문이 바뀌면 코드 뷰어를 새로 만들므로 앞 본문의 코드 뷰어를 쓰지 않는다.
+  useEffect(() => setEditor(null), [key]);
 
   useEffect(() => {
     if (code !== undefined) {
-      keepModel(path);
+      keepModel(key);
+      place(key, { path: file, fileLine, modelLine: (line) => (woven === null ? line : rowOf(woven, "target", line)) });
     }
-  }, [path, code]);
+  }, [key, code, file, fileLine, woven]);
+
+  // 엮은 문서의 삭제된 줄과 추가된 줄에 바탕을 칠하고 줄 번호 칸 옆에 `−`·`+`를 적는다.
+  useEffect(() => {
+    if (editor === null || woven === null) {
+      return;
+    }
+    const decorations = editor.createDecorationsCollection(
+      woven.rows.flatMap((row, i) => {
+        const name = CHANGED[row.kind];
+        const options = { isWholeLine: true, className: name, marginClassName: name, linesDecorationsClassName: `code-sign ${name}-sign` };
+        return name === undefined ? [] : [{ range: new monaco.Range(i + 1, 1, i + 1, 1), options }];
+      }),
+    );
+    return () => decorations.clear();
+  }, [editor, woven]);
+
+  // 엮은 문서에서 고른 범위에 바뀐 줄이 있으면 줄 머리에 `-`·`+`·빈칸 표시를 붙여 복사한다. 줄 머리에서 끝난 선택은 그 앞줄까지로 센다.
+  useEffect(() => {
+    if (editor === null || woven === null) {
+      return;
+    }
+    const dom = editor.getContainerDomNode();
+    const onCopy = (event: ClipboardEvent) => {
+      const selection = editor.getSelection();
+      const model = editor.getModel();
+      if (selection === null || selection.isEmpty() || model === null || event.clipboardData === null) {
+        return;
+      }
+      const from = selection.startLineNumber;
+      const open = selection.endColumn === 1 && selection.endLineNumber > from;
+      const to = open ? selection.endLineNumber - 1 : selection.endLineNumber;
+      if (woven.rows.slice(from - 1, to).every((row) => row.kind === "same")) {
+        return;
+      }
+      const texts = Array.from({ length: to - from + 1 }, (_, i) => {
+        const line = from + i;
+        const ends = line === to && !open ? selection.endColumn : model.getLineMaxColumn(line);
+        return model.getValueInRange(new monaco.Range(line, line === from ? selection.startColumn : 1, line, ends));
+      });
+      event.clipboardData.setData("text/plain", marked(woven, from, to, texts) + (open ? "\n" : ""));
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    dom.addEventListener("copy", onCopy, true);
+    return () => dom.removeEventListener("copy", onCopy, true);
+  }, [editor, woven]);
 
   // 범위 밖의 줄을 흐리게 그린다.
   useEffect(() => {
@@ -99,21 +231,21 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
 
   // 줄의 바탕을 칠한다.
   useEffect(() => {
-    if (editor === null || code === undefined || highlight === undefined) {
+    if (editor === null || code === undefined || lit === undefined) {
       return;
     }
     const decorations = editor.createDecorationsCollection([
       {
-        range: { startLineNumber: highlight, startColumn: 1, endLineNumber: highlight, endColumn: 1 },
+        range: { startLineNumber: lit, startColumn: 1, endLineNumber: lit, endColumn: 1 },
         options: { isWholeLine: true, className: "code-range" },
       },
     ]);
     return () => decorations.clear();
-  }, [editor, code, highlight]);
+  }, [editor, code, lit]);
 
   // 바탕을 칠한 줄이 있으면 그 줄을, 없으면 범위를 코드 뷰어의 가운데에 둔다. 파일 전체를 보일 때는 1번 줄부터 보인다.
   // 뷰어의 높이가 바뀌면 다시 가운데에 두고, 사용자가 스크롤한 뒤에는 옮기지 않는다.
-  const [from, to] = highlight !== undefined ? [highlight, highlight] : [start, end];
+  const [from, to] = lit !== undefined ? [lit, lit] : [start, end];
   useEffect(() => {
     if (editor === null || code === undefined) {
       return;
@@ -127,6 +259,8 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
     let scrolled = false;
     /** 마우스 버튼을 누른 채인지. 스크롤 막대를 끌거나 글자를 끌어 고르며 옮긴 스크롤을 사용자의 스크롤로 센다. */
     let pressed = false;
+    /** 문서 높이가 바뀐 뒤 다시 가운데에 두려고 잡아 둔 프레임 */
+    let again = 0;
     const onWheel = () => (scrolled = true);
     const onKey = (event: KeyboardEvent) => (scrolled ||= SCROLL_KEYS.has(event.key));
     const onDown = () => (pressed = true);
@@ -138,8 +272,15 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
     const listeners = [
       editor.onDidScrollChange((event) => (scrolled ||= pressed && event.scrollTopChanged)),
       editor.onDidLayoutChange(() => !scrolled && center(editor, from, to)),
+      editor.onDidContentSizeChange((event) => {
+        if (event.contentHeightChanged) {
+          cancelAnimationFrame(again);
+          again = requestAnimationFrame(() => !scrolled && center(editor, from, to));
+        }
+      }),
     ];
     return () => {
+      cancelAnimationFrame(again);
       listeners.forEach((listener) => listener.dispose());
       dom.removeEventListener("wheel", onWheel, true);
       dom.removeEventListener("keydown", onKey, true);
@@ -156,13 +297,14 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
     const listener = editor.onMouseDown((event) => {
       const position = event.target.position;
       const mouse = event.event;
-      if (!mouse.leftButton || !(mouse.metaKey || mouse.ctrlKey) || position === null) {
+      const line = position === null ? null : fileLine(position.lineNumber);
+      if (!mouse.leftButton || !(mouse.metaKey || mouse.ctrlKey) || position === null || line === null) {
         return;
       }
       const body = editor.getContainerDomNode().getBoundingClientRect();
       const at = { x: mouse.browserEvent.clientX - body.left, y: mouse.browserEvent.clientY - body.top };
       const asked = useAtlas.getState().selection;
-      getDefinition(path, position.lineNumber, position.column - 1)
+      getDefinition(file, line, position.column - 1)
         .then(({ targets }) => {
           const target = targets.at(0);
           const selection = useAtlas.getState().selection;
@@ -188,7 +330,7 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
         });
     });
     return () => listener.dispose();
-  }, [editor, path, select]);
+  }, [editor, file, fileLine, select]);
 
   // Mod를 누른 채 이름 위에 마우스를 올리면 정의가 레포 안의 노드인 이름에 밑줄을 긋는다.
   useEffect(() => {
@@ -207,7 +349,8 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
         const position = event.target.position;
         const mod = event.event.metaKey || event.event.ctrlKey;
         const word = mod && position !== null ? editor.getModel()?.getWordAtPosition(position) : null;
-        if (word == null || position === null) {
+        const asking = position === null ? null : fileLine(position.lineNumber);
+        if (word == null || position === null || asking === null) {
           clear();
           return;
         }
@@ -218,7 +361,7 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
         }
         clear();
         asked = key;
-        getDefinition(path, line, word.startColumn - 1)
+        getDefinition(file, asking, word.startColumn - 1)
           .then(({ targets }) => {
             if (asked === key && targets.at(0)?.node != null) {
               links.set([
@@ -242,7 +385,7 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
       window.removeEventListener("keyup", onKeyUp);
       links.clear();
     };
-  }, [editor, path]);
+  }, [editor, file, fileLine]);
 
   useEffect(() => {
     if (note === null) {
@@ -257,7 +400,7 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
       {error !== null && <div className="code-error">{error}</div>}
       {code !== undefined && (
         <Editor
-          path={path}
+          path={key}
           defaultLanguage="python"
           value={code}
           theme={monacoTheme(theme)}
@@ -265,10 +408,12 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
             setTop(mounted.getOption(monaco.editor.EditorOption.lineHeight));
             setEditor(mounted);
           }}
-          options={OPTIONS}
+          options={options}
         />
       )}
-      {editor !== null && code !== undefined && <RangeNotes key={`${path}:${start}-${end}`} editor={editor} path={path} />}
+      {editor !== null && code !== undefined && (
+        <RangeNotes key={`${key}:${start}-${end}`} editor={editor} path={file} woven={woven} between={woven === null ? null : source.compared} />
+      )}
       {note !== null && (
         <div className="code-note" style={{ left: note.x, top: note.y }}>
           {note.text}

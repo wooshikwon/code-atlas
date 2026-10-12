@@ -1,10 +1,12 @@
 // 노드의 우클릭 메뉴. 그래프의 노드와 파일트리의 행이 `useNodeMenu`의 show로 열고 App이 한 번 그린다. 항목은 그 노드의 LLM 요약
 // 요청이고 폴더는 안에 든 파일의 요약 요청이다(`ask.ts`). 메뉴를 열거나 항목을 골라도 선택과 화면, 탐색 이력은 바뀌지 않고, 경로 고정 중에도 열린다.
-// 메뉴에서 요청한 요약을 만들지 못하면 관계 그래프 영역 위쪽에 까닭을 적는다.
+// 메뉴에서 요청한 요약을 만들지 못하면 관계 그래프 영역 위쪽에 까닭을 적는다. 시점 비교가 켜져 있으면 대상 시점에 있는 노드만 요약을 요청한다.
 import { useMemo } from "react";
 import { create } from "zustand";
+import { liveGraph } from "../graph/compare";
 import { titleOf } from "../graph/layout";
 import { hidden, nodeIndex } from "../graph/visible";
+import { useCompare } from "../state/compare";
 import { useAtlas } from "../state/store";
 import { useSummaries } from "../state/summaries";
 import { asksOf } from "./ask";
@@ -31,7 +33,8 @@ export const useNodeMenu = create<NodeMenuStore>()((set, get) => ({
   asked: [],
   show: (node, x, y, first) => {
     const { graph, showTests, showExternal } = useAtlas.getState();
-    if (graph === null || asksOf(graph, useSummaries.getState(), hidden(graph, { showTests, showExternal }), node).length === 0) {
+    const live = graph === null ? null : liveGraph(graph, useCompare.getState().result);
+    if (live === null || asksOf(live, useSummaries.getState(), hidden(live, { showTests, showExternal }), node).length === 0) {
       return false;
     }
     set({ at: { node, x, y, first } });
@@ -52,22 +55,24 @@ export function NodeMenu() {
   const at = useNodeMenu((s) => s.at);
   const close = useNodeMenu((s) => s.close);
   const graph = useAtlas((s) => s.graph);
+  const compared = useCompare((s) => s.result);
+  const live = useMemo(() => (graph === null ? null : liveGraph(graph, compared)), [graph, compared]);
   const showTests = useAtlas((s) => s.showTests);
   const showExternal = useAtlas((s) => s.showExternal);
   const states = useSummaries((s) => s.states);
   const leads = useSummaries((s) => s.leads);
   const items = useMemo(
     (): MenuItem[] =>
-      at === null || graph === null
+      at === null || live === null
         ? []
-        : asksOf(graph, { states, leads }, hidden(graph, { showTests, showExternal }), at.node).map((ask) => ({
+        : asksOf(live, { states, leads }, hidden(live, { showTests, showExternal }), at.node).map((ask) => ({
             key: ask.key,
             label: ask.label,
             disabled: ask.disabled,
             node: at.node,
             run: () => useNodeMenu.getState().ask(ask.nodes, ask.refresh),
           })),
-    [at, graph, showTests, showExternal, states, leads],
+    [at, live, showTests, showExternal, states, leads],
   );
   if (at === null || items.length === 0) {
     return null;

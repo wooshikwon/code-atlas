@@ -11,6 +11,8 @@ import type {
   History,
   Hover,
   MadeSummary,
+  MarkedCode,
+  OldSpan,
   Repo,
   Stat,
   Status,
@@ -115,22 +117,30 @@ export function makeSummary(node: string, refresh: boolean): Promise<MadeSummary
   return request(`/api/summary?node=${encodeURIComponent(node)}${refresh ? "&refresh=true" : ""}`, undefined, "POST");
 }
 
-function span(path: string, start: number, end: number): string {
-  return `path=${encodeURIComponent(path)}&start=${start}&end=${end}`;
+function span(path: string, start: number, end: number, old?: OldSpan): string {
+  const between = old === undefined ? "" : `&base=${old.base}&target=${old.target}&old_start=${old.start}&old_end=${old.end}`;
+  return `path=${encodeURIComponent(path)}&start=${start}&end=${end}${between}`;
 }
 
-/** 파일에 저장해 둔 코드 범위 설명 */
-export function getExplanations(path: string): Promise<Explanations> {
-  return request(`/api/explanations?path=${encodeURIComponent(path)}`);
+/** 파일에 저장해 둔 코드 분석. between을 넘기면 그 두 시점의 비교에 묶어 둔 설명을 함께 받는다. */
+export function getExplanations(path: string, between?: { base: string; target: string }): Promise<Explanations> {
+  return request(`/api/explanations?path=${encodeURIComponent(path)}${between === undefined ? "" : `&base=${between.base}&target=${between.target}`}`);
 }
 
-/** 캐시에 없으면 코드 범위의 설명을 만들어 저장하게 한다. refresh면 캐시에 있어도 다시 만든다. */
-export function makeExplanation(path: string, start: number, end: number, refresh: boolean): Promise<Explanation> {
-  return request(`/api/explanation?${span(path, start, end)}${refresh ? "&refresh=true" : ""}`, undefined, "POST");
+/**
+ * 캐시에 없으면 코드 범위의 분석을 만들어 저장하게 한다. refresh면 캐시에 있어도 다시 만든다. question은 그 범위를 두고 적은 질문이고
+ * 빈 글이면 범위를 설명하게 한다. 두 시점을 엮은 문서에서 고른 범위에 바뀐 줄이 있으면 marked에 표시를 붙인 본문을 싣고, 삭제된 줄이
+ * 든 범위는 start와 end가 대상 시점의 줄(없으면 0)이다.
+ */
+export function makeExplanation(path: string, start: number, end: number, refresh: boolean, question: string, marked?: MarkedCode): Promise<Explanation> {
+  const query = `${span(path, start, end, marked?.old ?? undefined)}${refresh ? "&refresh=true" : ""}`;
+  const body = { ...(marked === undefined ? {} : { code: marked.code }), ...(question === "" ? {} : { question }) };
+  return request(`/api/explanation?${query}`, undefined, "POST", Object.keys(body).length === 0 ? undefined : body);
 }
 
-export function deleteExplanation(path: string, start: number, end: number): Promise<{ deleted: boolean }> {
-  return request(`/api/explanation?${span(path, start, end)}`, undefined, "DELETE");
+export function deleteExplanation(path: string, start: number, end: number, question: string, old?: OldSpan): Promise<{ deleted: boolean }> {
+  const asked = question === "" ? "" : `&question=${encodeURIComponent(question)}`;
+  return request(`/api/explanation?${span(path, start, end, old)}${asked}`, undefined, "DELETE");
 }
 
 /** 마지막 커밋 뒤에 바뀐 파일과 노드 */
