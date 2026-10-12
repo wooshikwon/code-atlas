@@ -77,6 +77,7 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | 미니맵 클릭·끌기 | 확대 비율을 그대로 둔 채 그 위치로 화면을 옮긴다 |
 | 그래프 바탕 클릭 | 선택과 펼친 파일 상자, 정보 패널을 그대로 둔다. 고정한 선의 말풍선과 메뉴만 닫고, 움직이던 화면을 멈춘다 |
 | `Esc`, 탐색 경로 맨 앞의 레포 이름 클릭, 고른 파일 상자의 머리 줄 클릭 | 그래프 뷰에서 선택을 푼다. `Esc`는 고정한 선 목록이 있으면 그 목록을, `배치 계산 중` 표시가 떠 있으면 그 배치를 먼저 닫거나 취소한다 |
+| 왼쪽 위 `비교` 버튼 | 비교 창을 펴거나 접는다. 창의 커밋 그래프에서 줄 두 개를 눌러 고르고 `확인`을 누르면 두 시점 사이에 바뀐 것을 그래프에 그린다. 비교가 켜져 있으면 다시 편 창의 `끄기`가 비교를 끈다. `Esc`는 창만 접는다 ("시점 비교") |
 | 왼쪽 아래 경로 찾기 버튼 | 경로 탐색 창을 펴거나 접는다. 출발 칸과 도착 칸에서 파일·클래스·함수를 검색해 고르면 두 곳을 잇는 실행 경로를 찾는다 |
 | 경로 탐색 창의 숫자 버튼 | 그 번호의 경로만 굵은 선으로 강조하고 단계 목록을 그 경로로 바꾼 뒤 출발 노드를 보인다 |
 | 경로 탐색 창의 단계 클릭 | 그 단계의 노드를 정보 패널에 보이고 그 노드와 다음 걸음의 노드가 보이게 화면을 옮긴다 |
@@ -163,6 +164,18 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 
 경로 고정과 분석 표시는 함께 켤 수 있다. 고정 중에는 경로가 먼저 읽히도록 순환 선을 색만 남긴 채 흐리게 그리고, 경로 위의 미사용 후보는 점선 테두리만 받는다.
 
+## 시점 비교
+
+대상 레포가 git 저장소면 관계 그래프 영역의 왼쪽 위에 `비교` 버튼이 있다. 두 시점을 골라 그 사이에 바뀐 정의의 줄 수, 삭제된 정의와 파일, 추가되고 삭제된 관계를 그래프 위에 그린다. 시점은 커밋이거나 작업 중인 상태다.
+
+- **두 줄 고르기**: 버튼을 누르면 커밋 그래프와 아래쪽 한 줄(줄 수, `확인`)만 있는 창이 뜬다. 커밋 그래프는 로컬 브랜치, 원격 브랜치, 태그, 지금 커밋에서 닿는 커밋을 날짜 순서로 200줄씩 읽고, 맨 위에 작업 중인 상태의 줄을 둔다. 줄을 누르면 고르고 다시 누르면 풀며, 두 줄을 고른 채 셋째 줄을 누르면 먼저 고른 줄이 바뀐다. 처음 펴면 커밋하지 않은 `.py` 변경이 있을 때 지금 커밋과 작업 중인 상태를, 없을 때 기본 브랜치의 커밋과 지금 커밋을 골라 둔다. 오래된 쪽 줄에 `기준`, 새 쪽 줄에 `대상`이 붙고 아래 줄에 두 시점 사이의 줄 수를 적는다. 두 줄이 조상 관계가 아니면 갈라진 커밋이 실제 기준이 되고 그 줄에 `갈라진 지점`이 붙는다. 줄 수는 분석 대상 `.py` 파일만 센다. 창은 손잡이로 폭 700px, 높이 400px 안에서 크기를 바꾸고 창 밖을 눌러도 닫히지 않는다.
+- **분석**: `확인`을 누르면 창이 닫히고 버튼이 `분석 중 120 / 333`을 적으며 그래프는 끝날 때까지 그대로다. 과거 커밋은 `~/.cache/code-atlas/snapshots/` 아래에 `git archive`로 꺼내, 이미 분석한 시점과 달라진 파일만 다시 분석하고 꺼낸 폴더를 지운다. 분석한 커밋의 판정은 분석 캐시에 커밋 해시로 남으므로 같은 커밋을 다시 고르면 언어 서버 없이 조립한다. 끝나면 버튼이 `main → 작업 중 · +79 −111`처럼 두 시점과 줄 수를 적는다.
+- **비교 표시**: 바뀐 함수·메서드·클래스·변수와 파일·폴더의 이름 옆에 추가된 줄 수와 삭제된 줄 수를 `+N −N`으로 적는다. 폴더의 수는 아래 파일의 합이다. 삭제된 정의와 파일은 흐린 단계로 남고, 고르거나 마우스를 올려도 진해지지 않는다. 선은 회색 그대로이고 선 위의 숫자는 대상 시점에 있는 관계만 센다. 삭제된 관계만 든 선은 흐린 단계로 그리고 숫자 대신 빨강 점 하나를 받는다. 선의 말풍선은 넷째 칸 `변경`에 `신규`·`삭제`·`유지`를 적고, 관계가 여럿 든 줄은 `신규 1 · 삭제 1`로, 지점 수만 달라진 줄은 관계 칸을 `호출 2곳 → 3곳`으로 적는다. 비교가 켜진 동안 변경 표시(`M`·`A`)는 그리지 않고, 범례에 비교 표시의 세 줄이 붙는다.
+- **파일트리와 정보 패널**: 파일트리의 행 오른쪽에 같은 줄 수를 적는다. 삭제된 파일과 정의는 이름의 색을 그대로 둔 채 흐리게 남고, 이름이 바뀐 파일은 `← 옛 이름`을 함께 적는다. 아무것도 고르지 않았으면 정보 패널이 바뀐 정의를 파일별로 묶은 변경 목록을 보이고, 행을 누르면 그 노드를 고른다.
+- **코드 뷰어**: 바뀐 줄이 있는 파일은 두 시점의 본문을 한 칸에 엮어 보인다. 줄 번호 칸에 기준 시점과 대상 시점의 번호를 나란히 적고, 삭제된 줄은 빨강 바탕과 `−`, 추가된 줄은 초록 바탕과 `+`로 그린다. 줄의 맞춤은 `git diff`의 것이어서 삭제된 줄과 추가된 줄의 수가 그 파일의 `+N −N`과 같다. 삭제된 줄도 끌어서 고르고, 고른 범위를 복사하면 줄 머리에 `-`·`+`·빈칸을 붙인 글이 클립보드에 들어간다. 코드 분석도 같은 표시를 붙인 본문으로 묻고, 삭제된 줄이 든 범위의 분석은 그 두 시점의 비교를 켰을 때만 보인다.
+- **대상이 커밋일 때**: 그래프, 파일트리, 코드 뷰어가 그 커밋의 것으로 바뀌고 LLM 요약과 요지 목록도 그 커밋의 코드를 다룬다. 삭제된 정의와 파일은 요약하지 않는다. hover와 정의 이동, 새로고침의 변경 감지는 대상이 작업 중인 상태일 때만 동작한다.
+- **끄기와 다른 분석 표시**: 비교 창의 `끄기`를 누르거나 필터 창에서 순환 의존이나 미사용 후보를 켜면 비교가 꺼지고 작업 중인 상태의 그래프로 돌아간다. 경로 찾기, 리니지 뷰, 순환 묶음, 미사용 후보의 수는 삭제된 것을 뺀 대상 시점의 그래프로 계산한다.
+
 ## LLM 요약
 
 정보 패널의 LLM 요약 칸은 고른 파일·클래스·함수의 설명을 요지, 하는 일, 앞뒤 흐름 세 부분으로 보여 준다. 변수는 요약하지 않는다. 요지는 굵고 크게, 구역 제목은 굵게 그리고, 백틱으로 감싼 식별자와 `파일 경로::정의 이름` 표기는 옅은 바탕의 등폭 글자(코드 칩)로 그린다. 그래프에 있는 정의의 표기는 글자가 파란색인 칩이고 누르면 그 노드를 고른다. 목록 기호로 시작하는 줄은 목록으로, `**`로 감싼 글은 굵게, 코드 울타리 사이의 줄은 코드 블록으로 그린다. 코드 분석 창도 같은 방식으로 그린다. 코드 뷰어가 함께 열려 있으면 요약 칸은 처음에 패널 높이의 4분의 1까지만 쓰고 넘치는 글은 칸 안에서 스크롤한다. 요약 칸과 코드 뷰어 사이의 경계선을 끌어 정한 높이는 다음에 열 때도 유지한다. 설명은 이 컴퓨터에 설치된 Claude Code CLI를 `claude -p`로 불러 만들고, Claude Code에 로그인한 구독 계정을 쓰므로 API 키가 필요 없다.
@@ -189,9 +202,9 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 
 ## 변경 표시
 
-대상 레포가 git 저장소면 마지막 커밋(`HEAD`) 뒤에 수정하거나 추가한 파일과 함수를 그래프와 파일트리에 표시한다. 수정은 주황 `M`, 추가(스테이징한 새 파일과 추적하지 않는 파일)는 파랑 `A`이고, 지워진 파일은 파일트리 아래 목록에 적는다. 화면은 15초마다, 그리고 창이 포커스를 받을 때 변경 내용을 다시 읽는다. 필터 창의 레포 정보에 현재 브랜치 이름을 적는다.
+대상 레포가 git 저장소면 마지막 커밋(`HEAD`) 뒤에 수정하거나 추가한 파일과 함수를 그래프와 파일트리에 표시한다. 수정은 주황 `M`, 추가(스테이징한 새 파일과 추적하지 않는 파일)는 파랑 `A`이고, 지워진 파일은 파일트리 아래 목록에 적는다. 함수·클래스·변수의 표시는 `HEAD`와 작업 중인 상태를 시점 비교와 같은 규칙으로 견준 값이다. `HEAD`에 없던 정의는 추가, 본문의 글이 달라진 정의는 수정이고 위쪽 코드가 바뀌어 줄만 밀린 정의에는 표시가 없다. 화면은 15초마다, 그리고 창이 포커스를 받을 때 변경 내용을 다시 읽는다. 필터 창의 레포 정보에 현재 브랜치 이름을 적는다.
 
-대상 레포에는 읽기 전용 git 명령(`status`, `diff`, `rev-parse`, `symbolic-ref`)만 부르고, 인덱스를 다시 쓰지 않으며, 원격에 접속하지 않는다. git 저장소가 아니면 변경 표시 없이 나머지 기능이 동작한다.
+변경 표시와 시점 비교는 대상 레포에 읽기 전용 git 명령(`status`, `diff`, `rev-parse`, `symbolic-ref`, `log`, `merge-base`, `show`, `archive`)만 부르고, 인덱스를 다시 쓰지 않으며, 원격에 접속하지 않는다. git 저장소가 아니면 변경 표시 없이 나머지 기능이 동작한다.
 
 ## 알려진 한계
 
@@ -200,6 +213,10 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 - **응답 없음**: 언어 서버가 어느 요청에도 10초 동안 답하지 않으면 기다리던 요청을 취소하고 한 번 다시 묻는다. 다시 물어도 10초 안에 답이 없는 지점은 미확인으로 남고 `응답 없음 N`으로 센다. 요청 하나가 10초 넘게 걸리면 그 뒤에서 차례를 기다리던 요청도 함께 응답 없음이 된다. 그 지점의 번호도 캐시에 들어가므로 캐시로 다시 열어도 같은 수를 적고, 그 지점은 그 파일이 바뀌거나 다시 묻는 범위에 들 때와 `--no-cache`로 다시 분석할 때 다시 묻는다.
 - **열어 둔 채 고친 코드**: 그래프의 노드와 줄 범위, 코드 뷰어와 요약의 본문은 마지막으로 분석한 값이다. 그 뒤 바뀐 파일은 "새로고침" 버튼에 점으로 표시하고 스스로 다시 분석하지 않는다. 다시 분석하는 동안 고친 파일의 hover와 정의 이동은 줄이 어긋날 수 있다.
 - **여러 탭**: 같은 서버를 탭 두 개로 열고 한쪽에서 새로고침하면 다른 탭도 다음 상태 확인 때 보던 화면 그대로 새 그래프로 다시 그려진다. 서버가 내려가도 화면에 연결이 끊겼다는 표시는 없다.
+- **시점 비교의 처음 분석**: 캐시에 없는 커밋을 처음 비교하면 달라진 파일과 그 파일을 import하는 파일의 지점을 언어 서버에 다시 묻는다. Apple M1에서 modern-deeplearning-pipeline의 한 커밋 앞은 4초, 다섯 커밋 앞은 11초, 스무 커밋 앞(바뀐 `.py` 163개)은 26초가 걸렸다. 두 번째부터는 1~2초다.
+- **비교 중인 탭이 둘일 때**: 요약이 읽는 시점은 서버가 마지막으로 응답한 비교의 대상 하나다. 같은 서버를 연 탭 두 개가 서로 다른 시점을 보고 있으면 한쪽 탭의 요약과 코드 분석이 다른 탭의 시점의 코드로 만들어질 수 있다.
+- **시점 비교가 견주지 않는 것**: 바뀐 파일에 닿지 않는 선은 한쪽 시점에서 언어 서버가 답하지 못해 달라졌더라도 변경으로 그리지 않는다. 과거 커밋에서 경로를 가리는 `.gitignore`와 가상환경 폴더의 판정은 지금 디스크의 것을 쓴다. 과거 커밋의 분석도 지금 인터프리터와 설치된 패키지로 한다.
+- **처음 화면의 비교 버튼**: 레포를 연 처음 화면과 "화면 맞춤"은 비교 버튼을 피하지 않으므로 그래프의 왼쪽 위 상자가 버튼 아래에 놓일 수 있다. 노드를 골라 화면이 옮겨질 때는 버튼을 피한다.
 - **변수 노드가 다루지 않는 것**: 클래스 본문의 속성과 `self` 속성은 노드로 만들지 않는다(데이터 클래스의 필드는 표의 칸으로 그린다). 변수의 값에 적힌 문자열이 가리키는 클래스나 경로는 잇지 않는다. 모듈 별칭의 속성으로 읽는 변수(`_conftest.FIXED_DATE`) 가운데 언어 서버가 풀지 못한 곳은 읽음 선이 없다. 변수를 부르는 호출(`handler()`)은 그 변수를 읽는 선만 그리고 변수에 든 대상은 미확인 호출로 센다.
 - **같은 변수를 읽고 바꾸는 함수**: 두 노드 사이의 종류가 다른 선은 따로 그리므로 읽음 선과 바꿈 선이 같은 길로 겹친다. 선에 마우스를 올리면 위에 그린 선 하나의 관계만 말풍선에 나오고, 두 관계는 정보 패널의 연결 목록에서 함께 본다.
 - **리니지 뷰의 변수**: 변수는 리니지 뷰의 가운데가 되지 않는다. 값 안에서 함수·메서드를 부르는 변수만 그 함수의 호출하는 쪽에 마름모로 나온다.
@@ -228,8 +245,10 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | `code_atlas/unused.py` | 분석 결과에서 들어오는 실행·사용 선이 없는 정의를 찾고 제외 규칙 일곱 개를 적용해 미사용 후보를 낸다 |
 | `code_atlas/venv.py` | 대상 레포의 가상환경 인터프리터 탐색 |
 | `code_atlas/git.py` | 대상 레포의 git을 읽는다. 지금 커밋과 브랜치, 파일의 상태(`git status`), 커밋 그래프(`git log`), 두 시점의 조상 관계와 갈라진 커밋(`git merge-base`), 두 시점 사이에 바뀐 `.py` 파일과 줄 단위 토막(`git diff`), 커밋의 파일 본문(`git show`)을 내고 커밋의 파일을 레포 밖 폴더에 꺼낸다(`git archive`). 모든 git 호출이 함수 하나를 지나고 인덱스를 다시 쓰지 않는 읽기 전용 명령만 부른다 |
+| `code_atlas/snapshot.py` | 커밋 하나의 분석 결과를 낸다. 커밋의 파일을 `~/.cache/code-atlas/snapshots/` 아래에 꺼내, 캐시에 그 커밋의 판정이 있으면 언어 서버 없이 조립하고 없으면 메모리의 분석 결과 가운데 바뀐 파일이 가장 적은 것에서 증분으로 분석한 뒤 꺼낸 폴더를 지운다 |
+| `code_atlas/compare.py` | 두 시점의 분석 결과와 바뀐 파일 목록, 줄 단위 토막을 받아 정의·변수·파일의 추가·삭제·수정과 줄 수, 선의 추가·삭제와 달라진 지점 수를 판정하고 대상 시점의 그래프에 삭제된 노드와 선을 더한다. git과 언어 서버를 부르지 않는다. 변경 표시의 정의 판정(`definitions`)도 낸다 |
 | `code_atlas/summary.py` | 분석 결과에서 앞뒤 흐름 자료를 모아 프롬프트를 만들고, Claude Code CLI(`claude -p`)를 불러 노드의 설명과 코드 범위의 설명을 받아 `~/.cache/code-atlas/summaries.db`에 저장한다 |
-| `code_atlas/api.py` | 서버가 뜬 뒤에 분석을 시작하고 분석 결과를 판 번호와 함께 응답 상태에 넣는다. `/api/status`(분석 단계와 진행 수, 판 번호, 언어 서버 상태, 분석 뒤 바뀐 파일), `/api/repo`·`/api/tree`·`/api/graph`·`/api/file`(분석 결과. `/api/file`은 분석할 때 읽은 본문을 돌려준다. 첫 결과가 나오기 전에는 `/api/status` 밖의 경로가 503이다), `POST /api/reload`(열어 둔 세션에서 바뀐 만큼만 다시 분석해 결과를 바꾸고 판 번호를 올린다. 분석하는 중에 온 요청은 그 분석이 끝나기를 기다린다), `/api/hover`·`/api/definition`(언어 서버에 묻는 타입 정보와 정의 위치), `/api/changes`(변경 표시), `/api/unused`(판정 대상 정의 수 `definitions`와 미사용 후보의 노드 id `candidates`), `/api/summary`(LLM 요약. 요약을 만든 `POST` 응답은 `claude` 호출의 토큰 수 `usage`를 담고, 캐시에서 읽은 요약은 `usage`가 `null`이다), `/api/summaries`(노드마다 남겨 둔 요약의 요지 목록), `/api/explanations`·`/api/explanation`(코드 분석. 줄 범위와 질문마다 하나씩 남긴다) 경로와 `frontend/dist/` 서빙. `127.0.0.1`에만 연다 |
+| `code_atlas/api.py` | 서버가 뜬 뒤에 분석을 시작하고 분석 결과를 판 번호와 함께 응답 상태에 넣는다. `/api/status`(분석 단계와 진행 수, 판 번호, 언어 서버 상태, 분석 뒤 바뀐 파일), `/api/repo`·`/api/tree`·`/api/graph`·`/api/file`(분석 결과. `/api/file`은 분석할 때 읽은 본문을 돌려준다. 첫 결과가 나오기 전에는 `/api/status` 밖의 경로가 503이다), `POST /api/reload`(열어 둔 세션에서 바뀐 만큼만 다시 분석해 결과를 바꾸고 판 번호를 올린다. 분석하는 중에 온 요청은 그 분석이 끝나기를 기다린다), `/api/hover`·`/api/definition`(언어 서버에 묻는 타입 정보와 정의 위치), `/api/changes`(변경 표시), `/api/history`(커밋 그래프의 줄과 지금 커밋·기본 브랜치), `/api/compare/stat`(고른 두 시점의 기준·대상·갈라진 커밋과 줄 수), `POST /api/compare`(두 시점을 분석해 견준 그래프·파일트리·변경 내용·파일마다의 줄 토막. 분석하는 동안 `/api/status`의 `compare`가 진행 수를 낸다), `/api/file`의 `at`(비교에 쓴 커밋의 본문), `/api/unused`(판정 대상 정의 수 `definitions`와 미사용 후보의 노드 id `candidates`), `/api/summary`(LLM 요약. 요약을 만든 `POST` 응답은 `claude` 호출의 토큰 수 `usage`를 담고, 캐시에서 읽은 요약은 `usage`가 `null`이다), `/api/summaries`(노드마다 남겨 둔 요약의 요지 목록), `/api/explanations`·`/api/explanation`(코드 분석. 줄 범위와 질문마다 하나씩 남긴다) 경로와 `frontend/dist/` 서빙. `127.0.0.1`에만 연다 |
 | `code_atlas/cli.py` | `code-atlas <레포>`(서버 실행과 분석)와 `code-atlas analyze <레포>`(결과 출력) 명령 |
 | `frontend/src/api/` | API 계약 자료형과 백엔드 호출. 화면 컴포넌트는 `client.ts`만 거친다 |
 | `frontend/src/state/` | `store.ts`의 zustand 저장소 `useAtlas(selector)`가 분석 결과, 선택, 뷰 종류, 접은 폴더(`startFolds`가 처음 화면의 접은 폴더를 고른다), 전부 펼친 파일 상자, 흐름 단계, 토글, 정보 패널 사각형을 담고 `history.ts`가 탐색 이력을 맡는다. `store.ts`는 경로 고정 상태 `finder`(창의 열림, 출발, 도착, 찾은 경로, 고른 번호, 정보 패널이 보이는 경로 위 노드)와 고정 중에 막는 액션, 고정 중에 막는 진입의 판정 `barred`도 맡는다. `overlay.ts`는 켠 분석 표시와 `/api/unused` 응답을, `cycles.ts`는 지금 토글의 순환 묶음을 낸다. `changes.ts`는 `/api/changes`를 15초마다와 창이 포커스를 받을 때 다시 받는다. `summaries.ts`와 `explanations.ts`는 노드 요약과 코드 분석의 상태와 요청을 맡고, `summaries.ts`는 요약 요청의 대기열과 묶음의 진행 수, 취소도 맡는다. `status.ts`는 `/api/status`를 분석하는 동안 0.5초마다, 그 밖에는 2초마다 받아 분석 단계와 분석 뒤 바뀐 파일을 담고 판 번호가 달라지면 분석 결과를 받아 그린다. `reload.ts`는 새로고침(다시 분석을 요청하고 새 분석 결과를 받는다)을 맡고, `store.ts`의 `placeIn`이 보던 화면과 탐색 이력을 새 그래프에 맞춘다 |
@@ -239,14 +258,17 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | `frontend/src/route/` | 경로 탐색 창. `Finder.tsx`가 경로 찾기 버튼과 창을, `EndField.tsx`가 출발·도착 검색 칸을, `Ends.tsx`가 정보 패널 머리 줄의 `출발로`·`도착으로` 버튼을 그리고, `words.ts`가 단계 목록과 경로 없음 문구를 만든다 |
 | `frontend/src/nav/` | 상단 줄. `Trail.tsx`는 탐색 경로 표시, `Entries.tsx`는 진입점 버튼, `MenuList.tsx`는 진입점 목록과 노드의 우클릭 메뉴가 함께 쓰는 메뉴, `NodeMenu.tsx`는 노드의 우클릭 메뉴와 만들지 못한 요약의 알림, `ask.ts`는 그 메뉴의 요약 항목, `Filters.tsx`는 필터 버튼과 필터 창(보기 설정, 레포 정보), `settings.ts`는 기본값과 다른 보기 설정, `Reload.tsx`는 새로고침 버튼과 분석 뒤 바뀐 파일 표시, `keys.ts`는 이력 이동·`Esc`·팔레트 열기·새로고침 단축키다 |
 | `frontend/src/panel/` | 그래프 위에 떠 있는 정보 패널. 머리 줄(`Header.tsx`), 정보 구역(`Facts.tsx`, 줄에 적는 값은 `links.ts`), 구역 머리(`Section.tsx`), LLM 요약 칸(`Summary.tsx`, 요약 상태와 요청은 `state/summaries.ts`, 문단·목록·코드 블록과 그 안의 코드 칩·정의 표기·굵은 글씨를 그리는 `inline.tsx`, 설명을 세 부분과 문단·목록·코드 블록, 정의 표기로 나누는 `parts.ts`), 코드 줄 목록(`Sites.tsx`), 분석 표시의 결과 목록(`Overview.tsx`), 끌기와 크기 조절(`usePanelRect.ts`·`rect.ts`·`drag.ts`), 그래프 노드가 없는 `__init__.py`를 여는 `opened.ts` |
+| `frontend/src/compare/` | 비교 버튼(`Button.tsx`)과 비교 창(`Window.tsx`, 커밋 그래프의 줄 `Rows.tsx`). `log.ts`가 줄과 표시, 버튼에 적는 시점 이름, 그릴 줄의 범위를 낸다. 고른 두 시점과 켜져 있는 비교는 `state/compare.ts`가, 세로 줄 배정은 `graph/commits.ts`가, 비교 결과를 그래프의 표시로 바꾸는 일은 `graph/compare.ts`가, 두 시점의 본문을 줄 토막으로 엮는 일은 `graph/weave.ts`가 맡는다 |
 | `frontend/src/code/` | 고른 노드가 든 파일의 전체 코드를 열고 노드의 줄 범위 밖을 흐리게 그리는 읽기 전용 Monaco 코드 뷰어. `hover.ts`가 이름 위 hover를, `CodeView.tsx`가 `Mod`+클릭 정의 이동을 백엔드에 연결한다. `RangeNotes.tsx`는 고른 줄 범위의 설명 버튼·창·말풍선 표지를 그린다. Monaco는 CDN 없이 번들에 넣는다 |
 | `frontend/src/graph/` | 그래프 뷰와 리니지 뷰. `visible.ts`가 보이는 노드와 파일 상자의 펼침 단계를, `flow.ts`가 고른 노드에서 나가는 흐름과 불투명도를, `scope.ts`가 그릴 선을, `columns.ts`가 열 번호와 연결 묶음·선반을 정한다. `route.ts`가 두 끝점 사이의 경로를, `cycles.ts`가 순환 묶음을, `overlay.ts`가 분석 표시가 그래프에 더하는 표시를 낸다. `layout.ts`가 ELK를 Web Worker로 돌려 좌표를 정하고, `view.ts`가 선마다 경로와 도착이 같은 선의 줄기, 숫자의 위치를, `motion.ts`가 배치 움직임을, `viewport.ts`가 화면 이동 좌표를, `flight.ts`가 화면 이동의 경로와 시간, 그 경로를 그리는 함수(`useFlight`)를, `layers.ts`가 노드·선·글자의 겹침 순서를 낸다. `aim.tsx`가 커서 밑을 지나는 선의 집합으로 선의 hover와 클릭을 판정하고, `arranging.tsx`가 느린 배치의 표시와 취소를, `Progress.tsx`가 분석 중의 진행 표시를, `SummaryQueue.tsx`가 요약 요청 묶음의 진행 칸을 맡는다. `calls.ts`·`CallView.tsx`는 리니지 뷰, `nodes/`·`edges/`는 React Flow 노드·선 컴포넌트(`PackNode.tsx`는 손잡이, `Trunk.tsx`는 줄기), `Dock.tsx`는 왼쪽 아래 칸, `Minimap.tsx`·`Legend.tsx`는 미니맵·범례다. `Tooltip.tsx`는 앱 전체가 함께 쓰는 말풍선으로, 요소의 `data-tip`에 담은 글을 마우스를 올리거나 키보드 초점을 받았을 때 띄운다. `tips.ts`는 노드·배지·선의 말풍선 글을, `names.ts`는 노드 종류와 선 종류의 이름, 선에 든 관계를 종류와 수로 적는 글(`relationsOf`)을 낸다 |
 | `frontend/scripts/shots.mjs` | 화면 시나리오 스크립트. 떠 있는 서버에서 정해진 조작을 하고 확인 항목의 통과 여부와 스크린샷을 남긴다 |
 | `frontend/scripts/perf.mjs` | 화면 측정 스크립트. 떠 있는 서버의 화면에서 처음 배치, 폴더 펼침, 노드 선택의 시간과 화면 이동·확대의 프레임 간격을 JSON으로 낸다 |
 | `scripts/measure_analysis.py` | 레포를 분석하며 단계별 시간, 정의 요청 수, 응답 없음 수를 JSONL로 내고 `--compare`로 다른 분석 결과와 노드·선·지점 판정을 견준다 |
+| `scripts/measure_compare.py` | 두 시점의 비교가 응답하기까지의 시간, 정의 요청 수, 응답 없음 수, 바뀐 노드와 선의 수를 JSONL로 출력한다 |
 | `scripts/measure_resolution.py` | 호출 지점 해석 상태별 비율 출력, 고정 시드 표본 JSONL 작성(`~/data/code-atlas/resolution-sample.jsonl`), `--report`로 직접 채운 판정 집계 |
 | `tests/fixtures/sample_repo/` | 시험용 고정 레포. `src/` 소스 루트, 하위 패키지, 함수 안 import, 상속, dataclass, `__main__` 블록, 한글 문자열 뒤 호출, 동적 호출, 어디서도 부르지 않는 함수와 문자열로만 불리는 함수를 담는다 |
 | `tests/fixtures/external_repo/` | 외부 클래스와 얽힌 고정 레포. 외부 클래스를 상속한 클래스, 그 자식 클래스, 같은 이름의 메서드를 정의한 다른 클래스, 외부 클래스를 다른 이름으로 재내보내는 `__init__.py`를 담는다 |
+| `tests/fixtures/history_repo/` | 이력 고정 레포의 재료. `tests/history.py`의 `build`(`python -m tests.history <폴더>`)가 단계별 폴더로 커밋을 쌓아 함수 수정·추가·삭제, 파일 삭제와 이름 변경, 갈라졌다 합쳐진 브랜치와 합쳐지지 않은 브랜치, 태그, 커밋하지 않은 변경이 있는 레포를 만든다 |
 | `tests/fixtures/cycle_repo/` | 순환이 있는 고정 레포. 같은 폴더의 파일 세 개가 도는 묶음, 폴더 두 개에 걸친 파일 두 개의 묶음, 함수 안 import로만 돌아오는 파일 두 개, 미사용 후보 하나를 담는다 |
 
 ## 개발
@@ -263,12 +285,12 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 화면은 `frontend/`에서 화면 시나리오 스크립트로 확인한다.
 
 ```bash
-node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wide-url 주소] [--only 이름,이름] [--with-summary]
+node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wide-url 주소] [--compare-url 주소] [--only 이름,이름] [--with-summary]
 ```
 
 떠 있는 서버의 주소를 받고(기본 `http://127.0.0.1:8766`) 서버를 띄우지 않는다. 시나리오마다 새 브라우저 컨텍스트에서 조작하고 확인 항목을 `통과`·`실패`·`건너뜀`과 함께 한 줄씩 출력한다. 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 `건너뜀`이고 실패로 세지 않는다. 실패한 확인 항목이나 페이지 오류·콘솔 오류가 있으면 종료 코드 1로 끝난다.
 
-- **시나리오**: `open`, `file`, `function`, `trail-root`, `body`, `panel`, `code-scope`, `hover`, `edge`, `badge-tip`, `entry-mark`, `entry`, `menu`, `folder-sum`, `summary-queue`, `keys-code`, `tips`, `minimap`, `region`, `folder`, `folder-tint`, `badge-lines`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `split`, `summary-busy`, `summary-stale`, `explain`, `summary-ask`, `summary-ref`, `summary`와 경로·분석 표시 시나리오 `finder-open`, `finder-search`, `finder-path`, `finder-folder`, `finder-step`, `finder-none`, `finder-pin`, `finder-change`, `finder-ends`, `overlay-menu`, `reload`, `reload-key`, `unused`, `finder-overlay`, `overlay-dark`, `cycles`, `cycles-change`, `cycles-pin`, 처음 화면·펼침·합류·분석 상태 시나리오 `start`, `arranging`, `node-hover`, `hover-step`, `node-grow`, `dim`, `merge`, `merge-out`, `merge-hover`, `merge-click`, `merge-select`, `merge-pin`, `badge`, `pack-place`, `pack-file`, `pack-flow`, `pack-folder`, `pack-find`, `pack-pin`, `pack-overlay`, `pack-history`, `pack-toggle`, `inner-pick`, `lanes`, `numbers`, `overlap`, `line-folder`, `line-bubble`, `panel-head`, `facts-list`, `motion`, `folder-hold`, `progress`, `progress-failed`, `stale`, `var-file`, `var-external`, `var-select`, `var-inner`, `var-line`, `var-write`, `var-tip`, `var-finder`, `var-jump` 105개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
+- **시나리오**: `open`, `file`, `function`, `trail-root`, `body`, `panel`, `code-scope`, `hover`, `edge`, `badge-tip`, `entry-mark`, `entry`, `menu`, `folder-sum`, `summary-queue`, `keys-code`, `tips`, `minimap`, `region`, `folder`, `folder-tint`, `badge-lines`, `folder-select`, `init-file`, `toolbar`, `callview`, `search`, `zoom`, `labels`, `external`, `dark`, `tree`, `tree-search`, `changes`, `zoom-keep`, `summary-panel`, `split`, `summary-busy`, `summary-stale`, `explain`, `summary-ask`, `summary-ref`, `summary`와 경로·분석 표시 시나리오 `finder-open`, `finder-search`, `finder-path`, `finder-folder`, `finder-step`, `finder-none`, `finder-pin`, `finder-change`, `finder-ends`, `overlay-menu`, `reload`, `reload-key`, `unused`, `finder-overlay`, `overlay-dark`, `cycles`, `cycles-change`, `cycles-pin`, 처음 화면·펼침·합류·분석 상태 시나리오 `start`, `arranging`, `node-hover`, `hover-step`, `node-grow`, `dim`, `merge`, `merge-out`, `merge-hover`, `merge-click`, `merge-select`, `merge-pin`, `badge`, `pack-place`, `pack-file`, `pack-flow`, `pack-folder`, `pack-find`, `pack-pin`, `pack-overlay`, `pack-history`, `pack-toggle`, `inner-pick`, `lanes`, `numbers`, `overlap`, `line-folder`, `line-bubble`, `panel-head`, `facts-list`, `motion`, `folder-hold`, `progress`, `progress-failed`, `stale`, `var-file`, `var-external`, `var-select`, `var-inner`, `var-line`, `var-write`, `var-tip`, `var-finder`, `var-jump`, `compare-window`, `compare-pick`, `compare-fork`, `compare-on`, `compare-marks`, `compare-gone`, `compare-order`, `compare-bubble`, `compare-tree`, `compare-list`, `compare-code`, `compare-range`, `compare-route`, `compare-off`, `compare-commits`, `compare-readonly` 121개다. `--only`에 이름을 쉼표로 이어 주면 그 시나리오만 돌고, 모르는 이름을 주면 고를 이름을 적고 종료 코드 2로 끝난다.
 - **기대값**: 노드 이름은 sync-engine을 연 서버가 기준이고, 노드 수·선 수·줄 범위는 서버 응답에서 읽는다. 경로 수와 단계 수, 순환 묶음, 미사용 후보 수, 파일 상자의 펼침 단계에 그리는 정의, 줄기와 들어오는 합계는 `/api/graph`와 `/api/unused` 응답에서 화면과 같은 규칙으로 계산한다. 폴더 안의 파일 상자를 보는 시나리오는 소스 루트 바로 아래의 접힌 폴더를 먼저 펼친다.
 - **순환 시나리오**: `cycles`, `cycles-change`, `cycles-pin`은 `tests/fixtures/cycle_repo`를 연 서버의 주소를 `--cycle-url`로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다.
 - **`reload`, `reload-key`, `stale`**: 대상 레포의 파일을 고쳤다가 되돌리므로 `tests/fixtures/sample_repo`를 임시 폴더로 복사해 연 서버의 주소를 `--reload-url`로 받았을 때만 돈다. `reload`는 폴더를 펴고 함수를 고르고 보기 설정을 바꾼 뒤 새로고침해 보던 화면과 고른 함수의 화면 좌표가 그대로인지, 고른 함수를 지운 뒤와 리니지 뷰에서 새로고침한 화면, "화면 초기화"와 뒤로 가기를 본다. `stale`은 새로고침 버튼의 점과 접근성 이름, 말풍선을 보고 사진을 `hf5-reload-{idle,stale,stale-dark,narrow}.png`에 남긴다.
@@ -297,18 +319,21 @@ node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wi
 - **`progress`, `progress-failed`**: `/api/status`의 응답을 바꿔 분석 중인 화면과 분석하지 못한 화면을 본다. 서버의 분석은 건드리지 않는다.
 - **`var-file`, `var-external`, `var-select`, `var-inner`, `var-line`, `var-write`, `var-tip`, `var-finder`, `var-jump`**: 모듈 변수 노드를 본다. 고르는 파일과 변수, 기대값은 `/api/graph`에서 계산한다. 펼침 단계와 전부 펼침 단계의 변수와 손잡이의 수, 외부 노드 토글이 외부 값 변수를 그래프·검색·파일트리에서 보이고 숨기는 것, 변수를 고른 정보 패널과 코드 뷰어, 안쪽 변수를 고른 전부 펼침과 뒤로·앞으로, 읽음 선의 말풍선과 선 위의 수, `g` 배지와 바꿈 선, 변수 노드의 말풍선과 커서를 올린 모양·우클릭·"모두 요약"의 수, 경로 탐색 창이 변수를 받지 않는 것, 코드 뷰어의 `Mod`+클릭을 본다. `var-select`와 `var-write`는 `--wide-url`을 받으면 그 레포에서 본다. 사진은 `mv-{이름}.png`로 남긴다.
 - **`finder-pin`**: 경로 고정 중에 경로 밖 파일 상자, 접힌 폴더 상자, 그래프 바탕, `Esc`, 더블클릭, 파일트리, `Mod+P`, 코드 뷰어의 `Mod`+클릭, 요약의 정의 표기, `Alt+←`, 토글과 흐름 단계를 실제로 눌러 강조가 그대로인지 본다.
-- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 103개 시나리오는 요약을 만드는 요청을 서버로 보내지 않고, Claude Code CLI의 설치와 로그인 상태를 전제하지 않는다.
-- **`changes`**: 대상 레포에서 `git status`·`git diff`를 직접 읽어 화면과 비교하므로 서버와 같은 컴퓨터에서 돌린다. 수정한 `.py` 파일이 없는 레포에서는 확인 항목을 건너뛴다.
+- **`summary`**: 실제로 요약 하나를 만들어 Claude Code 구독 사용량을 쓰므로 `--only`로 지정하거나 `--with-summary`를 줬을 때만 돈다. 나머지 120개 시나리오는 요약을 만드는 요청을 서버로 보내지 않고, Claude Code CLI의 설치와 로그인 상태를 전제하지 않는다.
+- **`changes`**: 대상 레포에서 `git status`·`git diff`를 직접 읽어 화면과 비교하므로 서버와 같은 컴퓨터에서 돌린다. 수정한 `.py` 파일이 없는 레포에서는 확인 항목을 건너뛴다. `--compare-url`을 받으면 그 레포에서 `HEAD`에 없던 함수의 추가 표시와 줄만 밀린 함수에 표시가 없는 것도 본다.
+- **`compare-*`**: 시점 비교를 본다. `PYTHONPATH=. .venv/bin/python -m tests.history <임시 폴더>`로 만든 이력 고정 레포를 연 서버의 주소를 `--compare-url`로 받았을 때만 돌고, 기대값은 그 서버의 `/api/history`·`/api/compare/stat`·`/api/compare` 응답에서 읽는다. 스크린샷은 `s5-{이름}.png`에 남긴다. `compare-range`의 코드 분석은 서버 대신 답하고, `compare-readonly`는 앞의 시나리오를 돈 뒤 그 레포의 `git status`, `git for-each-ref`, `.git` 아래 파일 목록이 그대로인지 본다.
 - **스크린샷**: `~/data/code-atlas/screenshots/s2-{이름}.png`(1700×1000, 배율 2)에 남기고, 경로·분석 표시 시나리오는 `s3-{이름}.png`에, 처음 화면·펼침·합류·분석 상태 시나리오는 `s4-{이름}.png`에 남긴다. `toolbar`는 창 폭 1700·1440·1280·1160·980·900·720px마다 `s2-toolbar-{폭}.png`를, `finder-open`과 `overlay-menu`는 창 폭 1700·1280·980·720px마다 `s3-{이름}-{폭}.png`를 더 남긴다.
 - **브라우저**: Playwright가 받은 chromium과 다른 실행 파일을 쓰려면 환경 변수 `CHROMIUM_PATH`에 경로를 넣는다.
 - **캐시를 쓰지 않는 실행**: 시나리오용 서버가 `~/.cache/code-atlas`에 분석 캐시를 남기지 않게 하려면 서버를 `HOME`을 임시 폴더로 바꿔 띄운다.
 
-성능은 두 스크립트로 잰다. 둘 다 대상 레포에 파일을 쓰지 않는다.
+성능은 세 스크립트로 잰다. 모두 대상 레포에 파일을 쓰지 않는다.
 
 ```bash
 .venv/bin/python scripts/measure_analysis.py <레포> [--python PATH] [--runs 3] [--no-cache] [--cache-dir 폴더] [--dump 결과.json] [--compare 결과.json]
-cd frontend && node scripts/perf.mjs <주소> [--expand 폴더id] [--pick 검색어] [--shot 경로 접두어]
+.venv/bin/python scripts/measure_compare.py <레포> <기준> [대상] [--python PATH] [--runs 3] [--cold] [--cache-dir 폴더]
+cd frontend && node scripts/perf.mjs <주소> [--expand 폴더id] [--pick 검색어] [--compare 기준,대상] [--shot 경로 접두어]
 ```
 
 - **`measure_analysis.py`**: 실행마다 분석을 한 번 돌려 전체 시간과 단계별 시간(파일 수집, 구조 추출, 환경 지문, 언어 서버 기동과 준비 확인, 정의 요청, 그래프 조립, 미사용 판정, 캐시 쓰기), 정의 요청 수, 응답 없음 수를 한 줄에 실행 하나씩 JSONL로 출력한다. `--cache-dir`은 분석 캐시를 둘 폴더이고, `--dump`는 마지막 실행의 분석 결과를 `code-atlas analyze --json`과 같은 JSON으로 쓰며, `--compare`는 그 JSON과 노드·선·지점별 판정을 견줘 다른 수를 적는다.
-- **`perf.mjs`**: 떠 있는 서버의 화면을 열어 첫 상자가 그려지기까지의 시간, 처음 화면·`--expand`로 펼친 화면·`--pick`으로 고른 화면마다 조작부터 화면이 멈추기까지의 시간, ELK worker의 응답 시간, 느린 배치 표시가 떴는지, 보이는 상자·선·줄기의 수, 화면을 끌어 옮길 때와 휠로 확대할 때의 프레임 간격(p50·p95, fps), `--pick`으로 고른 노드로 가는 화면 이동의 프레임 간격과 걸린 시간을 JSON 한 줄로 출력한다.
+- **`measure_compare.py`**: 실행마다 앱을 새로 만들어(포트를 열지 않는다) `/api/history`, `/api/compare/stat`, `POST /api/compare`의 시간과 과거 시점의 분석이 띄운 언어 서버의 수, 정의 요청 수, 응답 없음 수, 바뀐 파일·노드·선의 수를 한 줄에 실행 하나씩 출력한다. 분석 캐시는 임시 폴더에 복사해 쓴다. `--cold`는 실행마다 복사본에서 두 시점의 판정을 지워 처음 비교를 재고, 없으면 캐시에 있는 시점의 비교를 잰다.
+- **`perf.mjs`**: 떠 있는 서버의 화면을 열어 첫 상자가 그려지기까지의 시간, 처음 화면·`--expand`로 펼친 화면·`--pick`으로 고른 화면마다 조작부터 화면이 멈추기까지의 시간, ELK worker의 응답 시간, 느린 배치 표시가 떴는지, 보이는 상자·선·줄기의 수, 화면을 끌어 옮길 때와 휠로 확대할 때의 프레임 간격(p50·p95, fps), `--pick`으로 고른 노드로 가는 화면 이동의 프레임 간격과 걸린 시간을 JSON 한 줄로 출력한다. `--compare`를 주면 비교 창이 뜨기까지와 줄 수가 적히기까지의 시간, 비교 응답이 온 뒤 배치가 멈추기까지의 시간, 비교가 켜진 화면의 프레임 간격을 함께 낸다.
