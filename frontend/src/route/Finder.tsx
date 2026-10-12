@@ -1,10 +1,9 @@
 // 그래프 왼쪽 아래 칸(`graph/Dock.tsx`)의 경로 찾기 버튼과 그 위에 펼치는 경로 탐색 창. 저장소의 finder를 읽고 쓴다.
 // 출발 칸과 도착 칸이 차면 찾은 경로를 숫자 버튼으로 나열하고, 고른 경로의 단계 목록과 경로 전체 보기 버튼, 고정 안내,
 // 끄기 버튼을 그린다.
-import { useReactFlow } from "@xyflow/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useFlight } from "../graph/flight";
 import { PATH_LIMIT } from "../graph/route";
-import { fitTarget, stageOf } from "../graph/viewport";
 import { nodeIndex } from "../graph/visible";
 import { build } from "../search/index";
 import { pinned, useAtlas } from "../state/store";
@@ -26,7 +25,7 @@ export function Finder() {
   const swapEnds = useAtlas((s) => s.swapEnds);
   const pickPath = useAtlas((s) => s.pickPath);
   const clearFinder = useAtlas((s) => s.clearFinder);
-  const { fitView } = useReactFlow();
+  const { fit } = useFlight();
   const nodes = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
   const entries = useMemo(() => (graph === null ? [] : build(graph, showTests)), [graph, showTests]);
 
@@ -83,7 +82,7 @@ export function Finder() {
   const fitPath = (event: ReactMouseEvent) => {
     const root = event.currentTarget.closest(".graph");
     if (root !== null && path !== undefined) {
-      void fitView(fitTarget(stageOf(root), path));
+      fit(root, path);
     }
   };
 
