@@ -6,9 +6,9 @@ import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
 import { ASIDE_GAP, BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, labelOf, type Box, type RouteEnd } from "../layout";
-import { valueAside } from "../names";
+import { kilo, valueAside } from "../names";
 import { lifted } from "../scope";
-import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, insideTip, locTip } from "../tips";
+import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, sizeTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
   node: AtlasNode;
@@ -23,8 +23,13 @@ export interface AtlasNodeData extends Record<string, unknown> {
   flow: boolean;
   /** 선택한 노드가 든 파일 상자 안의 노드다 */
   local: boolean;
-  /** 접힌 파일 상자와 접힌 폴더 상자의 배지에 적는 수. 파일 상자는 안에 든 함수·클래스·변수 수, 폴더 상자는 안에 든 파일 수다. 그 밖의 노드는 0이다. */
+  /** 오른쪽 위 배지의 말풍선에 적는 안에 든 것의 수. 파일 상자는 안에 든 함수·클래스·변수 수, 폴더는 안에 든 파일 수다. 그 밖의 노드는 0이다. */
   inside: number;
+  /**
+   * 오른쪽 위 배지에 적는 줄 수. 파일 상자·클래스·데이터 클래스는 노드의 `loc`이고 폴더는 안에 든 보이는 파일의 줄 수 합(`visible.ts`의 `folderLines`)이다.
+   * 배지를 달지 않는 노드는 null이다.
+   */
+  loc: number | null;
   /** 이 함수·메서드에서 나가는 바꿈 선의 도착 변수 이름. 비지 않으면 모듈 변수 변경 배지를 단다. */
   writes: string[];
   /** 이 노드와 이 노드로 올린 안쪽 노드 가운데 LLM 요약을 만드는 중인 노드 수 */
@@ -220,16 +225,7 @@ export function Label({ data, bold = false }: { data: AtlasNodeData; bold?: bool
   );
 }
 
-/** 이름표 오른쪽의 줄 수 숫자 */
-export function Loc({ data }: { data: AtlasNodeData }) {
-  return (
-    <span className="loc" data-tip={locTip(data.node)}>
-      {data.node.loc}
-    </span>
-  );
-}
-
-/** 파일 상자의 줄 수 숫자 뒤에 적는 변경 상태 글자 */
+/** 파일 상자의 이름표 뒤에 적는 변경 상태 글자 */
 export function Mark({ change }: { change: Change | null }) {
   return change === null ? null : (
     <span className="change-mark" data-tip={CHANGE_TIPS[change]}>
@@ -239,7 +235,7 @@ export function Mark({ change }: { change: Change | null }) {
 }
 
 /**
- * 감싼 모양의 오른쪽 위 모서리에 접힌 상자 안에 든 것의 수를, 오른쪽 아래 모서리에 모듈 변수 변경을 달고, LLM 요약을 만드는 중이면
+ * 감싼 모양의 오른쪽 위 모서리에 상자의 줄 수(`names.ts`의 `kilo`로 줄인 글)를, 오른쪽 아래 모서리에 모듈 변수 변경을 달고, LLM 요약을 만드는 중이면
  * 도는 표시를 그린다. 도는 표시는 감싼 모양이 원(`circle`)이면 그 원의 테두리 위에서 도는 고리이고, 아니면 왼쪽 위 모서리의
  * 도는 원이다. 글자 요소에만 그린다. 배지의 바깥쪽 끝은 모양의 그쪽 끝에서 `BADGE_OVERHANG`만큼 나간다.
  * 배지마다 뜻을 적은 말풍선 글(`tips.ts`)을 `data-tip`에 담는다.
@@ -260,9 +256,9 @@ export function Badges({ data, circle = false }: { data: AtlasNodeData; circle?:
           data-tip={busyTip(data.node, data.busy)}
         />
       )}
-      {data.inside > 0 && (
-        <span className="badge badge-inside" style={style} data-tip={insideTip(data.node, data.inside)}>
-          {data.inside}
+      {data.loc !== null && (
+        <span className="badge badge-lines" style={style} data-tip={sizeTip(data.node, data.loc, data.inside)}>
+          {kilo(data.loc)}
         </span>
       )}
       {data.writes.length > 0 && (
@@ -298,7 +294,7 @@ export function Diamond({ data }: { data: AtlasNodeData }) {
   );
 }
 
-/** 변수 노드의 줄 수 숫자 뒤에 적는 값의 종류와 원소 수 */
+/** 변수 노드의 이름표 뒤에 적는 값의 종류와 원소 수 */
 export function Aside({ data }: { data: AtlasNodeData }) {
   return (
     <span className="node-aside" style={{ marginLeft: ASIDE_GAP }}>

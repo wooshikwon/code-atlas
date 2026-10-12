@@ -75,8 +75,7 @@ export const BADGE_HEIGHT = 14;
 export const BADGE_GAP = 3;
 /** 원과 그 오른쪽 이름표 사이의 폭. 배지가 나온 폭과 배지 뒤에 남기는 폭을 더한 값이다. */
 export const CIRCLE_GAP = BADGE_OVERHANG + BADGE_GAP;
-export const LOC_GAP = 5;
-/** 변수 노드의 줄 수 숫자와 그 뒤에 적는 값의 종류·원소 수 사이의 폭 */
+/** 변수 노드의 이름표와 그 뒤에 적는 값의 종류·원소 수 사이의 폭 */
 export const ASIDE_GAP = 6;
 /** 강조하는 경로의 출발 노드와 도착 노드 이름표 뒤에 적는 표지 */
 export const END_NAMES = { from: "출발", to: "도착" } as const;
@@ -85,7 +84,7 @@ export type RouteEnd = keyof typeof END_NAMES;
 export const END_GAP = 6;
 export const END_PAD = 6;
 const COUNT_GAP = 12;
-/** 펼친 파일 상자의 머리 줄에서 줄 수 뒤에 적는 변경 상태 글자 앞의 폭과 그 글자 가운데 넓은 쪽 */
+/** 펼친 파일 상자의 머리 줄에서 이름표 뒤에 적는 변경 상태 글자 앞의 폭과 그 글자 가운데 넓은 쪽 */
 const CHANGE_GAP = 5;
 const CHANGE_MARK = "M";
 const FOLDER_PAD = 36;
@@ -338,15 +337,15 @@ interface Marks {
   end?: RouteEnd;
 }
 
-/** 순환 아이콘, 진입점 표지, 이름표의 폭. loc이 참이면 이름표 오른쪽 줄 수 숫자의 폭을, 출발·도착 표지가 있으면 그 폭을 더한다. */
-function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, loc: boolean, marks: Marks): number {
+/** 순환 아이콘, 진입점 표지, 이름표의 폭. 출발·도착 표지가 있으면 그 폭을 더한다. */
+function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, marks: Marks): number {
   const label = (marks.cycle ? CYCLE_MARK_WIDTH : 0) + (node.entry ? ENTRY_MARK_WIDTH : 0) + measure(labelOf(node), bold);
   const tag = marks.end === undefined ? 0 : END_GAP + measure(END_NAMES[marks.end], true) + 2 * END_PAD;
-  return (loc ? label + LOC_GAP + measure(String(node.loc)) : label) + tag;
+  return label + tag;
 }
 
 function tableSize(node: AtlasNode, measure: Measure, marks: Marks): Size {
-  const widths = [labelWidth(node, measure, true, true, marks), ...tableRows(node).map((r) => measure(r))];
+  const widths = [labelWidth(node, measure, true, marks), ...tableRows(node).map((r) => measure(r))];
   return { width: Math.ceil(Math.max(...widths)) + 16, height: tableHeight(node) };
 }
 
@@ -355,17 +354,17 @@ function leafSize(node: AtlasNode, measure: Measure, marks: Marks): Size {
   switch (node.kind) {
     case "function":
     case "method":
-      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true, marks), height: LEAF_HEIGHT };
+      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, marks), height: LEAF_HEIGHT };
     case "variable":
-      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, true, marks) + ASIDE_GAP + measure(valueAside(node)), height: LEAF_HEIGHT };
+      return { width: CIRCLE + CIRCLE_GAP + labelWidth(node, measure, false, marks) + ASIDE_GAP + measure(valueAside(node)), height: LEAF_HEIGHT };
     case "class":
-      return { width: labelWidth(node, measure, true, false, marks) + 28, height: HEX_HEIGHT };
+      return { width: labelWidth(node, measure, true, marks) + 28, height: HEX_HEIGHT };
     case "dataclass":
       return tableSize(node, measure, marks);
     case "package":
-      return { width: labelWidth(node, measure, true, false, marks) + FOLDER_PAD, height: MODULE_HEIGHT };
+      return { width: labelWidth(node, measure, true, marks) + FOLDER_PAD, height: MODULE_HEIGHT };
     case "external":
-      return { width: labelWidth(node, measure, false, false, marks) + 24, height: EXTERNAL_HEIGHT };
+      return { width: labelWidth(node, measure, false, marks) + 24, height: EXTERNAL_HEIGHT };
     case "module":
       return { width: MODULE_WIDTH, height: MODULE_HEIGHT };
   }
@@ -378,7 +377,7 @@ function leafSize(node: AtlasNode, measure: Measure, marks: Marks): Size {
  */
 function boxOptions(node: AtlasNode, functions: number, measure: Measure, marks: Marks, handle: Size | null): Record<string, string> {
   let top = node.kind === "package" ? REGION_HEAD + PAD : HEADER;
-  let minWidth = labelWidth(node, measure, true, node.kind === "module", marks) + 2 * PAD;
+  let minWidth = labelWidth(node, measure, true, marks) + 2 * PAD;
   if (node.kind === "module") {
     minWidth += CHANGE_GAP + measure(CHANGE_MARK, true) + COUNT_GAP + measure(moduleHeader(node, functions));
   }

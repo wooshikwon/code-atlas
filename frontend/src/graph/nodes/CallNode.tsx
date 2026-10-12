@@ -1,9 +1,9 @@
 import type { Node, NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { useChange } from "../../state/changes";
-import { counted, type Side } from "../calls";
+import type { Side } from "../calls";
 import { CIRCLE_GAP } from "../layout";
-import { Circle, DIAMOND_POINTS, EntryMark, Handles, Loc, nodeProps, sameNode, type AtlasNodeData } from "./common";
+import { Circle, DIAMOND_POINTS, EntryMark, Handles, nodeProps, sameNode, type AtlasNodeData } from "./common";
 
 export interface CallNodeData extends AtlasNodeData {
   /** 메서드면 `클래스.이름()` */
@@ -47,7 +47,7 @@ function Shape({ data }: { data: CallNodeData }) {
 }
 
 /**
- * 지름 16px 원, 이름표와 줄 수, 그 아래 파일 경로. 더 펼 선이 남은 양옆 노드는 바깥쪽에 + 버튼을 단다.
+ * 지름 16px 원, 이름표, 그 아래 파일 경로. 더 펼 선이 남은 양옆 노드는 바깥쪽에 + 버튼을 단다.
  * + 버튼은 글자 요소가 그리고 바탕 요소는 같은 폭을 비운다.
  */
 export const CallNode = memo(function CallNode({ data }: NodeProps<CallFlowNode>) {
@@ -74,7 +74,6 @@ export const CallNode = memo(function CallNode({ data }: NodeProps<CallFlowNode>
               {data.node.entry && <EntryMark className="node-entry" />}
               {data.label}
             </span>
-            {counted(data.node) && <Loc data={data} />}
           </span>
           {data.file !== null && <span className="call-file">{data.file}</span>}
         </span>

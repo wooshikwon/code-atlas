@@ -6,7 +6,7 @@ import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { flow } from "../graph/flow";
 import { arriving, picked, trunkTarget } from "../graph/scope";
-import { hidden, nodeIndex, shown, unitOf, unresolvedWithin } from "../graph/visible";
+import { folderLines, hidden, nodeIndex, shown, unitOf, unresolvedWithin } from "../graph/visible";
 import { focusOf } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { chosenOf, litOf, useAtlas, type Selection } from "../state/store";
@@ -127,7 +127,7 @@ export function InfoPanel() {
     [graph, index, off, via, lit, file, selection, base],
   );
 
-  /** 고른 노드의 연결과 안에 든 정의 수, 미확인 호출 수. 파일 상자와 폴더 상자는 안에 든 노드의 미확인 호출 수를 합친다. */
+  /** 고른 노드의 연결과 안에 든 정의 수, 미확인 호출 수, 줄 수. 파일 상자와 폴더 상자는 안에 든 노드의 미확인 호출 수를 합치고, 폴더 상자의 줄 수는 그래프의 폴더가 적는 수(`folderLines`)다. */
   const facts = useMemo(() => {
     if (graph === null || index === null || off === null || node === undefined) {
       return null;
@@ -136,6 +136,7 @@ export function InfoPanel() {
       ...linksOf(graph, index.nodes, off, node.id),
       contents: contentsOf(graph, index.nodes, off, node),
       unresolved: UNITS.has(node.kind) ? (unresolvedWithin(graph, off).get(node.id) ?? 0) : node.unresolved,
+      loc: folderLines(graph, off).get(node.id) ?? node.loc,
     };
   }, [graph, index, off, node]);
 
@@ -176,9 +177,9 @@ export function InfoPanel() {
     rows.push({ id: "via", topic: "관계", text: relationText(arrived.links.kinds), press: () => list("via"), pressed: listed === "via" });
   }
   if (node !== undefined && facts !== null) {
-    const size = sizeText(node);
+    const size = sizeText(node, facts.loc);
     if (size !== null) {
-      rows.push({ id: "size", topic: "크기", text: size, brief: `${node.loc}줄` });
+      rows.push({ id: "size", topic: "크기", text: size, brief: `${facts.loc}줄` });
     }
     if (facts.contents.length > 0) {
       rows.push({ id: "contents", topic: "포함", text: facts.contents.map(({ name, count }) => `${name} ${count}개`).join(", ") });

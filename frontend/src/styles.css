@@ -882,7 +882,7 @@ ul {
 }
 
 /* 노드 하나는 바탕 요소(.node-body)와 글자 요소(.node-face)로 그린다. 두 요소는 같은 종류 클래스로 크기와 안쪽 배치를 함께 쓰고,
-   바탕 요소가 테두리와 채움을, 글자 요소가 이름표·줄 수 숫자·배지·선택 고리를 그린다. 글자 요소는 테두리 대신 같은 폭의 안쪽 여백을 둔다.
+   바탕 요소가 테두리와 채움을, 글자 요소가 이름표·배지·선택 고리를 그린다. 글자 요소는 테두리 대신 같은 폭의 안쪽 여백을 둔다.
    두 요소의 층은 graph/layers.ts가 정한다. */
 .node-package,
 .node-module,
@@ -1349,11 +1349,6 @@ ul {
   color: var(--ink);
 }
 
-/* 접힌 상자의 배지는 바탕을 줄 수 숫자의 색으로 바꾼다. 글자는 화면 바탕색 그대로이고 불투명도는 상자의 단계를 따른다. */
-.react-flow__node.pointed .badge-inside {
-  background: var(--loc);
-}
-
 .react-flow__node.pointed :is(.node-module-head, .node-region-head) .node-label {
   text-shadow: 0 0 2px color-mix(in srgb, var(--ink) 45%, transparent);
 }
@@ -1393,7 +1388,7 @@ ul {
   visibility: hidden;
 }
 
-/* 배지는 감싼 모양의 모서리에 세로 가운데를 맞춘다. 미확인 호출 수는 오른쪽 위, 모듈 변수 변경은 오른쪽 아래, 원이 없는 모양의 도는 원은 왼쪽 위다.
+/* 배지는 감싼 모양의 모서리에 세로 가운데를 맞춘다. 상자의 줄 수는 오른쪽 위, 모듈 변수 변경은 오른쪽 아래, 원이 없는 모양의 도는 원은 왼쪽 위다.
    모양 밖으로 나가는 폭 --overhang은 layout.ts의 BADGE_OVERHANG을 컴포넌트가 넣는다. 글자 요소는 테두리가 없으므로 배지의 위치를
    모양의 바깥 변에서 잰다. */
 .badge {
@@ -1409,8 +1404,8 @@ ul {
   white-space: nowrap;
 }
 
-/* 접힌 상자 안에 든 것의 수 */
-.badge-inside {
+/* 상자의 줄 수 */
+.badge-lines {
   top: -7px;
   right: calc(0px - var(--overhang));
   color: var(--surface);
@@ -1919,18 +1914,13 @@ ul {
 }
 
 
-.legend-inside {
+.legend-lines {
   fill: var(--muted);
 }
 
-.legend-inside-count {
+.legend-lines-count {
   fill: var(--surface);
   font-size: 9px;
-}
-
-.legend-loc {
-  fill: var(--loc);
-  font-size: 10px;
 }
 
 .legend-change-bar {

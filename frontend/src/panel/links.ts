@@ -169,14 +169,14 @@ export function relationText(kinds: Links["kinds"]): string {
 }
 
 /**
- * 노드의 줄 수와 정의의 줄 범위를 `42줄 (120~161)`로 적는다. 파일 상자와 폴더 상자는 줄 수만 적고, 변수는 값의 종류와 원소 수를
+ * 노드의 줄 수 loc과 정의의 줄 범위를 `42줄 (120~161)`로 적는다. 파일 상자와 폴더 상자는 줄 수만 적고, 변수는 값의 종류와 원소 수를
  * 앞에 적으며(`set · 15개 · 17줄 (21~37)`), 외부 노드는 null이다.
  */
-export function sizeText(node: AtlasNode): string | null {
+export function sizeText(node: AtlasNode, loc: number): string | null {
   if (node.kind === "external") {
     return null;
   }
-  const lines = BOXES.has(node.kind) || node.range === null ? `${node.loc}줄` : `${node.loc}줄 (${node.range[0]}~${node.range[1]})`;
+  const lines = BOXES.has(node.kind) || node.range === null ? `${loc}줄` : `${loc}줄 (${node.range[0]}~${node.range[1]})`;
   return node.kind === "variable" ? `${valueAside(node)} · ${lines}` : lines;
 }
 

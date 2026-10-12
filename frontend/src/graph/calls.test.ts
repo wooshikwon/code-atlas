@@ -166,6 +166,6 @@ describe("변수 노드", () => {
   it("변수 노드의 크기는 같은 글의 함수 노드와 같은 식으로 잡는다", () => {
     const made = callview(variableFixture, "conf:Preset", [], none);
     const size = callSize(made, variables, variables.get("conf:PRESETS")!, measure);
-    expect(size).toEqual({ width: 16 + 9 + Math.max(measure("PRESETS") + 5 + measure("6"), measure("conf.py")), height: LEAF_HEIGHT + 14 });
+    expect(size).toEqual({ width: 16 + 9 + Math.max(measure("PRESETS"), measure("conf.py")), height: LEAF_HEIGHT + 14 });
   });
 });

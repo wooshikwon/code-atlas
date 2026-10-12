@@ -66,6 +66,7 @@ function itemsOf(
       flow: false,
       local: false,
       inside: 0,
+      loc: null,
       writes: writes.get(id) ?? [],
       busy: making.includes(id) ? 1 : 0,
       cycle: null,

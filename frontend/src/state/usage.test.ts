@@ -1,18 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { added, cacheTip, kilo, usageText } from "./usage";
+import { added, cacheTip, usageText } from "./usage";
 
 const usage = { input: 2, cache_write: 1487, cache_read: 16411, output: 527 };
-
-describe("kilo", () => {
-  it("1,000 미만은 그대로 적는다", () => {
-    expect([0, 7, 840, 999].map(kilo)).toEqual(["0", "7", "840", "999"]);
-  });
-
-  it("10k 미만은 소수 한 자리까지, 10k부터는 정수로 반올림한다", () => {
-    expect([1000, 1249, 1250, 9013, 9949].map(kilo)).toEqual(["1.0k", "1.2k", "1.3k", "9.0k", "9.9k"]);
-    expect([9950, 9999, 20985, 21499, 21500, 180521, 201506, 1_900_000].map(kilo)).toEqual(["10k", "10k", "21k", "21k", "22k", "181k", "202k", "1900k"]);
-  });
-});
 
 describe("added", () => {
   it("칸마다 더하고, 없는 쪽은 더하지 않는다", () => {
