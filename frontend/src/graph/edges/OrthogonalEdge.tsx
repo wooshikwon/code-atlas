@@ -2,22 +2,24 @@
 // 마우스를 올린 선은 `data-pointed`를 받아 1px 굵게, 진하기를 한 단계 올려(`scope.ts`의 `lifted`) 다른 선 위의 층에 그린다.
 // 강조하는 경로의 걸음은 `data-route`에 걸음 종류를 받아 굵게 그리고, 선을 눌러 온 상태에서 지나온 선은 `data-via`를 받아 1px 굵게 그린다.
 // 순환 의존 표시가 켜진 동안의 순환 선만 critical 색으로 그린다.
+// 시점 비교에서 삭제된 관계만 든 선은 `data-gone`을 받아 마우스를 올려도 진하기를 올리지 않고, 수 대신 빨강 점(`.edge-gone`)을 그린다.
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
 import { useMemo, useRef } from "react";
 import type { EdgeGroup } from "../../api/types";
 import { LAYER } from "../layers";
 import { lifted, type EdgeKey, type Tone } from "../scope";
 import type { Point } from "../layout";
-import { emphasized, ownNumbers, roundedPath, trunkShade, type EdgeView, type Lines, type TrunkView } from "../view";
+import { emphasized, MARK_SIZE, ownNumbers, roundedPath, trunkShade, type EdgeView, type Lines, type TrunkView } from "../view";
 import { Trunk } from "./Trunk";
 
 /**
  * pointed는 마우스를 올린 선이고 cycle은 순환 의존 표시가 칠하는 순환 선이다. whole은 줄기에 든 선이 줄기 위에 전체 경로를 그리는지다.
  * own은 활성화된 선이 그 선 위에 적는 sites 수의 가운데 점이고, 적지 않으면 null이다. sum은 들어오는 줄기 위에 전체 경로를 그리는 선이
- * 줄기의 들어오는 합계를 자기 선 위에 한 번 더 적을 점과 값이다. 전체 경로가 줄기의 합계를 덮기 때문이다.
+ * 줄기의 들어오는 합계를 자기 선 위에 한 번 더 적을 점과 값이다. 전체 경로가 줄기의 합계를 덮기 때문이다. dot은 빨강 점을 그리는
+ * 가운데 점이다. 그 선의 `mark`이고, 줄기가 점을 그리는 선이 전체 경로를 그리면 줄기의 점을 한 번 더 그린다.
  */
 export type AtlasFlowEdge = Edge<
-  EdgeView & { pointed: boolean; cycle: boolean; whole: boolean; own: Point | null; sum: { at: Point; sites: number } | null },
+  EdgeView & { pointed: boolean; cycle: boolean; whole: boolean; own: Point | null; sum: { at: Point; sites: number } | null; dot: Point | null },
   "orthogonal"
 >;
 
@@ -49,7 +51,7 @@ function bundled(view: EdgeView): boolean {
 
 /**
  * 그릴 선마다 React Flow 선 하나와 줄기마다 하나. 마우스를 올린 선 pointed는 다른 선 위의 층에 그 선의 진하기에서 한 단계 올린
- * 진하기(`lifted`)로 그린다. 줄기에 든 선이 모두 pointed에 들면 그 줄기도 같은 방식으로 그린다. cycles에 든 선은 순환 선이다. 줄기에 든 선은 가지만 그리고,
+ * 진하기(`lifted`)로 그린다. 줄기에 든 선이 모두 pointed에 들면 그 줄기도 같은 방식으로 그린다. 삭제된 관계만 든 선과 그런 선만 든 줄기는 진하기를 올리지 않는다. cycles에 든 선은 순환 선이다. 줄기에 든 선은 가지만 그리고,
  * 강조하는 선(`emphasized`)은 줄기 위에 전체 경로를 한 번 더 그리고 그 선의 수를 선 위에 적는다(`ownNumbers`).
  * 같은 층에서는 가지, 줄기, 강조하는 선 순서로 그린다. 마우스를 올려서만 강조하는 선은 다른 선 위의 층에 그리므로 순서를 옮기지 않아,
  * 마우스를 올리고 뗄 때 선의 순서가 바뀌지 않는다. 앞에 만든 선 before 가운데 층과 데이터의 내용이 그대로인 선은 그 객체를
@@ -74,12 +76,13 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
     const own = numbers.get(view.key) ?? null;
     const stem = whole && view.trunks.in !== null ? stemOf.get(view.trunks.in)! : null;
     const sum = stem === null || stem.at === null ? null : { at: stem.at, sites: stem.sites };
+    const dot = view.mark ?? stem?.mark ?? null;
     return kept({
       id: view.key,
       source: view.source,
       target: view.target,
       type: "orthogonal",
-      data: { ...view, ...(on ? lifted(view) : {}), pointed: on, cycle, whole, own, sum },
+      data: { ...view, ...(on && !view.gone ? lifted(view) : {}), pointed: on, cycle, whole, own, sum, dot },
       zIndex: on ? LAYER.pointed : LAYER.edge,
     });
   });
@@ -93,7 +96,7 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
       source: members[0].source,
       target: members[0].target,
       type: "trunk",
-      data: { ...trunk, ...(on ? lifted(shade) : shade), pointed: on },
+      data: { ...trunk, ...(on && trunk.mark === null ? lifted(shade) : shade), pointed: on },
       zIndex: on ? LAYER.pointed : LAYER.edge,
     });
   });
@@ -142,7 +145,7 @@ export function Markers() {
 /**
  * 선 하나. 줄기에 든 선은 두 줄기 사이의 가지를 그리고, 강조하는 선이면 그 위에 출발부터 도착까지의 경로를 화살촉과 함께
  * 한 번 더 그린다. 가지는 들어오는 줄기에 들지 않았을 때만 화살촉을 단다. 누름 영역은 가지다. 숫자는 도착 노드 앞의 들어오는 합계와,
- * 강조하는 선 위에 적는 그 선의 수 두 가지다.
+ * 강조하는 선 위에 적는 그 선의 수 두 가지다. 삭제된 관계만 든 선은 숫자 대신 빨강 점을 그린다.
  */
 export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
   if (data === undefined) {
@@ -166,6 +169,7 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
       data-cycle={data.cycle ? "" : undefined}
       data-route={data.route ?? undefined}
       data-via={data.via ? "" : undefined}
+      data-gone={data.gone ? "" : undefined}
       style={{ opacity: data.opacity }}
     >
       <path className="edge-hit" d={branch} />
@@ -184,6 +188,7 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
           {data.sum.sites}
         </text>
       )}
+      {data.dot !== null && <circle className="edge-gone" cx={data.dot.x} cy={data.dot.y} r={MARK_SIZE / 2} />}
     </g>
   );
 }
