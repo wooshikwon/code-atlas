@@ -1,11 +1,11 @@
-import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
+import { ReactFlowProvider } from "@xyflow/react";
 import { useEffect } from "react";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { usePick } from "./graph/aim";
+import { useFlight } from "./graph/flight";
 import { GraphView } from "./graph/GraphView";
 import { Progress } from "./graph/Progress";
 import { Tooltip } from "./graph/Tooltip";
-import { fitTarget, stageOf } from "./graph/viewport";
 import { Entries } from "./nav/Entries";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
@@ -28,7 +28,7 @@ function Toolbar() {
   const back = useAtlas((s) => s.back);
   const forward = useAtlas((s) => s.forward);
   const setTheme = useAtlas((s) => s.setTheme);
-  const { fitView } = useReactFlow();
+  const { fit } = useFlight();
 
   /**
    * 정보 패널이 가리지 않는 영역에 그래프 전체를 맞추고 확대 비율을 100%보다 키우지 않는다.
@@ -39,7 +39,7 @@ function Toolbar() {
     if (graph !== null) {
       const { finder, view } = useAtlas.getState();
       const path = litOf(finder)?.path ?? null;
-      void fitView(fitTarget(stageOf(graph), path));
+      fit(graph, path);
       if (view.kind === "structure") {
         useAtlas.setState({ fitted: path === null });
       }

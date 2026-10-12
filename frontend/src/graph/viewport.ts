@@ -2,9 +2,6 @@
 import type { Rect } from "../state/store";
 import type { Box, Point } from "./layout";
 
-/** 화면 이동의 길이(ms) */
-export const PAN_MS = 400;
-
 /** 확대 비율의 범위 */
 export const ZOOM_MIN = 0.05;
 export const ZOOM_MAX = 4;
@@ -156,17 +153,6 @@ export function fitPadding(area: Rect, room: Rect) {
     bottom: px(area.y + area.height - room.y - room.height),
     left: px(room.x - area.x),
   };
-}
-
-/**
- * "화면 맞춤"이 맞추는 대상. 강조하는 경로 path가 없으면 그래프 전체를 free에 맞춘다. 경로 고정 중에는 경로 위 노드를 clear에 맞춘다.
- * 확대 비율은 100%보다 키우지 않는다.
- */
-export function fitTarget({ area, free, clear }: Stage, path: string[] | null) {
-  if (path === null) {
-    return { padding: fitPadding(area, free), maxZoom: FRAME_ZOOM };
-  }
-  return { padding: fitPadding(area, clear), nodes: path.map((id) => ({ id })), maxZoom: FRAME_ZOOM };
 }
 
 /** 화면에서 관계 그래프 영역 root와 정보 패널, 왼쪽 아래 칸의 사각형을 읽는다. */

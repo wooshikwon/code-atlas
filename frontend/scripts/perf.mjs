@@ -7,6 +7,7 @@
 //   arranging 느린 배치 표시(.arranging)가 떴는지
 //   boxes, lines, trunks, zoom  보이는 상자, 선, 줄기의 수와 확대 비율
 //   pan, wheel  화면을 끌어 옮기는 2초와 휠로 확대·축소하는 2초의 프레임 간격(p50·p95 ms, fps)
+//   fly       --pick이 고른 노드로 가는 화면 이동(.graph[data-flying])의 프레임 간격과 걸린 시간(ms)
 // first_box_ms는 페이지를 열기 시작한 때부터 첫 상자가 그려지기까지다. 요약을 만드는 요청은 서버로 보내지 않는다.
 import { chromium } from "playwright";
 
@@ -64,6 +65,25 @@ function instrument() {
       };
       requestAnimationFrame(tick);
     });
+  window.__perfFlight = () =>
+    new Promise((resolve) => {
+      const gaps = [];
+      const began = performance.now();
+      let last = null;
+      const tick = (now) => {
+        const flying = document.querySelector(".graph[data-flying]") !== null;
+        if (flying && last !== null) {
+          gaps.push(now - last);
+        }
+        if ((!flying && last !== null) || now - began > 60_000) {
+          resolve(gaps);
+          return;
+        }
+        last = flying ? now : null;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
   new MutationObserver(() => {
     window.__perfArranging ||= document.querySelector(".arranging") !== null;
   }).observe(document, { childList: true, subtree: true });
@@ -81,7 +101,7 @@ async function settle(page) {
   await page.waitForFunction(
     (ms) => {
       const graph = document.querySelector(".graph");
-      const busy = graph === null || graph.hasAttribute("data-moving") || document.querySelector(".arranging") !== null;
+      const busy = graph === null || graph.hasAttribute("data-moving") || graph.hasAttribute("data-flying") || document.querySelector(".arranging") !== null;
       const now = [busy, document.querySelector(".react-flow__viewport")?.style.transform, document.querySelectorAll(".react-flow__node").length].join("|");
       if (window.__perfSeen !== now) {
         window.__perfSeen = now;
@@ -205,6 +225,7 @@ if (query !== null) {
   await page.keyboard.type(query);
   await page.waitForSelector(".palette-option", { timeout: 5_000 });
   const picked = await page.evaluate(() => document.querySelector(".palette-option")?.dataset.node ?? null);
+  const flight = page.evaluate(() => window.__perfFlight());
   out.pick = {
     query,
     id: picked,
@@ -213,6 +234,8 @@ if (query !== null) {
       await page.waitForFunction((id) => document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`) !== null, picked, { timeout: 240_000 });
     })),
   };
+  const gaps = await flight;
+  out.pick.fly = gaps.length === 0 ? null : { ...stat(gaps), ms: Math.round(gaps.reduce((sum, gap) => sum + gap, 0)) };
   await page.context().close();
 }
 await browser.close();
