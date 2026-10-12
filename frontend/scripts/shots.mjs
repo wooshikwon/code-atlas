@@ -320,12 +320,48 @@ const colorOf = (page, name) =>
 
 // ── 조작 ─────────────────────────────────────────────────────────
 
-/** 배치 움직임(300ms)과 화면 이동(400ms)이 끝나 노드 수와 화면 위치가 quiet ms 동안 그대로일 때까지 기다린다. */
+/**
+ * 프레임마다 화면 위치와 확대 비율, 화면 이동과 배치 움직임의 표시, 미니맵의 화면 영역 사각형, 고른 노드, 도착 표시를 적기 시작한다.
+ * `framesOf`가 적은 프레임을 돌려주고 기록을 끝낸다.
+ */
+const watchFrames = (page) =>
+  page.evaluate(() => {
+    const frames = [];
+    window.__shotsFrames = frames;
+    const tick = (now) => {
+      if (window.__shotsFrames !== frames) {
+        return;
+      }
+      const graph = document.querySelector(".graph");
+      const view = /translate\(([^p]+)px, ([^p]+)px\) scale\(([^)]+)\)/.exec(document.querySelector(".react-flow__viewport")?.style.transform ?? "");
+      frames.push({
+        at: now,
+        x: Number(view?.[1]),
+        y: Number(view?.[2]),
+        zoom: Number(view?.[3]),
+        flying: graph?.hasAttribute("data-flying") === true,
+        moving: graph?.hasAttribute("data-moving") === true,
+        mask: `${document.querySelector(".graph-minimap svg")?.getAttribute("viewBox")} ${document.querySelector(".react-flow__minimap-mask")?.getAttribute("d")}`,
+        selected: document.querySelector(".react-flow__node .node-selected")?.closest(".react-flow__node")?.dataset.id ?? null,
+        reached: document.querySelector(".reached") !== null,
+      });
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+const framesOf = (page) =>
+  page.evaluate(() => {
+    const frames = window.__shotsFrames;
+    window.__shotsFrames = null;
+    return frames;
+  });
+
+/** 배치 움직임(`data-moving`)과 화면 이동(`data-flying`)이 끝나 노드 수와 화면 위치가 quiet ms 동안 그대로일 때까지 기다린다. */
 async function settle(page, quiet = 500) {
   await page.waitForFunction(
     (ms) => {
       const graph = document.querySelector(".graph");
-      const busy = graph === null || graph.hasAttribute("data-moving") || document.querySelector(".graph-empty") !== null;
+      const busy = graph === null || graph.hasAttribute("data-moving") || graph.hasAttribute("data-flying") || document.querySelector(".graph-empty") !== null;
       const now = [
         busy,
         document.querySelector(".react-flow__viewport")?.style.transform,
@@ -1537,7 +1573,6 @@ async function minimap(t, page) {
   const [zoom, before] = [await zoomOf(page), await viewport()];
   const area = await rectOf(page, ".graph-minimap");
   await page.mouse.click(area.x + area.width * 0.8, area.y + area.height * 0.5);
-  await page.waitForTimeout(700);
   await settle(page);
   t.check(
     "미니맵을 누르면 확대 비율은 그대로 두고 화면이 그 위치로 옮겨 간다",
@@ -4185,7 +4220,6 @@ async function finderPath(t, page) {
   await pickPath(page, 0, route.paths[0].length - 1);
   const transformOf = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
   await page.getByRole("button", { name: "화면 맞춤" }).click();
-  await page.waitForTimeout(600);
   await rest(page);
   const fitted = { transform: await transformOf(), zoom: await zoomOf(page), seen: [] };
   for (const id of route.paths[0]) {
@@ -4198,11 +4232,9 @@ async function finderPath(t, page) {
   );
   await page.screenshot({ path: join(OUT, "s3-finder-path-fit.png") });
   await page.click(".finder-step >> nth=-1");
-  await page.waitForTimeout(600);
   await rest(page);
   const stepped = await transformOf();
   await page.click(".finder-fit");
-  await page.waitForTimeout(600);
   await rest(page);
   t.check(
     "경로 탐색 창의 경로 전체 보기 버튼이 화면 맞춤과 같은 화면으로 맞춘다",
@@ -4211,7 +4243,6 @@ async function finderPath(t, page) {
   );
   await page.click(".finder-step >> nth=0");
   await page.click(".finder-fit");
-  await page.waitForTimeout(600);
   await rest(page);
   const first = { lines: (await routeLinesOf(page)).map((line) => line.key).sort(), opacity: await opacitiesOf(page) };
   // 경로 밖 선은 올려도 강조되지 않고 눌러도 강조가 그대로다.
@@ -4345,7 +4376,6 @@ async function finderStep(t, page) {
   const walked = [];
   for (const [at, id] of path.entries()) {
     await page.click(`.finder-step >> nth=${at}`);
-    await page.waitForTimeout(600);
     await rest(page);
     walked.push((await reachable(page, id)).ok && (await currentStep(page)).id === id);
   }
@@ -4362,11 +4392,9 @@ async function finderStep(t, page) {
   );
   // 경로 전체를 보이게 줄인 화면에서 지금 단계의 행을 다시 누른다.
   await page.click(".finder-fit");
-  await page.waitForTimeout(600);
   await rest(page);
   const wide = await zoomOf(page);
   await page.click(".finder-step >> nth=0");
-  await page.waitForTimeout(600);
   await rest(page);
   t.check(
     `경로 전체 보기 뒤에 지금 단계의 행을 다시 누르면 확대 비율이 ${NAMED_ZOOM}로 돌아오고 그 노드가 가리지 않는 영역에 보인다`,
@@ -4433,7 +4461,6 @@ async function finderStep(t, page) {
   const kept = [];
   for (const id of [path.at(-1), path[0]]) {
     await palettePick(page, graph.nodes.find((n) => n.id === id).name, id);
-    await page.waitForTimeout(600);
     await rest(page);
     const current = await currentStep(page);
     kept.push(current.id === id && current.shown);
@@ -4568,7 +4595,6 @@ async function finderPin(t, page) {
   const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
   const fitted = await viewport();
   await page.getByRole("button", { name: "화면 맞춤" }).click();
-  await page.waitForTimeout(600);
   await rest(page);
   t.check("고정 중에도 화면 맞춤이 화면을 옮기고 고정은 그대로다", (await viewport()) !== fitted && same((await state()).lines, pinnedState.lines), `${fitted} → ${await viewport()}`);
   const boxAt = center(await rectOf(page, `${face(outside.file)} .node-label`));
@@ -4682,7 +4708,6 @@ async function finderPin(t, page) {
   );
   await page.screenshot({ path: join(OUT, "s3-finder-pin-folded.png") });
   await page.getByRole("button", { name: "화면 맞춤" }).click();
-  await page.waitForTimeout(600);
   await rest(page);
   await blocked("창을 접은 채 경로 밖 파일 상자 클릭", () => clickNode(page, outside.file), 1, TRIP.to.id);
   t.check("접은 채 막힌 조작을 하면 창이 펴진다", (await count(page, ".finder")) === 1);
@@ -4699,7 +4724,6 @@ async function finderPin(t, page) {
   await waitSelected(page, outside.file).catch(() => {});
   const picked = (await selectedOf(page)) === outside.file && (await boxes(page)).find((b) => b.id === outside.file)?.open === true;
   await page.getByRole("button", { name: "화면 맞춤" }).click();
-  await page.waitForTimeout(600);
   await rest(page);
   await clickNode(page, "parser");
   await page.waitForSelector(`${node("parser")} > .node-package`, { state: "detached", timeout: 30_000 }).catch(() => {});
@@ -6892,21 +6916,24 @@ const LINE_FOLDER = { file: "doc_update", from: "arbiter", to: "parser" };
 const WIDE_LINE_FOLDER = { open: ["mdp", "mdp.settings"], file: "mdp.settings.loader", from: "mdp.cli", to: "mdp.runtime" };
 
 /**
- * 접힌 폴더 상자 to로 들어가는 선을 at에서 누른 뒤의 화면. 도착 표시는 배치 움직임이 끝난 뒤 1.2초 동안만 있으므로 화면이 멎기 전에 읽고,
- * shot을 받았으면 그때 부른다.
+ * 접힌 폴더 상자 to로 들어가는 선을 at에서 누른 뒤의 화면. 도착 표시는 배치 움직임과 화면 이동이 끝난 뒤 1.2초 동안만 있으므로 화면이 멎기 전에 읽고,
+ * shot을 받았으면 그때 부른다. after는 도착 표시가 배치 움직임과 화면 이동이 끝난 프레임에만 있었는지다.
  * fits는 펼친 폴더 영역이 가리지 않는 영역 안에 들어와 있는지다.
  */
 async function lineToFolder(page, to, at, shot = null) {
+  await watchFrames(page);
   await page.mouse.click(at.x, at.y);
   await page.mouse.move(1, 1);
   const marked = await page.waitForSelector(`.reached[data-node="${to}"]`, { timeout: 5_000 }).then(() => true, () => false);
   await shot?.();
   await settle(page);
+  const frames = await framesOf(page);
   const [box, { clear }] = [await rectOf(page, `${node(to)}:has(> .node-region)`), await stageOf(page)];
   /** 영역이 들어가는 축은 전부 들어와 있고, 영역이 더 긴 축은 시작 끝이 20px 안쪽에 있는지 */
   const along = (start, length, low, room) => (length > room ? near(start, low + INSET, 2) : start >= low && start + length <= low + room);
   return {
     marked,
+    after: frames.some((frame) => frame.flying || frame.moving) && frames.every((frame) => !frame.reached || (!frame.flying && !frame.moving)),
     opened: box !== null,
     fits: box !== null && along(box.x, box.width, clear.x, clear.width) && along(box.y, box.height, clear.y, clear.height),
     selected: await selectedOf(page),
@@ -6964,6 +6991,10 @@ async function lineFolder(t, page) {
     first.opened && first.marked && first.selected === null,
     `펼침 ${first.opened}, 도착 표시 ${first.marked}, ${first.text}`,
   );
+  t.check(
+    "도착 표시는 배치 움직임과 화면 이동이 끝난 뒤에 그려진다",
+    first.after,
+  );
   t.check("도착 표시는 사라진다", (await page.waitForSelector(".reached", { state: "detached", timeout: 5_000 }).then(() => true, () => false)));
 
   await load(page, url, false);
@@ -6992,7 +7023,7 @@ async function lineFolder(t, page) {
     `펼침 ${went.opened}, 선택 ${went.selected}, 본문 잉크 선 ${went.strong}개, 누른 선이 갈라진 선 ${went.via}개`,
   );
   t.check(`펼친 ${to}/ 영역이 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역 안에 오고 확대 비율은 그대로다`, went.fits && near(await zoomOf(page), before, 0.001), went.text);
-  t.check("펼친 영역에 도착 표시가 잠깐 그려진다", went.marked);
+  t.check("펼친 영역에 도착 표시가 화면 이동이 끝난 뒤에 잠깐 그려진다", went.marked && went.after);
   await page.getByRole("button", { name: "뒤로" }).click();
   await waitSelected(page, file).catch(() => {});
   t.check("뒤로 한 번이면 폴더가 접히고 앞 선택이 돌아온다", (await selectedOf(page)) === file && (await count(page, `${node(to)} > .node-package`)) > 0, `선택 ${await selectedOf(page)}`);
@@ -7022,7 +7053,7 @@ async function lineFolder(t, page) {
     `펼침 ${there.opened}, 선택 ${there.selected}, 본문 잉크 선 ${there.strong}개, 누른 선이 갈라진 선 ${there.via}개`,
   );
   t.check(`펼친 ${wide.to}/ 영역이 가리지 않는 영역 안에 오고 확대 비율은 그대로다`, there.fits && near(await zoomOf(page), scale, 0.001), there.text);
-  t.check("펼친 영역에 도착 표시가 잠깐 그려진다", there.marked);
+  t.check("펼친 영역에 도착 표시가 화면 이동이 끝난 뒤에 잠깐 그려진다", there.marked && there.after);
 }
 
 // ── 정보 패널의 머리 줄과 "정보" 구역 ───────────────────────────────
@@ -7390,6 +7421,187 @@ async function panelHead(t, page) {
   await t.shot();
 }
 
+/**
+ * 화면 이동. 파일트리의 파일 행을 눌러 먼 노드와 가까운 노드로 가며 프레임마다의 화면을 읽는다. 먼 이동의 프레임은
+ * `s4-motion-{0~5}.png`에 남긴다.
+ */
+async function motion(t, page) {
+  await load(page);
+  const row = (id) => `.tree-row.tree-file[data-node="${id}"]`;
+  const go = async (id) => {
+    await page.click(row(id));
+    await waitSelected(page, id);
+  };
+  /** 파일트리에 행이 보이는 파일 상자와 그 가운데의 화면 좌표 */
+  const files = async () => {
+    const list = await boxes(page);
+    const zoom = await zoomOf(page);
+    const shown = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`.tree-row.tree-file[data-node="${CSS.escape(id)}"]`) !== null), list.map((box) => box.id));
+    return list.filter((box) => shown.includes(box.id)).map((box) => ({ id: box.id, x: box.x + (box.width * zoom) / 2, y: box.y + (box.height * zoom) / 2 }));
+  };
+  const apartOf = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  /**
+   * 화면 이동을 그린 프레임과 걸린 시간, 프레임 사이에 화면이 간 빠르기(1초에 간 길이). 길이는 옆으로 간 폭을 보이는 폭으로 나눈 값과
+   * 확대 비율의 로그 차이를 합친 값이다.
+   */
+  const flightOf = (frames, clear, area) => {
+    const flying = frames.filter((frame) => frame.flying);
+    const side = Math.min(clear.width, clear.height);
+    const eye = (frame) => ({ x: (clear.x - area.x + clear.width / 2 - frame.x) / frame.zoom, y: (clear.y - area.y + clear.height / 2 - frame.y) / frame.zoom });
+    const rates = flying
+      .slice(1)
+      .map((frame, i) => (Math.hypot((apartOf(eye(frame), eye(flying[i])) * frame.zoom) / side, Math.log(frame.zoom / flying[i].zoom)) * 1000) / (frame.at - flying[i].at));
+    return { flying, rates, ms: flying.length === 0 ? 0 : flying.at(-1).at - flying[0].at, lowest: Math.min(...flying.map((frame) => frame.zoom)) };
+  };
+
+  await go(FILE);
+  const { clear, area } = await stageOf(page);
+  const middle = center(clear);
+  const far = (await files()).reduce((a, b) => (apartOf(b, middle) > apartOf(a, middle) ? b : a));
+  await watchFrames(page);
+  await go(far.id);
+  const frames = await framesOf(page);
+  const long = flightOf(frames, clear, area);
+  const [from, to] = [frames[0], frames.at(-1)];
+  const turn = long.flying.findIndex((frame) => frame.zoom === long.lowest);
+  const dips = long.flying.slice(1, turn + 1).every((frame, i) => frame.zoom <= long.flying[i].zoom) && long.flying.slice(turn + 1).every((frame, i) => frame.zoom >= long.flying[turn + i].zoom);
+  t.check(
+    "가리지 않는 영역 밖의 먼 노드로 가는 이동은 가운데에서 출발·도착 화면보다 축소했다가 도착의 확대 비율로 돌아온다",
+    long.flying.length > 0 && long.lowest < Math.min(from.zoom, to.zoom) * 0.8 && dips && near(to.zoom, Math.max(from.zoom, NAMED_ZOOM), 0.001),
+    `${FILE} → ${far.id}, 확대 비율 ${from.zoom.toFixed(3)} → ${long.lowest.toFixed(3)} → ${to.zoom.toFixed(3)}, ${Math.round(long.ms)}ms, 프레임 ${long.flying.length}개`,
+  );
+  t.check("이동을 시작하는 프레임에 도착 노드가 이미 골라져 있다", long.flying[0]?.selected === far.id, `첫 프레임의 고른 노드 ${long.flying[0]?.selected}`);
+  const moved = long.flying.slice(1).filter((frame, i) => frame.x !== long.flying[i].x || frame.zoom !== long.flying[i].zoom);
+  const followed = long.flying.slice(1).filter((frame, i) => (frame.x !== long.flying[i].x || frame.zoom !== long.flying[i].zoom) && frame.mask !== long.flying[i].mask);
+  t.check("미니맵의 화면 영역 사각형이 이동하는 프레임마다 함께 움직인다", moved.length > 0 && followed.length === moved.length, `화면이 바뀐 프레임 ${moved.length}개 가운데 사각형이 바뀐 프레임 ${followed.length}개`);
+  t.check(
+    "이동이 끝나면 data-flying이 사라지고 도착 노드가 가리지 않는 영역에 있다",
+    !to.flying && (await count(page, ".graph[data-flying]")) === 0 && (await reachable(page, far.id)).ok,
+    `도착 노드의 이름표 ${(await reachable(page, far.id)).at}`,
+  );
+
+  // 먼 이동의 프레임을 남긴다.
+  await page.click(row(FILE));
+  await page.waitForSelector(".graph[data-flying]", { timeout: 10_000 });
+  const taken = [];
+  for (let i = 0; i < 6 && (await count(page, ".graph[data-flying]")) > 0; i += 1) {
+    taken.push((await zoomOf(page)).toFixed(2));
+    await page.screenshot({ path: join(OUT, `s4-motion-${i}.png`) });
+    if (i === 1) {
+      await t.shot();
+    }
+  }
+  await waitSelected(page, FILE);
+  t.check("먼 이동 도중의 화면을 남긴다", taken.length >= 3, `확대 비율 ${taken.join(", ")}`);
+
+  // 고른 파일 안의 함수 가운데 가리지 않는 영역 안에 보이는 함수로 간다.
+  const inside = (
+    await page.evaluate(() =>
+      [...document.querySelectorAll(".tree-row.tree-symbol[data-node]")].map((symbol) => {
+        const rect = document.querySelector(`.react-flow__node[data-id="${CSS.escape(symbol.dataset.node)}"]`)?.getBoundingClientRect();
+        return rect === undefined ? null : { id: symbol.dataset.node, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }),
+    )
+  ).filter((each) => each !== null && each.x > clear.x + 40 && each.x < clear.x + clear.width - 40 && each.y > clear.y + 40 && each.y < clear.y + clear.height - 40);
+  if (inside.length === 0) {
+    t.skip("가리지 않는 영역 안에 보이는 가까운 노드로 가는 이동은 확대 비율을 그대로 둔다", "가리지 않는 영역 안에 고른 파일의 함수가 없다");
+  } else {
+    const close = inside.reduce((a, b) => (apartOf(b, middle) > apartOf(a, middle) ? b : a));
+    const zoom = await zoomOf(page);
+    await watchFrames(page);
+    await page.click(`.tree-row.tree-symbol[data-node="${close.id}"]`);
+    await waitSelected(page, close.id);
+    const short = flightOf(await framesOf(page), clear, area);
+    t.check(
+      "가리지 않는 영역 안에 보이는 가까운 노드로 가는 이동은 확대 비율을 그대로 두고 먼 이동보다 짧게 걸린다",
+      short.flying.length > 0 && short.flying.every((frame) => near(frame.zoom, zoom, 0.001)) && short.ms < long.ms,
+      `${FILE} → ${close.id}, 확대 비율 ${zoom.toFixed(3)} → ${short.lowest.toFixed(3)}, ${Math.round(short.ms)}ms(먼 이동 ${Math.round(long.ms)}ms)`,
+    );
+  }
+
+  // 이동 중에 다른 노드를 고른다.
+  const other = (await files()).reduce((a, b) => (apartOf(b, middle) > apartOf(a, middle) ? b : a));
+  const next = other.id === far.id ? FILE : other.id;
+  await watchFrames(page);
+  await page.click(row(far.id));
+  await page.waitForSelector(".graph[data-flying]", { timeout: 10_000 });
+  await page.waitForTimeout(400);
+  const midway = (await count(page, ".graph[data-flying]")) > 0;
+  await page.click(row(next));
+  await waitSelected(page, next);
+  const chained = await framesOf(page);
+  const span = chained.slice(chained.findIndex((frame) => frame.flying), chained.findLastIndex((frame) => frame.flying) + 1);
+  const chain = flightOf(span, clear, area);
+  const turned = span.findIndex((frame) => frame.selected === next);
+  const mean = (list) => list.reduce((total, value) => total + value, 0) / list.length;
+  const [pace, kept] = [mean(chain.rates.slice(Math.max(turned - 4, 0), turned - 1)), mean(chain.rates.slice(turned, turned + 3))];
+  const typical = [...chain.rates].sort((a, b) => a - b)[Math.floor(chain.rates.length / 2)];
+  t.check(
+    "이동 중에 다른 노드를 고르면 그 순간의 화면에서 멈추지 않고 새 도착 노드로 이어 간다",
+    midway && turned > 0 && span.every((frame) => frame.flying) && kept > pace * 0.4 && Math.max(...chain.rates) < typical * 4 && (await reachable(page, next)).ok,
+    `${far.id}로 가다가 ${next}로, 빠르기는 바꾸기 전 세 프레임 ${pace.toFixed(2)} · 바꾼 뒤 세 프레임 ${kept.toFixed(2)}, 가장 빠른 프레임 ${Math.max(...chain.rates).toFixed(2)}(가운데값 ${typical.toFixed(2)})`,
+  );
+
+  // 이동 중에 휠을 굴리고, 이동 중에 화면을 끈다.
+  const viewport = () => page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+  const halted = async (act) => {
+    await page.waitForSelector(".graph[data-flying]", { timeout: 10_000 });
+    await page.waitForTimeout(300);
+    const flying = (await count(page, ".graph[data-flying]")) > 0;
+    await act();
+    const stopped = await page.waitForSelector(".graph[data-flying]", { state: "detached", timeout: 300 }).then(() => true, () => false);
+    await settle(page);
+    return { flying, stopped };
+  };
+  await page.click(row(far.id));
+  const wheeled = await halted(async () => {
+    await page.mouse.move(middle.x, middle.y);
+    await page.mouse.wheel(0, -100);
+  });
+  const stayed = await viewport();
+  t.check(
+    "이동 중에 휠을 굴리면 이동을 멈추고 도착 노드로 가지 않는다",
+    wheeled.flying && wheeled.stopped && !(await reachable(page, far.id)).ok && (await viewport()) === stayed,
+    `굴릴 때 이동 중 ${wheeled.flying}, 멈춤 ${wheeled.stopped}, 도착 노드의 이름표 ${(await reachable(page, far.id)).at}`,
+  );
+  await page.click(row(next));
+  const dragged = await halted(async () => {
+    await page.mouse.move(middle.x, middle.y);
+    await page.mouse.down();
+  });
+  await page.mouse.move(middle.x + 60, middle.y + 30, { steps: 4 });
+  await page.mouse.up();
+  await settle(page);
+  t.check("이동 중에 화면을 잡으면 이동을 멈춘다", dragged.flying && dragged.stopped && (await count(page, ".graph[data-flying]")) === 0, `잡을 때 이동 중 ${dragged.flying}, 멈춤 ${dragged.stopped}`);
+  await page.mouse.move(1, 1);
+
+  // 움직임을 줄이는 설정에서는 바로 옮긴다.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await watchFrames(page);
+  await go(far.id);
+  const still = await framesOf(page);
+  t.check(
+    "움직임을 줄이는 설정에서는 화면 이동 없이 바로 옮긴다",
+    still.every((frame) => !frame.flying) && (await reachable(page, far.id)).ok && new Set(still.map((frame) => `${frame.x} ${frame.zoom}`)).size <= 2,
+    `이동 프레임 ${still.filter((frame) => frame.flying).length}개, 도착 노드의 이름표 ${(await reachable(page, far.id)).at}`,
+  );
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+
+  // "화면 맞춤"도 같은 이동을 지난다.
+  await watchFrames(page);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await settle(page);
+  const fitting = flightOf(await framesOf(page), clear, area);
+  const fitted = await viewport();
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await settle(page);
+  t.check(
+    '"화면 맞춤"은 화면 이동을 그리며 그래프 전체를 맞추고, 맞춘 화면에서 다시 누르면 화면이 그대로다',
+    fitting.flying.length > 0 && (await viewport()) === fitted,
+    `${Math.round(fitting.ms)}ms, 프레임 ${fitting.flying.length}개, ${fitted}`,
+  );
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -7464,6 +7676,7 @@ const SCENARIOS = [
   ["overlap", overlap],
   ["line-folder", lineFolder],
   ["panel-head", panelHead],
+  ["motion", motion],
   ["progress", progress],
   ["progress-failed", progressFailed],
   ["stale", staleScenario],
@@ -7495,6 +7708,7 @@ const STAGE4 = new Set([
   "overlap",
   "line-folder",
   "panel-head",
+  "motion",
   "progress",
   "progress-failed",
   "stale",
