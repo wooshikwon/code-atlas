@@ -1,7 +1,8 @@
 {
   "bundle": {
     "resources": {
-      "pyembed/python/": "python/"
+      "pyembed/python/": "python/",
+      "cli/atlas": "bin/atlas"
     }
   }
 }

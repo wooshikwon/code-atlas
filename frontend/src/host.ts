@@ -23,6 +23,8 @@ export interface Host {
   claudeLogin(path: string): Promise<void>;
   /** 앱 메뉴에서 고른 항목을 받는다. 돌려주는 함수가 받기를 멈춘다. */
   onMenu(listen: (item: "open") => void): () => void;
+  /** macOS가 이 앱으로 열라고 넘긴 경로를 받는다. 터미널 명령 `atlas <폴더>`가 넘긴다. 돌려주는 함수가 받기를 멈춘다. */
+  onOpen(listen: (paths: string[]) => void): () => void;
 }
 
 const browser: Host = {
@@ -38,9 +40,10 @@ const browser: Host = {
   restartBackend: () => Promise.resolve(),
   claudeLogin: () => Promise.resolve(),
   onMenu: () => () => {},
+  onOpen: () => () => {},
 };
 
-/** 앱 껍데기의 Tauri 명령 `backend_state`·`restart_backend`·`claude_login`과 이벤트 `backend`·`menu`를 쓴다. */
+/** 앱 껍데기의 Tauri 명령 `backend_state`·`restart_backend`·`claude_login`·`take_opened`와 이벤트 `backend`·`menu`·`open`을 쓴다. */
 function shell(): Host {
   const core = import("@tauri-apps/api/core");
   const events = import("@tauri-apps/api/event");
@@ -94,6 +97,18 @@ function shell(): Host {
     claudeLogin: async (path) => (await core).invoke("claude_login", { path }),
     onMenu: (listen) => {
       const stop = events.then((event) => event.listen<"open">("menu", (received) => listen(received.payload)));
+      return () => void stop.then((unlisten) => unlisten());
+    },
+    onOpen: (listen) => {
+      // 앱 껍데기가 쌓아 둔 경로를 가져온다. 화면이 뜨기 전에 받은 경로도 여기서 받으므로 받기 시작한 뒤에 한 번 가져온다.
+      const take = async () => {
+        const paths = await (await core).invoke<string[]>("take_opened");
+        if (paths.length > 0) {
+          listen(paths);
+        }
+      };
+      const stop = events.then((event) => event.listen("open", () => void take()));
+      void stop.then(take);
       return () => void stop.then((unlisten) => unlisten());
     },
   };

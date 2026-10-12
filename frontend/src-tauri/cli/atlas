@@ -1,0 +1,69 @@
+#!/bin/sh
+# Atlas 앱의 터미널 명령. 앱 묶음의 `Contents/Resources/bin/atlas`에 들어가고, `scripts/build_app.py --install`이 PATH에 놓는
+# 파일이 이 파일을 실행한다. 폴더를 앱에서 열 때는 macOS의 `open`으로 앱에 넘기고(앱이 꺼져 있으면 켜진다), `--browser`는 앱에
+# 묶은 Python으로 `code_atlas.cli`를 띄운다.
+
+bundle=$(cd "$(dirname "$0")/../../.." && pwd)
+python="$bundle/Contents/Resources/python/bin/python3"
+
+usage() {
+    cat <<'END'
+사용법: atlas [폴더]
+        atlas --browser [폴더] [--port 번호] [--python 인터프리터] [--no-open]
+
+  atlas <폴더>         폴더를 Atlas 앱에서 엽니다. 앱이 떠 있으면 떠 있는 창이 그 폴더를 엽니다.
+  atlas                Atlas 앱을 엽니다.
+  -b, --browser        앱 대신 브라우저에서 엽니다. Ctrl+C로 끝냅니다.
+      --port 번호          브라우저가 접속할 포트를 정합니다. 0이면 비어 있는 포트를 씁니다.
+      --python 인터프리터  레포의 파이썬 인터프리터 경로를 정합니다.
+      --no-open            브라우저를 열지 않고 주소만 출력합니다.
+  -h, --help           이 도움말을 출력합니다.
+  -v, --version        앱의 버전을 출력합니다.
+END
+}
+
+browser=
+for arg do
+    shift
+    case $arg in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        -v | --version)
+            echo "Atlas $(defaults read "$bundle/Contents/Info" CFBundleShortVersionString)"
+            exit 0
+            ;;
+        -b | --browser) browser=1 ;;
+        *) set -- "$@" "$arg" ;;
+    esac
+done
+
+if [ -n "$browser" ]; then
+    exec "$python" -I -B -m code_atlas.cli "$@"
+fi
+
+if [ $# -eq 0 ]; then
+    exec open -a "$bundle"
+fi
+case $1 in
+    -*)
+        echo "atlas: 알 수 없는 옵션입니다: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
+if [ $# -gt 1 ]; then
+    echo "atlas: 폴더는 하나만 받습니다. 창 하나가 레포 하나를 엽니다." >&2
+    exit 2
+fi
+case $1 in
+    "~") path=$HOME ;;
+    "~/"*) path=$HOME/${1#"~/"} ;;
+    *) path=$1 ;;
+esac
+if [ ! -e "$path" ]; then
+    echo "atlas: 폴더를 찾지 못했습니다: $path" >&2
+    exit 1
+fi
+exec open -a "$bundle" "$path"

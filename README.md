@@ -22,17 +22,17 @@ macOS에서는 레포를 받은 Mac에서 데스크톱 앱 `Atlas`를 만든다.
 
 ```bash
 python3 scripts/build_app.py --doctor     # 빌드 전 점검만 한다
-python3 scripts/build_app.py --install    # 앱을 만들어 /Applications/Atlas.app에 놓는다
+python3 scripts/build_app.py --install    # 앱을 만들어 /Applications/Atlas.app에 놓고 터미널 명령 atlas를 놓는다
 ```
 
 `--doctor`는 칩과 macOS, 위 도구의 판과 경로, 디스크 여유, 내려받을 곳에 닿는지를 한 줄씩 적고, 통과하지 못한 항목마다 설치·설정 방법을 함께 적는다. `python3`이 3.12보다 낮으면 그 Mac에서 찾은 더 높은 판으로 실행하는 명령을 적는다. 빌드는 늘 이 점검으로 시작하고, 통과하지 못한 항목이 있으면 그 뒤 단계를 하지 않는다.
 
 | 옵션 | 뜻 |
 |---|---|
-| `--doctor` | 빌드 전 점검만 한다 |
-| `--install` | 만든 앱을 `/Applications/Atlas.app`에 놓는다. 그 앱이 떠 있으면 끝내 달라고 적고 끝난다. 주지 않으면 만든 앱의 경로와 놓는 명령을 적는다 |
+| `--doctor` | 빌드 전 점검만 한다. 놓아 둔 터미널 명령 `atlas`의 경로와 이 터미널에서 실행되는지도 적는다 |
+| `--install` | 만든 앱을 `/Applications/Atlas.app`에 놓고 터미널 명령 `atlas`를 놓는다. 그 앱이 떠 있으면 끝내 달라고 적고 끝난다. 주지 않으면 만든 앱의 경로와 놓는 명령을 적는다 |
 | `--dmg` | `.dmg`도 만든다 |
-| `--check` | 만들어 둔 앱에 판정(격리 속성, 서명, 묶은 Python과 `node`의 실행)만 다시 돌린다 |
+| `--check` | 만들어 둔 앱에 판정(격리 속성, 서명, 묶은 Python과 `node`의 실행, 묶은 화면 빌드와 터미널 명령)만 다시 돌리고, 놓아 둔 터미널 명령 `atlas`의 경로와 이 터미널에서 실행되는지를 적는다 |
 | `--clean` | 끝난 단계의 표식과 묶을 Python 폴더를 지우고 처음부터 한다 |
 | `--sign adhoc` | 서명 방식. 임시 서명만 만든다 |
 
@@ -40,9 +40,29 @@ python3 scripts/build_app.py --install    # 앱을 만들어 /Applications/Atlas
 
 - **내려받는 것**: 묶을 Python(python-build-standalone 3.13의 `install_only_stripped`, `curl`), Python 의존성(`pip`), 화면의 의존성(`npm ci`), 앱 껍데기의 크레이트(`cargo`)다. 묶을 Python은 `scripts/build_app.py`에 적어 둔 SHA-256과, Python 의존성은 `scripts/requirements-app.txt`의 해시와 같아야 쓰고, npm과 cargo는 `package-lock.json`과 `Cargo.lock`의 판을 쓴다.
 - **망 설정**: 네 도구는 그 Mac의 설정을 따르고 빌드 명령은 그 설정을 바꾸지 않는다. `curl`은 `HTTPS_PROXY`·`HTTP_PROXY`·`NO_PROXY`와 `~/.curlrc`를, `pip`는 `pip.conf`와 `PIP_INDEX_URL`·`PIP_CERT`를, `npm`은 `.npmrc`의 `registry`·`cafile`·`proxy`를, `cargo`는 `~/.cargo/config.toml`의 `[source]`·`[http]`를 따른다. 묶을 Python을 받는 주소는 환경 변수 `CODE_ATLAS_PYTHON_URL`에 사내 미러의 파일 주소나 받아 둔 파일의 경로를 줘서 바꾼다.
-- **쓰는 곳**: `frontend/src-tauri/pyembed/`(묶을 Python과 표식)·`target/`, `frontend/node_modules/`·`dist/`, `~/.cache/code-atlas/build/`(받은 묶을 Python)와 `--install`을 줬을 때의 `/Applications/Atlas.app`이다.
+- **쓰는 곳**: `frontend/src-tauri/pyembed/`(묶을 Python과 표식)·`target/`, `frontend/node_modules/`·`dist/`, `~/.cache/code-atlas/build/`(받은 묶을 Python)와 `--install`을 줬을 때의 `/Applications/Atlas.app`, 터미널 명령 파일이다.
 - **새 판으로 올리기**: `git pull` 뒤 같은 명령을 다시 실행한다. 설정 파일(`~/.config/code-atlas/`), 캐시(`~/.cache/code-atlas/`), 창의 크기와 위치, 화면 설정은 앱 밖에 있어 그대로 남는다. 앱은 빌드한 레포의 커밋 해시와 빌드한 날을 `/api/about`으로 낸다.
 - **Intel Mac**: 묶을 Python과 의존성의 x86_64 체크섬을 적어 두었고, Intel Mac에서 빌드해 보지는 않았다.
+
+### 터미널 명령 `atlas`
+
+`--install`은 앱과 함께 터미널 명령 `atlas`를 놓는다.
+
+```bash
+atlas <레포 경로>              # 폴더를 Atlas 앱에서 연다
+atlas                          # Atlas 앱을 연다
+atlas --browser <레포 경로>    # 앱 대신 브라우저에서 연다. Ctrl+C로 끝낸다
+atlas --help
+atlas --version
+```
+
+`atlas <레포 경로>`는 앱이 꺼져 있으면 켜서 그 폴더를 열고, 켜져 있으면 떠 있는 창을 앞으로 가져와 그 폴더로 바꾼다. 경로는 상대 경로와 `.`, `~`를 받는다. 앱은 넘겨받은 폴더를 `폴더 열기…`로 고른 폴더와 같은 순서로 판정하므로, `.py` 파일이 없는 폴더, 프로젝트의 하위 폴더, 프로젝트 여러 개를 품은 폴더, 인터프리터를 찾지 못한 레포에서는 같은 물음이 화면에 뜬다. 없는 경로를 주면 앱을 열지 않고 터미널에 까닭을 적는다.
+
+`atlas --browser`(짧게 `-b`)는 앱에 묶은 Python으로 아래 "실행"의 `code-atlas <레포 경로>`를 띄우고, 뒤의 옵션(`--port`, `--python`, `--no-open` 등)을 그대로 넘긴다. 가상환경과 `npm run build` 없이 앱만 있으면 돈다.
+
+- **놓는 폴더**: `~/.local/bin`, `~/bin`, `/usr/local/bin`, `/opt/homebrew/bin` 가운데 빌드 명령을 실행한 터미널의 `PATH`에 들어 있고 `sudo` 없이 쓸 수 있으며 다른 프로그램의 `atlas`가 없는 첫 폴더다. 그런 폴더가 없으면 `~/.local/bin`에 놓고 셸 설정 파일에 더할 `export PATH=…` 줄을 적는다. 셸 설정 파일은 고치지 않는다. 후보와 순서는 `scripts/build_app.py`의 `COMMAND_DIRS`가 정한다.
+- **놓는 파일**: `/Applications/Atlas.app` 안의 명령(`Contents/Resources/bin/atlas`)을 실행하는 셸 스크립트다. 앱을 새로 놓으면 명령도 새 앱의 것을 쓰고, 앱이 그 경로에 없으면 앱을 놓으라고 적고 끝난다.
+- **지우기**: `--install`이 적은 경로의 파일을 지운다(`rm ~/.local/bin/atlas`).
 
 ## 실행
 
@@ -290,10 +310,10 @@ basedpyright가 대상 레포의 외부 패키지 import를 해석하려면 그 
 | `frontend/src/compare/` | 비교 버튼(`Button.tsx`)과 비교 창(`Window.tsx`, 커밋 그래프의 줄 `Rows.tsx`). `log.ts`가 줄과 표시, 버튼에 적는 시점 이름, 그릴 줄의 범위를 낸다. 고른 두 시점과 켜져 있는 비교는 `state/compare.ts`가, 세로 줄 배정은 `graph/commits.ts`가, 비교 결과를 그래프의 표시로 바꾸는 일은 `graph/compare.ts`가, 두 시점의 본문을 줄 토막으로 엮는 일은 `graph/weave.ts`가 맡는다 |
 | `frontend/src/code/` | 고른 노드가 든 파일의 전체 코드를 열고 노드의 줄 범위 밖을 흐리게 그리는 읽기 전용 Monaco 코드 뷰어. `hover.ts`가 이름 위 hover를, `CodeView.tsx`가 `Mod`+클릭 정의 이동을 백엔드에 연결한다. `RangeNotes.tsx`는 고른 줄 범위의 코드 분석 버튼·질문 입력 창·분석 창·말풍선 표지를 그린다. Monaco는 CDN 없이 번들에 넣는다 |
 | `frontend/src/graph/` | 그래프 뷰와 리니지 뷰. `visible.ts`가 보이는 노드와 파일 상자의 펼침 단계를, `flow.ts`가 고른 노드에서 나가는 흐름과 불투명도를, `scope.ts`가 그릴 선을, `columns.ts`가 열 번호와 연결 묶음·선반을 정한다. `route.ts`가 두 끝점 사이의 경로를, `cycles.ts`가 순환 묶음을, `overlay.ts`가 분석 표시가 그래프에 더하는 표시를 낸다. `layout.ts`가 ELK를 Web Worker로 돌려 좌표를 정하고, `view.ts`가 선마다 경로와 도착이 같은 선의 줄기, 숫자의 위치를, `motion.ts`가 배치 움직임을, `viewport.ts`가 화면 이동 좌표를, `flight.ts`가 화면 이동의 경로와 시간, 그 경로를 그리는 함수(`useFlight`)를, `layers.ts`가 노드·선·글자의 겹침 순서를 낸다. `aim.tsx`가 커서 밑을 지나는 선의 집합으로 선의 hover와 클릭을 판정하고, `arranging.tsx`가 느린 배치의 표시와 취소를, `Progress.tsx`가 분석 중의 진행 표시를, `SummaryQueue.tsx`가 요약 요청 묶음의 진행 칸을 맡는다. `calls.ts`·`CallView.tsx`는 리니지 뷰, `nodes/`·`edges/`는 React Flow 노드·선 컴포넌트(`PackNode.tsx`는 손잡이, `Trunk.tsx`는 줄기), `Dock.tsx`는 왼쪽 아래 칸, `Minimap.tsx`·`Legend.tsx`는 미니맵·범례다. `Tooltip.tsx`는 앱 전체가 함께 쓰는 말풍선으로, 요소의 `data-tip`에 담은 글을 마우스를 올리거나 키보드 초점을 받았을 때 띄운다. `tips.ts`는 노드·배지·선의 말풍선 글을, `names.ts`는 노드 종류와 선 종류의 이름, 선에 든 관계를 종류와 수로 적는 글(`relationsOf`)을 낸다 |
-| `frontend/src-tauri/` | 앱 껍데기. `backend.rs`가 백엔드 프로세스의 수명을, `menu.rs`가 앱 메뉴를, `main.rs`가 창과 화면이 부르는 명령을 맡는다. `tauri.bundle.json`은 묶을 Python을 앱에 넣는 설정이고 빌드 명령만 쓴다 |
+| `frontend/src-tauri/` | 앱 껍데기. `backend.rs`가 백엔드 프로세스의 수명을, `menu.rs`가 앱 메뉴를, `main.rs`가 창과 화면이 부르는 명령, macOS가 이 앱으로 열라고 넘긴 경로를 화면에 넘기는 일을 맡는다. `cli/atlas`는 앱에 묶는 터미널 명령이다. `tauri.bundle.json`은 묶을 Python과 터미널 명령을 앱에 넣는 설정이고 빌드 명령만 쓴다 |
 | `frontend/scripts/shots.mjs` | 화면 시나리오 스크립트. 떠 있는 서버에서 정해진 조작을 하고 확인 항목의 통과 여부와 스크린샷을 남긴다 |
 | `frontend/scripts/perf.mjs` | 화면 측정 스크립트. 떠 있는 서버의 화면에서 처음 배치, 폴더 펼침, 노드 선택의 시간과 화면 이동·확대의 프레임 간격을 JSON으로 낸다 |
-| `scripts/build_app.py` | 앱을 만드는 빌드 명령. 빌드 전 점검, 묶을 Python 받기와 구성, 화면과 앱 껍데기 빌드, 임시 서명, 판정, `/Applications`에 놓기를 맡는다 |
+| `scripts/build_app.py` | 앱을 만드는 빌드 명령. 빌드 전 점검, 묶을 Python 받기와 구성, 화면과 앱 껍데기 빌드, 임시 서명, 판정, `/Applications`에 앱을 놓고 `PATH`의 폴더에 터미널 명령 `atlas`를 놓는 일을 맡는다 |
 | `scripts/requirements-app.txt` | 앱에 묶는 Python 의존성의 판과 wheel 해시 |
 | `scripts/measure_analysis.py` | 레포를 분석하며 단계별 시간, 정의 요청 수, 응답 없음 수를 JSONL로 내고 `--compare`로 다른 분석 결과와 노드·선·지점 판정을 견준다 |
 | `scripts/measure_compare.py` | 두 시점의 비교가 응답하기까지의 시간, 정의 요청 수, 응답 없음 수, 바뀐 노드와 선의 수를 JSONL로 출력한다 |

@@ -7,13 +7,18 @@ Python 3.12 이상이면 가상환경 없이 돈다. `--doctor`는 점검만 하
 `--install`은 만든 앱을 `/Applications/Atlas.app`에 놓고, `--dmg`는 `.dmg`도 만든다. `--clean`은 표식과 묶을 Python
 폴더를 지우고 처음부터 한다.
 
+`--install`은 터미널 명령 `atlas`도 놓는다. 놓는 폴더는 `COMMAND_DIRS` 가운데 이 터미널의 PATH에 들어 있고 쓸 수 있는 첫
+폴더이고, 그런 폴더가 없으면 `~/.local/bin`에 놓고 PATH에 더할 줄을 적는다. 놓는 파일은 앱 안의 명령
+(`Contents/Resources/bin/atlas`)을 실행하는 셸 스크립트이므로 앱을 새로 놓으면 명령도 새 앱의 것을 쓴다. `--doctor`와
+`--check`는 놓아 둔 명령의 경로와 PATH에서 실행되는지를 함께 적는다. 명령을 지우려면 그 파일을 지운다.
+
 내려받기는 `curl`과 이 Mac의 `pip`·`npm`·`cargo`가 하고 넷 다 이 Mac의 설정(프록시, 사내 미러, 인증서)을 따른다. 이 명령은 그
 설정을 읽어 적기만 한다. 묶을 Python을 받는 주소는 환경 변수 `CODE_ATLAS_PYTHON_URL`(파일 주소나 받아 둔 파일의 경로)로
 바꾸고, 어디서 받든 아래에 적어 둔 SHA-256과 같아야 쓴다. 받은 파일은 `~/.cache/code-atlas/build/`에 체크섬 이름으로 둔다.
 
 끝난 단계는 입력의 해시를 `frontend/src-tauri/pyembed/stamps/`에 적어 두고, 다시 실행하면 입력이 같은 단계를 건너뛴다.
 쓰는 곳은 `frontend/src-tauri/pyembed/`·`target/`, `frontend/node_modules/`·`dist/`, `~/.cache/code-atlas/build/`와
-`--install`을 받았을 때의 `/Applications/Atlas.app`이다.
+`--install`을 받았을 때의 `/Applications/Atlas.app`과 터미널 명령 파일이다.
 """
 
 from __future__ import annotations
@@ -46,6 +51,21 @@ APP = SHELL / "target" / "release" / "bundle" / "macos" / "Atlas.app"
 DMG = SHELL / "target" / "release" / "bundle" / "dmg" / "Atlas.dmg"
 DOWNLOADS = Path.home() / ".cache" / "code-atlas" / "build"
 INSTALLED = Path("/Applications") / APP.name
+
+# 터미널 명령. `COMMAND_DIRS`는 명령을 놓는 폴더의 후보이고 앞의 것부터 본다.
+COMMAND = "atlas"
+COMMAND_DIRS = ("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin")
+BUNDLED_COMMAND = Path("Contents") / "Resources" / "bin" / COMMAND
+COMMAND_MARK = "# Atlas 앱의 터미널 명령"
+COMMAND_SCRIPT = """#!/bin/sh
+{mark}. scripts/build_app.py --install이 놓았고, 지우려면 이 파일을 지운다.
+command={command}
+if [ ! -x "$command" ]; then
+    echo "atlas: Atlas 앱이 {app}에 없습니다. code-atlas 레포에서 scripts/build_app.py --install을 실행해 앱을 놓아 주세요." >&2
+    exit 1
+fi
+exec "$command" "$@"
+"""
 
 # 묶을 Python. python-build-standalone 릴리스의 `install_only_stripped` 파일이고, 칩마다 파일 이름의 칩 이름과 SHA-256을 적는다.
 PYTHON_RELEASE = "20261009"
@@ -316,6 +336,7 @@ def doctor() -> None:
         print(f"  {'통과' if check.ok else '실패'}  {check.name}: {check.detail}")
         for line in check.fix:
             print(f"        → {line}")
+    print(f"  참고  {command_status()}")
     failed = [check.name for check in checks if not check.ok]
     if failed:
         raise Failed(f"통과하지 못한 점검 {len(failed)}개를 위의 방법으로 고친 뒤 다시 실행한다: {', '.join(failed)}")
@@ -488,7 +509,9 @@ def build_shell(at: Revision) -> None:
         print("  입력이 같아 건너뛴다")
         return
     begin("shell")
-    built = json.dumps({"build": {"beforeBuildCommand": None}})  # 화면은 앞 단계가 빌드했다
+    # 화면은 앞 단계가 빌드했다. 묶은 `code_atlas`가 브라우저에 내줄 화면 빌드를 레포에서와 같은 위치(`code_atlas` 옆의 `frontend/dist`)에 넣는다
+    screen = Path("python") / SITE.relative_to(PYTHON) / "frontend" / "dist"
+    built = json.dumps({"build": {"beforeBuildCommand": None}, "bundle": {"resources": {"../dist/": f"{screen}/"}}})
     tauri = ["npm", "run", "tauri", "build", "--", "--bundles", "app", "--no-sign", "--config", "src-tauri/tauri.bundle.json", "--config", built]
     run([*tauri, "--", "--locked"], cwd=FRONTEND, net="cargo")
     if not (APP / "Contents" / "MacOS").is_dir():
@@ -568,6 +591,10 @@ def check_app(app: Path, dmg: Path | None = None) -> None:
     told = read([node, "--version"])
     if told is None:
         wrong.append(f"묶은 node가 실행되지 않는다: {node}")
+    if read([python / "bin" / "python3", "-I", "-B", "-c", "from code_atlas.api import DIST_DIR; open(DIST_DIR / 'index.html').close()"]) is None:
+        wrong.append("묶은 code_atlas가 화면 빌드(frontend/dist)를 찾지 못했다")
+    if read([app / BUNDLED_COMMAND, "--version"]) is None:
+        wrong.append(f"묶은 터미널 명령이 실행되지 않는다: {app / BUNDLED_COMMAND}")
     if wrong:
         raise Failed("\n  ".join(["판정을 통과하지 못했다", *wrong]))
     print(f"  묶음과 Mach-O 파일 {len(inside)}개에 격리 속성 없음, 묶음 서명 맞음, Mach-O 파일 모두 서명됨, 묶은 Python과 node {told} 실행됨")
@@ -598,20 +625,78 @@ def install(app: Path, destination: Path) -> None:
     print(f"  놓았다: {destination}\n  여는 방법: open -a {shlex.quote(destination.stem)}")
 
 
+def searched() -> list[Path]:
+    """이 터미널의 PATH에 든 폴더."""
+    return [Path(part).expanduser() for part in os.environ.get("PATH", "").split(os.pathsep) if part]
+
+
+def placed_by_us(path: Path) -> bool:
+    """`path`가 이 명령이 놓은 터미널 명령 파일인지."""
+    try:
+        with path.open("rb") as file:
+            return COMMAND_MARK.encode() in file.read(200)
+    except OSError:
+        return False
+
+
+def command_dir() -> Path:
+    """터미널 명령을 놓을 폴더. `COMMAND_DIRS` 가운데 PATH에 들어 있고 쓸 수 있으며 다른 프로그램의 `atlas`가 없는 첫 폴더이고, 없으면 `COMMAND_DIRS`의 첫 폴더다."""
+    folders = [Path(name).expanduser() for name in COMMAND_DIRS]
+    on_path = searched()
+    for folder in folders:
+        taken = (folder / COMMAND).exists() and not placed_by_us(folder / COMMAND)
+        if folder in on_path and folder.is_dir() and os.access(folder, os.W_OK) and not taken:
+            return folder
+    return folders[0]
+
+
+def command_reach(placed: Path) -> str:
+    """놓은 터미널 명령이 이 터미널에서 `atlas`로 실행되는지를 적은 한 줄."""
+    folder, found = placed.parent, shutil.which(COMMAND)
+    if folder not in searched():
+        home = Path.home()
+        shown = f"$HOME/{folder.relative_to(home)}" if folder.is_relative_to(home) else str(folder)
+        return f'이 터미널의 PATH에 {folder}가 없다. 셸 설정 파일(zsh는 ~/.zshrc)에 다음 줄을 더하고 새 터미널을 연다: export PATH="{shown}:$PATH"'
+    if found is None or Path(found) != placed:
+        return f"이 터미널의 PATH에서 다른 {COMMAND}가 먼저 실행된다: {found}"
+    return f"이 터미널에서 {COMMAND} <레포 폴더>로 연다 ({COMMAND} --help)"
+
+
+def command_status() -> str:
+    """놓아 둔 터미널 명령의 경로와 이 터미널에서 실행되는지를 적은 한 줄."""
+    placed = [path for path in (Path(name).expanduser() / COMMAND for name in COMMAND_DIRS) if placed_by_us(path)]
+    if not placed:
+        return f"터미널 명령 {COMMAND}: 놓지 않았다. --install이 앱과 함께 놓는다"
+    missing = "" if (INSTALLED / BUNDLED_COMMAND).is_file() else f". {INSTALLED}에 앱이 없어 실행되지 않는다"
+    return f"터미널 명령 {COMMAND}: {placed[0]}. {command_reach(placed[0])}{missing}"
+
+
+def place_command(app: Path) -> None:
+    """`app` 안의 터미널 명령을 실행하는 파일을 `command_dir()`에 놓고, 놓은 경로와 이 터미널에서 실행되는지, 지우는 방법을 적는다."""
+    placed = command_dir() / COMMAND
+    if placed.exists() and not placed_by_us(placed):
+        raise Failed(f"{placed}에 다른 프로그램의 {COMMAND}가 있어 터미널 명령을 놓지 않았다. 그 파일을 옮긴 뒤 같은 명령을 다시 실행한다")
+    placed.parent.mkdir(parents=True, exist_ok=True)
+    placed.write_text(COMMAND_SCRIPT.format(mark=COMMAND_MARK, command=shlex.quote(str(app / BUNDLED_COMMAND)), app=app), encoding="utf-8")
+    placed.chmod(0o755)
+    print(f"  터미널 명령을 놓았다: {placed}\n  {command_reach(placed)}\n  명령을 지우려면: rm {shlex.quote(str(placed))}")
+
+
 def place_app(install_it: bool, dmg: bool) -> None:
     if install_it:
         install(APP, INSTALLED)
+        place_command(INSTALLED)
         return
     print(f"  만든 앱: {APP}")
     if dmg:
         print(f"  만든 .dmg: {DMG}")
-    print(f"  놓으려면 --install을 붙여 다시 실행하거나: rm -rf {INSTALLED} && ditto {shlex.quote(str(APP))} {INSTALLED}")
+    print(f"  앱과 터미널 명령 {COMMAND}를 놓으려면 --install을 붙여 다시 실행한다. 앱만 놓으려면: rm -rf {INSTALLED} && ditto {shlex.quote(str(APP))} {INSTALLED}")
 
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="레포를 받은 Mac에서 Atlas 앱을 만든다")
     p.add_argument("--doctor", action="store_true", help="빌드 전 점검만 한다")
-    p.add_argument("--install", action="store_true", help=f"만든 앱을 {INSTALLED}에 놓는다")
+    p.add_argument("--install", action="store_true", help=f"만든 앱을 {INSTALLED}에 놓고 터미널 명령 {COMMAND}를 PATH의 폴더에 놓는다")
     p.add_argument("--dmg", action="store_true", help=".dmg도 만든다")
     p.add_argument("--check", action="store_true", help="만들어 둔 앱에 판정만 다시 돌린다")
     p.add_argument("--clean", action="store_true", help="표식과 묶을 Python 폴더를 지우고 처음부터 한다")
@@ -626,6 +711,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     dmg = DMG if args.dmg else None
     at = revision()
+
+    def judge() -> None:
+        check_app(APP, dmg)
+        print(f"  {command_status()}")
+
     plan = {
         1: doctor,
         2: python_archive,
@@ -633,7 +723,7 @@ def main(argv: list[str] | None = None) -> int:
         4: lambda: build_frontend(at),
         5: lambda: build_shell(at),
         6: lambda: sign_app("-", args.dmg),
-        7: lambda: check_app(APP, dmg),
+        7: judge,
         8: lambda: place_app(args.install, args.dmg),
     }
     numbers = [7] if args.check else [1] if args.doctor else list(plan)

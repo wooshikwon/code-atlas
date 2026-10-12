@@ -331,6 +331,133 @@ def test_copied_executable_is_found_signed_and_runs(build, tmp_path):
     assert subprocess.run([str(copied)]).returncode == 0
 
 
+@pytest.fixture
+def terminal(build, tmp_path, monkeypatch):
+    """홈 폴더와 PATH를 임시 폴더로 바꾼 터미널. 돌려주는 함수가 PATH에 넣을 폴더를 만든다."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    build.COMMAND_DIRS = ("~/.local/bin", "~/bin", str(tmp_path / "shared" / "bin"))
+    build.INSTALLED = tmp_path / "Applications" / "Atlas.app"
+
+    def on_path(*folders: Path) -> None:
+        for folder in folders:
+            folder.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PATH", os.pathsep.join([*map(str, folders), "/usr/bin:/bin"]))
+
+    return on_path
+
+
+def test_command_goes_to_the_first_listed_folder_on_the_path_that_can_be_written(build, terminal, tmp_path, capsys):
+    home, shared = tmp_path / "home", tmp_path / "shared" / "bin"
+    terminal(home / "bin", shared, home / ".local" / "bin")
+    (home / ".local" / "bin").chmod(0o555)
+    assert build.command_dir() == home / "bin"
+
+    fake_tools(home / "bin", atlas="다른 프로그램")
+    assert build.command_dir() == shared
+    build.place_command(build.INSTALLED)
+    assert build.placed_by_us(shared / "atlas") and "다른 프로그램" in (home / "bin" / "atlas").read_text()
+    printed = capsys.readouterr().out
+    assert f"터미널 명령을 놓았다: {shared}/atlas" in printed and f"명령을 지우려면: rm {shared}/atlas" in printed
+    assert f"다른 atlas가 먼저 실행된다: {home}/bin/atlas" in printed
+    (home / ".local" / "bin").chmod(0o755)
+
+
+def test_command_goes_to_local_bin_with_the_line_to_add_when_no_listed_folder_is_on_the_path(build, terminal, tmp_path, capsys):
+    placed = tmp_path / "home" / ".local" / "bin" / "atlas"
+    assert build.command_status() == "터미널 명령 atlas: 놓지 않았다. --install이 앱과 함께 놓는다"
+    build.place_command(build.INSTALLED)
+    assert placed.stat().st_mode & 0o777 == 0o755
+    assert 'export PATH="$HOME/.local/bin:$PATH"' in capsys.readouterr().out
+    assert build.command_status().endswith(f'export PATH="$HOME/.local/bin:$PATH". {build.INSTALLED}에 앱이 없어 실행되지 않는다')
+
+    terminal(placed.parent)
+    (build.INSTALLED / build.BUNDLED_COMMAND).parent.mkdir(parents=True)
+    (build.INSTALLED / build.BUNDLED_COMMAND).write_text("")
+    assert build.command_status() == f"터미널 명령 atlas: {placed}. 이 터미널에서 atlas <레포 폴더>로 연다 (atlas --help)"
+
+    placed.write_text("#!/bin/sh\n")
+    with pytest.raises(build.Failed, match="다른 프로그램의 atlas"):
+        build.place_command(build.INSTALLED)
+
+
+def test_placed_command_runs_the_one_in_the_app_and_tells_when_the_app_is_gone(build, terminal, tmp_path):
+    placed = tmp_path / "home" / ".local" / "bin" / "atlas"
+    build.place_command(build.INSTALLED)
+    gone = subprocess.run([str(placed), "."], capture_output=True, text=True)
+    assert gone.returncode == 1 and f"Atlas 앱이 {build.INSTALLED}에 없습니다" in gone.stderr
+
+    bundled = build.INSTALLED / build.BUNDLED_COMMAND
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    bundled.chmod(0o755)
+    assert subprocess.run([str(placed), "--browser", "my repo"], capture_output=True, text=True).stdout == "--browser\nmy repo\n"
+
+
+@pytest.fixture
+def atlas(tmp_path, monkeypatch):
+    """가짜 앱 묶음에 넣은 터미널 명령을 실행하는 함수. `open`과 `defaults`, 묶은 Python은 받은 인자를 한 줄씩 적는 가짜다."""
+    bundle = tmp_path / "Atlas.app"
+    command = bundle / "Contents" / "Resources" / "bin" / "atlas"
+    command.parent.mkdir(parents=True)
+    command.write_bytes((SCRIPT.parent.parent / "frontend" / "src-tauri" / "cli" / "atlas").read_bytes())
+    command.chmod(0o755)
+    echo = '#!/bin/sh\necho "{name}"\nprintf "%s\\n" "$@"\n'
+    fake_tools(tmp_path / "bin", open="", defaults="")
+    for path in (tmp_path / "bin" / "open", bundle / "Contents" / "Resources" / "python" / "bin" / "python3"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(echo.format(name=path.name))
+        path.chmod(0o755)
+    (tmp_path / "bin" / "defaults").write_text("#!/bin/sh\necho 0.1.0\n")
+    (tmp_path / "home" / "repo").mkdir(parents=True)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}:/usr/bin:/bin")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path / "home")
+
+    def run(*args: str) -> tuple[int, list[str], str]:
+        done = subprocess.run([str(command), *args], capture_output=True, text=True)
+        return done.returncode, done.stdout.splitlines(), done.stderr
+
+    return run
+
+
+@macos
+def test_atlas_hands_the_folder_to_the_app(atlas, tmp_path):
+    bundle, home = str((tmp_path / "Atlas.app").resolve()), str(tmp_path / "home")
+    assert atlas("repo") == (0, ["open", "-a", bundle, "repo"], "")
+    assert atlas(".") == (0, ["open", "-a", bundle, "."], "")
+    assert atlas("~/repo") == (0, ["open", "-a", bundle, f"{home}/repo"], "")
+    assert atlas("~") == (0, ["open", "-a", bundle, home], "")
+    assert atlas() == (0, ["open", "-a", bundle], "")
+
+
+@macos
+def test_atlas_refuses_what_it_cannot_open(atlas):
+    assert atlas("nowhere") == (1, [], "atlas: 폴더를 찾지 못했습니다: nowhere\n")
+    code, printed, error = atlas("repo", ".")
+    assert (code, printed) == (2, []) and error.startswith("atlas: 폴더는 하나만 받습니다")
+    code, printed, error = atlas("--port", "8921")
+    assert (code, printed) == (2, []) and error.startswith("atlas: 알 수 없는 옵션입니다: --port\n사용법: atlas [폴더]")
+
+
+@macos
+def test_atlas_browser_runs_the_bundled_python_with_the_rest(atlas):
+    ran = ["python3", "-I", "-B", "-m", "code_atlas.cli", "repo", "--port", "8921", "--no-open"]
+    assert atlas("--browser", "repo", "--port", "8921", "--no-open") == (0, ran, "")
+    assert atlas("repo", "--port", "8921", "-b", "--no-open") == (0, ran, "")
+    assert atlas("-b") == (0, ran[:5], "")
+
+
+@macos
+def test_atlas_tells_its_usage_and_version(atlas):
+    code, printed, _ = atlas("--help")
+    assert code == 0 and printed[0] == "사용법: atlas [폴더]"
+    assert atlas("-b", "repo", "-h")[1] == printed
+    assert atlas("--version") == (0, ["Atlas 0.1.0"], "") == atlas("-v")
+
+
 def test_only_adhoc_signing_is_made(build, capsys):
     assert build.main(["--sign", "developer-id"]) == 2
     assert "임시 서명만 만든다" in capsys.readouterr().err

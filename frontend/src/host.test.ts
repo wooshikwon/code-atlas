@@ -60,6 +60,7 @@ describe("브라우저", () => {
     host.onBackend((state) => states.push(state))();
     host.onDrop(() => {})();
     host.onMenu(() => {})();
+    host.onOpen(() => {})();
     await settle();
     expect(states).toEqual([{ phase: "ready", url: "" }]);
     expect(shell.loaded).toEqual([]);
@@ -129,6 +130,27 @@ describe("앱", () => {
     stops.forEach((stop) => stop());
     await settle();
     expect(shell.unlisten).toHaveBeenCalledTimes(2);
+  });
+
+  it("앱이 뜨기 전에 넘겨받은 경로와 떠 있는 동안 넘겨받은 경로를 한 번씩 받는다", async () => {
+    const waiting = [["/repos/shop"], [], ["/repos/blog"]];
+    shell.invoke.mockImplementation(async (command: string) => (command === "take_opened" ? waiting.shift() : { phase: "starting" }));
+    const host = await load();
+    const opened: string[][] = [];
+    const stop = host.onOpen((paths) => opened.push(paths));
+    await settle();
+    expect(opened).toEqual([["/repos/shop"]]);
+
+    emit("open", null);
+    await settle();
+    expect(opened).toEqual([["/repos/shop"]]);
+    emit("open", null);
+    await settle();
+    expect(opened).toEqual([["/repos/shop"], ["/repos/blog"]]);
+
+    stop();
+    await settle();
+    expect(shell.unlisten).toHaveBeenCalledTimes(1);
   });
 
   it("백엔드를 다시 띄우는 명령과 로그인 명령을 앱 껍데기에 보낸다", async () => {

@@ -10,6 +10,7 @@ import "./styles.css";
 useAtlas.getState().restore();
 useStatus.getState().watch();
 host.onMenu(() => void useOpening.getState().browse());
+host.onOpen((paths) => void useOpening.getState().drop(paths));
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

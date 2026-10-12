@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "주 창이 쓰는 플러그인과 명령",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "window-state:default", "allow-backend-state", "allow-restart-backend", "allow-claude-login"]
+  "permissions": ["core:default", "dialog:default", "window-state:default", "allow-backend-state", "allow-restart-backend", "allow-claude-login", "allow-take-opened"]
 }

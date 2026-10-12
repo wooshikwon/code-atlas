@@ -1,5 +1,5 @@
 //! Atlas 앱 껍데기. 창 하나를 띄워 `frontend/dist`의 화면을 `tauri://localhost`에서 열고, 백엔드 프로세스 하나를 띄워 그 주소를
-//! 화면에 알린다. 레포의 판정과 도구 찾기, 분석 결과는 백엔드와 화면이 맡는다.
+//! 화면에 알린다. macOS가 이 앱으로 열라고 넘긴 경로는 화면에 넘긴다. 레포의 판정과 도구 찾기, 분석 결과는 백엔드와 화면이 맡는다.
 
 mod backend;
 mod menu;
@@ -10,9 +10,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use tauri::{Emitter, Manager, RunEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Url};
 
 use backend::{Backend, STOP_TIMEOUT};
 
@@ -55,16 +55,34 @@ fn login_script(claude: &Path) -> Result<String, String> {
     Ok(format!("#!/bin/sh\nPATH={}:\"$PATH\" exec {} auth login\n", quoted(dir), quoted(claude)))
 }
 
+/// macOS가 이 앱으로 열라고 넘긴 경로. 터미널 명령 `atlas <폴더>`가 `open -a`로 넘긴다. 화면이 `take_opened`로 받아 갈 때까지 둔다.
+#[derive(Default)]
+struct Opened(Mutex<Vec<String>>);
+
+#[tauri::command]
+fn take_opened(opened: tauri::State<Opened>) -> Vec<String> {
+    std::mem::take(&mut opened.0.lock().unwrap())
+}
+
+/// `urls` 가운데 파일 주소가 가리키는 경로
+fn opened_paths(urls: &[Url]) -> Vec<String> {
+    urls.iter().filter_map(|url| url.to_file_path().ok()).map(|path| path.to_string_lossy().into_owned()).collect()
+}
+
+/// 떠 있는 창을 앞으로 가져온다.
+fn show_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 fn main() {
     let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
-        }))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .manage(Opened::default())
         .setup(|app| {
             let resources = app.path().resource_dir()?;
             let handle = app.handle().clone();
@@ -80,12 +98,13 @@ fn main() {
             Ok(())
         });
     #[cfg(not(feature = "probe"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![backend_state, restart_backend, claude_login]);
+    let builder = builder.invoke_handler(tauri::generate_handler![backend_state, restart_backend, claude_login, take_opened]);
     #[cfg(feature = "probe")]
     let builder = probe::attach(builder).invoke_handler(tauri::generate_handler![
         backend_state,
         restart_backend,
         claude_login,
+        take_opened,
         probe::probe_report,
         probe::probe_done,
         probe::probe_window,
@@ -95,6 +114,11 @@ fn main() {
     builder.build(tauri::generate_context!()).expect("Atlas를 띄우지 못했다").run(|app, event| match event {
         RunEvent::ExitRequested { .. } => app.state::<Arc<Backend>>().close(),
         RunEvent::Exit => app.state::<Arc<Backend>>().stop(STOP_TIMEOUT),
+        RunEvent::Opened { urls } => {
+            app.state::<Opened>().0.lock().unwrap().extend(opened_paths(&urls));
+            show_window(app);
+            let _ = app.emit("open", ());
+        }
         _ => {}
     });
 }
@@ -132,5 +156,11 @@ mod tests {
         assert!(login_script(plain.parent().unwrap()).is_err(), "폴더");
         assert!(login_script(Path::new("/nonexistent/claude")).is_err(), "없는 파일");
         assert!(login_script(Path::new("claude")).is_err(), "상대 경로");
+    }
+
+    #[test]
+    fn opened_paths_keeps_only_file_urls() {
+        let urls = ["file:///Users/me/my%20repo/", "https://example.com/repo", "file:///tmp/notes.txt"].map(|url| Url::parse(url).unwrap());
+        assert_eq!(opened_paths(&urls), ["/Users/me/my repo/", "/tmp/notes.txt"]);
     }
 }
