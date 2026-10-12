@@ -61,7 +61,7 @@ export function linksOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<st
   return { out: linked(nodes, out, (edge) => peer(edge.target)), into: linked(nodes, into, (edge) => peer(edge.source)) };
 }
 
-/** 지나온 선 하나. sources는 누른 선의 출발 노드이고 links는 그 선에 든 관계를 출발 노드마다 묶은 것이다. */
+/** 지나온 선 하나. sources와 target은 누른 선의 출발 노드와 도착 노드이고(지금 고른 노드와 무관하다) links는 그 선에 든 관계를 출발 노드마다 묶은 것이다. */
 export interface Followed {
   sources: string[];
   target: string;

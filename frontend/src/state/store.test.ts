@@ -133,6 +133,12 @@ describe("follow", () => {
     expect(store().history.entries.at(-1)).toMatchObject({ selection: null, via: null });
   });
 
+  it("선의 출발 노드로 가도 누른 선을 그대로 담는다", () => {
+    store().follow([line], b);
+    expect(store().selection).toEqual(node(b));
+    expect(store().via).toEqual([line]);
+  });
+
   it("그래프에 없는 노드로는 가지 않는다", () => {
     store().follow([line], "없는:노드");
     expect(store().via).toBeNull();

@@ -47,8 +47,9 @@ export interface AtlasStore {
   view: View;
   selection: Selection;
   /**
-   * 그래프에서 선을 눌러 지금 화면에 왔으면 누른 선의 키(선을 눌러 온 상태). 정보 패널이 `연결`·`관계` 줄을 보이고 그래프가 그 선을
-   * 굵게 그린다. 선택을 바꾸는 다른 액션이 null로 돌리고, 선택을 그대로 두는 액션(폴더 접기·펴기, 손잡이)은 그대로 둔다.
+   * 그래프에서 선을 눌러 지금 화면에 왔으면 누른 선의 키(선을 눌러 온 상태). 키가 선의 출발 노드·도착 노드·종류를 담고, 그 선의 어느 쪽
+   * 노드로 왔는지는 selection이 따로 담는다. 정보 패널이 `연결`·`관계` 줄을 보이고 그래프가 그 선을 굵게 그린다.
+   * 선택을 바꾸는 다른 액션이 null로 돌리고, 선택을 그대로 두는 액션(폴더 접기·펴기, 손잡이)은 그대로 둔다.
    */
   via: EdgeKey[] | null;
   /** 접은 폴더(패키지 노드 id). 레포를 열면 `startFolds`가 고른 폴더가 접혀 있다. */
@@ -121,10 +122,10 @@ export interface AtlasStore {
   /** 폴더를 접거나 펼친다. 초점을 둔 노드가 든 폴더를 접거나 초점을 둔 폴더를 펼치면 선택을 푼다. */
   toggleFolder(id: string): void;
   /**
-   * 그래프에서 누른 선 keys를 따라 도착 노드 target으로 간다. 도착 노드가 폴더면 그 폴더를 펼치고 선택을 풀며, 그 밖의 노드면 그 노드를
+   * 그래프에서 누른 선 keys를 따라 그 선의 한쪽 끝 노드 to로 간다. to가 폴더면 그 폴더를 펼치고 선택을 풀며, 그 밖의 노드면 그 노드를
    * 고른다(이미 고른 노드여도 선택을 풀지 않는다). 두 경우 모두 누른 선을 via에 담아 이력에 한 단계를 넣는다.
    */
-  follow(keys: EdgeKey[], target: string): void;
+  follow(keys: EdgeKey[], to: string): void;
   /** 파일 상자의 손잡이를 눌러 전부 펼침과 펼침을 오간다. 선택과 초점은 바꾸지 않는다. */
   togglePack(id: string): void;
   setDepth(depth: Depth): void;
@@ -464,18 +465,18 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       })(),
     selectEdge: guarded((key) => visit({ selection: { type: "edge", key, focus: focusOf(get().selection) } })),
     toggleFolder: guarded(toggle),
-    follow: (keys, target) =>
-      focused(target) ||
+    follow: (keys, to) =>
+      focused(to) ||
       guarded(() => {
-        const kind = kindOf(target);
+        const kind = kindOf(to);
         if (kind === undefined) {
           return;
         }
         const via = [...keys].sort();
         if (kind === "package") {
-          visit({ collapsed: new Set([...get().collapsed].filter((folder) => folder !== target)), selection: null, via });
+          visit({ collapsed: new Set([...get().collapsed].filter((folder) => folder !== to)), selection: null, via });
         } else {
-          visit({ selection: { type: "node", id: target }, collapsed: revealed(target), via });
+          visit({ selection: { type: "node", id: to }, collapsed: revealed(to), via });
         }
       })(),
     togglePack: guarded((id) => {
