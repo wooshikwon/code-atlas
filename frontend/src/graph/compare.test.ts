@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { gone, lineTotals, liveGraph, liveSites, rowChange } from "./compare";
-import { compareFixture, edge, repoFixture } from "./fixture";
+import { gone, inSource, lineTotals, liveGraph, liveSites, rowChange } from "./compare";
+import { compareFixture, edge, node, repoFixture } from "./fixture";
 import { edgeKey } from "./scope";
 
 const { graph } = compareFixture;
@@ -82,6 +82,15 @@ describe("lineTotals", () => {
     expect([top.reduce((n, t) => n + t.added, 0), top.reduce((n, t) => n + t.deleted, 0)]).toEqual([sum("added"), sum("deleted")]);
   });
 
+  it("패키지 노드의 path가 `__init__.py`여도 그 파일의 줄 수를 그 폴더부터 더한다", () => {
+    const packaged = { nodes: [node("lib", "package", null, { path: "lib/__init__.py" }), node("lib.a", "module", "lib", { path: "lib/a.py" })], edges: [] };
+    const files = [
+      { path: "lib/__init__.py", old: null, status: "modified" as const, added: 2, deleted: 1, test: false },
+      { path: "lib/a.py", old: null, status: "modified" as const, added: 4, deleted: 0, test: false },
+    ];
+    expect(lineTotals(packaged, files).get("lib")).toEqual({ added: 6, deleted: 1 });
+  });
+
   it("줄 수가 0인 파일과 바뀌지 않은 파일은 담지 않는다", () => {
     expect(totals.has("cli")).toBe(false);
     expect(totals.has("common")).toBe(false);
@@ -123,5 +132,26 @@ describe("rowChange", () => {
   it("기준 시점의 수가 지금과 같은 선은 수만 달라진 선이 아니다", () => {
     const same = lines("main:run", "main:helper")[0];
     expect(rowChange([same], { [edgeKey(same)]: { change: null, before: 1 } }).before).toBeNull();
+  });
+});
+
+describe("inSource", () => {
+  const inFile = graph.nodes.filter((n) => n.path === "pkg/mod.py" && n.kind !== "module");
+
+  it("삭제된 정의를 대상 시점의 본문에서 놓였을 줄 뒤에 끼운다", () => {
+    expect(inSource(inFile, compareFixture.nodes).map((n) => n.id)).toEqual([
+      "pkg.mod:Store",
+      "pkg.mod:Store.load",
+      "pkg.mod:Store.save",
+      "pkg.mod:Row",
+      "pkg.mod:parse",
+      "pkg.mod:drop",
+    ]);
+    const early = { ...compareFixture.nodes, "pkg.mod:drop": { change: "deleted" as const, added: 0, deleted: 7, slot: 32 } };
+    expect(inSource(inFile, early).map((n) => n.id.split(":")[1])).toEqual(["Store", "Store.load", "Store.save", "Row", "drop", "parse"]);
+  });
+
+  it("비교가 꺼져 있으면 시작 줄 순서다", () => {
+    expect(inSource([...inFile].reverse(), null).map((n) => n.range?.[0])).toEqual([1, 3, 12, 32, 42, 52]);
   });
 });
