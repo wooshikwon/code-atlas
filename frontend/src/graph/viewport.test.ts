@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, frameOn, freeRect } from "./viewport";
+import { anchorOn, autoView, boundsOf, centerOn, fitPadding, frameOn, freeRect } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -73,21 +73,6 @@ describe("anchorOn", () => {
     const next = anchorOn({ x: 200, y: 300 }, { x: 260, y: 280 }, view);
     expect(next).toEqual({ x: 70, y: 60, zoom: 0.5 });
     expect([260 * next.zoom + next.x, 280 * next.zoom + next.y]).toEqual([200 * view.zoom + view.x, 300 * view.zoom + view.y]);
-  });
-});
-
-describe("cornerInto", () => {
-  const clear = { x: 0, y: 0, width: 1000, height: 800 };
-  const view = { x: 0, y: 0, zoom: 1 };
-
-  it("왼쪽 위 모서리가 영역의 20px 안쪽에 들어 있으면 상자가 영역보다 넓어도 화면을 그대로 둔다", () => {
-    expect(cornerInto({ x: 700, y: 100 }, clear, view)).toEqual(view);
-  });
-
-  it("모서리가 벗어난 축만 모서리가 20px 안쪽에 오게 옮기고 확대 비율은 그대로 둔다", () => {
-    expect(cornerInto({ x: 1100, y: 100 }, clear, view)).toEqual({ x: -120, y: 0, zoom: 1 });
-    expect(cornerInto({ x: 100, y: -50 }, clear, view)).toEqual({ x: 0, y: 70, zoom: 1 });
-    expect(cornerInto({ x: 100, y: 1700 }, clear, { x: 0, y: 0, zoom: 0.5 })).toEqual({ x: 0, y: -70, zoom: 0.5 });
   });
 });
 

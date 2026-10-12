@@ -78,12 +78,13 @@ describe("글", () => {
   it("연결 합계는 세는 관계만 `곳`으로 적고, 종류가 하나면 종류와 수를, 여럿이면 합과 종류마다의 수를 적는다", () => {
     expect(linksText({ call: 2 })).toBe("호출 2곳");
     expect(linksText({ import: 3, call: 10, construct: 3 })).toBe("13곳 (호출 10곳, 생성 3곳)");
+    expect(linksText({ type: 4, call: 10, pass: 2, decorate: 1 })).toBe("13곳 (호출 10곳, 전달 2곳, 데코레이터 1곳)");
     expect(linksText({ import: 3, type: 1 })).toBe("없음");
     expect(linksText({})).toBe("없음");
   });
 
   it("그 밖 묶음은 세지 않는 관계를 종류마다 적고 없으면 null이다", () => {
-    expect(restText({ call: 9, import: 3, type: 2 })).toBe("그 밖 import 3줄, 타입 2곳");
+    expect(restText({ call: 9, pass: 1, import: 3, type: 2 })).toBe("그 밖 import 3줄, 타입 2곳");
     expect(restText({ call: 9 })).toBeNull();
   });
 

@@ -46,17 +46,15 @@ export function relationOf(kind: EdgeKind, count: number): string {
 }
 
 /**
- * 수로 세는 관계의 종류. 선의 말풍선, 선 위의 수와 도착 노드 앞의 합계, 정보 패널의 연결 합계가 이 종류만 센다.
- * 그 밖의 종류는 선으로 그리고 정보 패널의 `그 밖` 묶음과 코드 줄 목록에 남긴다.
+ * 수로 세는 관계의 종류. 실행할 때 그 코드가 실제로 도는 관계(호출, 생성, 전달, 데코레이터, 상속, 오버라이드)다.
+ * 선의 말풍선, 선 위의 수와 도착 노드 앞의 합계, 정보 패널의 연결 합계가 이 종류만 센다. 이름만 쓰는 관계(타입, import)는
+ * 선으로 그리고 정보 패널의 `그 밖` 묶음과 코드 줄 목록에 남긴다.
  */
-export const COUNTED_KINDS: EdgeKind[] = ["call", "construct", "inherit"];
+export const COUNTED_KINDS: EdgeKind[] = ["call", "construct", "pass", "decorate", "inherit", "override"];
 
-/** 세는 관계가 없는 선에 수 대신 적는 글. 여러 종류가 있으면 앞에 적은 종류의 글을 쓴다. */
+/** 세는 관계가 없는 선에 수 대신 적는 글. 타입과 import가 함께 있으면 타입의 글을 쓴다. */
 const ALONE: [EdgeKind, string][] = [
-  ["pass", "전달에만 쓰임"],
-  ["decorate", "데코레이터에만 쓰임"],
   ["type", "타입에만 쓰임"],
-  ["override", "오버라이드 관계만 있음"],
   ["import", "import 관계만 있음"],
 ];
 
@@ -74,7 +72,7 @@ export function countedOf(kinds: Kinds): number {
 
 /**
  * 선에 든 관계를 적은 글. 세는 관계가 있으면 그 종류만 수와 함께 적고(`호출 5곳 · 생성 2곳`), 없으면 수 없이 `타입에만 쓰임`이나
- * `import 관계만 있음`처럼 적는다. kinds는 종류마다의 수다.
+ * `import 관계만 있음`으로 적는다. kinds는 종류마다의 수다.
  */
 export function relationsOf(kinds: Kinds): string {
   const counted = kindsOf(kinds, true);

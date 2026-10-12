@@ -1,7 +1,8 @@
 // 관계 그래프. 저장소의 뷰 종류에 따라 구조 뷰나 함수 시점 뷰를 그린다. 구조 뷰는 저장소 상태에서 보이는 노드와
 // 그릴 선을 정해 배치를 부르고, 배치가 바뀌면 노드를 움직이며 고른 노드나 선이 가리킨 폴더로 화면을 옮긴다. 경로 고정 중에는 고른 노드의 흐름 대신
-// 강조하는 경로를 그리고, finder.focus를 정할 때마다 그 노드와 다음 걸음이 보이게 화면을 옮긴다. 전체 맞춤 상태(저장소의 fitted)에서는
-// 배치가 바뀔 때마다 화면을 다시 맞추고, 이름표가 읽히는 확대 비율 아래로 줄이지 않는다.
+// 강조하는 경로를 그리고, finder.focus를 정할 때마다 그 노드와 다음 걸음이 보이게 화면을 옮긴다. 폴더나 손잡이를 눌러 상자 하나를
+// 펼치거나 접으면 화면을 옮기지 않고 그 상자의 모서리를 붙잡는다. 전체 맞춤 상태(저장소의 fitted)에서 그 밖의 까닭으로 배치가 바뀌면
+// 화면을 다시 맞추고, 이름표가 읽히는 확대 비율 아래로 줄이지 않는다.
 import {
   getViewportForBounds,
   ReactFlow,
@@ -46,7 +47,7 @@ import { drawn, followed, type EdgeKey } from "./scope";
 import { clipped, nodeTip, packTip, tipOf } from "./tips";
 import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
-import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
+import { anchorOn, autoView, boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, unitOf, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -183,7 +184,7 @@ function ringOf(box: Box) {
 
 /**
  * 코드가 스스로 맞추는 화면(`autoView`). 배치 전체가 이름표가 읽히는 확대 비율로 정보 패널이 가리지 않는 영역에 들어오면 전체를 맞추고
- * (확대 비율을 100%보다 키우지 않는다), 들어오지 않으면 사용자가 방금 펼치거나 접은 상자 pressed의 왼쪽 위를, 그런 상자가 없으면
+ * (확대 비율을 100%보다 키우지 않는다), 들어오지 않으면 선을 눌러 간 폴더 pressed의 왼쪽 위를, 그런 폴더가 없으면
  * 그래프의 왼쪽 위를 그 영역의 왼쪽 위에 놓는다.
  */
 function fittedView(at: Layout, { area, free }: Stage, pressed: string | null): Viewport {
@@ -399,19 +400,20 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       }
     }
 
-    // 전체 맞춤 상태에서 배치가 바뀌면 화면을 다시 맞춘다(`fittedView`).
-    const whole = useAtlas.getState().fitted;
-    if (whole && from !== null && !settled(from, to) && root.current !== null) {
+    // 폴더나 손잡이를 눌러 상자 하나를 펼치거나 접었으면 화면을 옮기지 않고 그 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 둔다.
+    // 확대 비율은 그대로이고 전체 맞춤 상태는 꺼진다. 노드를 골라 그 노드를 품은 폴더가 펼쳐졌으면 고른 노드로, 선을 눌러 폴더를 펼쳤으면
+    // 그 폴더로 화면을 옮기므로 상자를 붙잡지 않는다.
+    const toggled = came === undefined && changed.length === 1 && (aim === null || !fresh) ? changed[0] : null;
+    const before = toggled === null ? undefined : from?.boxes.get(toggled);
+    const held = before === undefined ? null : { id: toggled!, before, view: getViewport() };
+
+    // 전체 맞춤 상태에서 그 밖의 까닭으로 배치가 바뀌면 화면을 다시 맞춘다(`fittedView`).
+    if (toggled !== null) {
+      useAtlas.setState({ fitted: false });
+    } else if (useAtlas.getState().fitted && from !== null && !settled(from, to) && root.current !== null) {
       const stage = stageOf(root.current);
       fly(fittedView(to, stage, changed.length === 1 ? changed[0] : null), stage.free);
     }
-
-    // 전체 맞춤 상태가 아닐 때 폴더나 손잡이를 눌러 상자 하나를 펼치거나 접었으면 그 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 둔다.
-    // 확대 비율은 그대로다. 노드를 골라 그 노드를 품은 폴더가 펼쳐졌으면 고른 노드로, 선을 눌러 폴더를 펼쳤으면 그 폴더로 화면을 옮기므로
-    // 상자를 붙잡지 않는다.
-    const toggled = !whole && came === undefined && changed.length === 1 && (aim === null || !fresh) ? changed[0] : null;
-    const before = toggled === null ? undefined : from?.boxes.get(toggled);
-    const held = before === undefined ? null : { id: toggled!, before, view: getViewport() };
 
     const draw = (at: Layout, fresh: Set<string> | null) => {
       onScreen.current = at;
@@ -423,24 +425,10 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         jump(anchorOn(held.before, box, held.view));
       }
     };
-    /** 펼치거나 접은 상자의 왼쪽 위 모서리가 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역을 벗어났으면 모서리가 들어오게만 옮긴다. */
-    const reveal = () => {
-      const box = toggled === null ? undefined : to.boxes.get(toggled);
-      if (box === undefined || root.current === null) {
-        return;
-      }
-      const view = held === null ? getViewport() : anchorOn(held.before, box, held.view);
-      const { clear } = stageOf(root.current);
-      const next = cornerInto(box, clear, view);
-      if (next.x !== view.x || next.y !== view.y) {
-        fly(next, clear);
-      }
-    };
 
     if (from === null || still || settled(from, to)) {
       draw(to, null);
       setMoving(false);
-      reveal();
       return;
     }
     const added = new Set(items.filter((item) => !from.boxes.has(item.id)).map((item) => item.id));
@@ -450,10 +438,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       from,
       to,
       (at) => draw(at, null),
-      () => {
-        setMoving(false);
-        reveal();
-      },
+      () => setMoving(false),
     );
   }, [scene, index, making, lit, pinFocus, aimed, cover, overlay, getViewport, fly, jump, heading]);
 

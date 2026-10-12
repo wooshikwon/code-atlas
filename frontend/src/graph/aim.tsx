@@ -101,7 +101,7 @@ export function useAim({ lines, boxes, name, rows, only, skip, go, open }: AimOp
     return linesAt(state.current.lines.views, at).sort((a, b) => place(a).y - place(b).y || place(a).x - place(b).x);
   };
   /**
-   * 선 views를 푼 말풍선의 줄. 함수 단계에서 세는 관계가 없어 누를 수 없는 줄은 다른 줄이 있으면 적지 않고, 줄이 그런 줄뿐이면 그대로 적는다.
+   * 선 views를 푼 말풍선의 줄. 함수 단계에서 풀어 적을 끝이 없어 누를 수 없는 안내 줄은 다른 줄이 있으면 적지 않고, 줄이 그런 줄뿐이면 그대로 적는다.
    */
   const table = (views: EdgeView[]): LineRow[] => {
     const all = views.flatMap(rows);

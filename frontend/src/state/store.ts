@@ -5,7 +5,7 @@ import type { AtlasNode, Graph, Repo, Tree } from "../api/types";
 import { cycles } from "../graph/cycles";
 import { lit, route, type Lit, type Route } from "../graph/route";
 import type { EdgeKey } from "../graph/scope";
-import { hidden } from "../graph/visible";
+import { hidden, packedIn } from "../graph/visible";
 import { applyTheme, preferredTheme, type Theme } from "../theme";
 import { back, focusOf, forward, jump, push, type History, type Place, type Selection, type View } from "./history";
 import { useOverlay } from "./overlay";
@@ -57,6 +57,7 @@ export interface AtlasStore {
   /**
    * 전부 펼침 단계인 파일 상자(파일 노드 id). 펼친 파일 상자는 파일 밖과 선이 없는 자식을 손잡이로 묶고, 이 집합에 든 파일 상자는
    * 그 자식도 그린다. 파일 상자는 선택을 풀면 접히지만 이 집합에는 남아, 다시 고르면 전부 펼침으로 열린다.
+   * 초점을 둔 노드가 손잡이에 묶이는 자식이거나 그 안에 든 노드면 그 파일 상자는 늘 이 집합에 있다(`unpackedFor`).
    */
   unpacked: Set<string>;
   /** 흐름 단계 */
@@ -112,7 +113,7 @@ export interface AtlasStore {
    * select(null)은 고정 중에 아무것도 하지 않는다.
    *
    * 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 폴더를 고르면 그 폴더를 접는다.
-   * 같은 id를 다시 고르거나 null을 넘기면 선택을 푼다.
+   * null을 넘기거나 고른 파일 상자·폴더·외부 노드를 다시 고르면 선택을 푼다. 고른 함수·클래스·메서드를 다시 고르면 아무것도 바꾸지 않는다.
    */
   select(id: string | null): void;
   /** 구조 뷰로 돌아가 select처럼 노드를 고른다. 이미 고른 노드여도 선택을 풀지 않는다. */
@@ -126,7 +127,10 @@ export interface AtlasStore {
    * 고른다(이미 고른 노드여도 선택을 풀지 않는다). 두 경우 모두 누른 선을 via에 담아 이력에 한 단계를 넣는다.
    */
   follow(keys: EdgeKey[], to: string): void;
-  /** 파일 상자의 손잡이를 눌러 전부 펼침과 펼침을 오간다. 선택과 초점은 바꾸지 않는다. */
+  /**
+   * 파일 상자의 손잡이를 눌러 전부 펼침과 펼침을 오간다. 선택과 초점은 바꾸지 않되, 초점을 둔 노드가 접는 손잡이에 묶이는 자식이거나
+   * 그 안에 든 노드면 그 파일 상자를 고른다.
+   */
   togglePack(id: string): void;
   setDepth(depth: Depth): void;
   /** 함수 시점 뷰로 들어가 그 함수를 고른다. */
@@ -274,6 +278,20 @@ export function barred(): boolean {
   return true;
 }
 
+type Boxes = Pick<AtlasStore, "graph" | "showTests" | "showExternal" | "selection" | "unpacked">;
+
+/** 초점을 둔 노드가 손잡이에 묶이는 자식이거나 그 안에 든 노드면 그 노드가 든 파일 상자, 아니면 null이다. */
+function packOf(state: Omit<Boxes, "unpacked">): string | null {
+  const focus = focusOf(state.selection);
+  return state.graph === null || focus === null ? null : packedIn(state.graph, hidden(state.graph, state), focus);
+}
+
+/** 초점을 둔 노드가 손잡이에 묶이는 자식이거나 그 안에 든 노드면 그 파일 상자를 더한 전부 펼친 상자 집합. 더할 상자가 없으면 받은 집합이다. */
+function unpackedFor(state: Boxes): Set<string> {
+  const box = packOf(state);
+  return box === null || state.unpacked.has(box) ? state.unpacked : new Set([...state.unpacked, box]);
+}
+
 const START: Pick<AtlasStore, "view" | "selection" | "via" | "collapsed" | "unpacked"> = {
   view: { kind: "structure" },
   selection: null,
@@ -304,16 +322,18 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
   const visit = (change: Partial<Pick<AtlasStore, "view" | "selection" | "via" | "collapsed" | "unpacked">>) =>
     set((state) => {
       const next = { ...("selection" in change ? { via: null } : {}), ...change };
-      return { ...next, history: push(state.history, placeOf({ ...state, ...next })) };
+      const unpacked = unpackedFor({ ...state, ...next });
+      return { ...next, unpacked, history: push(state.history, placeOf({ ...state, ...next, unpacked })) };
     });
 
-  /** 이력의 지금 단계를 화면에 되돌린다. 이력에 새 단계를 넣지 않는다. */
+  /** 이력의 지금 단계를 화면에 되돌린다. 이력에 새 단계를 넣지 않는다. 그 단계를 넣은 뒤 토글이 바뀌었으면 전부 펼친 상자를 지금 토글로 다시 맞춘다. */
   const restore = (history: History) => {
     if (history === get().history) {
       return;
     }
     const place = history.entries[history.index];
-    set({ history, view: place.view, selection: place.selection, via: place.via, collapsed: new Set(place.collapsed), unpacked: new Set(place.unpacked) });
+    const unpacked = unpackedFor({ ...get(), selection: place.selection, unpacked: new Set(place.unpacked) });
+    set({ history, view: place.view, selection: place.selection, via: place.via, collapsed: new Set(place.collapsed), unpacked });
   };
 
   /** 화면 설정을 바꾸고 localStorage에 쓴다. */
@@ -446,12 +466,15 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
           visit({ selection: null });
           return;
         }
-        if (kindOf(id) === undefined) {
+        const kind = kindOf(id);
+        if (kind === undefined) {
           return;
         }
         const selection = get().selection;
         if (selection?.type === "node" && selection.id === id) {
-          visit({ selection: null });
+          if (kind === "module" || kind === "package" || kind === "external") {
+            visit({ selection: null });
+          }
           return;
         }
         visit({ selection: { type: "node", id }, collapsed: revealed(id) });
@@ -483,8 +506,10 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       const unpacked = new Set(get().unpacked);
       if (!unpacked.delete(id)) {
         unpacked.add(id);
+        visit({ unpacked });
+      } else {
+        visit(packOf(get()) === id ? { unpacked, selection: { type: "node", id } } : { unpacked });
       }
-      visit({ unpacked });
     }),
     setDepth: guarded((depth) => keep({ depth })),
     enterFunction: guarded((id) => {
@@ -505,7 +530,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       if (!centered && kind !== "function" && kind !== "method") {
         return;
       }
-      set({ history: from, view: place.view, selection: place.selection, via: place.via, collapsed: new Set(place.collapsed), unpacked: new Set(place.unpacked) });
+      restore(from);
       if (!centered) {
         enter(id);
       }
@@ -526,11 +551,11 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       return true;
     },
     toggleTests: guarded(() => {
-      set((state) => ({ showTests: !state.showTests }));
+      set((state) => ({ showTests: !state.showTests, unpacked: unpackedFor({ ...state, showTests: !state.showTests }) }));
       seek(get().finder.from, get().finder.to);
     }),
     toggleExternal: guarded(() => {
-      set((state) => ({ showExternal: !state.showExternal }));
+      set((state) => ({ showExternal: !state.showExternal, unpacked: unpackedFor({ ...state, showExternal: !state.showExternal }) }));
       seek(get().finder.from, get().finder.to);
     }),
     toggleFinder: () => set((state) => ({ finder: { ...state.finder, open: !state.finder.open } })),

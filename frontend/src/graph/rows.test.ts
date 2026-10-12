@@ -41,7 +41,7 @@ describe("rowsOf", () => {
     ]);
   });
 
-  it("함수를 고르면 접힌 폴더로 뭉친 선을 실제 상대 함수로 풀고 세는 관계만 줄로 낸다", () => {
+  it("함수를 고르면 접힌 폴더로 뭉친 선을 실제 상대 함수로 풀어 줄마다 그 관계의 원래 선 키를 담는다", () => {
     expect(rowsOf(nodes, "main:run", lines("main:run", ["pkg"]).get("agg|main:run|pkg")!)).toEqual([
       {
         line: "agg|main:run|pkg",
@@ -54,9 +54,25 @@ describe("rowsOf", () => {
     ]);
   });
 
-  it("함수를 고른 선에 세는 관계가 없으면 그린 양 끝과 관계 글을 누를 수 없는 줄 하나로 낸다", () => {
-    const line: RowLine = { key: "f|m|import", source: "main:run", target: "common", kinds: { import: 1 }, route: null, edges: [{ ...repoFixture.edges[0], source: "main:run", target: "common" }] };
-    expect(rowsOf(nodes, "main:run", line)).toEqual([{ line: "f|m|import", source: "main:run", target: "common", relation: "import 관계만 있음", keys: null, list: "f|m|import" }]);
+  it("함수 단계에서 타입에만 쓰이는 관계도 누를 수 있는 줄이고 관계 칸은 수 없이 적는다", () => {
+    const uses = [
+      { ...repoFixture.edges[0], source: "main:run", target: "pkg.mod:Row", kind: "type" as const },
+      { ...repoFixture.edges[0], source: "main:helper", target: "pkg.mod:Row", kind: "type" as const },
+    ];
+    const line: RowLine = { key: "agg|main|pkg.mod:Row", source: "main", target: "pkg.mod:Row", kinds: { type: 2 }, route: null, edges: uses };
+    expect(rowsOf(nodes, "pkg.mod:Row", line)).toEqual([
+      { line: line.key, source: "main:run", target: "pkg.mod:Row", relation: "타입에만 쓰임", keys: ["main:run|pkg.mod:Row|type"], list: "main:run|pkg.mod:Row|type" },
+      { line: line.key, source: "main:helper", target: "pkg.mod:Row", relation: "타입에만 쓰임", keys: ["main:helper|pkg.mod:Row|type"], list: "main:helper|pkg.mod:Row|type" },
+    ]);
+  });
+
+  it("함수 단계에서 import는 줄이 되지 않고, import뿐인 선은 그린 양 끝과 관계 글을 누를 수 없는 안내 줄 하나로 낸다", () => {
+    const imported = { ...repoFixture.edges[0], source: "main:run", target: "common" };
+    const called = { ...repoFixture.edges[0], source: "main:run", target: "common:log", kind: "call" as const };
+    const alone: RowLine = { key: "f|m|import", source: "main:run", target: "common", kinds: { import: 1 }, route: null, edges: [imported] };
+    expect(rowsOf(nodes, "main:run", alone)).toEqual([{ line: "f|m|import", source: "main:run", target: "common", relation: "import 관계만 있음", keys: null, list: "f|m|import" }]);
+    const mixed: RowLine = { key: "agg|main:run|common", source: "main:run", target: "common", kinds: { import: 1, call: 1 }, route: null, edges: [imported, called] };
+    expect(rowsOf(nodes, "main:run", mixed).map((row) => [row.source, row.target, row.relation])).toEqual([["main:run", "common:log", "호출 1곳"]]);
   });
 
   it("파일을 고르면 접힌 폴더로 뭉친 선의 상대 끝을 그 안의 파일로 풀고 고른 파일 쪽은 그린 노드를 적는다", () => {

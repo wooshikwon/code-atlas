@@ -1277,6 +1277,11 @@ ul {
   color: var(--ink);
 }
 
+/* 접힌 상자의 배지는 바탕을 줄 수 숫자의 색으로 바꾼다. 글자는 화면 바탕색 그대로이고 불투명도는 상자의 단계를 따른다. */
+.react-flow__node.pointed .badge-inside {
+  background: var(--loc);
+}
+
 .react-flow__node.pointed :is(.node-module-head, .node-region-head) .node-label {
   text-shadow: 0 0 2px color-mix(in srgb, var(--ink) 45%, transparent);
 }
