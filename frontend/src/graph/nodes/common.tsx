@@ -6,6 +6,7 @@ import type { AtlasNode, Change } from "../../api/types";
 import { CHANGE_LETTERS } from "../../state/changes";
 import { faceId, layerOf, type Part } from "../layers";
 import { BADGE_OVERHANG, boxCaption, CIRCLE_GAP, END_GAP, END_NAMES, END_PAD, ENTRY_MARK, labelOf, type Box, type RouteEnd } from "../layout";
+import { lifted } from "../scope";
 import { busyTip, candidatesTip, CHANGE_TIPS, cycleTip, ENTRY_TIP, globalTip, insideTip, locTip } from "../tips";
 
 export interface AtlasNodeData extends Record<string, unknown> {
@@ -81,7 +82,10 @@ export function flowNodes<D extends AtlasNodeData>(items: Drawn<D>[], at: Map<st
   return [...items.map((item) => node(item, item.body)), ...items.map((item) => node(item, item.face))];
 }
 
-/** 마우스를 올린 노드의 React Flow 노드가 받는 클래스. styles.css가 이 클래스에 굵은 이름표와 옅은 빛을 준다. */
+/**
+ * 마우스를 올린 노드의 React Flow 노드가 받는 클래스. styles.css가 이 클래스에 굵은 이름표와 옅은 빛을 주고,
+ * 한 단계 올린 진하기가 본문 잉크인 노드가 함께 받는 `tone-strong`에 본문 잉크 테두리를 준다.
+ */
 export const POINTED = "pointed";
 
 /** 노드 위의 요소 target이 눌리는 곳인지. 펼친 파일 상자와 폴더 영역은 머리 줄만 눌린다. */
@@ -91,8 +95,10 @@ export function pressable(data: AtlasNodeData, target: EventTarget): boolean {
 }
 
 /**
- * 마우스를 올린 노드 id의 React Flow 노드를 선의 hover처럼 가장 진한 단계로 바꾼 목록. 불투명도를 1로 올리고 `POINTED` 클래스를 준다.
- * 펼친 파일 상자와 폴더 영역은 머리 줄을 그리는 글자 요소만 바꾼다. 다른 노드는 같은 객체를 그대로 돌려주므로 다시 그리지 않는다.
+ * 마우스를 올린 노드 id의 React Flow 노드를 선의 hover처럼 진하기를 한 단계 올린(`scope.ts`의 `lifted`) 목록. 노드의 진하기는 muted 잉크
+ * 테두리에 그 노드의 불투명도이므로 흐린 노드는 불투명도만 한 단계 오르고, 불투명도 100%인 노드는 테두리가 본문 잉크가 된다.
+ * 굵은 이름표와 옅은 빛은 `POINTED` 클래스가 진하기와 관계없이 준다. 펼친 파일 상자와 폴더 영역은 머리 줄을 그리는 글자 요소만 바꾼다.
+ * 다른 노드는 같은 객체를 그대로 돌려주므로 다시 그리지 않는다.
  */
 export function pointing<D extends AtlasNodeData>(nodes: Node<D>[], id: string | null): Node<D>[] {
   if (id === null) {
@@ -104,7 +110,8 @@ export function pointing<D extends AtlasNodeData>(nodes: Node<D>[], id: string |
     if (node.id !== face && (node.id !== id || container)) {
       return node;
     }
-    return { ...node, className: POINTED, style: { ...node.style, opacity: 1 } };
+    const { tone, opacity } = lifted({ tone: "muted", opacity: Number(node.style?.opacity ?? 1) });
+    return { ...node, className: tone === "strong" ? `${POINTED} tone-strong` : POINTED, style: { ...node.style, opacity } };
   });
 }
 

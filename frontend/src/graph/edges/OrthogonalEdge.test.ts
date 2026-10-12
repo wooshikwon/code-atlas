@@ -26,4 +26,11 @@ describe("flowEdges", () => {
     expect(back.filter((edge) => !pointed.includes(edge)).map((edge) => edge.id)).toEqual(changed.map((edge) => edge.id));
     expect(flowEdges(lines, none, none, back).every((edge, i) => edge === back[i])).toBe(true);
   });
+
+  it("마우스를 올린 선은 그 선의 진하기에서 한 단계만 올려 그린다", () => {
+    const view = lines.views[0];
+    const drawnLine = flowEdges(lines, new Set([view.key]), new Set()).find((edge) => edge.id === view.key)!;
+    expect(view).toMatchObject({ tone: "muted", opacity: 0.5 });
+    expect(drawnLine.data).toMatchObject({ pointed: true, tone: "muted", opacity: 1 });
+  });
 });

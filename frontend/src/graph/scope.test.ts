@@ -3,7 +3,7 @@ import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { repoFixture, routeFixture } from "./fixture";
 import { flow } from "./flow";
 import { lit, route } from "./route";
-import { along, arriving, drawn, endsOf, followed, picked, trunkTarget, type DrawnEdge } from "./scope";
+import { along, arriving, drawn, endsOf, followed, lifted, picked, trunkTarget, type DrawnEdge } from "./scope";
 import { hidden, nodeIndex, shown, unitOf } from "./visible";
 
 const toggles = { showTests: false, showExternal: false };
@@ -15,6 +15,19 @@ function draw(selection: string | null, collapsed: string[] = [], hover: string 
   const visible = shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), flow: focus, lit: null });
   return new Map(drawn(repoFixture, visible, focus, hover, null).map((e) => [e.key, e]));
 }
+
+describe("lifted", () => {
+  it("마우스를 올린 진하기는 한 단계만 오르고 가장 진한 단계는 그대로다", () => {
+    expect(lifted({ tone: "muted", opacity: 0.2 })).toEqual({ tone: "muted", opacity: 0.5 });
+    expect(lifted({ tone: "muted", opacity: 0.5 })).toEqual({ tone: "muted", opacity: 1 });
+    expect(lifted({ tone: "muted", opacity: 1 })).toEqual({ tone: "strong", opacity: 1 });
+    expect(lifted({ tone: "strong", opacity: 1 })).toEqual({ tone: "strong", opacity: 1 });
+  });
+
+  it("단계 사이의 불투명도는 바로 위 단계로 오른다", () => {
+    expect(lifted({ tone: "muted", opacity: 0.4 })).toEqual({ tone: "muted", opacity: 0.5 });
+  });
+});
 
 describe("drawn", () => {
   it("규칙 1: 고른 노드가 없으면 상자 사이의 선을 그리고, 올린 선은 집계 선 하나로 합친다", () => {

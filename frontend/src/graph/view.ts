@@ -23,7 +23,7 @@ import {
   type Point,
 } from "./layout";
 import type { StepKind } from "./route";
-import { aggKey, type DrawnEdge, type EdgeKey, type Tone } from "./scope";
+import { aggKey, darkness, type DrawnEdge, type EdgeKey, type Shade, type Tone } from "./scope";
 
 /** 선이 합류하는 쪽. in은 도착 노드 앞에서 모이는 쪽, out은 출발 노드 뒤에서 갈라지는 쪽이다. */
 export type End = "in" | "out";
@@ -332,7 +332,7 @@ export function edgeViews(edges: DrawnEdge[], layout: Layout, nodes: Map<string,
   return trunkViews(views, letteredBoxes(layout, nodes));
 }
 
-/** 줄기 위에 출발부터 도착까지의 경로를 한 번 더 그리는 선: 마우스를 올린 선, 순환 선, 경로의 걸음, 고른 노드에 닿는 선 */
+/** 줄기 위에 출발부터 도착까지의 경로를 한 번 더 그리는 선: 마우스를 올린 선, 순환 선, 경로의 걸음, 고른 노드에 닿는 선(본문 잉크로 그리는 선) */
 export function emphasized(view: EdgeView, marks: { pointed: boolean; cycle: boolean }): boolean {
   return marks.pointed || marks.cycle || view.route !== null || view.tone === "strong";
 }
@@ -386,16 +386,11 @@ function stretch(points: Point[], from: number, to: number): Point[] {
   return result;
 }
 
-/** 진하기의 순서. 본문 잉크가 muted 잉크보다, 높은 불투명도가 낮은 불투명도보다 진하다. */
-function darkness(view: Pick<EdgeView, "tone" | "opacity">): number {
-  return (view.tone === "strong" ? 2 : 0) + view.opacity;
-}
-
 /**
  * 줄기의 진하기. 줄기 위에 전체 경로를 따로 그리는 선(apart)을 뺀 가지 가운데 가장 진한 값이고, 모든 가지를 따로 그리면
  * 가지 전체에서 고른다. members는 줄기에 든 선이다.
  */
-export function trunkShade(members: EdgeView[], apart: (view: EdgeView) => boolean): Pick<EdgeView, "tone" | "opacity"> {
+export function trunkShade(members: EdgeView[], apart: (view: EdgeView) => boolean): Shade {
   const rest = members.filter((view) => !apart(view));
   const { tone, opacity } = (rest.length > 0 ? rest : members).reduce((a, b) => (darkness(b) > darkness(a) ? b : a));
   return { tone, opacity };

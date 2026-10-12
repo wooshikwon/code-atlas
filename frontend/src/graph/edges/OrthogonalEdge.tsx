@@ -1,11 +1,12 @@
 // 배치가 정한 직각 경로를 모서리를 둥글려 그린다. 선 분류는 선 모양과 화살촉으로, 초점은 선의 진하기로 가른다.
+// 마우스를 올린 선은 `data-pointed`를 받아 1px 굵게, 진하기를 한 단계 올려(`scope.ts`의 `lifted`) 다른 선 위의 층에 그린다.
 // 강조하는 경로의 걸음은 `data-route`에 걸음 종류를 받아 굵게 그리고, 선을 눌러 온 상태에서 지나온 선은 `data-via`를 받아 1px 굵게 그린다.
 // 순환 덮개가 켜진 동안의 순환 선만 critical 색으로 그린다.
 import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
 import { useMemo, useRef } from "react";
 import type { EdgeGroup } from "../../api/types";
 import { LAYER } from "../layers";
-import { EDGE_OPACITY, type EdgeKey, type Tone } from "../scope";
+import { lifted, type EdgeKey, type Tone } from "../scope";
 import type { Point } from "../layout";
 import { emphasized, ownNumbers, roundedPath, trunkShade, type EdgeView, type Lines, type TrunkView } from "../view";
 import { Trunk } from "./Trunk";
@@ -47,8 +48,8 @@ function bundled(view: EdgeView): boolean {
 }
 
 /**
- * 그릴 선마다 React Flow 선 하나와 줄기마다 하나. 마우스를 올린 선 pointed는 다른 선 위의 층에 본문 잉크, 불투명도 1로 그린다.
- * 줄기에 든 선이 모두 pointed에 들면 그 줄기도 같은 방식으로 그린다. cycles에 든 선은 순환 선이다. 줄기에 든 선은 가지만 그리고,
+ * 그릴 선마다 React Flow 선 하나와 줄기마다 하나. 마우스를 올린 선 pointed는 다른 선 위의 층에 그 선의 진하기에서 한 단계 올린
+ * 진하기(`lifted`)로 그린다. 줄기에 든 선이 모두 pointed에 들면 그 줄기도 같은 방식으로 그린다. cycles에 든 선은 순환 선이다. 줄기에 든 선은 가지만 그리고,
  * 강조하는 선(`emphasized`)은 줄기 위에 전체 경로를 한 번 더 그리고 그 선의 수를 선 위에 적는다(`ownNumbers`).
  * 같은 층에서는 가지, 줄기, 강조하는 선 순서로 그린다. 마우스를 올려서만 강조하는 선은 다른 선 위의 층에 그리므로 순서를 옮기지 않아,
  * 마우스를 올리고 뗄 때 선의 순서가 바뀌지 않는다. 앞에 만든 선 before 가운데 층과 데이터의 내용이 그대로인 선은 그 객체를
@@ -78,9 +79,7 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
       source: view.source,
       target: view.target,
       type: "orthogonal",
-      data: on
-        ? { ...view, tone: "strong", opacity: EDGE_OPACITY.full, pointed: true, cycle, whole, own, sum }
-        : { ...view, pointed: false, cycle, whole, own, sum },
+      data: { ...view, ...(on ? lifted(view) : {}), pointed: on, cycle, whole, own, sum },
       zIndex: on ? LAYER.pointed : LAYER.edge,
     });
   });
@@ -88,13 +87,13 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
   const stems = trunks.map((trunk): TrunkFlowEdge => {
     const members = trunk.keys.map((key) => byKey.get(key)!);
     const on = trunk.keys.every((key) => pointed.has(key));
-    const shade = on ? { tone: "strong" as const, opacity: EDGE_OPACITY.full } : trunkShade(members, (view) => emphasized(view, marks(view)));
+    const shade = trunkShade(members, (view) => emphasized(view, marks(view)));
     return kept({
       id: trunk.key,
       source: members[0].source,
       target: members[0].target,
       type: "trunk",
-      data: { ...trunk, ...shade, pointed: on },
+      data: { ...trunk, ...(on ? lifted(shade) : shade), pointed: on },
       zIndex: on ? LAYER.pointed : LAYER.edge,
     });
   });

@@ -303,6 +303,17 @@ async function hittable(page, lines) {
   return null;
 }
 
+/** 진하기 단계를 연한 것부터 적은 사다리(`graph/scope.ts`의 `SHADES`). 마우스를 올린 선과 노드는 한 단계 위로 그린다. */
+const SHADES = [
+  { tone: "muted", opacity: DIM },
+  { tone: "muted", opacity: 0.5 },
+  { tone: "muted", opacity: 1 },
+  { tone: "strong", opacity: 1 },
+];
+const darknessOf = (shade) => (shade.tone === "strong" ? 2 : 0) + shade.opacity;
+/** 진하기 shade에서 한 단계 올린 진하기. 가장 진한 단계는 그대로다. */
+const liftedShade = (shade) => SHADES.find((step) => darknessOf(step) > darknessOf(shade)) ?? { tone: shade.tone, opacity: shade.opacity };
+
 /** 선의 진하기 세 단계마다 그린 선 수 */
 function toneLevels(edges) {
   const ink = edges.filter((e) => e.tone === "strong").length;
@@ -5487,6 +5498,7 @@ async function nodeHover(t, page) {
       return {
         opacity: [Number(getComputedStyle(body).opacity), Number(getComputedStyle(face).opacity)],
         pointed: [body.classList.contains("pointed"), face.classList.contains("pointed")],
+        inked: body.classList.contains("tone-strong"),
         stroke: parseFloat(getComputedStyle(label).webkitTextStrokeWidth),
         glow: getComputedStyle(body.firstElementChild).filter !== "none",
         shadow: getComputedStyle(label).textShadow !== "none",
@@ -5518,7 +5530,7 @@ async function nodeHover(t, page) {
   ];
   for (const [name, at] of levels) {
     if (at === undefined) {
-      t.skip(`${name}에 마우스를 올리면 가장 진한 단계로 그린다`, "이 화면에 그 단계의 노드가 없다");
+      t.skip(`${name}에 마우스를 올리면 진하기를 한 단계 올려 그린다`, "이 화면에 그 단계의 노드가 없다");
       continue;
     }
     const other = list.find((item) => item.id !== at.id && item.opacity === at.opacity && leaf(item)) ?? list.find((item) => item.id !== at.id);
@@ -5530,10 +5542,11 @@ async function nodeHover(t, page) {
     }
     await away();
     const after = await look(at.id);
+    const up = liftedShade({ tone: "muted", opacity: at.opacity });
     t.check(
-      `${name}에 마우스를 올리면 불투명도 1, 굵은 이름표, 옅은 빛으로 그리고 떠나면 돌아온다`,
-      same(before.opacity, [at.opacity, at.opacity]) && same(on.opacity, [1, 1]) && before.stroke === 0 && on.stroke > 0 && !before.glow && on.glow && same(after, before),
-      `${at.id}: 불투명도 ${before.opacity} → ${on.opacity} → ${after.opacity}, 외곽선 ${before.stroke} → ${on.stroke}px, 빛 ${before.glow} → ${on.glow}`,
+      `${name}에 마우스를 올리면 불투명도 ${up.opacity}${up.tone === "strong" ? "에 본문 잉크 테두리" : ""}, 굵은 이름표, 옅은 빛으로 그리고 떠나면 돌아온다`,
+      same(before.opacity, [at.opacity, at.opacity]) && same(on.opacity, [up.opacity, up.opacity]) && on.inked === (up.tone === "strong") && before.stroke === 0 && on.stroke > 0 && !before.glow && on.glow && same(after, before),
+      `${at.id}: 불투명도 ${before.opacity} → ${on.opacity} → ${after.opacity}, 본문 잉크 테두리 ${on.inked}, 외곽선 ${before.stroke} → ${on.stroke}px, 빛 ${before.glow} → ${on.glow}`,
     );
     t.check(`${name}: 이름표·상자·줄 수 숫자의 위치와 폭, 층이 그대로다`, on.place === before.place && on.layers === before.layers, `${before.place} → ${on.place}, 층 ${on.layers}`);
     t.check(`${name}: 옆 노드의 단계는 그대로다`, same(beside, aside), `${other.id} 불투명도 ${aside.opacity} → ${beside.opacity}`);
@@ -5575,6 +5588,125 @@ async function nodeHover(t, page) {
     same(blocked.pointed, [false, false]) && blocked.opacity[0] === off.opacity && same(lit.pointed, [true, true]),
     `경로 밖 ${off.id} ${blocked.pointed} 불투명도 ${blocked.opacity}, 경로 위 ${onPath.id} ${lit.pointed}`,
   );
+}
+
+/**
+ * 마우스를 올린 선의 진하기가 그 선의 단계에서 한 단계만 오르는지 본다. 고른 노드가 없는 처음 화면, 파일을 고른 화면(고른 노드에 닿는 선,
+ * 흐름에 든 노드 사이의 선, 그 밖의 선), 어두운 화면, 미사용 덮개의 후보 노드를 차례로 본다. 사진은 `hf3-hover-{이름}.png`로 남긴다.
+ */
+async function hoverStep(t, page) {
+  /** 마우스를 올린 점 at의 둘레 640×420px를 남긴다. 화면에 맞춘 그래프는 선이 가늘어 전체 화면으로는 진하기가 읽히지 않는다. */
+  const shot = (name, at) =>
+    page.screenshot({
+      path: join(OUT, `hf3-hover-${name}.png`),
+      clip: { x: Math.max(0, Math.min(VIEW.width - 640, at.x - 320)), y: Math.max(0, Math.min(VIEW.height - 420, at.y - 210)), width: 640, height: 420 },
+    });
+  const away = async () => {
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(300);
+  };
+  /** 선 want에 마우스를 올린 동안의 그 선 */
+  const over = async (want) => {
+    await page.mouse.move(want.at.x - 1, want.at.y);
+    await page.mouse.move(want.at.x, want.at.y);
+    await page.waitForTimeout(300);
+    return (await linesOf(page)).find((line) => line.key === want.line.key);
+  };
+  /** 진하기가 shade인 선 가운데 누를 점이 있는 첫 선 */
+  const pointable = async (shade) => hittable(page, (await linesOf(page)).filter((line) => !line.below && line.tone === shade.tone && line.opacity === shade.opacity));
+  /** 단계 name의 선에 올려 한 단계 위의 진하기, 1px 굵은 선, 빛을 확인하고 올린 동안의 선을 돌려준다. */
+  const step = async (name, shade, picture = null) => {
+    const want = await pointable(shade);
+    if (want === null) {
+      t.skip(`${name}에 마우스를 올리면 진하기가 한 단계만 오른다`, "이 화면에 그 단계의 누를 수 있는 선이 없다");
+      return null;
+    }
+    const up = liftedShade(shade);
+    const line = await over(want);
+    if (picture !== null) {
+      await shot(picture, want.at);
+    }
+    await away();
+    const back = (await linesOf(page)).find((each) => each.key === want.line.key);
+    t.check(
+      `${name}(${shade.tone} ${shade.opacity})에 마우스를 올리면 ${up.tone} ${up.opacity}로 한 단계만 오르고 1px 굵어지며 빛을 두른다`,
+      line.pointed && line.tone === up.tone && line.opacity === up.opacity && near(line.width, want.line.width + 1, 0.01) && line.glow && back.tone === shade.tone && back.opacity === shade.opacity && !back.glow,
+      `${want.line.key}: ${line.tone} ${line.opacity}, 굵기 ${want.line.width} → ${line.width}px, 빛 ${line.glow}, 떠난 뒤 ${back.tone} ${back.opacity}`,
+    );
+    return line;
+  };
+
+  await load(page);
+  await away();
+  await step("고른 노드가 없을 때의 선", SHADES[1], "idle-light");
+  const theme = async (name) => {
+    await page.getByRole("button", { name: name === "dark" ? "어두운 화면" : "밝은 화면" }).click();
+    await page.waitForFunction((want) => document.documentElement.dataset.theme === want, name);
+    await away();
+  };
+  await theme("dark");
+  await step("어두운 화면에서 고른 노드가 없을 때의 선", SHADES[1], "idle-dark");
+  await theme("light");
+
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await away();
+  await settle(page);
+  const rest = await step("함수를 골랐을 때 그 밖의 선", SHADES[0], "rest-light");
+  await step("흐름에 든 노드 사이의 선", SHADES[2], "flow-light");
+  await step("고른 노드에 닿는 선", SHADES[3], "strong-light");
+  const active = (await linesOf(page)).filter((line) => line.opacity === 1);
+  if (rest !== null) {
+    t.check(
+      "흐린 선은 마우스를 올려도 활성인 선보다 연하다",
+      active.length > 0 && rest.tone === "muted" && active.every((line) => rest.opacity < line.opacity),
+      `올린 흐린 선의 불투명도 ${rest.opacity}, 활성인 선 ${active.length}개의 불투명도 1`,
+    );
+  }
+
+  await theme("dark");
+  await step("어두운 화면에서 그 밖의 선", SHADES[0], "rest-dark");
+  await step("어두운 화면에서 고른 노드에 닿는 선", SHADES[3], "strong-dark");
+
+  // 미사용 덮개의 후보 노드는 단계 사이의 불투명도 40%에서 바로 위 단계 50%로 오른다.
+  await theme("light");
+  await setOverlay(page, "unused");
+  const [graph, unused] = [await api("/api/graph"), await api("/api/unused")];
+  const holder = graph.nodes.find((n) => n.kind === "module" && candidatesOf(graph, unused).some((id) => graph.nodes.find((each) => each.id === id).path === n.path));
+  if (holder !== undefined) {
+    await page.click(`.tree-row.tree-file[data-node="${holder.id}"]`);
+    await waitSelected(page, holder.id);
+  }
+  await away();
+  await settle(page);
+  const faded = await page.evaluate(() => {
+    for (const face of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
+      const label = face.querySelector(".node-label");
+      if (Number(face.style.opacity) !== 0.4 || label === null || getComputedStyle(label).visibility !== "visible") {
+        continue;
+      }
+      const rect = label.getBoundingClientRect();
+      const [x, y] = [rect.left + rect.width / 2, rect.top + rect.height / 2];
+      if (face.contains(document.elementFromPoint(x, y))) {
+        return { id: face.dataset.id.replace(/#face$/, ""), x, y };
+      }
+    }
+    return null;
+  });
+  if (faded === null) {
+    t.skip("미사용 후보 노드에 마우스를 올리면 불투명도 40%에서 50%로 오른다", "화면에 이름표가 눌리는 불투명도 40%의 후보가 없다");
+  } else {
+    await page.mouse.move(faded.x, faded.y);
+    await page.waitForTimeout(300);
+    const on = await page.evaluate((id) => {
+      const body = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+      return { opacity: Number(getComputedStyle(body).opacity), inked: body.classList.contains("tone-strong"), pointed: body.classList.contains("pointed") };
+    }, faded.id);
+    await shot("unused-light", faded);
+    t.check("미사용 후보 노드에 마우스를 올리면 불투명도 40%에서 50%로 오르고 테두리는 본문 잉크가 되지 않는다", on.pointed && on.opacity === 0.5 && !on.inked, `${faded.id}: 불투명도 ${on.opacity}, 본문 잉크 테두리 ${on.inked}`);
+  }
+  await away();
 }
 
 // ── 4단계: 선의 합류 ─────────────────────────────────────────────
@@ -7624,6 +7756,7 @@ const SCENARIOS = [
   ["start", start],
   ["arranging", arranging],
   ["node-hover", nodeHover],
+  ["hover-step", hoverStep],
   ["merge", merge],
   ["merge-out", mergeOut],
   ["merge-hover", mergeHover],
@@ -7657,6 +7790,7 @@ const STAGE4 = new Set([
   "start",
   "arranging",
   "node-hover",
+  "hover-step",
   "merge",
   "merge-out",
   "merge-hover",

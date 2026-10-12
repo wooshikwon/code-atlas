@@ -42,6 +42,30 @@ export interface DrawnEdge {
  */
 export const EDGE_OPACITY = { full: 1, idle: 0.5, rest: 0.2 } as const;
 
+/** 색과 불투명도로 정한 진하기 */
+export type Shade = { tone: Tone; opacity: number };
+
+/** 진하기 단계를 연한 것부터 적은 사다리: muted 20%, muted 50%, muted 100%, 본문 잉크 100%. 선의 진하기 표의 단계와 같다. */
+const SHADES: Shade[] = [
+  { tone: "muted", opacity: EDGE_OPACITY.rest },
+  { tone: "muted", opacity: EDGE_OPACITY.idle },
+  { tone: "muted", opacity: EDGE_OPACITY.full },
+  { tone: "strong", opacity: EDGE_OPACITY.full },
+];
+
+/** 진하기의 순서. 본문 잉크가 muted 잉크보다, 높은 불투명도가 낮은 불투명도보다 진하다. */
+export function darkness(shade: Shade): number {
+  return (shade.tone === "strong" ? 2 : 0) + shade.opacity;
+}
+
+/**
+ * 마우스를 올린 선과 노드의 진하기. 지금 진하기에서 사다리의 한 단계 위다: muted 20%는 muted 50%, muted 50%는 muted 100%,
+ * muted 100%는 본문 잉크 100%가 되고, 가장 진한 본문 잉크 100%는 그대로다. 단계 사이의 값(미사용 덮개의 40%)은 바로 위 단계로 올린다.
+ */
+export function lifted(shade: Shade): Shade {
+  return SHADES.find((step) => darkness(step) > darkness(shade)) ?? shade;
+}
+
 const GROUP_ORDER: EdgeGroup[] = ["run", "use", "derive"];
 const BOX_KINDS = new Set(["module", "package", "external"]);
 
@@ -61,10 +85,10 @@ function related(nodes: Map<string, AtlasNode>, a: string, b: string): boolean {
   return within(nodes, a, b) || within(nodes, b, a);
 }
 
-type Shade = Pick<DrawnEdge, "tone" | "opacity" | "route">;
+type Drawing = Pick<DrawnEdge, "tone" | "opacity" | "route">;
 
 /** 흐름에서 정한 선의 진하기. edges는 선 하나에 합친 원래 선이다. */
-function shadeOf(edges: AtlasEdge[], flow: Flow | null, member: (id: string) => boolean): Shade {
+function shadeOf(edges: AtlasEdge[], flow: Flow | null, member: (id: string) => boolean): Drawing {
   const touching = flow !== null && edges.some((e) => flow.seeds.has(e.source) !== flow.seeds.has(e.target));
   const inFlow = touching || edges.some((e) => member(e.source) && member(e.target));
   return {
@@ -75,7 +99,7 @@ function shadeOf(edges: AtlasEdge[], flow: Flow | null, member: (id: string) => 
 }
 
 /** 원래 선 edges를 선 하나로 합친다. edges가 비면 분류는 실행이고 무게는 0이다. */
-function merge(key: EdgeKey, source: string, target: string, edges: AtlasEdge[], shade: Shade): DrawnEdge {
+function merge(key: EdgeKey, source: string, target: string, edges: AtlasEdge[], shade: Drawing): DrawnEdge {
   const kinds: DrawnEdge["kinds"] = {};
   let group = edges[0]?.group ?? "run";
   let weight = 0;
@@ -94,7 +118,7 @@ function merge(key: EdgeKey, source: string, target: string, edges: AtlasEdge[],
  * `step|…` 키에 원래 선 없이 낸다.
  */
 function strides(graph: Graph, lit: Lit): DrawnEdge[] {
-  const shade = (route: StepKind): Shade => ({ tone: "strong", opacity: EDGE_OPACITY.full, route });
+  const shade = (route: StepKind): Drawing => ({ tone: "strong", opacity: EDGE_OPACITY.full, route });
   const result: DrawnEdge[] = [];
   for (let i = 0; i + 1 < lit.path.length; i++) {
     const [source, target] = [lit.path[i], lit.path[i + 1]];
@@ -132,7 +156,7 @@ export function drawn(graph: Graph, shown: Shown, flow: Flow | null, hover: stri
   const member = (id: string) =>
     flow !== null && (flow.seeds.has(id) || flow.out.has(flow.unit === "file" ? unitOf(nodes, id) : id));
 
-  const shade = (edges: AtlasEdge[]): Shade =>
+  const shade = (edges: AtlasEdge[]): Drawing =>
     lit === null ? shadeOf(edges, flow, member) : { tone: "muted", opacity: EDGE_OPACITY.rest, route: null };
 
   const inScope = (edge: AtlasEdge, source: string, target: string): boolean => {
