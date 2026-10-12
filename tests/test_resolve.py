@@ -69,7 +69,7 @@ def test_unresolved_builtin_dynamic_external(index):
     _, root = index
     r, _ = run(index, "call")
     assert r.status == "unresolved"
-    r, _ = run(index, "call", Location(str(root / "src/app/core.py"), 6, 0))
+    r, _ = run(index, "call", Location(str(root / "src/app/core.py"), 6, 5))
     assert r.status == "unresolved"
     r, _ = run(index, "call", Location(f"{TYPESHED}/stdlib/builtins.pyi", 10, 4))
     assert (r.status, r.edge) == ("builtin", None)
@@ -82,6 +82,29 @@ def test_unresolved_builtin_dynamic_external(index):
     assert externals["ext:os"].origin == "stdlib"
     r, _ = run(index, "inherit", Location(f"{TYPESHED}/stdlib/enum.pyi", 10, 6))
     assert (r.target, r.edge) == ("ext:enum", "inherit")
+
+
+def test_variable_targets(index):
+    idx, root = index
+    registry = Location(str(root / "src/app/core.py"), 6, 0)
+    assert idx.kinds["app.core:REGISTRY"] == "variable"
+    for kind, edge in [("read", "read"), ("write", "write"), ("call", "read"), ("pass", "read"), ("type", "read"), ("decorate", "read")]:
+        r, _ = run(index, kind, registry)
+        assert (r.status, r.target, r.edge) == ("resolved", "app.core:REGISTRY", edge)
+    r, _ = run(index, "inherit", registry)
+    assert r.status == "unresolved"
+    r, _ = run(index, "read", Location(str(root / "src/app/core.py"), *_name_pos(idx, "app.core:helper")))
+    assert r.status == "unresolved"
+
+
+def test_call_sites_prefer_a_definition_or_an_external_over_a_variable(index):
+    idx, root = index
+    registry = Location(str(root / "src/app/core.py"), 6, 0)
+    external = Location(f"{TYPESHED}/stdlib/os/__init__.pyi", 10, 4)
+    r, _ = run(index, "call", registry, external)
+    assert (r.status, r.target, r.edge) == ("external", "ext:os", None)
+    r, _ = run(index, "read", external, registry)
+    assert (r.status, r.target, r.edge) == ("resolved", "app.core:REGISTRY", "read")
 
 
 def test_locations_under_a_symlinked_root_resolve(sample_repo, tmp_path):

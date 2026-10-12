@@ -86,7 +86,7 @@ def test_repo(client):
     assert body["name"] == "sample_repo"
     assert body["source_root"] == "src"
     assert body["python"] == sys.executable
-    assert body["stats"]["files"] == 10
+    assert body["stats"]["files"] == 13
     assert body["stats"]["timed_out"] == 0
     assert body["stats"]["resolved"] + body["stats"]["unresolved"] == body["stats"]["call_sites"]
 
@@ -173,9 +173,37 @@ def test_graph(client):
     assert edge["sites"] == [{"path": "src/app/cli.py", "line": 10, "col": 21}]
 
 
+def test_graph_variable_nodes_and_edges(client):
+    body = client.get("/api/graph").json()
+    nodes = {n["id"]: n for n in body["nodes"]}
+    limits = nodes["app.tables:LIMITS"]
+    assert (limits["kind"], limits["parent"], limits["range"]) == ("variable", "app.tables", [9, 9])
+    assert limits["value"] == {"kind": "dict", "size": 2, "text": "{'low': 1, 'high': 9}"}
+    assert not limits["external_value"] and nodes["app.tables:logger"]["external_value"]
+    assert (limits["reads"], limits["writes"], limits["unresolved"]) == ([], [], 0)
+    engine = nodes["app.core:Engine"]
+    assert engine["value"] is None and engine["external_value"] is False
+    kinds = {(e["kind"], e["group"]) for e in body["edges"] if nodes[e["target"]]["kind"] == "variable"}
+    assert kinds == {("read", "use"), ("write", "use")}
+    edge = next(e for e in body["edges"] if e["kind"] == "write" and e["source"] == "app.lookup:reset")
+    assert (edge["target"], edge["sites"]) == ("app.tables:total", [{"path": "src/app/lookup.py", "line": 14, "col": 4}])
+    stats = client.get("/api/repo").json()["stats"]
+    assert (stats["nodes"], stats["edges"]) == (len(body["nodes"]), len(body["edges"]))
+
+
+def test_definition_of_variable_is_its_node(client):
+    read = client.get("/api/definition", params={"path": "src/app/lookup.py", "line": 6, "col": 11}).json()
+    assert read["targets"] == [
+        {"path": "src/app/tables.py", "line": 9, "col": 0, "node": "app.tables:LIMITS", "external": None}
+    ]
+    # 노드가 아닌 변수의 대입 위치는 그 위치를 품은 노드로 답한다.
+    banner = client.get("/api/definition", params={"path": "src/app/tables.py", "line": 21, "col": 3}).json()
+    assert [(t["line"], t["node"]) for t in banner["targets"]] == [(16, "app.tables")]
+
+
 def test_unused(client):
     body = client.get("/api/unused").json()
-    assert body == {"definitions": 21, "candidates": ["app.core:spare", "app.models:Point", "app.models:Color", "app.shadow:announce"]}
+    assert body == {"definitions": 28, "candidates": ["app.core:spare", "app.models:Point", "app.models:Color", "app.shadow:announce"]}
     ids = {n["id"] for n in client.get("/api/graph").json()["nodes"]}
     assert set(body["candidates"]) <= ids and "app.core:on_stop" in ids
 

@@ -229,3 +229,169 @@ def test_builtin_prejudging_covers_decorators_bases_and_passed_names():
         ("call", "map(str, x)"): True,
         ("pass", "str"): True,
     }
+
+
+def variables(facts, path):
+    return {v.name: v for v in facts[path].variables}
+
+
+def accesses(facts, path):
+    return [(s.kind, s.line, s.text, s.enclosing) for s in facts[path].sites if s.kind in ("read", "write")]
+
+
+def test_module_variables_and_their_values(facts):
+    found = variables(facts, "src/app/tables.py")
+    assert list(found) == [
+        "logger", "PATTERN", "LIMITS", "DEFAULTS", "HANDLERS", "SEEN", "total",
+        "BASE", "DOUBLE", "BANNER", "UNREAD", "name", "__all__",
+    ]  # fmt: skip
+    limits = found["LIMITS"]
+    assert (limits.node_id, limits.range, limits.targets) == ("app.tables:LIMITS", (9, 9), [(9, 0)])
+    assert (limits.value, limits.value_kind, limits.size, limits.text) == ((9, 9, 9, 30), "dict", 2, "{'low': 1, 'high': 9}")
+    kinds = {name: (v.value_kind, v.size) for name, v in found.items()}
+    assert kinds["logger"] == ("logging.getLogger(…)", None)
+    assert kinds["DEFAULTS"] == ("list", 2)
+    assert kinds["total"] == ("int", None)
+    assert kinds["DOUBLE"] == ("식", None)
+    assert kinds["BANNER"] == ("str", None)
+
+
+def test_maker_is_the_request_position_of_the_innermost_call(facts):
+    found = variables(facts, "src/app/tables.py")
+    calls = {(s.request_line, s.request_col): s.text for s in sites(facts, "src/app/tables.py", "call")}
+    assert calls[found["logger"].maker] == "logging.getLogger(__name__)"
+    assert calls[found["PATTERN"].maker] == "re.compile('\\\\d+')"
+    assert found["LIMITS"].maker is None and found["DEFAULTS"].maker is None
+
+
+VARIABLE_FORMS = """\
+from pathlib import Path
+
+HOME = Path.home().parent / "x"
+FROZEN = frozenset({"a", "b", "c"})
+first, second = 1, 2
+ratio: float
+ratio = 0.5
+for step in range(3):
+    pass
+if HOME:
+    late = None
+try:
+    import fast
+except ImportError:
+    fast = None
+with open("f") as handle:
+    pass
+
+
+def late():
+    return ratio
+
+
+class Box:
+    inside = 1
+"""
+
+
+def test_variable_forms():
+    file = SourceFile(path="src/pkg/m.py", module_id="pkg.m", test=False, is_init=False)
+    found = {v.name: v for v in extract(file, VARIABLE_FORMS, frozenset()).variables}
+    assert list(found) == ["HOME", "FROZEN", "first", "second", "ratio", "step", "fast"]  # `late`는 함수 이름과 같다
+    assert found["HOME"].maker == (3, 12) and found["HOME"].value_kind == "식"
+    assert (found["FROZEN"].value_kind, found["FROZEN"].size) == ("frozenset(…)", 3)
+    assert (found["first"].value, found["first"].value_kind, found["first"].text) == (None, "식", "")
+    assert (found["ratio"].range, found["ratio"].targets, found["ratio"].value) == ((6, 6), [(6, 0), (7, 0)], None)
+    assert found["step"].range == (8, 9) and found["fast"].value_kind == "None"
+
+
+def test_assigned_names_pair_with_the_variables():
+    from code_atlas.extract import assigned_names
+
+    assert assigned_names(VARIABLE_FORMS) == sorted(["HOME", "FROZEN", "first", "second", "ratio", "step", "fast"])
+    assert assigned_names("def broken(:\n") == []
+
+
+def test_read_and_write_sites(facts):
+    assert accesses(facts, "src/app/tables.py") == [
+        ("read", 15, "BASE", "app.tables"),
+        ("read", 21, "BANNER", "app.tables"),
+        ("write", 22, "SEEN", "app.tables"),
+        ("read", 26, "logger", "app.tables:dispatch"),
+        ("read", 27, "HANDLERS", "app.tables:dispatch"),
+        ("read", 28, "DEFAULTS", "app.tables:dispatch"),
+        ("write", 33, "total", "app.tables:remember"),
+        ("write", 34, "SEEN", "app.tables:remember"),
+        ("read", 35, "PATTERN", "app.tables:remember"),
+        ("read", 35, "DOUBLE", "app.tables:remember"),
+    ]
+    assert accesses(facts, "src/app/lookup.py") == [
+        ("read", 6, "LIMITS", "app.lookup:lowest"),
+        ("read", 10, "tables.LIMITS", "app.lookup:highest"),
+        ("write", 14, "tables.total", "app.lookup:reset"),
+        ("read", 18, "LIMITS", "app.lookup:Window"),
+    ]
+    highest = next(s for s in sites(facts, "src/app/lookup.py", "read") if s.text == "tables.LIMITS")
+    assert (highest.col, highest.request_col) == (11, 18)
+
+
+def test_local_names_make_no_access_sites(facts):
+    # `name`은 app.tables의 모듈 변수이고 dispatch와 label의 매개변수다.
+    assert not [s for s in sites(facts, "src/app/tables.py") if s.kind in ("read", "write") and s.text == "name"]
+
+
+ACCESS_FORMS = """\
+import other
+from other import TABLE, HOOK, Alias
+
+def f(x: Alias, TABLE=None):
+    return TABLE
+
+def g(self):
+    HOOK()
+    use(TABLE)
+    other.TABLE[x] = 1
+    del TABLE["k"]
+    TABLE.update(a=1)
+    other.TABLE.setdefault("k", [])
+    self.TABLE = 2
+    return other.HOOK
+
+@HOOK
+class K(Alias):
+    kept = TABLE
+    def m(self):
+        global COUNT
+        COUNT = TABLE.get(1)
+"""
+
+
+def test_access_sites_skip_positions_another_site_already_asks():
+    file = SourceFile(path="src/pkg/m.py", module_id="pkg.m", test=False, is_init=False)
+    names = frozenset({"TABLE", "HOOK", "Alias", "COUNT"})
+    found = extract(file, ACCESS_FORMS, frozenset({"use"}), names).sites
+    asked = [(s.request_line, s.request_col) for s in found if not s.dynamic]
+    assert len(asked) == len(set(asked))
+    assert [(s.kind, s.line, s.text, s.enclosing) for s in found if s.kind in ("read", "write")] == [
+        ("write", 10, "other.TABLE", "pkg.m:g"),
+        ("write", 11, "TABLE", "pkg.m:g"),
+        ("write", 12, "TABLE", "pkg.m:g"),
+        ("write", 13, "other.TABLE", "pkg.m:g"),
+        ("read", 15, "other.HOOK", "pkg.m:g"),
+        ("write", 22, "COUNT", "pkg.m:K.m"),
+        ("read", 22, "TABLE", "pkg.m:K.m"),
+    ]
+    # import로 묶인 이름의 호출·전달·타입·데코레이터·상속 지점이 같은 위치를 이미 묻는다.
+    kept = {(s.kind, s.line, s.text) for s in found if s.kind not in ("read", "write", "import")}
+    assert {
+        ("type", 4, "Alias"),
+        ("call", 8, "HOOK()"),
+        ("pass", 9, "TABLE"),
+        ("decorate", 17, "HOOK"),
+        ("inherit", 18, "Alias"),
+        ("pass", 19, "TABLE"),
+    } <= kept
+
+
+def test_no_access_sites_without_repo_variables():
+    file = SourceFile(path="src/pkg/m.py", module_id="pkg.m", test=False, is_init=False)
+    assert not [s for s in extract(file, ACCESS_FORMS, frozenset()).sites if s.kind in ("read", "write")]

@@ -47,13 +47,18 @@ def git(repo: Path, *args: str) -> None:
 
 
 def group_ended(pgid: int, within: float = 3.0) -> bool:
-    """프로세스 묶음에 남은 프로세스가 없다. 끝난 프로세스가 거둬질 때까지 `within`초 기다린다."""
+    """프로세스 묶음에 남은 프로세스가 없다. 끝난 프로세스가 거둬질 때까지 `within`초 기다린다.
+
+    macOS는 끝났지만 아직 거둬지지 않은 프로세스만 남은 묶음에 신호를 보내면 EPERM을 낸다. 그 묶음은 거둬지면 없어지므로 계속 기다린다.
+    """
     deadline = time.monotonic() + within
     while time.monotonic() < deadline:
         try:
             os.killpg(pgid, 0)
         except ProcessLookupError:
             return True
+        except PermissionError:
+            pass
         time.sleep(0.05)
     return False
 
