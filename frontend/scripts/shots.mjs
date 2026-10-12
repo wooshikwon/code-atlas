@@ -859,6 +859,23 @@ const codeRows = (page) =>
   });
 
 /** 파일을 고르면 파일 전체가, 함수를 고르면 파일 전체에서 그 함수 밖의 줄만 흐리게 보이는지 본다. */
+/**
+ * 코드 뷰어에서 줄 범위 [from, to]가 놓인 곳. first는 범위 첫 줄의 위 끝, top은 1번 줄의 위 끝이고(둘 다 뷰어의 위 끝에서 잰다),
+ * off는 범위의 세로 가운데에서 뷰어의 세로 가운데를 뺀 값이다. 화면에 그린 줄 하나의 위치와 줄 높이로 센다.
+ */
+const placedOf = (page, range) =>
+  page.evaluate(([from, to]) => {
+    const editor = document.querySelector(".info-panel .monaco-editor");
+    const box = editor.getBoundingClientRect();
+    const line = editor.querySelector(".view-line").getBoundingClientRect().height;
+    const shown = [...editor.querySelectorAll(".line-numbers")].find((element) => element.textContent !== "");
+    const y = (n) => shown.getBoundingClientRect().top - box.top + (n - Number(shown.textContent)) * line;
+    return { first: y(from), top: y(1), off: (y(from) + y(to) + line - box.height) / 2, line, height: box.height, long: (to - from + 1) * line > box.height };
+  }, range);
+/** 규칙대로 놓였는지: 뷰어보다 긴 범위는 첫 줄이 뷰어 맨 위에 있고, 그 밖의 범위는 가운데가 뷰어 가운데와 줄 높이 한 줄 안에서 같다. */
+const centered = (at) => (at.long ? near(at.first, 0, 2) : Math.abs(at.off) <= at.line);
+const placedText = (at) => `첫 줄의 위 끝 ${Math.round(at.first)}px, 가운데 차이 ${Math.round(at.off)}px, 줄 높이 ${at.line}px, 뷰어 높이 ${Math.round(at.height)}px`;
+
 async function codeScope(t, page) {
   const asked = [];
   page.on("request", (request) => {
@@ -886,11 +903,13 @@ async function codeScope(t, page) {
   await page.waitForTimeout(300);
   const code = await rectOf(page, ".info-panel .code");
   const opened = await codeRows(page);
+  const long = await placedOf(page, target.range);
   t.check(
-    `함수를 고르면 정의의 첫 줄 ${target.range[0]}번이 코드 뷰어 맨 위에 있고 그 줄부터 흐리지 않다`,
-    opened[0]?.line === target.range[0] && near(opened[0].y, 0, 2) && dimmedOutside(opened, target.range),
+    `코드 뷰어보다 긴 함수를 고르면 정의의 첫 줄 ${target.range[0]}번이 코드 뷰어 맨 위에 있고 그 줄부터 흐리지 않다`,
+    long.long && opened[0]?.line === target.range[0] && near(opened[0].y, 0, 2) && dimmedOutside(opened, target.range),
     `첫 줄 번호 ${opened[0]?.line}, 높이 ${opened[0]?.y}`,
   );
+  await page.screenshot({ path: HF3("code-center-long") });
   const gap = await page.evaluate(() => {
     const [viewer, editor] = [document.querySelector(".info-panel .code"), document.querySelector(".info-panel .monaco-editor")];
     return {
@@ -934,10 +953,48 @@ async function codeScope(t, page) {
   await waitLine(later.range[0]);
   await page.waitForTimeout(300);
   const moved = await codeRows(page);
+  const movedAt = await placedOf(page, later.range);
   t.check(
-    `같은 파일의 다른 함수를 고르면 그 정의의 첫 줄 ${later.range[0]}번이 맨 위로 오고 흐린 범위가 바뀐다`,
-    moved[0]?.line === later.range[0] && dimmedOutside(moved, later.range),
-    `첫 줄 번호 ${moved[0]?.line}`,
+    `스크롤한 뒤에 같은 파일의 다른 함수(${later.range[0]}~${later.range[1]}번 줄)를 고르면 그 정의가 가운데 규칙대로 놓이고 흐린 범위가 바뀐다`,
+    centered(movedAt) && moved.some((row) => row.line === later.range[0]) && dimmedOutside(moved, later.range),
+    placedText(movedAt),
+  );
+
+  // 짧은 정의는 범위의 가운데가 뷰어 가운데에 온다. 뷰어 높이가 바뀌면 다시 가운데에 두고, 스크롤한 뒤에는 옮기지 않는다.
+  const short = graph.nodes.find((n) => n.kind === "function" && n.path === path && (n.range[1] - n.range[0] + 1) * long.line < long.height / 3 && n.range[0] > 100 && n.range[1] < total - 100);
+  await page.click(`.tree-row.tree-symbol[data-node="${short.id}"]`);
+  await waitSelected(page, short.id);
+  await waitLine(short.range[0]);
+  await page.waitForTimeout(300);
+  const shortAt = await placedOf(page, short.range);
+  t.check(
+    `코드 뷰어보다 짧은 함수(${short.range[0]}~${short.range[1]}번 줄)를 고르면 범위의 가운데가 뷰어의 가운데와 줄 높이 한 줄 안에서 같다`,
+    !shortAt.long && Math.abs(shortAt.off) <= shortAt.line && shortAt.first > shortAt.line,
+    placedText(shortAt),
+  );
+  await page.screenshot({ path: HF3("code-center-short") });
+  const divide = () => rectOf(page, ".info-panel-divide").then(center);
+  await drag(page, await divide(), 0, 160);
+  await page.waitForTimeout(400);
+  const resized = await placedOf(page, short.range);
+  t.check(
+    "요약 칸과 코드 뷰어 사이의 경계선을 끌어 뷰어 높이를 바꾸면 그 정의를 다시 가운데에 둔다",
+    Math.abs(resized.height - shortAt.height) > 100 && Math.abs(resized.off) <= resized.line,
+    `${placedText(shortAt)} → ${placedText(resized)}`,
+  );
+  await page.screenshot({ path: HF3("code-center-resized") });
+  const viewer = await rectOf(page, ".info-panel .code");
+  await page.mouse.move(viewer.x + viewer.width / 2, viewer.y + viewer.height / 2);
+  await page.mouse.wheel(0, 200);
+  await page.waitForTimeout(300);
+  const wheeled = await placedOf(page, short.range);
+  await drag(page, await divide(), 0, -160);
+  await page.waitForTimeout(400);
+  const kept = await placedOf(page, short.range);
+  t.check(
+    "사용자가 스크롤한 뒤에는 뷰어 높이를 바꿔도 스크롤 위치를 옮기지 않는다",
+    resized.first - wheeled.first > wheeled.line && near(kept.first, wheeled.first, 1) && near(kept.height, shortAt.height, 2) && Math.abs(kept.off) > kept.line,
+    `스크롤한 뒤 첫 줄의 위 끝 ${Math.round(wheeled.first)}px → 높이를 되돌린 뒤 ${Math.round(kept.first)}px`,
   );
   await page.click(`.tree-row.tree-file[data-node="${FILE}"]`);
   await waitSelected(page, FILE);
@@ -949,7 +1006,31 @@ async function codeScope(t, page) {
     whole[0]?.line === 1 && whole.every((row) => !row.dim),
     `첫 줄 번호 ${whole[0]?.line}, 흐린 줄 ${whole.filter((row) => row.dim).length}개`,
   );
-  t.check(`함수 둘과 파일을 차례로 고르는 동안 /api/file 요청이 ${path} 한 번뿐이다`, same(asked, [path]), asked.join(", "));
+  t.check(`함수 셋과 파일을 차례로 고르는 동안 /api/file 요청이 ${path} 한 번뿐이다`, same(asked, [path]), asked.join(", "));
+
+  // 파일 맨 위의 정의는 가운데에 둘 줄이 위에 없으므로 1번 줄부터 보인다. 창을 높여 뷰어 높이의 절반 안에서 끝나는 정의를 찾는다.
+  await page.setViewportSize({ width: VIEW.width, height: 1400 });
+  await rest(page);
+  const tall = (await rectOf(page, ".info-panel .monaco-editor")).height;
+  const head = graph.nodes
+    .filter((n) => ["function", "class", "dataclass"].includes(n.kind) && !n.test && n.range !== null && (n.range[0] + n.range[1]) * long.line < tall)
+    .sort((x, y) => x.range[0] - y.range[0])[0];
+  if (head === undefined) {
+    t.skip("파일 맨 위의 정의를 고르면 1번 줄부터 보인다", "범위의 가운데가 뷰어 높이의 절반보다 위에 있는 정의가 없다");
+    return;
+  }
+  const owner = graph.nodes.find((n) => n.kind === "module" && n.path === head.path);
+  await pickInTree(page, { id: head.id, owner: owner.id });
+  await waitLine(head.range[0]);
+  await page.waitForTimeout(300);
+  const headAt = await placedOf(page, head.range);
+  const headRows = await codeRows(page);
+  t.check(
+    `파일 맨 위의 정의(${head.path} ${head.range[0]}~${head.range[1]}번 줄)를 고르면 스크롤 위치가 0이어서 1번 줄이 여백 바로 아래에 보인다`,
+    near(headAt.top, 0, 1) && headRows[0]?.line === 1 && headAt.off < 0 && dimmedOutside(headRows, head.range),
+    `1번 줄의 위 끝 ${Math.round(headAt.top)}px, ${placedText(headAt)}`,
+  );
+  await page.screenshot({ path: HF3("code-center-top") });
 }
 
 /** 코드 뷰어에서 word가 처음 나오는 곳의 화면 사각형 */

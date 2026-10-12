@@ -13,7 +13,7 @@ interface CodeViewProps {
   path: string;
   /** 문법 색으로 그릴 1부터 세는 시작 줄과 끝 줄. 범위 밖의 줄은 흐리게 그린다. null이면 파일 전체다. */
   range: [number, number] | null;
-  /** 바탕을 칠하고 화면 가운데로 옮길 줄 번호 */
+  /** 바탕을 칠할 줄 번호 */
   highlight?: number;
 }
 
@@ -24,6 +24,18 @@ interface Note {
 }
 
 const NOTE_MS = 2000;
+/** 사용자가 코드 뷰어를 스크롤하는 키 */
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
+
+/**
+ * 줄 from~to의 세로 가운데를 코드 뷰어의 세로 가운데에 둔다. from 줄이 뷰어 맨 위보다 위로 올라가지 않게 하고,
+ * 스크롤 위치는 Monaco가 문서의 범위 안으로 자른다. 그래서 뷰어보다 긴 범위는 첫 줄부터 보이고, 파일 맨 위의 범위는 1번 줄부터 보인다.
+ */
+function center(editor: CodeEditor, from: number, to: number): void {
+  const first = editor.getTopForLineNumber(from);
+  const middle = (first + editor.getBottomForLineNumber(to) - editor.getLayoutInfo().height) / 2;
+  editor.setScrollTop(Math.min(first, middle));
+}
 const OPTIONS = {
   readOnly: true,
   domReadOnly: true,
@@ -71,13 +83,9 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
     }
   }, [path, code]);
 
-  // 범위 밖의 줄을 흐리게 그리고 범위의 첫 줄을 코드 뷰어 맨 위로 옮긴다.
+  // 범위 밖의 줄을 흐리게 그린다.
   useEffect(() => {
-    if (editor === null || code === undefined) {
-      return;
-    }
-    if (start === null || end === null) {
-      editor.setScrollTop(0);
+    if (editor === null || code === undefined || start === null || end === null) {
       return;
     }
     const last = editor.getModel()?.getLineCount() ?? end;
@@ -86,11 +94,10 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
       ...(start > 1 ? [{ range: lines(1, start - 1), options: { isWholeLine: true, inlineClassName: "code-dim" } }] : []),
       ...(end < last ? [{ range: lines(end + 1, last), options: { isWholeLine: true, inlineClassName: "code-dim" } }] : []),
     ]);
-    editor.setScrollTop(editor.getTopForLineNumber(start));
     return () => decorations.clear();
   }, [editor, code, start, end]);
 
-  // 줄의 바탕을 칠하고 화면 가운데로 옮긴다.
+  // 줄의 바탕을 칠한다.
   useEffect(() => {
     if (editor === null || code === undefined || highlight === undefined) {
       return;
@@ -101,9 +108,45 @@ export function CodeView({ path, range, highlight }: CodeViewProps) {
         options: { isWholeLine: true, className: "code-range" },
       },
     ]);
-    editor.revealLineInCenter(highlight);
     return () => decorations.clear();
   }, [editor, code, highlight]);
+
+  // 바탕을 칠한 줄이 있으면 그 줄을, 없으면 범위를 코드 뷰어의 가운데에 둔다. 파일 전체를 보일 때는 1번 줄부터 보인다.
+  // 뷰어의 높이가 바뀌면 다시 가운데에 두고, 사용자가 스크롤한 뒤에는 옮기지 않는다.
+  const [from, to] = highlight !== undefined ? [highlight, highlight] : [start, end];
+  useEffect(() => {
+    if (editor === null || code === undefined) {
+      return;
+    }
+    if (from === null || to === null) {
+      editor.setScrollTop(0);
+      return;
+    }
+    center(editor, from, to);
+    const dom = editor.getContainerDomNode();
+    let scrolled = false;
+    /** 마우스 버튼을 누른 채인지. 스크롤 막대를 끌거나 글자를 끌어 고르며 옮긴 스크롤을 사용자의 스크롤로 센다. */
+    let pressed = false;
+    const onWheel = () => (scrolled = true);
+    const onKey = (event: KeyboardEvent) => (scrolled ||= SCROLL_KEYS.has(event.key));
+    const onDown = () => (pressed = true);
+    const onUp = () => (pressed = false);
+    dom.addEventListener("wheel", onWheel, { capture: true, passive: true });
+    dom.addEventListener("keydown", onKey, true);
+    dom.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointerup", onUp, true);
+    const listeners = [
+      editor.onDidScrollChange((event) => (scrolled ||= pressed && event.scrollTopChanged)),
+      editor.onDidLayoutChange(() => !scrolled && center(editor, from, to)),
+    ];
+    return () => {
+      listeners.forEach((listener) => listener.dispose());
+      dom.removeEventListener("wheel", onWheel, true);
+      dom.removeEventListener("keydown", onKey, true);
+      dom.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointerup", onUp, true);
+    };
+  }, [editor, code, from, to]);
 
   // Mod+클릭한 이름의 정의가 레포 안에 있으면 그 노드를 고르고, 레포 밖에 있으면 외부 모듈 이름을 띄운다.
   useEffect(() => {
