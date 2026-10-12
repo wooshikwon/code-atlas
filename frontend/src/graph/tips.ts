@@ -43,7 +43,7 @@ function listed(names: string[]): string {
 
 /** 손잡이. 파일 밖과 선이 없는 정의의 수와 이름을 적는다. names는 그 정의의 이름표다. */
 export function packTip(names: string[]): string {
-  return `이 파일 안에서만 쓰이는 정의 ${names.length}개 · ${listed(names)}`;
+  return `이 파일 안에서만 쓰이는 내부 함수 ${names.length}개 · ${listed(names)}`;
 }
 
 /**

@@ -36,9 +36,8 @@ function shownFor(selection: string | null, collapsed: string[] = [], unpacked: 
   return shown(repoFixture, { ...toggles, collapsed: new Set(collapsed), unpacked: new Set(unpacked), flow: picked, lit: null });
 }
 
-/** 손잡이를 뺀 자식 */
 function kidsOf(node: ElkNode | undefined): ElkNode[] | undefined {
-  return node?.children?.filter((child) => !child.id.endsWith("#pack"));
+  return node?.children;
 }
 
 function arranged(selection: string | null, collapsed: string[] = []): Promise<Layout> {
@@ -125,31 +124,35 @@ describe("elkGraphs", () => {
     expect(closed.shelf.map((n) => n.id)).toEqual(["scratch"]);
   });
 
-  it("자식을 그리지 않는 노드는 왼쪽 변에 들어오는 포트 하나를 두고 그 노드로 가는 선은 포트에 닿는다. 자식을 그리는 노드에는 포트가 없다", () => {
+  it("자식을 그리지 않는 노드는 왼쪽 변 가운데에 들어오는 포트 하나를, 오른쪽 변 가운데에 나가는 포트를 도착 노드마다 하나씩 두고 선은 그 포트에 닿는다. 자식을 그리는 노드에는 포트가 없다", () => {
     const root = opened.components[0];
     for (const id of ["main", "common", "pkg.util", "pkg.mod:parse", "pkg.mod:Store.load"]) {
       const node = find(root, id)!;
-      expect(node.ports).toEqual([{ id: `${id}#in`, width: 0, height: 0, layoutOptions: { "elk.port.side": "WEST" } }]);
-      expect(node.layoutOptions?.["elk.portConstraints"]).toBe("FIXED_SIDE");
+      expect(node.ports![0]).toEqual({ id: `${id}#in`, x: 0, y: node.height! / 2, width: 0, height: 0, layoutOptions: { "elk.port.side": "WEST" } });
+      expect(node.ports!.slice(1).every((port) => port.id.startsWith(`${id}#out#`) && port.x === node.width && port.y === node.height! / 2)).toBe(true);
+      expect(node.layoutOptions?.["elk.portConstraints"]).toBe("FIXED_POS");
     }
+    expect(find(root, "main")!.ports!.slice(1).map((port) => port.id)).toEqual(["main#out#pkg", "main#out#common"]);
     for (const id of ["pkg", "pkg.mod", "pkg.mod:Store", "app"]) {
       expect(find(root, id)!.ports).toBeUndefined();
     }
-    const targets = new Map(root.edges!.map((e) => [e.id, e.targets[0]]));
-    expect(targets.get("main|common|import")).toBe("common#in");
-    expect(targets.get("agg|main|pkg")).toBe("pkg");
-    expect(root.edges!.every((e) => !e.sources[0].endsWith("#in"))).toBe(true);
+    const ends = new Map(root.edges!.map((e) => [e.id, [e.sources[0], e.targets[0]]]));
+    expect(ends.get("main|common|import")).toEqual(["main#out#common", "common#in"]);
+    expect(ends.get("agg|main|pkg")).toEqual(["main#out#pkg", "pkg"]);
+    expect(root.edges!.every((e) => !e.sources[0].endsWith("#in") && !e.targets[0].includes("#out#"))).toBe(true);
   });
 
-  it("손잡이를 다는 상자는 자식 목록 끝에 손잡이 노드를 열0으로 넣고, 이미 그리던 자식의 순서와 열은 그대로다", () => {
-    const part = find(elkGraphs(repoFixture, shownFor("pkg.mod", [], []), cols, measure, new Map()).components[0], "pkg.mod")!;
-    expect(part.children?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod#pack"]);
-    const handle = part.children!.at(-1)!;
-    expect(handle).toMatchObject({ width: measure("안쪽 2개") + 12, height: 18 });
-    expect(handle.layoutOptions?.["elk.partitioning.partition"]).toBe("0");
-    const full = find(opened.components[0], "pkg.mod")!;
-    expect(full.children?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse", "pkg.mod#pack"]);
-    expect(full.children!.at(-1)!.width).toBe(measure("안쪽 2개 접기") + 12);
+  it("손잡이를 다는 상자는 손잡이를 자식으로 넣지 않고 아래 여백에 간격 24와 손잡이 한 줄 18을 더하며, 이미 그리던 자식의 순서와 열은 그대로다", () => {
+    const input = elkGraphs(repoFixture, shownFor("pkg.mod", [], []), cols, measure, new Map());
+    const part = find(input.components[0], "pkg.mod")!;
+    expect(part.children?.map((c) => c.id)).toEqual(["pkg.mod:Store"]);
+    expect([...input.packs]).toEqual([["pkg.mod", { width: measure("내부 함수 2개") + 12, height: 18 }]]);
+    expect(part.layoutOptions?.["elk.padding"]).toBe("[top=32,left=16,bottom=58,right=16]");
+    const all = elkGraphs(repoFixture, shownFor("pkg.mod"), cols, measure, new Map());
+    const full = find(all.components[0], "pkg.mod")!;
+    expect(full.children?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse"]);
+    expect(all.packs.get("pkg.mod")!.width).toBe(measure("내부 함수 2개 접기") + 12);
+    expect(find(closed.components[0], "pkg")!.layoutOptions?.["elk.padding"]).toBe("[top=28,left=16,bottom=16,right=16]");
     const partition = (node: ElkNode, id: string) => find(node, id)!.layoutOptions?.["elk.partitioning.partition"];
     expect(partition(part, "pkg.mod:Store")).toBe(partition(full, "pkg.mod:Store"));
   });
@@ -205,9 +208,9 @@ describe("elkGraphs", () => {
     expect(boxCaption(2)).toBe("미사용 후보 2");
   });
 
-  it("펼친 파일 상자는 머리 줄 여백을 두고 안의 노드를 소스 정의 순서로 품는다", () => {
+  it("펼친 파일 상자는 머리 줄 여백과 손잡이 줄을 두고 안의 노드를 소스 정의 순서로 품는다", () => {
     const mod = find(opened.components[0], "pkg.mod")!;
-    expect(mod.layoutOptions?.["elk.padding"]).toBe("[top=32,left=16,bottom=16,right=16]");
+    expect(mod.layoutOptions?.["elk.padding"]).toBe("[top=32,left=16,bottom=58,right=16]");
     expect(kidsOf(mod)?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse"]);
     expect(kidsOf(mod)?.map((c) => c.layoutOptions?.["elk.partitioning.partition"])).toEqual(["0", "1", "1"]);
     expect(kidsOf(find(mod, "pkg.mod:Store"))?.map((c) => c.id)).toEqual(["pkg.mod:Store.load", "pkg.mod:Store.save"]);
@@ -293,14 +296,19 @@ describe("arrange", async () => {
     }
   });
 
-  it("손잡이는 상자 안 열0의 맨 아래에 놓이고, 단계를 바꿔도 상자 사이의 열과 순서는 그대로다", async () => {
+  it("손잡이는 상자 안 왼쪽 아래에 안쪽 여백만큼 들어와 모든 자식 아래에 놓이고, 단계를 바꿔도 상자 사이의 열과 순서는 그대로다", async () => {
     const part = await arrange(elkGraphs(repoFixture, shownFor("pkg.mod", [], []), cols, measure, new Map()), run);
     const full = await arranged("pkg.mod");
-    for (const result of [part, full]) {
+    for (const [result, kids] of [[part, ["pkg.mod:Store"]], [full, ["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse"]]] as const) {
       const handle = result.boxes.get("pkg.mod#pack")!;
-      const store = result.boxes.get("pkg.mod:Store")!;
-      expect(handle.x).toBe(store.x);
-      expect(handle.y).toBeGreaterThan(store.y + store.height);
+      const box = result.boxes.get("pkg.mod")!;
+      expect(handle.x).toBe(box.x + 16);
+      expect(handle.y + handle.height).toBe(box.y + box.height - 16);
+      expect(result.positions.get("pkg.mod#pack")).toEqual({ x: 16, y: box.height - 16 - 18 });
+      for (const kid of kids) {
+        const at = result.boxes.get(kid)!;
+        expect(handle.y).toBeGreaterThanOrEqual(at.y + at.height + 24);
+      }
     }
     const boxes = [...shownFor(null).nodes];
     expect(arrangement(part, boxes)).toBe(arrangement(full, boxes));
