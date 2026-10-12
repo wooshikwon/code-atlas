@@ -943,7 +943,7 @@ async function functionScenario(t, page) {
   const cleared = (await selectedOf(page)) === null && (await count(page, ".trail-step")) === 0;
   await page.keyboard.press("Alt+ArrowLeft");
   await waitSelected(page, FUNCTION).catch(() => {});
-  t.check("탐색 경로의 소스 루트 이름을 누르면 선택이 풀리고, 뒤로 가면 그 함수를 고른 화면으로 돌아온다", steps > 0 && cleared && (await selectedOf(page)) === FUNCTION, `선택 ${await selectedOf(page)}`);
+  t.check("탐색 경로 맨 앞의 레포 이름을 누르면 선택이 풀리고, 뒤로 가면 그 함수를 고른 화면으로 돌아온다", steps > 0 && cleared && (await selectedOf(page)) === FUNCTION, `선택 ${await selectedOf(page)}`);
   await pickFile(page, FILE);
   // 펼친 상자의 머리 줄이 화면 안에 오도록 그래프 전체를 맞춘 뒤 누른다.
   await page.getByRole("button", { name: "화면 맞춤" }).click();
@@ -10546,10 +10546,99 @@ const STAGE4 = new Set([
   "merge-click",
   "merge-select",
   "merge-pin",
+/**
+ * 탐색 경로 맨 앞의 레포 이름. 고른 노드가 없을 때와 있을 때의 이름 순서, 레포 이름과 소스 루트 폴더 이름을 눌러 선택을 푸는지와
+ * 그 단계가 이력에 담기는지, 창 폭 720px에서 앞 이름부터 줄고 마지막 단계가 눌리는지 본다. `--wide-url`을 받으면 소스 루트가
+ * 레포 루트인 그 레포에서도 본다. 사진은 `hf4-trail-root-{이름}.png`로 남긴다.
+ */
+async function trailRoot(t, page) {
+  /** 탐색 경로에 그린 이름과 `…`, 마지막 이름이 가운데 점에서 눌리고 상단 줄 안에 있는지 */
+  const trailOf = () =>
+    page.evaluate(() => {
+      const trail = document.querySelector(".toolbar-trail");
+      const bar = document.querySelector(".toolbar").getBoundingClientRect();
+      const names = [...trail.querySelectorAll(".trail-cut, .trail-root, .trail-step")];
+      const last = names.at(-1);
+      const rect = last?.getBoundingClientRect();
+      const hit = rect === undefined ? null : document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return {
+        names: names.map((each) => each.textContent.trim()),
+        roots: [...trail.querySelectorAll(".trail-root")].map((each) => ({ text: each.textContent.trim(), button: each.tagName === "BUTTON", tip: each.dataset.tip })),
+        cut: trail.querySelector(".trail-cut")?.dataset.tip ?? null,
+        pressed: last !== undefined && hit !== null && last.contains(hit) && rect.right <= bar.right,
+        clipped: last !== undefined && last.scrollWidth > last.clientWidth,
+        header: document.querySelector(".explorer-header")?.textContent ?? null,
+      };
+    });
+  const round = async (name, at, id, shot) => {
+    const [repo, graph] = [await api("/api/repo", at), await api("/api/graph", at)];
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const roots = [repo.name, ...(repo.source_root === "" ? [] : [repo.source_root])];
+    const chain = [];
+    for (let n = byId.get(id); n !== undefined; n = n.parent === null ? undefined : byId.get(n.parent)) {
+      chain.unshift(n.kind === "module" ? `${n.name}.py` : n.kind === "function" || n.kind === "method" ? `${n.name}()` : n.name);
+    }
+    await page.setViewportSize({ width: 1700, height: 1000 });
+    await load(page, at, false);
+    const idle = await trailOf();
+    t.check(
+      `${name}: 고른 노드가 없으면 탐색 경로는 ${roots.join(" > ")}이고 이름마다 선택을 푸는 버튼이다`,
+      same(idle.names, roots) && idle.roots.every((root) => root.button && root.tip === "선택 풀기") && idle.header === repo.name,
+      `${idle.names.join(" > ")}, 파일트리 머리 ${idle.header}`,
+    );
+    await palettePick(page, id.split(":")[1], id);
+    await waitSelected(page, id);
+    await page.mouse.move(5, 5);
+    const picked = await trailOf();
+    t.check(`${name}: 함수를 고르면 레포 이름 뒤에 단계가 이어지고 마지막 단계가 눌린다`, same(picked.names, [...roots, ...chain]) && picked.pressed && !picked.clipped, picked.names.join(" > "));
+    await page.screenshot({ path: HF4(`trail-root-${shot}`) });
+    const backs = () => page.getByRole("button", { name: "뒤로" }).isDisabled();
+    for (const [index, root] of roots.entries()) {
+      await page.click(`.trail-root >> nth=${index}`);
+      await page.mouse.move(5, 5);
+      await rest(page);
+      const cleared = (await selectedOf(page)) === null && same((await trailOf()).names, roots) && !(await backs());
+      await page.keyboard.press("Alt+ArrowLeft");
+      await waitSelected(page, id).catch(() => {});
+      t.check(`${name}: 탐색 경로의 ${root}를 누르면 선택이 풀리고 뒤로 가면 그 함수로 돌아온다`, cleared && (await selectedOf(page)) === id, `선택 ${await selectedOf(page)}`);
+    }
+
+    // 좁은 창. 앞 이름부터 `…`로 줄고 마지막 단계는 눌린다.
+    await page.setViewportSize({ width: 720, height: 1000 });
+    await page.waitForTimeout(400);
+    const narrow = await trailOf();
+    t.check(
+      `${name}: 창 폭 720px에서 탐색 경로는 앞 이름부터 줄이고 줄인 이름을 …의 말풍선에 적으며 마지막 단계가 상단 줄 안에서 눌린다`,
+      narrow.names.at(-1) === chain.at(-1) && narrow.pressed && (narrow.cut === null ? same(narrow.names, [...roots, ...chain]) : narrow.names[0] === "…" && narrow.cut.startsWith(repo.name)),
+      `${narrow.names.join(" > ")}, 줄인 이름 "${narrow.cut ?? "없음"}"${narrow.clipped ? ", 마지막 단계 말줄임" : ""}`,
+    );
+    if (shot === "se") {
+      await page.screenshot({ path: HF4("trail-root-narrow") });
+    }
+    await page.keyboard.press("Escape");
+    await rest(page);
+    const bare = await trailOf();
+    t.check(`${name}: 창 폭 720px에서 고른 노드가 없으면 마지막 이름이 상단 줄 안에서 눌린다`, bare.names.at(-1) === roots.at(-1) && bare.pressed && (await selectedOf(page)) === null, `${bare.names.join(" > ")}${bare.clipped ? ", 마지막 이름 말줄임" : ""}`);
+    if (shot === "mdp") {
+      await page.screenshot({ path: HF4("trail-root-mdp-narrow") });
+    }
+    await page.setViewportSize({ width: 1700, height: 1000 });
+  };
+  await round("sync-engine", url, FUNCTION, "se");
+  if (wideUrl === null) {
+    t.skip("소스 루트가 레포 루트인 레포의 탐색 경로", "--wide-url을 주지 않았다");
+  } else {
+    const graph = await api("/api/graph", wideUrl);
+    const deep = graph.nodes.filter((n) => n.kind === "function" && !n.test).sort((a, b) => b.id.split(".").length - a.id.split(".").length || a.id.localeCompare(b.id))[0];
+    await round("폴더가 여러 겹인 레포", wideUrl, deep.id, "mdp");
+  }
+}
+
   "badge",
   "pack-place",
   "pack-file",
   "pack-flow",
+  ["trail-root", trailRoot],
   "pack-folder",
   "pack-find",
   "pack-pin",

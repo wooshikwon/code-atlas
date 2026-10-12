@@ -1,6 +1,6 @@
 // 상단 줄의 탐색 경로 표시. 고른 노드(함수 시점 뷰에서는 가운데 함수, 경로 고정 중에는 정보 패널이 보이는 경로 위 노드)까지의
-// 폴더·파일·클래스·함수를 단계로 그린다. 맨 앞의 소스 루트 폴더 이름을 누르면 선택을 푼다.
-// 줄 폭이 모자라면 앞 단계부터 `…`로 줄이고 마지막 단계는 늘 남긴다.
+// 폴더·파일·클래스·함수를 단계로 그린다. 맨 앞에는 늘 레포 이름을 적고 소스 루트가 따로 있으면 그 폴더 이름을 이어 적는다.
+// 두 이름을 누르면 선택을 푼다. 줄 폭이 모자라면 앞 이름부터 `…`로 줄이고 마지막 이름은 늘 남긴다.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AtlasNode } from "../api/types";
 import { labelOf, titleOf } from "../graph/layout";
@@ -38,8 +38,10 @@ export function Trail() {
   /** 소스 루트 폴더 이름. 소스 루트 밖의 노드를 골랐거나 소스 루트가 레포 루트이면 적지 않는다. */
   const source = repo?.source_root ?? "";
   const rooted = source !== "" && (steps.length === 0 || steps[0].path?.startsWith(`${source}/`) === true);
-  /** 소스 루트 폴더 이름과 단계의 이름. 화면에 그리는 순서다. */
-  const names = [...(rooted ? [source] : []), ...steps.map(stepName)];
+  /** 단계 앞에 적는 레포 이름과 소스 루트 폴더 이름 */
+  const roots = [...(repo === null ? [] : [repo.name]), ...(rooted ? [source] : [])];
+  /** 화면에 그리는 순서의 이름 */
+  const names = [...roots, ...steps.map(stepName)];
 
   const nav = useRef<HTMLElement | null>(null);
   const path = `${names.join("/")}|${view.kind}`;
@@ -64,7 +66,7 @@ export function Trail() {
     return () => observer.disconnect();
   }, []);
 
-  const offset = rooted ? 1 : 0;
+  const offset = roots.length;
   return (
     <nav className="toolbar-trail" aria-label="탐색 경로" ref={nav}>
       {hidden > 0 && (
@@ -72,10 +74,20 @@ export function Trail() {
           …
         </span>
       )}
-      {rooted && hidden === 0 && (
-        <button className="trail-root" data-tip="선택 풀기" onClick={() => select(null)}>
-          {source}
-        </button>
+      {roots.map(
+        (name, index) =>
+          index >= hidden && (
+            <Fragment key={index}>
+              {index > 0 && (
+                <span className="trail-gap" aria-hidden>
+                  &gt;
+                </span>
+              )}
+              <button className={index === names.length - 1 ? "trail-root trail-last" : "trail-root"} data-tip="선택 풀기" data-full={name} onClick={() => select(null)}>
+                {name}
+              </button>
+            </Fragment>
+          ),
       )}
       {steps.map(
         (node, index) =>
