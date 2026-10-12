@@ -22,10 +22,10 @@ export interface Flow {
  * 흐린 단계의 불투명도. 초점 밖의 노드와 선, 경로 고정 중의 경로 밖 노드와 선이 이 값으로 그려진다. 흐린 항목도 이름을 읽고 찾아갈 수
  * 있어야 하고, 한 단계 위(`HALF`)와 눈으로 구분돼야 한다.
  */
-export const DIM = 0.4;
+export const DIM = 0.35;
 
 /** 중간 단계의 불투명도. 나가는 흐름의 마지막 단계에 든 노드와, 고른 노드가 없을 때의 모든 선이 이 값으로 그려진다. */
-export const HALF = 0.6;
+export const HALF = 0.55;
 
 type Opacity = 1 | typeof HALF | typeof DIM;
 

@@ -3770,7 +3770,7 @@ ol.summary-list {
 .tree-row[data-gone] > :not(.tree-indent),
 .overview-row[data-gone] > *,
 .overview-file[data-gone] > * {
-  opacity: 0.4;
+  opacity: 0.35;
 }
 
 /* 변경 목록의 묶음 머리: 파일 경로, 옛 이름, 그 파일의 줄 수 */
