@@ -9835,6 +9835,74 @@ async function summaryQueue(t, page) {
 }
 
 /**
+ * 코드 뷰어 안의 이력 이동. 코드 뷰어의 본문을 눌러 커서를 둔 채 `Alt+←`·`Alt+→`가 탐색 이력을 옮기고 커서를 낱말만큼 옮기지 않는지,
+ * 코드 뷰어의 찾기 창과 파일트리 검색 칸에서는 같은 키가 이력을 바꾸지 않고 글자 커서를 낱말만큼 옮기는지 본다.
+ */
+async function keysCode(t, page) {
+  const cursor = () => page.evaluate(() => (({ left, top }) => `${left}, ${top}`)(document.querySelector(".info-panel .monaco-editor .cursor").style));
+  const focus = () => page.evaluate(() => document.activeElement?.closest(".monaco-editor") !== null && !(document.activeElement instanceof HTMLTextAreaElement && document.activeElement.classList.contains("input")));
+  /** 코드 뷰어의 본문에서 화면에 보이는 줄 가운데 글자가 있는 줄을 눌러 커서를 둔다. */
+  const clickCode = async () => {
+    await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 20_000 });
+    await settle(page);
+    const at = await page.evaluate(() => {
+      const editor = document.querySelector(".info-panel .monaco-editor").getBoundingClientRect();
+      const line = [...document.querySelectorAll(".info-panel .monaco-editor .view-line > span")].map((span) => span.getBoundingClientRect()).find((rect) => rect.width > 80 && rect.top > editor.top + 40 && rect.bottom < editor.bottom - 40);
+      return { x: line.left + 60, y: line.top + line.height / 2 };
+    });
+    await page.mouse.click(at.x, at.y);
+    await page.waitForTimeout(200);
+  };
+  const caret = () => page.evaluate(() => ({ at: document.activeElement.selectionStart, length: document.activeElement.value?.length ?? null }));
+  await load(page);
+  await pickInTree(page, { id: FUNCTION, owner: FILE });
+  await clickCode();
+  const placed = { cursor: await cursor(), focus: await focus() };
+  await page.keyboard.press("Alt+ArrowRight");
+  await page.waitForTimeout(300);
+  t.check(
+    "코드 뷰어의 본문에 커서를 두고 앞으로 갈 이력이 없을 때 Alt+→를 누르면 선택이 그대로고 커서가 옮겨지지 않는다",
+    placed.focus && (await selectedOf(page)) === FUNCTION && (await cursor()) === placed.cursor,
+    `포커스가 본문에 있음 ${placed.focus}, 커서 ${placed.cursor} → ${await cursor()}`,
+  );
+  await page.keyboard.press("Alt+ArrowLeft");
+  await waitSelected(page, FILE).catch(() => {});
+  t.check("코드 뷰어의 본문에 커서를 둔 채 Alt+←를 누르면 앞 선택으로 돌아간다", (await selectedOf(page)) === FILE, `${await selectedOf(page)}`);
+  await clickCode();
+  const again = await focus();
+  await page.keyboard.press("Alt+ArrowRight");
+  await waitSelected(page, FUNCTION).catch(() => {});
+  t.check("다시 본문에 커서를 두고 Alt+→를 누르면 돌아오기 전의 선택으로 간다", again && (await selectedOf(page)) === FUNCTION, `포커스가 본문에 있음 ${again}, ${await selectedOf(page)}`);
+
+  // 코드 뷰어의 찾기 창은 입력 칸이다.
+  await clickCode();
+  await page.keyboard.press(`${MOD}+f`);
+  await page.waitForSelector(".info-panel .monaco-editor .find-widget textarea", { timeout: 5_000 }).catch(() => {});
+  await page.keyboard.type("note sections");
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForTimeout(300);
+  const found = { caret: await caret(), tag: await page.evaluate(() => document.activeElement.tagName), selected: await selectedOf(page) };
+  t.check(
+    "코드 뷰어의 찾기 창에서 Alt+←를 누르면 이력이 바뀌지 않고 글자 커서가 낱말만큼 옮겨진다",
+    found.tag === "TEXTAREA" && found.selected === FUNCTION && found.caret.at > 0 && found.caret.at < found.caret.length,
+    `${found.tag}, 선택 ${found.selected}, 글자 커서 ${found.caret.at} / ${found.caret.length}`,
+  );
+  await page.keyboard.press("Escape");
+
+  // 파일트리 검색 칸
+  await page.click(".tree-search-input");
+  await page.keyboard.type("note sections");
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForTimeout(300);
+  const searched = { caret: await caret(), selected: await selectedOf(page) };
+  t.check(
+    "파일트리 검색 칸에서 Alt+←를 누르면 이력이 바뀌지 않고 글자 커서가 낱말만큼 옮겨진다",
+    searched.selected === FUNCTION && searched.caret.at > 0 && searched.caret.at < searched.caret.length,
+    `선택 ${searched.selected}, 글자 커서 ${searched.caret.at} / ${searched.caret.length}`,
+  );
+}
+
+/**
  * 화면 이동. 파일트리의 파일 행을 눌러 먼 노드와 가까운 노드로 가며 프레임마다의 화면을 읽는다. 먼 이동의 프레임은
  * `s4-motion-{0~5}.png`에 남긴다.
  */
@@ -10097,6 +10165,7 @@ const SCENARIOS = [
   ["menu", menu],
   ["folder-sum", folderSum],
   ["summary-queue", summaryQueue],
+  ["keys-code", keysCode],
   ["tips", tips],
   ["minimap", minimap],
   ["region", region],
