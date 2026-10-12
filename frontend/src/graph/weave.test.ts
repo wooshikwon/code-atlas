@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gutter, holds, marked, rowOf, rowsOf, spanOf, weave, widened, type Woven } from "./weave";
+import { gutter, holds, marked, rowOf, rowsOf, spanOf, weave, widened, type Hunk, type Woven } from "./weave";
 
 const text = (lines: string[]) => lines.map((line) => `${line}\n`).join("");
 /** 엮은 문서를 줄마다 `표시 기준번호 대상번호 글`로 적는다. */
@@ -8,10 +8,15 @@ const drawn = (woven: Woven) =>
 
 const BASE = text(["def f(a):", "    x = a", "    y = x", "    return y", "", "def g():", "    return 1"]);
 const TARGET = text(["def f(a):", "    x = a + 1", "    z = 0", "    y = x", "    return y", "", "def h():", "    return 2"]);
+/** BASE와 TARGET 사이의 줄 토막 */
+const HUNKS: Hunk[] = [
+  [2, 1, 2, 2],
+  [6, 2, 7, 2],
+];
 
 describe("weave", () => {
   it("바뀌지 않은 줄은 한 번, 바뀐 곳은 삭제된 줄을 먼저 적고 추가된 줄을 이어 적는다", () => {
-    expect(drawn(weave(BASE, TARGET))).toEqual([
+    expect(drawn(weave(BASE, TARGET, HUNKS))).toEqual([
       "  1 1 def f(a):",
       "- 2 .     x = a",
       "+ . 2     x = a + 1",
@@ -27,37 +32,41 @@ describe("weave", () => {
   });
 
   it("같은 본문은 모든 줄이 그대로인 줄이다", () => {
-    const woven = weave(BASE, BASE);
+    const woven = weave(BASE, BASE, []);
     expect(woven.rows.every((row) => row.kind === "same" && row.base === row.target)).toBe(true);
     expect(woven.lines).toHaveLength(7);
   });
 
   it("한쪽 시점에만 있는 파일은 모든 줄이 삭제된 줄이나 추가된 줄이다", () => {
-    expect(drawn(weave(text(["a", "b"]), null))).toEqual(["- 1 . a", "- 2 . b"]);
-    expect(drawn(weave(null, text(["a", "b"])))).toEqual(["+ . 1 a", "+ . 2 b"]);
-    expect(weave(null, null).rows).toEqual([]);
+    expect(drawn(weave(text(["a", "b"]), null, [[1, 2, 0, 0]]))).toEqual(["- 1 . a", "- 2 . b"]);
+    expect(drawn(weave(null, text(["a", "b"]), [[0, 0, 1, 2]]))).toEqual(["+ . 1 a", "+ . 2 b"]);
+    expect(weave(null, null, []).rows).toEqual([]);
   });
 
   it("파일 끝의 줄바꿈이 한쪽에만 있어도 줄 수는 같다", () => {
-    expect(drawn(weave("a\nb", "a\nb\n"))).toEqual(["  1 1 a", "  2 2 b"]);
+    expect(drawn(weave("a\nb", "a\nb\n", []))).toEqual(["  1 1 a", "  2 2 b"]);
   });
 
   it("가운데 줄을 지우거나 끼우면 그 줄만 바뀐 줄이다", () => {
-    expect(drawn(weave(text(["a", "b", "c"]), text(["a", "c"])))).toEqual(["  1 1 a", "- 2 . b", "  3 2 c"]);
-    expect(drawn(weave(text(["a", "c"]), text(["a", "b", "c"])))).toEqual(["  1 1 a", "+ . 2 b", "  2 3 c"]);
+    expect(drawn(weave(text(["a", "b", "c"]), text(["a", "c"]), [[2, 1, 1, 0]]))).toEqual(["  1 1 a", "- 2 . b", "  3 2 c"]);
+    expect(drawn(weave(text(["a", "c"]), text(["a", "b", "c"]), [[1, 0, 2, 1]]))).toEqual(["  1 1 a", "+ . 2 b", "  2 3 c"]);
   });
 
-  it("되풀이되는 줄이 있어도 삭제된 줄과 추가된 줄의 수가 가장 적다", () => {
+  it("되풀이되는 줄에서 토막이 가리키는 줄을 삭제된 줄로 적는다", () => {
     const base = text(["x", "", "y", "", "z", ""]);
     const target = text(["x", "", "z", ""]);
-    const woven = weave(base, target);
-    expect(woven.rows.filter((row) => row.kind === "deleted")).toHaveLength(2);
-    expect(woven.rows.filter((row) => row.kind === "added")).toHaveLength(0);
-    expect(woven.rows.filter((row) => row.base !== null).map((row) => woven.lines[woven.rows.indexOf(row)]).join("\n") + "\n").toBe(base);
+    expect(drawn(weave(base, target, [[3, 2, 2, 0]]))).toEqual(["  1 1 x", "  2 2 ", "- 3 . y", "- 4 . ", "  5 3 z", "  6 4 "]);
+    expect(drawn(weave(base, target, [[2, 2, 1, 0]]))).toEqual(["  1 1 x", "- 2 . ", "- 3 . y", "  4 2 ", "  5 3 z", "  6 4 "]);
+  });
+
+  it("삭제된 줄과 추가된 줄의 수가 토막의 줄 수와 같다", () => {
+    const woven = weave(BASE, TARGET, HUNKS);
+    const count = (kind: string) => woven.rows.filter((row) => row.kind === kind).length;
+    expect([count("deleted"), count("added")]).toEqual([HUNKS.reduce((n, h) => n + h[1], 0), HUNKS.reduce((n, h) => n + h[3], 0)]);
   });
 
   it("엮은 문서에서 한 시점의 줄만 모으면 그 시점의 본문이다", () => {
-    const woven = weave(BASE, TARGET);
+    const woven = weave(BASE, TARGET, HUNKS);
     const side = (key: "base" | "target") => text(woven.lines.filter((_, i) => woven.rows[i][key] !== null));
     expect(side("base")).toBe(BASE);
     expect(side("target")).toBe(TARGET);
@@ -65,7 +74,7 @@ describe("weave", () => {
 });
 
 describe("rowsOf", () => {
-  const woven = weave(BASE, TARGET);
+  const woven = weave(BASE, TARGET, HUNKS);
 
   it("대상 시점의 줄 범위는 사이에 든 삭제된 줄을 품는다", () => {
     expect(rowsOf(woven, "target", [1, 5])).toEqual([1, 6]);
@@ -90,14 +99,14 @@ describe("rowsOf", () => {
 });
 
 describe("widened", () => {
-  const woven = weave(BASE, TARGET);
+  const woven = weave(BASE, TARGET, HUNKS);
 
   it("첫 줄이 추가된 줄이면 바로 앞의 삭제된 줄까지 넓힌다", () => {
     expect(widened(woven, rowsOf(woven, "target", [7, 8])!)).toEqual([8, 11]);
   });
 
   it("끝 줄 뒤에 삭제된 줄이 붙어 있으면 그 줄까지 넓힌다", () => {
-    const cut = weave(text(["def f():", "    a", "    b", "", "x = 1"]), text(["def f():", "    a", "", "x = 1"]));
+    const cut = weave(text(["def f():", "    a", "    b", "", "x = 1"]), text(["def f():", "    a", "", "x = 1"]), [[3, 1, 2, 0]]);
     expect(widened(cut, rowsOf(cut, "target", [1, 2])!)).toEqual([1, 3]);
   });
 
@@ -108,7 +117,7 @@ describe("widened", () => {
 });
 
 describe("spanOf", () => {
-  const woven = weave(BASE, TARGET);
+  const woven = weave(BASE, TARGET, HUNKS);
 
   it("엮은 문서의 줄 범위를 두 시점의 줄 범위로 되돌린다", () => {
     expect(spanOf(woven, 1, 6)).toEqual({ base: [1, 4], target: [1, 5] });
@@ -132,7 +141,7 @@ describe("spanOf", () => {
 });
 
 describe("marked", () => {
-  const woven = weave(BASE, TARGET);
+  const woven = weave(BASE, TARGET, HUNKS);
 
   it("바뀐 줄이 든 범위는 줄 머리에 표시를 붙인다", () => {
     expect(marked(woven, 1, 5)).toBe(["def f(a):", "    x = a", "    x = a + 1", "    z = 0", "    y = x"].map((line, i) => " -++ "[i] + line).join("\n"));
@@ -153,7 +162,7 @@ describe("marked", () => {
 describe("gutter", () => {
   it("두 시점의 번호를 폭을 맞춰 나란히 적고 없는 번호는 비운다", () => {
     const lines = Array.from({ length: 12 }, (_, i) => `l${i}`);
-    const { chars, label } = gutter(weave(text(lines), text([...lines.slice(0, 9), "new", ...lines.slice(10)])));
+    const { chars, label } = gutter(weave(text(lines), text([...lines.slice(0, 9), "new", ...lines.slice(10)]), [[10, 1, 10, 1]]));
     const drawnLabel = (line: number) => label(line).replaceAll(" ", "_");
     expect(chars).toBe(5);
     expect(drawnLabel(1)).toBe("_1__1");

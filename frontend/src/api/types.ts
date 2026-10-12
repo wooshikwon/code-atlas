@@ -338,6 +338,8 @@ export interface ComparedFile {
   status: "added" | "deleted" | "modified" | "renamed";
   added: number;
   deleted: number;
+  /** 그 파일의 줄 토막(`git diff -U0`). 하나가 [기준 쪽 시작 줄, 줄 수, 대상 쪽 시작 줄, 줄 수]이고 줄 수의 합이 deleted와 added다. */
+  hunks: [number, number, number, number][];
   test: boolean;
 }
 

@@ -85,8 +85,8 @@ describe("lineTotals", () => {
   it("패키지 노드의 path가 `__init__.py`여도 그 파일의 줄 수를 그 폴더부터 더한다", () => {
     const packaged = { nodes: [node("lib", "package", null, { path: "lib/__init__.py" }), node("lib.a", "module", "lib", { path: "lib/a.py" })], edges: [] };
     const files = [
-      { path: "lib/__init__.py", old: null, status: "modified" as const, added: 2, deleted: 1, test: false },
-      { path: "lib/a.py", old: null, status: "modified" as const, added: 4, deleted: 0, test: false },
+      { path: "lib/__init__.py", old: null, status: "modified" as const, added: 2, deleted: 1, hunks: [], test: false },
+      { path: "lib/a.py", old: null, status: "modified" as const, added: 4, deleted: 0, hunks: [], test: false },
     ];
     expect(lineTotals(packaged, files).get("lib")).toEqual({ added: 6, deleted: 1 });
   });

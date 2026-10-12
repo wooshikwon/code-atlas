@@ -19,7 +19,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import asdict, replace
+from dataclasses import asdict, astuple, replace
 from pathlib import Path
 from typing import TypeVar
 
@@ -457,7 +457,10 @@ def create_app(
             "tree": {"entries": _tree(files_with_gone, replace(after.analysis, nodes=result.nodes))},
             "nodes": {node: _change(change) for node, change in result.node_changes.items()},
             "edges": {key: asdict(change) for key, change in result.edge_changes.items()},
-            "files": [{**f, "test": is_test_path(f["path"])} for f in result.files],
+            "files": [
+                {**f, "hunks": [astuple(h) for h in hunks.get(f["path"], [])], "test": is_test_path(f["path"])}
+                for f in result.files
+            ],
             "unused": to_dict(after.unused),
         }
         return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()

@@ -18,14 +18,14 @@ export interface Woven {
 
 export type Side = "base" | "target";
 
+/** `git diff -U0`의 토막 하나: 기준 쪽 시작 줄과 줄 수, 대상 쪽 시작 줄과 줄 수 */
+export type Hunk = [number, number, number, number];
+
 /** 엮은 문서의 줄 범위가 두 시점에서 차지하는 줄 범위. 그 시점의 줄이 하나도 없으면 null이다. */
 export interface Span {
   base: [number, number] | null;
   target: [number, number] | null;
 }
-
-/** 두 본문의 다른 줄 수가 이 값을 넘으면 줄을 맞추지 않고 앞 본문을 모두 삭제된 줄로, 뒤 본문을 모두 추가된 줄로 적는다. */
-const MAX_EDITS = 2000;
 
 /** 본문의 줄. 파일 끝의 줄바꿈 뒤는 줄로 세지 않는다. 그 시점에 파일이 없으면 줄이 없다. */
 function linesOf(text: string | null): string[] {
@@ -40,96 +40,36 @@ function linesOf(text: string | null): string[] {
 }
 
 /**
- * a를 b로 바꾸는 가장 짧은 편집을 a와 b에서 서로 짝인 줄의 쌍으로 낸다(Myers의 O(ND) 방법). 쌍은 앞에서 뒤로 가는 순서다.
- * 다른 줄 수가 MAX_EDITS를 넘으면 짝이 없는 것으로 본다.
+ * 기준 시점의 본문 base와 대상 시점의 본문 target을 그 파일의 줄 토막 hunks(비교 응답의 `files[].hunks`)로 엮는다. 토막 밖의 줄은
+ * 두 시점에서 짝인 그대로인 줄이고, 토막마다 기준 쪽 줄을 삭제된 줄로, 대상 쪽 줄을 추가된 줄로 적는다. 삭제된 줄과 추가된 줄의 수가
+ * 그 파일의 줄 수(`added`, `deleted`)와 같다. 파일이 그 시점에 없으면 null을 넘긴다.
  */
-function matches(a: string[], b: string[]): [number, number][] {
-  const n = a.length;
-  const m = b.length;
-  const max = Math.min(n + m, MAX_EDITS);
-  const offset = max + 1;
-  /** k = x - y인 대각선마다 가장 멀리 간 x */
-  let reach = new Int32Array(2 * offset + 1);
-  const trace: Int32Array[] = [];
-  for (let d = 0; d <= max; d += 1) {
-    trace.push(reach.slice(offset - d - 1, offset + d + 2));
-    const next = reach.slice();
-    for (let k = -d; k <= d; k += 2) {
-      const down = k === -d || (k !== d && reach[offset + k - 1] < reach[offset + k + 1]);
-      let x = down ? reach[offset + k + 1] : reach[offset + k - 1] + 1;
-      let y = x - k;
-      while (x < n && y < m && a[x] === b[y]) {
-        x += 1;
-        y += 1;
-      }
-      next[offset + k] = x;
-      if (x >= n && y >= m) {
-        const pairs: [number, number][] = [];
-        for (let step = d; step >= 0; step -= 1) {
-          const before = trace[step];
-          const diagonal = x - y;
-          /** before는 대각선 -step-1부터 담고 있다. */
-          const at = diagonal + step + 1;
-          const fell = diagonal === -step || (diagonal !== step && before[at - 1] < before[at + 1]);
-          const from = fell ? before[at + 1] : before[at - 1] + 1;
-          const start = step === 0 ? 0 : from;
-          while (x > start) {
-            x -= 1;
-            y -= 1;
-            pairs.push([x, y]);
-          }
-          x = fell ? from : from - 1;
-          y = x - (fell ? diagonal + 1 : diagonal - 1);
-        }
-        return pairs.reverse();
-      }
-    }
-    reach = next;
-  }
-  return [];
-}
-
-/**
- * 기준 시점의 본문 base와 대상 시점의 본문 target을 엮는다. 파일이 그 시점에 없으면 null을 넘기고, 그때는 모든 줄이 추가된 줄이나
- * 삭제된 줄이다.
- */
-export function weave(base: string | null, target: string | null): Woven {
+export function weave(base: string | null, target: string | null, hunks: Hunk[]): Woven {
   const a = linesOf(base);
   const b = linesOf(target);
-  let head = 0;
-  while (head < a.length && head < b.length && a[head] === b[head]) {
-    head += 1;
-  }
-  let tail = 0;
-  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) {
-    tail += 1;
-  }
-  const middle = matches(a.slice(head, a.length - tail), b.slice(head, b.length - tail)).map(([x, y]): [number, number] => [x + head, y + head]);
-  const pairs: [number, number][] = [
-    ...Array.from({ length: head }, (_, i): [number, number] => [i, i]),
-    ...middle,
-    ...Array.from({ length: tail }, (_, i): [number, number] => [a.length - tail + i, b.length - tail + i]),
-  ];
   const lines: string[] = [];
   const rows: Row[] = [];
   let x = 0;
   let y = 0;
-  for (const [nextX, nextY] of [...pairs, [a.length, b.length] as [number, number]]) {
-    for (; x < nextX; x += 1) {
+  const same = (until: number) => {
+    for (; x < until && x < a.length && y < b.length; x += 1, y += 1) {
+      lines.push(b[y]);
+      rows.push({ kind: "same", base: x + 1, target: y + 1 });
+    }
+  };
+  for (const [oldStart, oldCount, , newCount] of hunks) {
+    /** 줄이 없는 쪽의 시작 줄은 토막이 끼어드는 곳의 앞줄이다. */
+    same(oldCount === 0 ? oldStart : oldStart - 1);
+    for (const end = Math.min(x + oldCount, a.length); x < end; x += 1) {
       lines.push(a[x]);
       rows.push({ kind: "deleted", base: x + 1, target: null });
     }
-    for (; y < nextY; y += 1) {
+    for (const end = Math.min(y + newCount, b.length); y < end; y += 1) {
       lines.push(b[y]);
       rows.push({ kind: "added", base: null, target: y + 1 });
     }
-    if (x < a.length) {
-      lines.push(a[x]);
-      rows.push({ kind: "same", base: x + 1, target: y + 1 });
-      x += 1;
-      y += 1;
-    }
   }
+  same(a.length);
   return { lines, rows };
 }
 

@@ -281,12 +281,12 @@ export const compareFixture: Comparison = {
     "main:run|pkg.mod:Store.load|call": { change: null, before: 2 },
   },
   files: [
-    { path: "app/text.py", old: null, status: "modified", added: 7, deleted: 0, test: false },
-    { path: "cli.py", old: "tool.py", status: "renamed", added: 0, deleted: 0, test: false },
-    { path: "main.py", old: null, status: "modified", added: 1, deleted: 0, test: false },
-    { path: "pkg/__init__.py", old: null, status: "modified", added: 2, deleted: 1, test: false },
-    { path: "pkg/mod.py", old: null, status: "modified", added: 3, deleted: 8, test: false },
-    { path: "pkg/old.py", old: null, status: "deleted", added: 0, deleted: 12, test: false },
+    { path: "app/text.py", old: null, status: "modified", added: 7, deleted: 0, hunks: [], test: false },
+    { path: "cli.py", old: "tool.py", status: "renamed", added: 0, deleted: 0, hunks: [], test: false },
+    { path: "main.py", old: null, status: "modified", added: 1, deleted: 0, hunks: [], test: false },
+    { path: "pkg/__init__.py", old: null, status: "modified", added: 2, deleted: 1, hunks: [], test: false },
+    { path: "pkg/mod.py", old: null, status: "modified", added: 3, deleted: 8, hunks: [], test: false },
+    { path: "pkg/old.py", old: null, status: "deleted", added: 0, deleted: 12, hunks: [], test: false },
   ],
   unused: { definitions: 12, candidates: ["scratch:todo"] },
 };

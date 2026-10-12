@@ -386,12 +386,12 @@ describe("시점 비교", () => {
     },
     edges: {},
     files: [
-      { path: "src/arbiter.py", old: null, status: "modified", added: 5, deleted: 8, test: false },
-      { path: "src/old/legacy.py", old: null, status: "deleted", added: 0, deleted: 9, test: false },
-      { path: "src/parser/__init__.py", old: null, status: "modified", added: 2, deleted: 0, test: false },
-      { path: "src/parser/plan.py", old: "src/parser/draft.py", status: "renamed", added: 1, deleted: 1, test: false },
-      { path: "src/empty.py", old: "lib/blank.py", status: "renamed", added: 0, deleted: 0, test: false },
-      { path: "tests/test_plan.py", old: null, status: "modified", added: 3, deleted: 0, test: true },
+      { path: "src/arbiter.py", old: null, status: "modified", added: 5, deleted: 8, hunks: [], test: false },
+      { path: "src/old/legacy.py", old: null, status: "deleted", added: 0, deleted: 9, hunks: [], test: false },
+      { path: "src/parser/__init__.py", old: null, status: "modified", added: 2, deleted: 0, hunks: [], test: false },
+      { path: "src/parser/plan.py", old: "src/parser/draft.py", status: "renamed", added: 1, deleted: 1, hunks: [], test: false },
+      { path: "src/empty.py", old: "lib/blank.py", status: "renamed", added: 0, deleted: 0, hunks: [], test: false },
+      { path: "tests/test_plan.py", old: null, status: "modified", added: 3, deleted: 0, hunks: [], test: true },
     ],
     unused: { definitions: 0, candidates: [] },
   };

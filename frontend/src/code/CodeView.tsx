@@ -3,7 +3,7 @@ import * as monaco from "monaco-editor/editor";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { getDefinition, getFile } from "../api/client";
 import { WORKTREE, type Comparison } from "../api/types";
-import { gutter, marked, rowOf, rowsOf, weave, widened, type RowKind, type Woven } from "../graph/weave";
+import { gutter, marked, rowOf, rowsOf, weave, widened, type Hunk, type RowKind, type Woven } from "../graph/weave";
 import { useCompare } from "../state/compare";
 import type { Between } from "../state/explanations";
 import { useAtlas } from "../state/store";
@@ -32,14 +32,14 @@ interface Shown {
 /**
  * 코드 뷰어가 보일 본문의 출처. key는 모델의 주소이고 본문마다 다르다. file은 그 파일이 대상 시점에서 가진 경로(삭제된 파일은 기준 시점의
  * 경로)이고, live는 대상 시점이 작업 중인 상태여서 언어 서버에 물을 수 있는지다. between은 두 시점의 본문을 엮어 보일 때 기준 시점과
- * 대상 시점에서 읽을 경로이고, 그 시점에 파일이 없으면 null이다.
+ * 대상 시점에서 읽을 경로와 그 파일의 줄 토막이고, 그 시점에 파일이 없으면 경로가 null이다.
  */
 interface Source {
   key: string;
   file: string;
   live: boolean;
   compared: Between | null;
-  between: { old: string | null; fresh: string | null } | null;
+  between: { old: string | null; fresh: string | null; hunks: Hunk[] } | null;
 }
 
 function sourceOf(compared: Comparison | null, path: string, base: boolean): Source {
@@ -54,7 +54,7 @@ function sourceOf(compared: Comparison | null, path: string, base: boolean): Sou
   if (found === undefined || (found.added === 0 && found.deleted === 0 && found.status !== "added" && found.status !== "deleted")) {
     return { ...shared, key: live ? file : `${compared.target}/${file}`, between: null };
   }
-  const between = { old: found.status === "added" ? null : (found.old ?? found.path), fresh: found.status === "deleted" ? null : found.path };
+  const between = { old: found.status === "added" ? null : (found.old ?? found.path), fresh: found.status === "deleted" ? null : found.path, hunks: found.hunks };
   return { ...shared, key: `${compared.base}..${compared.target}/${file}`, between };
 }
 
@@ -67,7 +67,7 @@ async function load({ key, file, live, compared, between }: Source): Promise<Sho
     between.old === null ? null : getFile(between.old, compared.base),
     between.fresh === null ? null : getFile(between.fresh, target),
   ]);
-  const woven = weave(old?.text ?? null, fresh?.text ?? null);
+  const woven = weave(old?.text ?? null, fresh?.text ?? null, between.hunks);
   return { key, text: woven.lines.join("\n"), woven };
 }
 

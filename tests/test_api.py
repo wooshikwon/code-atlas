@@ -1185,8 +1185,11 @@ def test_compare_with_the_worktree_adds_deleted_nodes_edges_and_files(history_cl
         counted["deleted"],
     )
     assert files["src/shop/audit.py"] == {
-        "path": "src/shop/audit.py", "old": None, "status": "deleted", "added": 0, "deleted": 8, "test": False,
+        "path": "src/shop/audit.py", "old": None, "status": "deleted", "added": 0, "deleted": 8, "hunks": [[1, 8, 0, 0]],
+        "test": False,
     }  # fmt: skip
+    for f in body["files"]:
+        assert (sum(h[3] for h in f["hunks"]), sum(h[1] for h in f["hunks"])) == (f["added"], f["deleted"])
     assert files["src/shop/inventory.py"]["old"] == "src/shop/stock.py"
     assert files["src/shop/notes.py"]["status"] == "added"
 
