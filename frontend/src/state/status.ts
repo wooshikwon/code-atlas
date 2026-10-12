@@ -1,9 +1,8 @@
 // 분석 상태. 서버의 `/api/status`를 주기마다 받아 분석의 단계와 진행 수, 분석 뒤 바뀐 파일을 담고, 서버의 판 번호가 화면이 그린
 // 판 번호와 달라지면 분석 결과를 받아 그린다. 분석 단계가 무엇을 하는지는 모르고 단계의 이름과 수만 적는다.
 import { create } from "zustand";
-import { forgetFiles, getGraph, getRepo, getStatus, getTree } from "../api/client";
+import { forgetFiles, getGraph, getRepo, getStatus, getTree, getUnused } from "../api/client";
 import type { Phase, Status } from "../api/types";
-import { useOpened } from "../panel/opened";
 import { useChanges } from "./changes";
 import { useExplanations } from "./explanations";
 import { useOverlay } from "./overlay";
@@ -78,7 +77,7 @@ export const useStatus = create<StatusStore>()((set, get) => {
   let last: Promise<void> = Promise.resolve();
 
   /**
-   * 분석 결과를 받아 그린다. 처음에는 저장해 둔 보기 설정대로 레포를 열고, 그 뒤에는 화면 상태를 레포를 처음 연 상태로 되돌린다.
+   * 분석 결과를 받아 그린다. 처음에는 저장해 둔 보기 설정대로 레포를 열고, 그 뒤에는 보던 화면을 새 그래프에 맞춘다.
    * 그리지 못하면 거짓을 돌려준다.
    */
   const draw = async (first: boolean): Promise<boolean> => {
@@ -91,14 +90,16 @@ export const useStatus = create<StatusStore>()((set, get) => {
       useSummaries.getState().list();
       return true;
     }
-    const [repo, graph, tree] = await Promise.all([getRepo(), getGraph(), getTree()]);
+    // 그래프와 미사용 후보를 함께 받아 한 번에 담는다. 그래프가 새 분석 결과의 배치를 한 번만 계산한다.
+    const [repo, graph, tree, unused] = await Promise.all([getRepo(), getGraph(), getTree(), getUnused().catch(() => null)]);
     forgetFiles();
-    useOpened.getState().close();
     useSummaries.getState().forget();
     useSummaries.getState().list();
     useExplanations.getState().forget();
-    useAtlas.getState().reopen(repo, graph, tree);
-    useOverlay.getState().load();
+    useAtlas.getState().refresh(repo, graph, tree);
+    if (unused !== null) {
+      useOverlay.getState().mark(unused);
+    }
     await useChanges.getState().load();
     return true;
   };

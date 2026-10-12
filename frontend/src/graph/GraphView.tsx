@@ -44,7 +44,7 @@ import { drawn, followed, type EdgeKey } from "./scope";
 import { clipped, nodeTip, packTip, tipOf, valueTip } from "./tips";
 import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
-import { anchorOn, autoView, boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
+import { anchorOn, autoView, boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, nearest, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, unitOf, writtenBy, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -200,14 +200,16 @@ export function GraphView() {
   const view = useAtlas((s) => s.view);
   /** 구조 뷰의 화면 위치와 확대 비율. 레포를 열어 화면을 맞추기 전에는 null이다. */
   const home = useRef<Viewport | null>(null);
+  /** 구조 뷰가 화면을 맞춰 둔 화면 초기화의 횟수(`homed`) */
+  const reset = useRef(useAtlas.getState().homed);
   return view.kind === "function" ? (
     <CallView center={view.center} expanded={view.expanded} />
   ) : (
-    <StructureView home={home} />
+    <StructureView home={home} reset={reset} />
   );
 }
 
-function StructureView({ home }: { home: RefObject<Viewport | null> }) {
+function StructureView({ home, reset }: { home: RefObject<Viewport | null>; reset: RefObject<number> }) {
   const graph = useAtlas((s) => s.graph);
   const showTests = useAtlas((s) => s.showTests);
   const showExternal = useAtlas((s) => s.showExternal);
@@ -223,6 +225,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const togglePack = useAtlas((s) => s.togglePack);
   const unpacked = useAtlas((s) => s.unpacked);
   const open = useAtlas((s) => s.open);
+  const homed = useAtlas((s) => s.homed);
   const making = useSummaries(makingKey);
   const overlay = useOverlay((s) => s.kind);
   const candidates = useOverlay((s) => s.unused);
@@ -254,6 +257,8 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const arranged = useRef<Pick<Scene, "graph" | "columns" | "lit" | "key"> | null>(null);
   /** 화면에 그린 배치의 그래프와 접은 폴더, 전부 펼친 상자. 다음 배치에서 펼치거나 접은 상자 하나를 찾는 데 쓴다. */
   const folds = useRef<Pick<Scene, "graph" | "collapsed" | "unpacked"> | null>(null);
+  /** 배치가 움직이는 동안 화면의 같은 좌표에 붙잡아 두는 상자. scene은 그 배치, before는 움직이기 전의 상자, view는 그때의 화면이다. */
+  const holding = useRef<{ scene: Scene; id: string; before: Box; view: Viewport } | null>(null);
   /** 화면을 옮겨 둔 노드나 경로와 그때의 finder.aimed */
   const panned = useRef<{ aim: string | Lit | null; aimed: number }>({ aim: null, aimed: 0 });
   /** 선을 눌러 가는 폴더. 그 폴더를 펼친 배치가 오면 화면을 옮긴다. */
@@ -266,16 +271,18 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const pinFocus = finder.focus;
   const aimed = finder.aimed;
 
+  /** 화면에 그린 배치의 그래프로 만든다. 다시 분석한 그래프를 받으면 그 그래프의 배치가 올 때까지 앞의 그래프를 그린다. */
+  const drawnGraph = scene?.graph ?? graph;
   const index = useMemo(
-    () => (graph === null ? null : { nodes: nodeIndex(graph), functions: functionCounts(graph) }),
-    [graph],
+    () => (drawnGraph === null ? null : { nodes: nodeIndex(drawnGraph), functions: functionCounts(drawnGraph) }),
+    [drawnGraph],
   );
   const cols = useMemo(
     () => (graph === null ? null : columns(graph, { showTests, showExternal })),
     [graph, showTests, showExternal],
   );
   const target = useMemo(() => {
-    if (graph === null || index === null) {
+    if (graph === null) {
       return null;
     }
     const toggles = { showTests, showExternal };
@@ -286,10 +293,13 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     if (lit !== null) {
       return { flow: null, lit, focus: null, key: JSON.stringify(state), collapsed, unpacked, shown: shown(graph, { ...toggles, ...boxes, flow: null, lit }) };
     }
-    const picked = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
+    const picked = focus !== null && graph.nodes.some((n) => n.id === focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
     const key = JSON.stringify([...state, picked === null ? null : [focus, depth]]);
     return { flow: picked, lit, focus: picked === null ? null : focus, key, collapsed, unpacked, shown: shown(graph, { ...toggles, ...boxes, flow: picked, lit }) };
-  }, [graph, index, showTests, showExternal, collapsed, unpacked, overlay, candidates, focus, depth, lit]);
+  }, [graph, showTests, showExternal, collapsed, unpacked, overlay, candidates, focus, depth, lit]);
+  /** 지금 상태로 그릴 배치의 키. 화면에 그린 배치의 키와 같으면 그 배치가 지금 상태의 배치다. */
+  const wanted = useRef<string | null>(null);
+  wanted.current = target?.key ?? null;
 
   /** 상자가 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역의 가운데에 오게 화면을 옮기고 전체 맞춤 상태를 끈다. 확대 비율은 `NAMED_ZOOM`보다 작을 때만 그 값으로 키운다. */
   const panTo = (box: Box) => {
@@ -375,7 +385,20 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     const differ = (a: Set<string>, b: Set<string>) => [...a].filter((id) => !b.has(id)).concat([...b].filter((id) => !a.has(id)));
     const changed = last === null || last.graph !== scene.graph ? [] : [...differ(last.collapsed, scene.collapsed), ...differ(last.unpacked, scene.unpacked)];
     const aim = scene.lit ?? scene.focus;
+    /** 다시 분석한 그래프의 첫 배치다. 고른 노드나 강조하는 경로로 화면을 옮기지 않는다. */
+    const swapped = last !== null && last.graph !== scene.graph;
+    if (swapped) {
+      panned.current = { aim, aimed };
+    }
     const fresh = aim !== panned.current.aim;
+    /** 화면을 초기화한 뒤의 배치다. 레포를 연 처음 화면처럼 맞추고(`fittedView`) 전체 맞춤 상태를 켠다. */
+    const homing = homed !== reset.current && scene.key === wanted.current && root.current !== null;
+    if (homing) {
+      reset.current = homed;
+      const stage = stageOf(root.current!);
+      useAtlas.setState({ fitted: true });
+      fly(fittedView(to, stage, null), stage.free);
+    }
     /** 이 배치가 펼친, 선을 눌러 가는 폴더의 상자. 배치가 그 폴더를 펼치지 않았으면(느린 배치를 취소했으면) 가지 않는다. */
     const came = last === scene || bound.current === null || scene.collapsed.has(bound.current) ? undefined : to.boxes.get(bound.current);
     if (last !== scene) {
@@ -387,7 +410,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
 
     // 고른 노드나 강조하는 경로가 바뀌면 화면을 옮기고 전체 맞춤 상태를 끈다. 경로 고정 중에는 finder.focus를 정할 때마다 옮긴다.
     // 강조하는 경로의 배치가 아직 오지 않았으면 그 배치가 올 때까지 기다린다.
-    if (scene.lit === lit && (fresh || (lit !== null && aimed !== panned.current.aimed)) && root.current !== null) {
+    if (!homing && scene.lit === lit && (fresh || (lit !== null && aimed !== panned.current.aimed)) && root.current !== null) {
       panned.current = { aim, aimed };
       const path = scene.lit?.path.filter((id) => to.boxes.has(id)) ?? [];
       const at = Math.max(path.indexOf(pinFocus ?? ""), 0);
@@ -406,14 +429,31 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     // 폴더나 손잡이를 눌러 상자 하나를 펼치거나 접었으면 화면을 옮기지 않고 그 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 둔다.
     // 확대 비율은 그대로이고 전체 맞춤 상태는 꺼진다. 노드를 골라 그 노드를 품은 폴더가 펼쳐졌으면 고른 노드로, 선을 눌러 폴더를 펼쳤으면
     // 그 폴더로 화면을 옮기므로 상자를 붙잡지 않는다.
-    const toggled = came === undefined && changed.length === 1 && (aim === null || !fresh) ? changed[0] : null;
-    const before = toggled === null ? undefined : from?.boxes.get(toggled);
-    const held = before === undefined ? null : { id: toggled!, before, view: getViewport() };
+    const toggled = !homing && came === undefined && changed.length === 1 && (aim === null || !fresh) ? changed[0] : null;
+    // 다시 분석한 그래프의 배치가 오면 고른 노드를, 고른 노드가 없으면 화면 가운데에 가장 가까운 상자를 같은 방식으로 붙잡는다.
+    // 전체 맞춤 상태면 붙잡지 않고 아래에서 화면을 다시 맞춘다.
+    const kept = (): string | null => {
+      if (!swapped || homing || useAtlas.getState().fitted || from === null || root.current === null) {
+        return null;
+      }
+      const both = [...from.boxes].filter(([id]) => to.boxes.has(id));
+      if (scene.focus !== null && both.some(([id]) => id === scene.focus)) {
+        return scene.focus;
+      }
+      const { area } = stageOf(root.current);
+      const view = getViewport();
+      return nearest(both, { x: (area.width / 2 - view.x) / view.zoom, y: (area.height / 2 - view.y) / view.zoom });
+    };
+    // 같은 배치를 다시 그릴 때(요약 상태나 분석 표시가 바뀌었을 때)는 붙잡아 둔 상자를 그대로 붙잡는다.
+    const grip = toggled ?? kept();
+    const before = grip === null ? undefined : from?.boxes.get(grip);
+    const held = last === scene ? (holding.current?.scene === scene ? holding.current : null) : before === undefined ? null : { scene, id: grip!, before, view: getViewport() };
+    holding.current = held;
 
     // 전체 맞춤 상태에서 그 밖의 까닭으로 배치가 바뀌면 화면을 다시 맞춘다(`fittedView`).
     if (toggled !== null) {
       useAtlas.setState({ fitted: false });
-    } else if (useAtlas.getState().fitted && from !== null && !settled(from, to) && root.current !== null) {
+    } else if (!homing && useAtlas.getState().fitted && from !== null && !settled(from, to) && root.current !== null) {
       const stage = stageOf(root.current);
       fly(fittedView(to, stage, changed.length === 1 ? changed[0] : null), stage.free);
     }
@@ -431,6 +471,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
 
     if (from === null || still || settled(from, to)) {
       draw(to, null);
+      holding.current = null;
       setMoving(false);
       return;
     }
@@ -441,9 +482,12 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       from,
       to,
       (at) => draw(at, null),
-      () => setMoving(false),
+      () => {
+        holding.current = null;
+        setMoving(false);
+      },
     );
-  }, [scene, index, making, lit, pinFocus, aimed, cover, overlay, getViewport, fly, jump, heading]);
+  }, [scene, index, making, lit, pinFocus, aimed, homed, cover, overlay, getViewport, fly, jump, heading]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
   /** 그릴 선과 그 가운데 순환 선의 키. 순환 의존 표시를 켠 동안에만 순환 선을 넣고 칠한다. */

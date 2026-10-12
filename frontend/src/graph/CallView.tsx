@@ -43,6 +43,8 @@ interface Scene {
   calls: Calls;
   center: string;
   layout: Layout;
+  /** calls를 만든 그래프의 노드 */
+  nodes: Map<string, AtlasNode>;
 }
 
 /** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. unused는 미사용 후보 표시가 표시할 후보다. */
@@ -124,16 +126,16 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     }
     return watchLayout(
       runElk(callElk(calls, (id) => callSize(calls, index, index.get(id)!, measureText))),
-      (done) => setScene({ calls, center, layout: fromElk(done, callLane(calls)) }),
+      (done) => setScene({ calls, center, layout: fromElk(done, callLane(calls)), nodes: index }),
       setError,
     );
   }, [calls, index, center]);
 
   useEffect(() => {
-    if (scene === null || index === null) {
+    if (scene === null) {
       return;
     }
-    const items = itemsOf(scene, index, selected, makingOf(making), unused, writes);
+    const items = itemsOf(scene, scene.nodes, selected, makingOf(making), unused, writes);
     const to = scene.layout;
     const from = onScreen.current;
     const still = reducedMotion();
@@ -168,7 +170,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, index, selected, making, unused, fly, jump]);
+  }, [scene, selected, making, unused, fly, jump]);
   useEffect(() => halt, [halt]);
 
   const lines = useMemo(() => (scene === null ? NO_LINES : callEdges(scene.calls, scene.center, scene.layout)), [scene]);

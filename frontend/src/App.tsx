@@ -10,13 +10,14 @@ import { Tooltip } from "./graph/Tooltip";
 import { Entries } from "./nav/Entries";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
-import { bind } from "./nav/keys";
+import { bind, dismiss } from "./nav/keys";
 import { NodeMenu, SummaryNotice } from "./nav/NodeMenu";
 import { Trail } from "./nav/Trail";
 import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
 import { Palette } from "./search/Palette";
 import { watch } from "./state/changes";
+import { busy, reload } from "./state/reload";
 import { litOf, pinned, useAtlas } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
@@ -29,6 +30,7 @@ function Toolbar() {
   const back = useAtlas((s) => s.back);
   const forward = useAtlas((s) => s.forward);
   const setTheme = useAtlas((s) => s.setTheme);
+  const resetView = useAtlas((s) => s.resetView);
   const { fit } = useFlight();
 
   /**
@@ -61,13 +63,16 @@ function Toolbar() {
       </div>
       <div className="toolbar-tools">
         <Filters />
-        <button className="toolbar-button" onClick={fitGraph}>
-          화면 맞춤
+        <Reload />
+        <button className="toolbar-button" aria-label="화면 맞춤" onClick={fitGraph}>
+          <span className="toolbar-wide">화면 </span>맞춤
+        </button>
+        <button className="toolbar-button" aria-label="화면 초기화" onClick={resetView} disabled={pin}>
+          <span className="toolbar-wide">화면 </span>초기화
         </button>
         <button className="toolbar-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
           {theme === "light" ? "어두운 화면" : "밝은 화면"}
         </button>
-        <Reload />
       </div>
     </div>
   );
@@ -82,6 +87,7 @@ export function App() {
 
   // 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
   // 정보 패널에 연 파일이 있으면 그 파일만 닫는다. 함수 시점 뷰에서는 구조 뷰로 돌아가고, 구조 뷰에서는 선택을 푼다.
+  // 새로고침 단축키는 새로고침 버튼을 누른 것과 같다. 팔레트와 펼친 메뉴, 필터 창, 고정한 선의 말풍선을 닫고 새로고침한다.
   useEffect(
     () =>
       bind({
@@ -101,6 +107,15 @@ export function App() {
           }
         },
         palette: () => useAtlas.getState().setPalette(true),
+        reload: () => {
+          const button = document.querySelector(".reload-button");
+          if (busy() || button === null) {
+            return;
+          }
+          useAtlas.getState().setPalette(false);
+          dismiss(button);
+          void reload();
+        },
       }),
     [],
   );
@@ -115,7 +130,7 @@ export function App() {
         onLayoutChanged={main.onLayoutChanged}
       >
         <Panel id="explorer" defaultSize={260} minSize={160} maxSize="40">
-          <FileTree key={epoch} />
+          <FileTree />
         </Panel>
         <Separator className="separator" />
         <Panel id="workspace" minSize="30">
@@ -123,8 +138,8 @@ export function App() {
             <div className="workspace">
               <Toolbar />
               <div className="stage">
-                {opened ? <GraphView key={epoch} /> : <Progress />}
-                {opened && <InfoPanel />}
+                {opened ? <GraphView /> : <Progress />}
+                {opened && <InfoPanel key={epoch} />}
                 <SummaryNotice />
                 <SummaryQueue />
               </div>

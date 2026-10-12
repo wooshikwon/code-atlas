@@ -1,4 +1,4 @@
-// 키보드 단축키. window의 capture 단계 keydown 하나에서 이력 이동, Esc, 검색 팔레트 열기를 나눠 부른다.
+// 키보드 단축키. window의 capture 단계 keydown 하나에서 이력 이동, Esc, 검색 팔레트 열기, 새로고침을 나눠 부른다.
 
 export interface KeyHandlers {
   /** Alt+←, Mac은 Cmd+[도 */
@@ -8,9 +8,16 @@ export interface KeyHandlers {
   escape(): void;
   /** Mod+P, Mod+K */
   palette(): void;
+  /** Mod+R */
+  reload(): void;
 }
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+
+/** 말풍선에 적는 Mod+key의 이름. Mac은 `⌘R`, 그 밖은 `Ctrl+R` 꼴이다. */
+export function modName(key: string): string {
+  return MAC ? `⌘${key}` : `Ctrl+${key}`;
+}
 
 /** Mod만 누른 채인지. Mod는 Mac에서 Cmd, 그 밖에서 Ctrl이다. */
 function modOnly(event: KeyboardEvent): boolean {
@@ -42,7 +49,18 @@ function escaping(): boolean {
   );
 }
 
-/** 단축키를 등록하고 등록을 푸는 함수를 돌려준다. 이력 이동과 팔레트 열기는 브라우저의 기본 동작(이전 페이지, 인쇄)을 막는다. */
+/**
+ * 펼친 메뉴와 필터 창, 고정한 선의 말풍선은 그 밖을 누르면 닫힌다. 상단 줄의 버튼 button을 누를 때 닫히는 것을 단축키로도 닫도록
+ * 그 버튼에서 누름을 알린다.
+ */
+export function dismiss(button: Element): void {
+  button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+}
+
+/**
+ * 단축키를 등록하고 등록을 푸는 함수를 돌려준다. 이력 이동과 팔레트 열기, 새로고침은 브라우저의 기본 동작(이전 페이지, 인쇄,
+ * 페이지 다시 읽기)을 막는다. Shift를 함께 누른 Mod+Shift+R은 받지 않아 브라우저가 페이지를 다시 읽는다.
+ */
 export function bind(handlers: KeyHandlers): () => void {
   const onKey = (event: KeyboardEvent) => {
     const mod = event.metaKey || event.ctrlKey;
@@ -50,6 +68,10 @@ export function bind(handlers: KeyHandlers): () => void {
     if (modOnly(event) && (key.toLowerCase() === "p" || key.toLowerCase() === "k")) {
       event.preventDefault();
       handlers.palette();
+    } else if (modOnly(event) && key.toLowerCase() === "r") {
+      // 글자 입력 칸과 코드 뷰어에서도 받는다. Mod+R은 글자 입력이나 Monaco의 키와 겹치지 않는다.
+      event.preventDefault();
+      handlers.reload();
     } else if (event.altKey && !mod && !event.shiftKey && (key === "ArrowLeft" || key === "ArrowRight")) {
       if (typing()) {
         return;

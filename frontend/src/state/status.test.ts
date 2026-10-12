@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getGraph, getRepo, getStatus, getTree } from "../api/client";
+import { getGraph, getRepo, getStatus, getTree, getUnused } from "../api/client";
 import type { Status } from "../api/types";
 import { phaseText, progressOf, running, staleLines, useStatus } from "./status";
 
-const atlas = vi.hoisted(() => ({ repo: null as object | null, load: vi.fn(), reopen: vi.fn() }));
-const overlay = vi.hoisted(() => ({ load: vi.fn() }));
+const atlas = vi.hoisted(() => ({ repo: null as object | null, load: vi.fn(), refresh: vi.fn() }));
+const overlay = vi.hoisted(() => ({ load: vi.fn(), mark: vi.fn() }));
 const changes = vi.hoisted(() => ({ load: vi.fn() }));
 
-vi.mock("../api/client", () => ({ getStatus: vi.fn(), getRepo: vi.fn(), getGraph: vi.fn(), getTree: vi.fn(), forgetFiles: vi.fn() }));
-vi.mock("../panel/opened", () => ({ useOpened: { getState: () => ({ close: vi.fn() }) } }));
+vi.mock("../api/client", () => ({ getStatus: vi.fn(), getRepo: vi.fn(), getGraph: vi.fn(), getTree: vi.fn(), getUnused: vi.fn(), forgetFiles: vi.fn() }));
 vi.mock("./changes", () => ({ useChanges: { getState: () => changes } }));
 vi.mock("./explanations", () => ({ useExplanations: { getState: () => ({ forget: vi.fn(), list: vi.fn() }) } }));
 vi.mock("./overlay", () => ({ useOverlay: { getState: () => overlay } }));
@@ -44,6 +43,7 @@ beforeEach(() => {
   vi.mocked(getRepo).mockResolvedValue({ name: "repo" } as never);
   vi.mocked(getGraph).mockResolvedValue({ nodes: [], edges: [] } as never);
   vi.mocked(getTree).mockResolvedValue({ entries: [] } as never);
+  vi.mocked(getUnused).mockResolvedValue({ candidates: [], definitions: 0 } as never);
 });
 
 describe("load", () => {
@@ -58,24 +58,25 @@ describe("load", () => {
     await store().load();
     expect(atlas.load).toHaveBeenCalledTimes(1);
     expect(overlay.load).toHaveBeenCalledTimes(1);
-    expect(atlas.reopen).not.toHaveBeenCalled();
+    expect(atlas.refresh).not.toHaveBeenCalled();
     expect(store().shown).toBe(1);
   });
 
-  it("판 번호가 그린 판과 달라지면 분석 결과를 다시 받아 화면을 처음 연 상태로 되돌린다", async () => {
+  it("판 번호가 그린 판과 달라지면 분석 결과와 미사용 후보를 다시 받아 보던 화면에 담는다", async () => {
     received.mockResolvedValue(status({ draft: true }));
     await store().load();
     received.mockResolvedValue(status({ phase: "resolve", done: 1, total: 4, draft: true }));
     await store().load();
-    expect(atlas.reopen).not.toHaveBeenCalled();
+    expect(atlas.refresh).not.toHaveBeenCalled();
 
     received.mockResolvedValue(status({ revision: 2 }));
     await store().load();
     await store().load();
     expect(atlas.load).toHaveBeenCalledTimes(1);
-    expect(atlas.reopen).toHaveBeenCalledTimes(1);
-    expect(atlas.reopen).toHaveBeenCalledWith({ name: "repo" }, { nodes: [], edges: [] }, { entries: [] });
-    expect(overlay.load).toHaveBeenCalledTimes(2);
+    expect(atlas.refresh).toHaveBeenCalledTimes(1);
+    expect(atlas.refresh).toHaveBeenCalledWith({ name: "repo" }, { nodes: [], edges: [] }, { entries: [] });
+    expect(overlay.load).toHaveBeenCalledTimes(1);
+    expect(overlay.mark).toHaveBeenCalledWith({ candidates: [], definitions: 0 });
     expect(changes.load).toHaveBeenCalledTimes(1);
     expect(store().shown).toBe(2);
   });
@@ -109,7 +110,7 @@ describe("load", () => {
     await store().load();
     expect(store().shown).toBe(1);
     await store().load();
-    expect(atlas.reopen).toHaveBeenCalledTimes(1);
+    expect(atlas.refresh).toHaveBeenCalledTimes(1);
     expect(store().shown).toBe(2);
   });
 
