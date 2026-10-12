@@ -125,6 +125,19 @@ export interface SummaryStatus {
 
 export interface MadeSummary {
   summary: string;
+  /** 요약을 만든 `claude` 호출의 사용량. 캐시에서 읽은 요약과 CLI가 사용량을 적지 않은 요약은 null이다. */
+  usage: Usage | null;
+}
+
+/** `claude` 호출 한 번이 쓴 토큰 수 */
+export interface Usage {
+  /** 캐시에서 읽지도 캐시에 넣지도 않은 입력 */
+  input: number;
+  /** 캐시에 새로 넣은 입력 */
+  cache_write: number;
+  /** 캐시에서 읽은 입력 */
+  cache_read: number;
+  output: number;
 }
 
 /** 요약이 있는 노드와 그 요약의 요지 */

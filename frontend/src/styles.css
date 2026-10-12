@@ -1651,12 +1651,37 @@ ul {
   width: 96px;
 }
 
+.summary-queue [role="status"] {
+  display: flex;
+  gap: 10px;
+}
+
+/* 만들지 못한 수. critical에 본문 잉크를 섞어 칸 바탕 위에서 대비 4.5:1을 넘긴다. */
+.summary-queue-failed {
+  color: color-mix(in srgb, var(--ink) 25%, var(--critical));
+}
+
+/* 묶음이 쓴 토큰 수. 칸의 오른쪽 끝에 한 단계 작은 muted 글자로 적고, 칸이 바닥 줄의 구간에 들어가지 않으면 감춘다. */
+.summary-queue-usage {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.summary-queue[data-lean] .summary-queue-usage {
+  display: none;
+}
+
 .summary-queue-cancel {
   flex: none;
-  margin-right: -8px;
   padding: 2px 10px;
   border: 1px solid var(--line);
   border-radius: 11px;
+}
+
+/* 칸의 오른쪽 끝에 있는 버튼은 칸의 둥근 끝에 붙인다. */
+.summary-queue-cancel:last-child {
+  margin-right: -8px;
 }
 
 .summary-queue-cancel:hover {
@@ -2236,6 +2261,16 @@ button.line-cell:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* 요약을 만든 호출이 쓴 토큰 수. 머리 줄의 오른쪽 끝, "다시 생성" 앞에 적는다. */
+.summary-usage {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .info-panel-summary[data-folded] {
