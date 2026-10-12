@@ -1,9 +1,6 @@
 /* 색은 theme.ts가 내보내는 변수만 쓴다. 칸 바탕·경계선·강조는 잉크를 바탕에 섞어 만든다. */
 :root {
   --line: color-mix(in srgb, var(--muted) 35%, transparent);
-  /* 펼친 폴더 영역의 테두리. 파일 상자의 테두리(muted 100%)와 평소의 선(muted 50%)보다 뒤로 물러나게, 선의 진하기 단계
-     (100%·50%·20%, graph/scope.ts의 EDGE_OPACITY) 가운데 가장 연한 20%로 그린다. 미니맵의 폴더 영역도 이 값을 쓴다. */
-  --region-line: color-mix(in srgb, var(--muted) 20%, transparent);
   --hover-bg: color-mix(in srgb, var(--ink) 6%, transparent);
   --active-bg: color-mix(in srgb, var(--ink) 12%, transparent);
   --panel-bg: color-mix(in srgb, var(--ink) 3%, var(--surface));
@@ -873,9 +870,8 @@ ul {
 }
 
 .node-body.node-region {
-  border: 1px solid var(--region-line);
-  /* 바탕색에 섞어 불투명하게 칠한다. 폴더가 몇 겹으로 펼쳐져도 바탕이 겹쳐 진해지지 않아 파일 상자의 바탕(잉크 4%)보다 늘 연하다. */
-  background: color-mix(in srgb, var(--ink) 2%, var(--surface));
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ink) 2%, transparent);
 }
 
 .node-face.node-region {
@@ -1567,7 +1563,7 @@ ul {
 
 .react-flow__minimap-node.minimap-package.minimap-open {
   fill: color-mix(in srgb, var(--ink) 3%, var(--surface));
-  stroke: var(--region-line);
+  stroke: var(--line);
 }
 
 .react-flow__minimap-node.minimap-open.minimap-selected {
