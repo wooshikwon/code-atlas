@@ -1,14 +1,14 @@
 // 그래프 왼쪽 아래의 미니맵. 전체 그래프의 축소 그림 위에 지금 화면에 보이는 영역을 사각형으로 그리고,
 // 누르거나 끌면 확대 비율을 그대로 둔 채 그 위치로 화면을 옮기고 전체 맞춤 상태를 끈다. 범례처럼 둥근 버튼으로 접고 편다.
 // 경로 고정 중에는 강조하는 경로를 그 위에 그린다.
-import { MiniMap, useReactFlow, useStore, type Node, type XYPosition } from "@xyflow/react";
+import { MiniMap, useStore, type Node, type XYPosition } from "@xyflow/react";
 import { useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAtlas } from "../state/store";
-import { reducedMotion } from "./motion";
+import { useFlight } from "./flight";
 import type { AtlasNodeData } from "./nodes/common";
 import { isPack, type PackFlowNode } from "./nodes/PackNode";
-import { PAN_MS, stageOf } from "./viewport";
+import { stageOf } from "./viewport";
 
 const SIZE = { width: 220, height: 140 };
 
@@ -65,16 +65,19 @@ function MinimapRoute({ path }: { path: string[] }) {
 export function Minimap() {
   const open = useAtlas((s) => s.minimapOpen);
   const path = useAtlas((s) => s.finder.route?.paths[s.finder.pick]);
-  const { getViewport, setViewport } = useReactFlow();
-  // 미니맵을 누르거나 끌면 화면이 옮겨지므로 전체 맞춤 상태를 끈다. React Flow의 MiniMap은 pointerdown 처리기를 받지 않는다.
+  const { fly, halt, heading } = useFlight();
+  // 미니맵을 누르거나 끌면 화면이 옮겨지므로 그리는 중인 화면 이동을 멈추고 전체 맞춤 상태를 끈다. React Flow의 MiniMap은 pointerdown 처리기를 받지 않는다.
   // MiniMap은 ariaLabel을 SVG의 `<title>`로 그려 브라우저 기본 말풍선이 뜨므로, 비워 두고 접근성 이름을 `aria-label`로 준다.
   useEffect(() => {
     const element = open ? document.querySelector(".graph-minimap") : null;
-    const release = () => useAtlas.setState({ fitted: false });
+    const release = () => {
+      halt();
+      useAtlas.setState({ fitted: false });
+    };
     element?.querySelector("svg")?.setAttribute("aria-label", "미니맵");
     element?.addEventListener("pointerdown", release);
     return () => element?.removeEventListener("pointerdown", release);
-  }, [open]);
+  }, [open, halt]);
   if (!open) {
     return null;
   }
@@ -85,11 +88,8 @@ export function Minimap() {
       return;
     }
     const { clear } = stageOf(root);
-    const zoom = getViewport().zoom;
-    void setViewport(
-      { x: clear.x + clear.width / 2 - at.x * zoom, y: clear.y + clear.height / 2 - at.y * zoom, zoom },
-      { duration: reducedMotion() ? 0 : PAN_MS },
-    );
+    const zoom = heading().zoom;
+    fly({ x: clear.x + clear.width / 2 - at.x * zoom, y: clear.y + clear.height / 2 - at.y * zoom, zoom }, clear);
   };
   return (
     <>

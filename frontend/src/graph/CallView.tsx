@@ -2,9 +2,9 @@
 import {
   getViewportForBounds,
   ReactFlow,
-  useReactFlow,
   type NodeMouseHandler,
   type NodeTypes,
+  type OnMoveStart,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
@@ -17,6 +17,7 @@ import { useAim } from "./aim";
 import { Arranging, watchLayout } from "./arranging";
 import { callEdges, callElk, callLabel, callLane, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
 import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
+import { useFlight, useFlying } from "./flight";
 import { fromElk, measureText, runElk, type Box, type Layout } from "./layout";
 import { Dock } from "./Dock";
 import { play, reducedMotion, settled, tween } from "./motion";
@@ -27,7 +28,7 @@ import { nodeTip, tipOf } from "./tips";
 import { NO_LINES } from "./view";
 import { tooltip } from "./Tooltip";
 import type { EdgeKey } from "./scope";
-import { boundsOf, fitPadding, FRAME_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
+import { boundsOf, fitPadding, FRAME_ZOOM, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, nodeIndex } from "./visible";
 
 const nodeTypes: NodeTypes = { call: CallNode };
@@ -86,7 +87,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const making = useSummaries(makingKey);
   const overlay = useOverlay((s) => s.kind);
   const candidates = useOverlay((s) => s.unused);
-  const { setViewport } = useReactFlow();
+  const { fly, jump, halt } = useFlight();
+  const flying = useFlying((s) => s.on);
   const selected = selection?.type === "node" ? selection.id : null;
 
   const [scene, setScene] = useState<Scene | null>(null);
@@ -139,10 +141,12 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       framed.current = scene.center;
       const stage = stageOf(root.current);
       const { width, height } = stage.area;
-      void setViewport(
-        getViewportForBounds(boundsOf(to.boxes.values()), width, height, ZOOM_MIN, FRAME_ZOOM, fitPadding(stage.area, stage.free)),
-        { duration: from === null || still ? 0 : PAN_MS },
-      );
+      const view = getViewportForBounds(boundsOf(to.boxes.values()), width, height, ZOOM_MIN, FRAME_ZOOM, fitPadding(stage.area, stage.free));
+      if (from === null) {
+        jump(view);
+      } else {
+        fly(view, stage.free);
+      }
     }
 
     if (from === null || still || settled(from, to)) {
@@ -159,7 +163,8 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       (at) => draw(at, null),
       () => setMoving(false),
     );
-  }, [scene, index, selected, making, unused, setViewport]);
+  }, [scene, index, selected, making, unused, fly, jump]);
+  useEffect(() => halt, [halt]);
 
   const lines = useMemo(() => (scene === null ? NO_LINES : callEdges(scene.calls, scene.center, scene.layout)), [scene]);
   const nameOf = (id: string) => {
@@ -241,6 +246,12 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     setAimedNode(null);
     tooltip.hide();
   };
+  /** 사용자가 화면을 끌거나 확대·축소하기 시작하면 그리는 중인 화면 이동을 멈춘다. 코드가 옮긴 화면은 event가 null이다. */
+  const grabbed: OnMoveStart = (event) => {
+    if (event !== null) {
+      halt();
+    }
+  };
   if (scene === null) {
     return (
       <div className="graph">
@@ -250,7 +261,13 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   }
 
   return (
-    <div className="graph" ref={root} data-moving={moving ? "" : undefined} data-overlay={overlay ?? undefined}>
+    <div
+      className="graph"
+      ref={root}
+      data-moving={moving ? "" : undefined}
+      data-flying={flying ? "" : undefined}
+      data-overlay={overlay ?? undefined}
+    >
       <Markers />
       <ReactFlow
         nodes={drawnNodes}
@@ -266,6 +283,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
         onEdgeMouseMove={aim.onEdgeMove}
         onEdgeMouseLeave={aim.onEdgeLeave}
         onPaneClick={onPaneClick}
+        onMoveStart={grabbed}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
