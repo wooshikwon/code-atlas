@@ -7,7 +7,8 @@
 // lanes 시나리오는 폴더가 여러 겹인 레포(modern-deeplearning-pipeline)를 연 서버의 주소를 --wide-url로 받으면 그 화면도 본다.
 // 시점 비교 시나리오(compare-*)는 `python -m tests.history <임시 폴더>`로 만든 이력 고정 레포를 연 서버의 주소를 --compare-url로 받았을 때만 돌고,
 // changes 시나리오는 그 주소를 받으면 그 레포의 변경 표시도 본다.
-// 레포 열기 시나리오(open-*)는 레포 없이 띄운 서버(`code-atlas --no-open --port …`, 설정 파일은 임시 폴더)의 주소를 --open-url로 받았을 때만 돈다.
+// 레포 열기 시나리오(open-*)와 환경 점검 시나리오(tools-*)는 레포 없이 띄운 서버(`code-atlas --no-open --port …`, 설정 파일은 임시 폴더)의 주소를 --open-url로 받았을 때만 돈다.
+// 환경 점검 시나리오는 도구를 찾은 결과를 고정 응답으로 답하므로 `claude`를 실행하지 않는다.
 // 그 서버가 보는 홈 폴더 아래에 고정 폴더를 만들어 열고 닫으며, 끝나면 폴더를 지우고 서버의 레포를 닫고 연 레포 목록을 비운다.
 // 고정 폴더의 가상환경은 PATH의 python3으로 만든다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
@@ -13612,8 +13613,8 @@ async function openWelcome(t, page) {
   const status = await api("/api/status", openUrl);
   t.check("연 레포가 없으면 칸 묶음 대신 레포 열기 화면을 그린다", status.phase === "idle" && seen.panels === 0 && seen.title === "레포 열기", `phase ${status.phase}, 칸 ${seen.panels}개`);
   t.check(
-    "브라우저는 포커스가 든 경로 입력 칸과 열기 버튼을 그리고, 경로가 비어 있으면 열기를 누를 수 없다",
-    seen.input === "레포 폴더의 경로" && seen.focused && same(seen.buttons, [{ text: "열기", disabled: true }]),
+    "브라우저는 포커스가 든 경로 입력 칸과 열기 버튼, 환경 점검 버튼을 그리고, 경로가 비어 있으면 열기를 누를 수 없다",
+    seen.input === "레포 폴더의 경로" && seen.focused && same(seen.buttons, [{ text: "열기", disabled: true }, { text: "환경 점검", disabled: false }]),
     JSON.stringify(seen.buttons),
   );
   t.check("연 적이 있는 레포가 없으면 목록을 그리지 않는다", seen.recent === 0);
@@ -13702,6 +13703,8 @@ async function openPython(t, page) {
   await welcome(page);
   await typePath(page, dirs.bare);
   await page.waitForSelector(".ask");
+  // 화면은 이 기기의 인터프리터를 찾는 동안 먼저 뜬다. 찾기가 끝날 때까지 기다린다.
+  await page.waitForFunction(() => document.querySelector('.ask [role="status"]') === null);
   const asked = await askOf(page);
   const candidates = await page.evaluate(() => [...document.querySelectorAll(".ask-option")].map((option) => option.dataset.python));
   t.check(
@@ -13810,8 +13813,8 @@ async function openSwitch(t, page) {
   const tip = await page.textContent(".tooltip");
   const items = await repoMenu(page);
   t.check(
-    "화살표를 누르면 최근에 연 다른 레포와 폴더 열기…, 레포 닫기가 든 메뉴가 내려온다",
-    tip === "다른 레포 열기" && same(items, [{ text: "loop", disabled: false }, { text: "폴더 열기…", disabled: false }, { text: "레포 닫기", disabled: false }]),
+    "화살표를 누르면 최근에 연 다른 레포와 폴더 열기…, 환경 점검, 레포 닫기가 든 메뉴가 내려온다",
+    tip === "다른 레포 열기" && same(items, [{ text: "loop", disabled: false }, { text: "폴더 열기…", disabled: false }, { text: "환경 점검", disabled: false }, { text: "레포 닫기", disabled: false }]),
     `말풍선 "${tip}", ${items.map((item) => item.text).join(", ")}`,
   );
   await t.shot();
@@ -13841,6 +13844,566 @@ async function openSwitch(t, page) {
   );
   const kept = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, settings: localStorage.getItem("code-atlas:ui:v3") }));
   t.check("레포를 바꿔도 화면 설정이 그대로다", kept.theme === "dark" && kept.settings === settings, `화면 색 ${kept.theme}`);
+}
+
+// ── 환경 점검 ────────────────────────────────────────────────────
+// 레포 없이 띄운 서버(--open-url)에서 돈다. 도구를 찾은 결과(/api/tools와 그 아래 경로, /api/about, /api/interpreters)는 서버로 보내지 않고
+// 도구 계약의 모양대로 지은 고정 응답으로 답하므로 `claude`를 실행하지 않는다. 레포를 열고 닫는 요청은 서버가 받는다.
+// 사진은 `s6-tools-*.png`로 남긴다.
+
+const TOOLS_SHOT = (name) => join(OUT, `s6-tools-${name}.png`);
+/** 화면이 적는 설치 명령과 로그인 명령 */
+const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
+const CLAUDE_LOGIN = "claude auth login";
+/** 고정 응답에 적는 경로 */
+const FIXED_CLAUDE = "/Users/me/.nvm/versions/node/v22.17.0/bin/claude";
+const CLAUDE_PLACES = ["/Users/me/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/Users/me/.volta/bin/claude", "/Users/me/.asdf/shims/claude"];
+
+const tried = (source, path, ok, detail) => ({ source, path, ok, detail });
+const toolFound = (tool, fields = {}) => ({ tool, path: null, version: null, source: null, attempts: [], note: null, auth: null, prefix: null, venv: null, ...fields });
+/** 알려진 위치 다섯 곳에 없고 nvm의 Node 폴더에서 찾은 `claude` */
+const claudeFound = (fields = {}) =>
+  toolFound("claude", {
+    path: FIXED_CLAUDE,
+    version: "2.1.288",
+    source: "known",
+    auth: "claude.ai",
+    attempts: [...CLAUDE_PLACES.map((path) => tried("known", path, false, "없는 파일")), tried("known", FIXED_CLAUDE, true, "2.1.288")],
+    ...fields,
+  });
+const gitFound = () => toolFound("git", { path: "/usr/bin/git", version: "2.50.1", source: "env", attempts: [tried("env", "/usr/bin/git", true, "2.50.1")] });
+
+/** 고정 응답의 처음 값. calls는 화면이 보낸 요청(`POST /check`)이고 runnable은 직접 골랐을 때 확인을 통과하는 경로다. */
+const toolsState = () => ({
+  tools: { shell: { shell: "/bin/zsh", ok: true, detail: "", seconds: 1.43 }, claude: claudeFound(), git: gitFound(), python: null },
+  about: { commit: "54fe2cf0a1b2c3d4e5f60718293a4b5c6d7e8f90", built: "2026-10-12", python: "3.13.16", basedpyright: "1.40.2" },
+  answer: { ok: true, seconds: 2.31, detail: "" },
+  interpreters: [],
+  runnable: new Set(),
+  calls: [],
+});
+
+/** 환경 점검의 요청에 서버 대신 state의 값으로 답한다. 직접 고른 경로는 runnable에 있으면 저장한 경로로 찾은 결과를, 없으면 400을 낸다. */
+async function answerTools(page, state) {
+  await page.route(
+    (at) => at.pathname === "/api/about",
+    (route) => (state.about === null ? route.fulfill({ status: 404, json: { error: "Not Found" } }) : route.fulfill({ json: state.about })),
+  );
+  await page.route((at) => at.pathname === "/api/interpreters", (route) => route.fulfill({ json: { found: state.interpreters } }));
+  await page.route(
+    (at) => at.pathname.startsWith("/api/tools"),
+    (route) => {
+      const request = route.request();
+      const [method, name] = [request.method(), new URL(request.url()).pathname.slice("/api/tools".length)];
+      state.calls.push(`${method} ${name}`.trim());
+      if (name === "" || name === "/check") {
+        return route.fulfill({ json: state.tools });
+      }
+      if (name === "/claude/ask") {
+        return route.fulfill({ json: state.answer });
+      }
+      const tool = name.slice(1);
+      if (method === "PUT") {
+        const { path } = request.postDataJSON();
+        if (!state.runnable.has(path)) {
+          const attempt = tried("saved", path, false, "실행 권한 없음");
+          return route.fulfill({ status: 400, json: { error: `실행하지 못했다: ${path} (${attempt.detail})`, attempt } });
+        }
+        state.tools[tool] = toolFound(tool, { path, version: "9.9.9", source: "saved", attempts: [tried("saved", path, true, "9.9.9")], auth: tool === "claude" ? "claude.ai" : null });
+      } else {
+        state.tools[tool] = tool === "claude" ? claudeFound() : gitFound();
+      }
+      return route.fulfill({ json: state.tools[tool] });
+    },
+  );
+}
+
+/** 환경 점검 화면의 행. 이름, 상태, 판과 출처, 경로, 까닭과 안내, 명령, 버튼, 펴진 시도 목록이다. */
+const toolRows = (page) =>
+  page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll(".tools-row")].map((row) => {
+        const text = (selector) => row.querySelector(selector)?.textContent.trim() ?? null;
+        const texts = (selector) => [...row.querySelectorAll(selector)].map((element) => element.textContent.trim());
+        return [
+          row.dataset.tool,
+          {
+            ok: row.hasAttribute("data-ok"),
+            name: text(".tools-name"),
+            state: text(".tools-state"),
+            facts: text(".tools-facts"),
+            path: text(":scope > .tools-path"),
+            notes: texts(".tools-trouble, .tools-note, .tools-prefix, .ask-error, [data-answer]"),
+            commands: texts(".tools-command code"),
+            buttons: texts("button.summary-action"),
+            attempts: [...row.querySelectorAll(".ask-attempt")].map((line) => [...line.children].map((cell) => cell.textContent.trim())),
+          },
+        ];
+      }),
+    ),
+  );
+
+/** 환경 점검 화면이 값을 받아 네 행을 그릴 때까지 기다린다. */
+async function waitTools(page) {
+  await page.waitForSelector(".tools-row");
+  await page.waitForFunction(() => document.querySelector(".tools-rows")?.getAttribute("aria-busy") === "false");
+}
+
+/** 환경 점검 화면을 Esc로 닫는다. */
+async function closeTools(page) {
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".tools-row", { state: "detached" });
+}
+
+/** 고정 폴더 dir을 열고 그 레포의 인터프리터를 찾은 고정 응답을 state에 넣는다. */
+async function openWithTools(page, state, dir) {
+  await welcome(page);
+  await typePath(page, dir);
+  await waitRepo(page, dir);
+  const python = (await api("/api/repo", openUrl)).python;
+  const version = execFileSync(python, ["-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"], { encoding: "utf8" }).trim();
+  state.tools.python = toolFound("python", { path: python, version, source: "env", prefix: join(dir, ".venv"), venv: true, attempts: [tried("env", python, true, version)] });
+  return { python, version };
+}
+
+const FORBIDDEN = /서버|백엔드|sidecar/i;
+
+async function toolsList(t, page) {
+  const dirs = await openFixtures();
+  const state = toolsState();
+  await answerTools(page, state);
+  await welcome(page);
+  await page.click(".welcome-tools");
+  await waitTools(page);
+  const first = await toolRows(page);
+  const head = await page.evaluate(() => ({ title: document.querySelector(".ask-title").textContent.trim(), about: document.querySelector(".tools-about")?.textContent.trim() ?? null, text: document.querySelector(".ask").innerText }));
+  t.check(
+    "레포 열기 화면의 환경 점검을 누르면 맨 위에 앱의 판을 적은 환경 점검 화면이 뜬다",
+    head.title === "환경 점검" && head.about === "Atlas 54fe2cf · 2026-10-12 빌드 · Atlas가 쓰는 Python 3.13.16 · basedpyright 1.40.2",
+    head.about,
+  );
+  t.check(
+    "로그인 셸, Claude Code, git, 레포의 Python 네 행을 이 순서로 그린다",
+    same(Object.keys(first), ["shell", "claude", "git", "python"]) && same(Object.values(first).map((row) => row.name), ["로그인 셸", "Claude Code", "git", "레포의 Python"]),
+    Object.values(first).map((row) => row.name).join(", "),
+  );
+  t.check(
+    "로그인 셸 행은 셸의 경로와 환경을 읽는 데 걸린 초를 적는다",
+    first.shell.state === "읽음" && first.shell.facts === "zsh" && first.shell.path === "/bin/zsh" && same(first.shell.notes, ["환경을 1.43초에 읽었다"]) && first.shell.buttons.length === 0,
+    JSON.stringify(first.shell),
+  );
+  t.check(
+    "Claude Code 행은 상태, 판, 찾은 출처, 로그인 방법, 경로를 적는다",
+    first.claude.ok && first.claude.state === "찾음" && first.claude.facts === "2.1.288 · 알려진 위치 · 로그인됨(claude.ai)" && first.claude.path === FIXED_CLAUDE,
+    `${first.claude.state} / ${first.claude.facts} / ${first.claude.path}`,
+  );
+  t.check(
+    "git 행은 상태, 판, 찾은 출처, 경로를 적고 연 레포가 없으면 Python 행은 그 사실만 적는다",
+    first.git.state === "찾음" && first.git.facts === "2.50.1 · 환경" && first.git.path === "/usr/bin/git" && first.python.state === "연 레포가 없다" && first.python.buttons.length === 0,
+    `${first.git.facts} / ${first.python.state}`,
+  );
+  t.check(
+    "찾은 도구의 시도 목록은 접혀 있고 행마다 다시 확인과 직접 고르기가 있다",
+    first.claude.attempts.length === 0 && first.git.attempts.length === 0 && same(first.claude.buttons, ["응답 확인", "다시 확인", "직접 고르기"]) && same(first.git.buttons, ["다시 확인", "직접 고르기"]),
+    `${first.claude.buttons.join(", ")} / ${first.git.buttons.join(", ")}`,
+  );
+  await page.click('.tools-row[data-tool="claude"] .info-section-head');
+  const unfolded = (await toolRows(page)).claude.attempts;
+  t.check(
+    "행 머리를 누르면 시도한 후보마다 출처, 경로, 결과를 적은 목록이 펴진다",
+    unfolded.length === 6 && same(unfolded[0], ["알려진 위치", CLAUDE_PLACES[0], "없는 파일"]) && same(unfolded[5], ["알려진 위치", FIXED_CLAUDE, "통과 · 2.1.288"]),
+    unfolded.map((line) => line.join(" | ")).join(" / "),
+  );
+  t.check("화면 문구에 서버, 백엔드, sidecar라는 말이 없다", !FORBIDDEN.test(head.text), head.text.replace(/\s+/g, " "));
+  t.check("화면을 띄울 때는 찾아 둔 값만 읽고 다시 찾기와 응답 확인을 보내지 않는다", same(state.calls, ["GET"]), state.calls.join(", "));
+  await page.screenshot({ path: TOOLS_SHOT("welcome") });
+  await closeTools(page);
+  t.check("Esc가 환경 점검 화면만 닫고 레포 열기 화면이 남는다", (await count(page, ".welcome")) === 1 && (await count(page, ".ask")) === 0);
+
+  const { python, version } = await openWithTools(page, state, dirs.shop);
+  const items = (await repoMenu(page)).map((item) => item.text);
+  t.check("레포 메뉴의 폴더 열기…와 레포 닫기 사이에 환경 점검이 있다", same(items.slice(-3), ["폴더 열기…", "환경 점검", "레포 닫기"]), items.join(", "));
+  await page.click('#trail-repo [data-key="tools"]');
+  await waitTools(page);
+  const opened = await toolRows(page);
+  t.check(
+    "레포를 연 화면에서는 Python 행이 그 레포의 인터프리터의 판, 출처, 가상환경인지, 경로, sys.prefix를 적는다",
+    opened.python.name === "shop의 Python" &&
+      opened.python.state === "찾음" &&
+      opened.python.facts === `${version} · 환경 · 가상환경` &&
+      opened.python.path === python &&
+      same(opened.python.notes, [`sys.prefix${join(dirs.shop, ".venv")}`]) &&
+      same(opened.python.buttons, ["바꾸기", "다시 확인"]),
+    `${opened.python.name} / ${opened.python.facts} / ${opened.python.buttons.join(", ")}`,
+  );
+  const asked = state.calls.filter((call) => call === "POST /claude/ask").length;
+  await page.hover('.tools-row[data-tool="claude"] button >> text=응답 확인');
+  await page.waitForSelector(".tooltip");
+  const askTip = await page.textContent(".tooltip");
+  await page.click('.tools-row[data-tool="claude"] button >> text=응답 확인');
+  await page.waitForSelector('.tools-row[data-tool="claude"] [data-answer]');
+  const answered = (await toolRows(page)).claude.notes;
+  t.check(
+    "응답 확인은 누를 때만 요청 하나를 보내고 걸린 초를 적는다",
+    asked === 0 && state.calls.filter((call) => call === "POST /claude/ask").length === 1 && same(answered, ["claude -p가 2.31초에 답했다"]) && askTip === "claude -p에 한 낱말을 답하게 하는 요청 하나를 보낸다",
+    `${answered.join(" / ")}, 말풍선 "${askTip}"`,
+  );
+  await page.mouse.move(1, 1);
+  await page.click('.tools-row[data-tool="claude"] .info-section-head');
+  await t.shot();
+  await page.screenshot({ path: TOOLS_SHOT("found") });
+  state.tools.git = toolFound("git", { path: "/opt/homebrew/bin/git", version: "2.51.0", source: "env", attempts: [tried("env", "/opt/homebrew/bin/git", true, "2.51.0")] });
+  await page.click('.tools-row[data-tool="git"] button >> text=다시 확인');
+  await page.waitForFunction(() => document.querySelector('.tools-row[data-tool="git"] .tools-path')?.textContent === "/opt/homebrew/bin/git");
+  const rechecked = await toolRows(page);
+  t.check(
+    "다시 확인을 누르면 다시 찾게 하고 받은 값으로 행을 바꾸며 응답 확인의 결과를 지운다",
+    state.calls.filter((call) => call === "POST /check").length === 1 && rechecked.git.facts === "2.51.0 · 환경" && rechecked.claude.notes.length === 0,
+    `${rechecked.git.facts}, 요청 ${state.calls.join(", ")}`,
+  );
+  const before = (await boxes(page)).map((box) => box.id).sort();
+  await closeTools(page);
+  t.check("Esc가 환경 점검 화면만 닫고 연 레포의 화면은 그대로다", same((await boxes(page)).map((box) => box.id).sort(), before) && (await count(page, ".ask")) === 0);
+
+  // 필터 창의 인터프리터 행과 인터프리터를 고르는 화면
+  await page.click(".filter-button");
+  await page.waitForFunction(() => document.querySelector(".filter-python button")?.disabled === false);
+  const row = await page.evaluate(() => ({
+    text: `${document.querySelector(".filter-python-name").textContent.trim()} · ${document.querySelector(".filter-python-path").textContent.trim()}`,
+    button: document.querySelector(".filter-python button").textContent.trim(),
+    note: document.querySelector(".filter-note")?.textContent ?? null,
+  }));
+  t.check(
+    "필터 창의 레포 정보가 인터프리터의 판과 레포 루트 기준 경로를 적고 바꾸기 버튼을 둔다",
+    row.text === `인터프리터 Python ${version} · .venv/bin/python` && row.button === "바꾸기" && row.note === null,
+    `${row.text} [${row.button}]`,
+  );
+  await page.screenshot({ path: TOOLS_SHOT("filter") });
+  // 이 기기의 인터프리터를 찾는 요청을 붙잡아 두어 기다리는 동안의 화면을 본다.
+  const candidate = join(dirs.loop, ".venv", "bin", "python");
+  const waiting = [];
+  await page.route((at) => at.pathname === "/api/interpreters", (route) => void waiting.push(route));
+  await page.click(".filter-python button");
+  await page.waitForSelector(".ask");
+  const seeking = await page.evaluate(() => ({
+    title: document.querySelector(".ask-title").textContent.trim(),
+    status: document.querySelector('.ask [role="status"]')?.textContent.trim() ?? null,
+    options: document.querySelectorAll(".ask-option").length,
+    filter: document.querySelectorAll(".filter-panel").length,
+    input: document.querySelector(".ask .open-input")?.disabled ?? null,
+  }));
+  t.check(
+    "바꾸기를 누르면 필터 창이 닫히고 지금 쓰는 인터프리터를 적은 고르는 화면이 뜬다",
+    seeking.title === `shop의 Python 인터프리터를 고른다. 지금은 ${python}` && seeking.filter === 0,
+    seeking.title,
+  );
+  t.check(
+    "이 기기의 인터프리터를 찾는 동안 찾는 중을 적고 경로 입력 칸은 쓸 수 있다",
+    seeking.status === "찾는 중" && seeking.options === 0 && seeking.input === false && waiting.length === 1,
+    `상태 "${seeking.status}", 후보 ${seeking.options}개`,
+  );
+  await page.screenshot({ path: TOOLS_SHOT("seeking") });
+  await waiting[0].fulfill({ json: { found: [toolFound("python", { path: candidate, version, prefix: join(dirs.loop, ".venv"), venv: true })] } });
+  await page.waitForSelector(".ask-option");
+  const sought = await page.evaluate(() => ({ status: document.querySelector('.ask [role="status"]')?.textContent ?? null, options: [...document.querySelectorAll(".ask-option")].map((option) => option.dataset.python) }));
+  t.check("찾은 인터프리터를 받으면 찾는 중 대신 목록을 그린다", sought.status === null && same(sought.options, [candidate]), sought.options.join(", "));
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".ask", { state: "detached" });
+  t.check("Esc가 고르는 화면만 닫고 인터프리터는 그대로다", (await api("/api/repo", openUrl)).python === python && (await count(page, ".react-flow__node")) > 0);
+  await page.unroute((at) => at.pathname === "/api/interpreters");
+  state.interpreters = [toolFound("python", { path: candidate, version, prefix: join(dirs.loop, ".venv"), venv: true })];
+  await answerTools(page, state);
+  await page.click(".filter-button");
+  await page.waitForFunction(() => document.querySelector(".filter-python button")?.disabled === false);
+  await page.click(".filter-python button");
+  const session = (await api("/api/status", openUrl)).session;
+  await Promise.all([page.waitForEvent("load", { timeout: 60_000 }), page.click(".ask-option")]);
+  const root = await waitRepo(page, dirs.shop);
+  const now = await api("/api/repo", openUrl);
+  t.check(
+    "목록에서 고른 인터프리터로 같은 레포가 다시 열린다",
+    root === dirs.shop && now.python === candidate && (await api("/api/status", openUrl)).session === session + 1,
+    now.python,
+  );
+}
+
+async function toolsMissing(t, page) {
+  const dirs = await openFixtures();
+  const state = toolsState();
+  state.about = null;
+  t.expected.push("404");
+  /** 요약 칸이 받는 요약을 만들지 못하는 까닭 */
+  let reason = "Claude Code CLI를 찾지 못했다";
+  await answerTools(page, state);
+  await answerSummaryReads(page, () => ({ summary: null, stale: false, available: false, reason }));
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  state.tools.claude = toolFound("claude", { attempts: [...CLAUDE_PLACES, FIXED_CLAUDE].map((path) => tried("known", path, false, "없는 파일")) });
+  await openWithTools(page, state, dirs.shop);
+  // 접힌 폴더를 파일트리에서 펼치고 그 안의 첫 파일을 고른다.
+  await page.click(".tree-row.tree-dir >> nth=-1");
+  await page.click(".tree-row.tree-file[data-node] >> nth=0");
+  await page.waitForSelector(".summary-unavailable");
+
+  /** LLM 요약 칸이 적은 까닭, 명령, 버튼 */
+  const cell = () =>
+    page.evaluate(() => {
+      const box = document.querySelector(".summary-unavailable");
+      const texts = (selector) => [...box.querySelectorAll(selector)].map((element) => element.textContent.trim());
+      return { trouble: texts(".tools-trouble"), commands: texts(".tools-command code"), buttons: texts("button"), text: box.innerText };
+    });
+  /** 요약 칸의 다시 확인으로 값을 다시 받게 하고 까닭이 line으로 바뀔 때까지 기다린다. */
+  const recheck = async (line) => {
+    await page.click(".summary-fixes button >> text=다시 확인");
+    await page.waitForFunction((want) => document.querySelector(".summary-unavailable .tools-trouble")?.textContent === want, line, { timeout: 5_000 }).catch(() => {});
+    return cell();
+  };
+  /** 요약 칸의 환경 점검으로 화면을 띄워 행을 읽는다. */
+  const rows = async () => {
+    await page.click(".summary-fixes button >> text=환경 점검");
+    await waitTools(page);
+    return toolRows(page);
+  };
+
+  await page.waitForFunction(() => document.querySelector(".summary-unavailable .tools-command") !== null);
+  const missing = await cell();
+  t.check(
+    "claude를 찾지 못하면 LLM 요약 칸이 까닭과 설치 명령, 복사 버튼, 환경 점검 버튼을 그린다",
+    same(missing.trouble, ["Claude Code CLI를 찾지 못했다"]) && same(missing.commands, [CLAUDE_INSTALL]) && same(missing.buttons, ["복사", "다시 확인", "환경 점검"]),
+    `${missing.trouble.join(" / ")} · ${missing.commands.join(" / ")} · ${missing.buttons.join(", ")}`,
+  );
+  t.check("요약 칸의 문구에 서버, 백엔드, sidecar라는 말이 없다", !FORBIDDEN.test(missing.text), missing.text.replace(/\s+/g, " "));
+  await page.click(".summary-unavailable .tools-command button");
+  await page.waitForFunction(() => document.querySelector(".summary-unavailable .tools-command button").textContent === "복사함");
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  t.check("복사 버튼이 설치 명령을 클립보드에 넣는다", copied === CLAUDE_INSTALL, copied);
+  await page.screenshot({ path: TOOLS_SHOT("summary-missing") });
+  const lost = (await rows()).claude;
+  t.check(
+    "환경 점검 화면의 Claude Code 행이 같은 까닭과 설치 명령을 적고 시도한 후보 여섯 곳을 펴 둔다",
+    !lost.ok && lost.state === "찾지 못함" && same(lost.notes, ["Claude Code CLI를 찾지 못했다"]) && same(lost.commands, [CLAUDE_INSTALL]) && lost.attempts.length === 6 && lost.attempts.every((line) => line[2] === "없는 파일"),
+    `${lost.state} / ${lost.notes.join(" / ")} / 시도 ${lost.attempts.length}곳`,
+  );
+  t.check("찾지 못한 도구에는 응답 확인을 그리지 않는다", same(lost.buttons, ["다시 확인", "직접 고르기", "복사"]), lost.buttons.join(", "));
+  await t.shot();
+  await page.screenshot({ path: TOOLS_SHOT("claude-missing") });
+  await closeTools(page);
+
+  const brokenLine = "Claude Code CLI를 실행하지 못했다: /opt/homebrew/bin/claude (종료 코드 127: env: node: No such file or directory)";
+  state.tools.claude = toolFound("claude", {
+    attempts: [tried("known", CLAUDE_PLACES[0], false, "없는 파일"), tried("known", CLAUDE_PLACES[1], false, "종료 코드 127: env: node: No such file or directory"), tried("known", CLAUDE_PLACES[2], false, "없는 파일")],
+  });
+  const broken = await recheck(brokenLine);
+  const brokenRow = (await rows()).claude;
+  t.check(
+    "있는 claude가 확인 명령을 통과하지 못하면 요약 칸과 환경 점검 화면이 그 경로와 까닭을 적는다",
+    same(broken.trouble, [brokenLine]) && broken.commands.length === 0 && brokenRow.state === "실행하지 못함" && same(brokenRow.notes, [brokenLine]),
+    `${broken.trouble.join(" / ")} · ${brokenRow.state}`,
+  );
+  await closeTools(page);
+
+  reason = "Claude Code에 로그인돼 있지 않다";
+  state.tools.claude = claudeFound({ note: reason, auth: null });
+  const out = await recheck(reason);
+  const outRow = (await rows()).claude;
+  t.check(
+    "로그인돼 있지 않으면 브라우저는 요약 칸과 환경 점검 화면에 로그인 명령과 복사 버튼을 그리고 로그인 버튼은 그리지 않는다",
+    same(out.trouble, [reason]) && same(out.commands, [CLAUDE_LOGIN]) && same(out.buttons, ["복사", "다시 확인", "환경 점검"]) && outRow.state === "로그인돼 있지 않음" && same(outRow.commands, [CLAUDE_LOGIN]) && !outRow.buttons.includes("로그인"),
+    `${out.trouble.join(" / ")} · ${out.commands.join(" / ")} · ${outRow.state} · ${outRow.buttons.join(", ")}`,
+  );
+  t.check(
+    "로그인돼 있지 않은 claude는 찾은 경로와 판을 그대로 적고 응답 확인을 그리지 않는다",
+    outRow.path === FIXED_CLAUDE && outRow.facts === "2.1.288 · 알려진 위치" && same(outRow.buttons, ["다시 확인", "직접 고르기", "복사"]),
+    `${outRow.facts} / ${outRow.buttons.join(", ")}`,
+  );
+  await page.screenshot({ path: TOOLS_SHOT("logged-out") });
+  await closeTools(page);
+  await page.screenshot({ path: TOOLS_SHOT("summary-logged-out") });
+
+  reason = "Claude Code CLI가 응답하지 않는다";
+  state.tools.claude = claudeFound({ note: reason, auth: null });
+  const silent = await recheck(reason);
+  t.check("그 밖의 까닭은 받은 문장을 명령 없이 적는다", same(silent.trouble, [reason]) && silent.commands.length === 0, silent.trouble.join(" / "));
+
+  reason = "서술 규약 문서를 읽지 못했다: /Users/me/style.md";
+  state.tools.claude = claudeFound();
+  const guide = await recheck(reason);
+  t.check("claude를 쓸 수 있는데 요약을 만들지 못하면 받은 까닭과 두 버튼만 그린다", same(guide.trouble, [reason]) && guide.commands.length === 0 && same(guide.buttons, ["다시 확인", "환경 점검"]), guide.trouble.join(" / "));
+
+  state.answer = { ok: false, seconds: 0.82, detail: "종료 코드 1: Not logged in · Please run /login" };
+  await rows();
+  await page.click('.tools-row[data-tool="claude"] button >> text=응답 확인');
+  await page.waitForSelector('.tools-row[data-tool="claude"] [data-answer="failed"]');
+  const refused = (await toolRows(page)).claude.notes;
+  t.check("응답 확인이 실패하면 claude -p가 답하지 않은 까닭을 적는다", same(refused, ["claude -p가 답하지 않았다: 종료 코드 1: Not logged in · Please run /login"]), refused.join(" / "));
+
+  /** 환경 점검 화면의 다시 확인으로 값을 다시 받게 하고 행을 읽는다. */
+  const again = async (tool, state_) => {
+    await page.click('.tools-row[data-tool="python"] button >> text=다시 확인');
+    await page.waitForFunction(([name, want]) => document.querySelector(`.tools-row[data-tool="${name}"] .tools-state`)?.textContent === want, [tool, state_], { timeout: 5_000 }).catch(() => {});
+    return (await toolRows(page))[tool];
+  };
+  /** 필터 창의 레포 정보가 적은 git을 쓰지 못하는 까닭 */
+  const filterNote = async () => {
+    await closeTools(page);
+    await page.click(".filter-button");
+    await page.waitForSelector(".filter-note", { timeout: 5_000 }).catch(() => {});
+    const note = await page.evaluate(() => document.querySelector(".filter-note")?.textContent ?? null);
+    await page.screenshot({ path: TOOLS_SHOT("filter-git") });
+    await page.click(".filter-button");
+    await page.click(".summary-fixes button >> text=환경 점검");
+    await waitTools(page);
+    return note;
+  };
+
+  const noGit = "git을 찾지 못했다. 변경 표시와 시점 비교를 끈다";
+  state.tools.git = toolFound("git", { attempts: ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"].map((path) => tried("known", path, false, "없는 파일")) });
+  const gitRow = await again("git", "찾지 못함");
+  const gitNote = await filterNote();
+  t.check(
+    "git을 찾지 못하면 환경 점검 화면과 필터 창의 레포 정보가 꺼지는 기능을 적는다",
+    !gitRow.ok && same(gitRow.notes, [noGit]) && gitRow.attempts.length === 3 && gitNote === noGit,
+    `${gitRow.notes.join(" / ")} · 필터 창 "${gitNote}"`,
+  );
+  const noClt = "Xcode Command Line Tools가 없다. 터미널에서 xcode-select --install을 실행한 뒤 다시 확인한다";
+  state.tools.git = toolFound("git", {
+    attempts: [tried("known", "/opt/homebrew/bin/git", false, "없는 파일"), tried("known", "/usr/local/bin/git", false, "없는 파일"), tried("known", "/usr/bin/git", false, "Xcode Command Line Tools가 없다")],
+  });
+  await page.click('.tools-row[data-tool="python"] button >> text=다시 확인');
+  await page.waitForFunction((want) => document.querySelector('.tools-row[data-tool="git"] .tools-trouble')?.textContent === want, noClt, { timeout: 5_000 }).catch(() => {});
+  const cltRow = (await toolRows(page)).git;
+  const cltNote = await filterNote();
+  t.check("Xcode Command Line Tools가 없으면 두 곳이 설치 명령을 적는다", same(cltRow.notes, [noClt]) && cltNote === noClt, `${cltRow.notes.join(" / ")} · 필터 창 "${cltNote}"`);
+
+  const shells = [
+    ["읽지 못함", { shell: "/bin/zsh", ok: false, seconds: 10.02, detail: "로그인 셸(zsh)이 10초 안에 환경을 알려 주지 않았다. 앱이 받은 환경과 알려진 설치 위치에서 도구를 찾는다" }],
+    ["읽지 못함", { shell: "/bin/zsh", ok: false, seconds: 0.41, detail: "로그인 셸의 출력에서 환경을 읽지 못했다(종료 코드 1): zsh: command not found: brew" }],
+    ["읽지 못함", { shell: "/bin/tcsh", ok: false, seconds: 0, detail: "로그인 셸 tcsh은 환경을 읽지 않는다. zsh, bash, fish를 읽는다" }],
+  ];
+  const seen = [];
+  for (const [, shell] of shells) {
+    state.tools.shell = shell;
+    await page.click('.tools-row[data-tool="python"] button >> text=다시 확인');
+    await page.waitForFunction((want) => document.querySelector('.tools-row[data-tool="shell"] .tools-trouble')?.textContent === want, shell.detail, { timeout: 5_000 }).catch(() => {});
+    seen.push((await toolRows(page)).shell);
+  }
+  t.check(
+    "로그인 셸이 시간 안에 끝나지 않았거나 출력을 읽지 못했거나 지원하지 않는 셸이면 그 까닭을 적는다",
+    seen.every((row, i) => !row.ok && row.state === shells[i][0] && same(row.notes, [shells[i][1].detail])),
+    seen.map((row) => row.notes.join(" / ")).join(" || "),
+  );
+  state.tools.shell = null;
+  const cli = await again("shell", "읽지 않음");
+  t.check("터미널에서 띄운 실행은 로그인 셸을 읽지 않는다고 적는다", cli.ok && same(cli.notes, ["터미널에서 띄웠으므로 그 터미널의 환경에서 도구를 찾는다"]) && cli.path === null, cli.notes.join(" / "));
+
+  const gone = state.tools.python.path;
+  state.tools.python = toolFound("python", { attempts: [tried("env", gone, false, "없는 파일")] });
+  const pythonRow = await again("python", "찾지 못함");
+  t.check(
+    "연 레포의 인터프리터가 없어지면 Python 행이 까닭과 시도한 경로를 적고 바꾸기를 둔다",
+    !pythonRow.ok && same(pythonRow.notes, ["shop의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다"]) && same(pythonRow.attempts, [["환경", gone, "없는 파일"]]) && pythonRow.buttons.includes("바꾸기"),
+    `${pythonRow.notes.join(" / ")} · ${pythonRow.attempts.map((line) => line.join(" | ")).join(" / ")}`,
+  );
+  const all = await page.evaluate(() => document.querySelector(".ask").innerText);
+  t.check("환경 점검 화면의 문구에 서버, 백엔드, sidecar라는 말이 없다", !FORBIDDEN.test(all), all.replace(/\s+/g, " "));
+  await page.screenshot({ path: TOOLS_SHOT("all-missing") });
+  await closeTools(page);
+
+  // 가상환경이 없는 레포를 고르면 뜨는 인터프리터를 고르는 화면
+  state.interpreters = [toolFound("python", { path: "/opt/homebrew/bin/python3.13", version: "3.13.12", prefix: "/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13", venv: false })];
+  await welcome(page);
+  await typePath(page, dirs.bare);
+  await page.waitForSelector(".ask-option");
+  const asked = await askOf(page);
+  t.check(
+    "레포의 Python을 찾지 못하면 인터프리터를 고르는 화면이 까닭과 찾은 인터프리터를 그린다",
+    asked.title === "bare의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다" && same(asked.options, ["Python 3.13.12"]),
+    asked.title,
+  );
+  await page.screenshot({ path: TOOLS_SHOT("python-missing") });
+  await page.keyboard.press("Escape");
+}
+
+async function toolsPick(t, page) {
+  const dirs = await openFixtures();
+  const state = toolsState();
+  state.about = null;
+  t.expected.push("404", "400");
+  // 확인 명령에 답하는 가짜 실행 파일. 고정 응답은 이 경로만 통과시킨다.
+  const fake = join(dirs.root, "fake-git");
+  writeFileSync(fake, "#!/bin/sh\necho 'git version 9.9.9'\n", { mode: 0o755 });
+  state.runnable.add(fake);
+  await answerTools(page, state);
+  await welcome(page);
+  await page.click(".welcome-tools");
+  await waitTools(page);
+  const git = '.tools-row[data-tool="git"]';
+  const first = (await toolRows(page)).git;
+  t.check("저장한 경로가 없으면 저장한 경로 지우기를 그리지 않는다", same(first.buttons, ["다시 확인", "직접 고르기"]), first.buttons.join(", "));
+
+  await page.click(`${git} button >> text=직접 고르기`);
+  await page.waitForSelector(`${git} .open-input`);
+  const input = await page.evaluate((row) => {
+    const field = document.querySelector(`${row} .open-input`);
+    return { placeholder: field.placeholder, focused: document.activeElement === field, submit: document.querySelector(`${row} .open-path button`).disabled };
+  }, git);
+  t.check(
+    "브라우저에서 직접 고르기를 누르면 그 행에 포커스가 든 경로 입력 칸이 펴지고 비어 있으면 누를 수 없다",
+    input.placeholder === "git 실행 파일의 경로" && input.focused && input.submit,
+    JSON.stringify(input),
+  );
+  const notRunnable = join(dirs.empty, "README.md");
+  await page.fill(`${git} .open-input`, notRunnable);
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(`${git} .ask-error`);
+  const refused = (await toolRows(page)).git;
+  t.check(
+    "확인을 통과하지 못한 경로는 저장하지 않고 그 행에 경로와 까닭을 적는다",
+    same(refused.notes, [`실행하지 못했다: ${notRunnable} (실행 권한 없음)`]) && refused.path === "/usr/bin/git" && !refused.buttons.includes("저장한 경로 지우기"),
+    refused.notes.join(" / "),
+  );
+  await page.screenshot({ path: TOOLS_SHOT("pick-refused") });
+
+  await page.fill(`${git} .open-input`, `  ${fake}  `);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(([row, want]) => document.querySelector(`${row} .tools-path`)?.textContent === want, [git, fake]);
+  const kept = (await toolRows(page)).git;
+  t.check(
+    "확인을 통과한 경로는 저장되어 그 행이 저장한 경로에서 찾은 것으로 바뀌고 앞의 까닭이 사라진다",
+    state.calls.filter((call) => call === "PUT /git").length === 2 && kept.facts === "9.9.9 · 저장한 경로" && kept.path === fake && kept.notes.length === 0,
+    `${kept.facts} / ${kept.path}`,
+  );
+  t.check("저장한 경로가 있으면 저장한 경로 지우기를 그린다", same(kept.buttons, ["다시 확인", "직접 고르기", "저장한 경로 지우기"]), kept.buttons.join(", "));
+  await page.click(`${git} .info-section-head`);
+  const attempts = (await toolRows(page)).git.attempts;
+  t.check("시도 목록의 첫 줄이 저장한 경로다", same(attempts, [["저장한 경로", fake, "통과 · 9.9.9"]]), attempts.map((line) => line.join(" | ")).join(" / "));
+  await t.shot();
+
+  await closeTools(page);
+  await page.click(".welcome-tools");
+  await waitTools(page);
+  t.check("화면을 닫았다 띄워도 저장한 경로에서 찾는다", (await toolRows(page)).git.path === fake);
+  await page.click(`${git} button >> text=저장한 경로 지우기`);
+  await page.waitForFunction((row) => document.querySelector(`${row} .tools-path`)?.textContent === "/usr/bin/git", git);
+  const cleared = (await toolRows(page)).git;
+  t.check(
+    "저장한 경로 지우기를 누르면 저장한 경로를 지우고 다시 찾은 값으로 바뀐다",
+    state.calls.filter((call) => call === "DELETE /git").length === 1 && cleared.facts === "2.50.1 · 환경" && same(cleared.buttons, ["다시 확인", "직접 고르기"]),
+    `${cleared.facts} / ${cleared.buttons.join(", ")}`,
+  );
+
+  const claude = '.tools-row[data-tool="claude"]';
+  state.runnable.add("/Users/me/bin/claude");
+  await page.click(`${claude} button >> text=직접 고르기`);
+  await page.fill(`${claude} .open-input`, "/Users/me/bin/claude");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction((row) => document.querySelector(`${row} .tools-path`)?.textContent === "/Users/me/bin/claude", claude);
+  const picked = (await toolRows(page)).claude;
+  t.check(
+    "Claude Code도 직접 고른 경로를 저장하고 git 행은 그대로 둔다",
+    state.calls.includes("PUT /claude") && picked.facts === "9.9.9 · 저장한 경로 · 로그인됨(claude.ai)" && (await toolRows(page)).git.path === "/usr/bin/git",
+    picked.facts,
+  );
+  rmSync(fake, { force: true });
 }
 
 const SCENARIOS = [
@@ -13974,6 +14537,9 @@ const SCENARIOS = [
   ["open-python", openPython],
   ["open-recent", openRecent],
   ["open-switch", openSwitch],
+  ["tools-list", toolsList],
+  ["tools-missing", toolsMissing],
+  ["tools-pick", toolsPick],
 ];
 
 /** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
@@ -14020,8 +14586,8 @@ const STAGE4 = new Set([
 const VARIABLES = new Set(SCENARIOS.filter(([name]) => name.startsWith("var-")).map(([name]) => name));
 /** 시점 비교 시나리오. 이력 고정 레포를 연 서버에서 돌고 스크린샷 이름이 s5-로 시작한다. */
 const COMPARE = new Set(SCENARIOS.filter(([name]) => name.startsWith("compare-")).map(([name]) => name));
-/** 레포 열기 시나리오. 레포 없이 띄운 서버에서 돌고 스크린샷 이름이 s6-로 시작한다. */
-const OPEN = new Set(SCENARIOS.filter(([name]) => name.startsWith("open-")).map(([name]) => name));
+/** 레포 열기 시나리오와 환경 점검 시나리오. 레포 없이 띄운 서버에서 돌고 스크린샷 이름이 s6-로 시작한다. */
+const OPEN = new Set(SCENARIOS.filter(([name]) => name.startsWith("open-") || name.startsWith("tools-")).map(([name]) => name));
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 

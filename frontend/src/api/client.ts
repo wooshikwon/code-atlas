@@ -1,6 +1,8 @@
 // 백엔드 호출은 모두 이 파일을 거친다. 화면 컴포넌트는 fetch를 직접 부르지 않는다. 주소의 앞부분은 `host`가 준다.
 import { host } from "../host";
 import type {
+  About,
+  Answer,
   ApiErrorBody,
   Changes,
   Comparison,
@@ -15,6 +17,7 @@ import type {
   MadeSummary,
   MarkedCode,
   OldSpan,
+  Pickable,
   Probe,
   RecentRepo,
   Repo,
@@ -22,6 +25,7 @@ import type {
   Status,
   Summaries,
   SummaryStatus,
+  Tools,
   Tree,
   Unused,
 } from "./types";
@@ -83,6 +87,35 @@ export function deleteRepo(root: string): Promise<unknown> {
 /** 인터프리터를 고르는 화면의 후보. 실행해 확인한 것만 온다. */
 export function getInterpreters(): Promise<{ found: Found[] }> {
   return request("/api/interpreters");
+}
+
+/** 로그인 셸의 환경, `claude`, `git`, 연 레포의 인터프리터를 찾은 결과 */
+export function getTools(): Promise<Tools> {
+  return request("/api/tools");
+}
+
+/** 찾아 둔 값을 버리고 다시 찾게 한다. */
+export function postToolsCheck(): Promise<Tools> {
+  return request("/api/tools/check", undefined, "POST");
+}
+
+/** 직접 고른 실행 파일을 그 도구의 경로로 저장한다. 실행해 확인하지 못하면 까닭을 적은 400이고 저장하지 않는다. */
+export function putTool(tool: Pickable, path: string): Promise<Found> {
+  return request(`/api/tools/${tool}`, undefined, "PUT", { path });
+}
+
+/** 저장한 경로를 지우고 다시 찾게 한다. */
+export function deleteTool(tool: Pickable): Promise<Found> {
+  return request(`/api/tools/${tool}`, undefined, "DELETE");
+}
+
+/** `claude -p`에 한 낱말을 답하게 하는 요청 하나를 보낸다. 구독 사용량을 쓰므로 `응답 확인`을 누를 때만 부른다. */
+export function postClaudeAsk(): Promise<Answer> {
+  return request("/api/tools/claude/ask", undefined, "POST");
+}
+
+export function getAbout(): Promise<About> {
+  return request("/api/about");
 }
 
 export function getRepo(): Promise<Repo> {

@@ -4131,3 +4131,204 @@ ol.summary-list {
   padding-top: 3px;
   border-top: 1px solid var(--line);
 }
+
+/* 환경 점검 */
+
+/* 레포 열기 화면의 환경 점검 버튼. 글자만 그리고 올리면 밑줄을 긋는다. */
+.welcome-tools {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.welcome-tools:hover,
+.welcome-tools:focus-visible {
+  color: var(--ink);
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* 환경 점검 화면의 행. 머리 줄은 접는 버튼과 이름, 상태, 판과 출처, 오른쪽 끝의 버튼이고 그 아래에 경로, 까닭과 안내, 시도한 경로를 둔다. */
+.tools-about {
+  font-size: 11px;
+}
+
+.tools-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.tools-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.tools-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.tools-head .info-section-head:disabled {
+  cursor: default;
+}
+
+.tools-head .info-section-head:disabled .info-section-caret {
+  visibility: hidden;
+}
+
+.tools-name {
+  font-weight: 600;
+}
+
+/* 쓰지 못하는 도구의 상태와 까닭은 열지 못한 까닭(.ask-error)과 같은 색으로 적는다. */
+.tools-row:not([data-ok]) .tools-state,
+.tools-trouble {
+  color: color-mix(in srgb, var(--ink) 25%, var(--critical));
+}
+
+.tools-facts,
+.tools-note,
+.tools-prefix,
+.tools-busy {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.tools-actions .summary-action,
+.tools-command .summary-action,
+.summary-fixes .summary-action,
+.filter-python .summary-action {
+  flex: none;
+  margin-left: 0;
+}
+
+.tools-actions .summary-action:disabled,
+.summary-fixes .summary-action:disabled,
+.filter-python .summary-action:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* 경로는 넘치면 앞에서부터 줄여 끝의 파일 이름을 보인다. */
+.tools-path {
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.tools-path {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.tools-prefix {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.tools-trouble {
+  overflow-wrap: anywhere;
+}
+
+.tools-busy {
+  align-self: center;
+  margin-right: auto;
+}
+
+/* Claude Code를 쓰지 못하는 까닭과 그 아래의 명령이나 로그인 버튼. 환경 점검 화면과 LLM 요약 칸이 함께 쓴다. */
+.tools-help {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.tools-command {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.tools-command code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.tools-login {
+  margin-left: 0;
+}
+
+.tools-row .ask-attempts {
+  margin-top: 2px;
+}
+
+.tools-row .ask-attempt {
+  padding-left: 13px;
+}
+
+/* 시도한 경로 가운데 통과한 줄은 본문 색으로 적는다. */
+.ask-attempt[data-ok] .ask-attempt-detail {
+  color: var(--ink);
+}
+
+/* LLM 요약 칸에서 요약을 만들지 못하는 까닭과 그 아래의 버튼 */
+.summary-unavailable {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.summary-fixes {
+  display: flex;
+  gap: 4px;
+}
+
+/* 필터 창의 인터프리터. 판과 바꾸기 버튼을 한 줄에, 경로를 그 아래 줄에 적는다. 경로는 넘치면 앞에서부터 줄인다. */
+.filter-python {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.filter-python-path {
+  margin-top: -4px;
+  overflow: hidden;
+  direction: rtl;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: left;
+}
+
+.filter-note {
+  color: color-mix(in srgb, var(--ink) 25%, var(--critical));
+}

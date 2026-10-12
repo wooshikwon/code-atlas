@@ -14,8 +14,8 @@ export type Step =
   | { kind: "ask-project"; path: string; project: string }
   /** 프로젝트 여러 개를 품은 폴더 */
   | { kind: "ask-nested"; path: string; nested: string[] }
-  /** error는 고른 인터프리터로 열지 못한 까닭이다. */
-  | { kind: "ask-python"; path: string; found: Found; candidates: Found[]; error?: string }
+  /** seeking이면 이 기기의 인터프리터를 찾는 중이라 candidates가 아직 비어 있다. error는 고른 인터프리터로 열지 못한 까닭이다. */
+  | { kind: "ask-python"; path: string; found: Found; candidates: Found[]; seeking?: true; error?: string }
   | { kind: "opening"; path: string }
   | { kind: "failed"; path: string; error: string };
 
@@ -37,6 +37,8 @@ export interface OpeningStore {
   choose(path: string, as?: As): Promise<void>;
   /** 끌어다 놓은 경로 가운데 첫 폴더를 choose에 넘긴다. 폴더가 없으면 첫 경로를 열 수 없다고 알린다. */
   drop(paths: string[]): Promise<void>;
+  /** path 레포의 인터프리터를 고르는 화면을 띄운다. found는 그 레포에서 지금 찾은 인터프리터다. */
+  pick(path: string, found: Found): Promise<void>;
   /** 묻는 창과 경로 입력 창을 닫는다. 판정을 기다리는 중이면 그 결과를 버린다. */
   cancel(): void;
   /** 연 레포를 닫고 페이지를 다시 읽는다. */
@@ -82,23 +84,52 @@ export function reread(): void {
   location.reload();
 }
 
+/** 인터프리터를 고르는 화면에 찾은 목록을 넣는다. */
+function sought<S extends Extract<Step, { kind: "ask-python" }>>(step: S, candidates: Found[]): Omit<S, "seeking"> {
+  const { seeking: _, ...rest } = step;
+  return { ...rest, candidates };
+}
+
 const reason = (caught: unknown) => (caught instanceof Error ? caught.message : String(caught));
 
 export const useOpening = create<OpeningStore>()((set, get) => {
   /** choose와 cancel을 부른 횟수. 기다리는 동안 달라졌으면 그 결과를 버린다. */
   let turn = 0;
 
+  /** 인터프리터 목록을 청한 횟수 */
+  let asked = 0;
+  /** 받았을 때 인터프리터를 고르는 화면이 떠 있지 않아 넣지 못한 목록. 그 화면으로 돌아갈 때 넣는다. */
+  let late: Found[] | null = null;
+
+  /**
+   * 인터프리터를 고르는 화면을 띄우고 이 기기의 인터프리터를 받아 목록에 넣는다. 관리자 명령과 후보마다의 확인을 차례로 실행하는
+   * 요청이라 몇 초가 걸리므로 화면을 먼저 띄운다. 받지 못하면 빈 목록이다.
+   */
+  const ask = async (path: string, found: Found): Promise<void> => {
+    asked += 1;
+    const mine = asked;
+    late = null;
+    set({ step: { kind: "ask-python", path, found, candidates: [], seeking: true } });
+    const candidates = await getInterpreters().then(
+      (received) => received.found,
+      () => [],
+    );
+    if (mine !== asked) {
+      return;
+    }
+    const step = get().step;
+    if (step.kind === "ask-python") {
+      set({ step: sought(step, candidates) });
+    } else {
+      late = candidates;
+    }
+  };
+
   /** 판정을 받은 폴더를 다음 단계로 보낸다. */
   const proceed = async (probe: Probe, as: As, mine: number): Promise<void> => {
     const step = next(probe, as);
     if (step.kind === "ask-python") {
-      const candidates = await getInterpreters().then(
-        (received) => received.found,
-        () => [],
-      );
-      if (mine === turn) {
-        set({ step: { ...step, candidates } });
-      }
+      await ask(step.path, step.found);
       return;
     }
     if (step.kind === "opening") {
@@ -120,7 +151,11 @@ export const useOpening = create<OpeningStore>()((set, get) => {
         return;
       }
       const error = reason(caught);
-      set({ step: before.kind === "ask-python" && python !== undefined ? { ...before, error } : { kind: "failed", path, error } });
+      if (before.kind === "ask-python" && python !== undefined) {
+        set({ step: { ...(before.seeking === true && late !== null ? sought(before, late) : before), error } });
+      } else {
+        set({ step: { kind: "failed", path, error } });
+      }
     }
   };
 
@@ -183,6 +218,11 @@ export const useOpening = create<OpeningStore>()((set, get) => {
           set({ step: { kind: "failed", path: paths[0], error: reason(caught) } });
         }
       }
+    },
+    pick: async (path, found) => {
+      turn += 1;
+      set({ typing: false });
+      await ask(path, found);
     },
     cancel: () => {
       turn += 1;

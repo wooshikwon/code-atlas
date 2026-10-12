@@ -1,10 +1,12 @@
 // LLM 요약 칸. 고른 노드의 설명을 캐시에서 읽어 요지, 하는 일, 앞뒤 흐름 세 부분으로 보이고, 캐시에 없으면 "요약 생성" 버튼을 눌렀을 때 만든다.
 // 이 화면에서 만든 요약은 머리 줄의 오른쪽 끝에 그 호출이 쓴 토큰 수를 적는다.
 // 구역 머리를 눌러 접으면 요약의 요지만 한 줄로 보인다. 필터 창의 "자동 요약"이 켜져 있으면 노드를 고른 채 잠시 머문 뒤에 만든다. 요약 상태와 요청은 `state/summaries.ts`가 가지므로
-// 노드를 떠나도 만들고 있던 요약은 끝까지 만든다.
+// 노드를 떠나도 만들고 있던 요약은 끝까지 만든다. Claude Code를 쓰지 못하면 까닭과 고치는 방법, 환경 점검 화면을 여는 버튼을 적는다.
 import { useEffect } from "react";
+import { ClaudeHelp } from "../open/Tools";
 import { useAtlas } from "../state/store";
 import { useSummaries, type SummaryState } from "../state/summaries";
+import { claudeState, useTools } from "../state/tools";
 import { cacheTip, usageText } from "../state/usage";
 import { Blocks, useInline } from "./inline";
 import { partsOf } from "./parts";
@@ -48,6 +50,44 @@ function briefOf(state: SummaryState): string {
     default:
       return "";
   }
+}
+
+/**
+ * 요약을 만들지 못하는 까닭. 환경 점검의 값에서 Claude Code를 쓰지 못하는 경우를 읽어 설치 명령이나 로그인하는 방법을 함께 적고,
+ * 그 값을 아직 받지 않았거나 까닭이 Claude Code 밖에 있으면 서버가 적은 까닭만 적는다.
+ */
+function Unavailable({ node, reason }: { node: string; reason: string }) {
+  const claude = useTools((s) => s.tools?.claude ?? null);
+  const busy = useTools((s) => s.busy);
+  const state = claude === null ? null : claudeState(claude);
+
+  useEffect(() => {
+    const tools = useTools.getState();
+    if (tools.tools === null && !tools.busy) {
+      void tools.load();
+    }
+  }, []);
+
+  /** 도구를 다시 찾게 한 뒤 이 노드의 요약을 다시 읽는다. */
+  const recheck = () =>
+    void useTools
+      .getState()
+      .check()
+      .then(() => useSummaries.getState().read(node));
+
+  return (
+    <div className="summary-unavailable">
+      {state === null || state.kind === "ready" ? <span className="tools-trouble">{reason}</span> : <ClaudeHelp state={state} />}
+      <span className="summary-fixes">
+        <button className="summary-action" disabled={busy} onClick={recheck}>
+          다시 확인
+        </button>
+        <button className="summary-action" onClick={() => useTools.getState().show()}>
+          환경 점검
+        </button>
+      </span>
+    </div>
+  );
 }
 
 interface SummaryProps {
@@ -117,11 +157,7 @@ export function Summary({ node, split }: SummaryProps) {
           </button>
         </>
       )}
-      {state.phase === "unavailable" && (
-        <span className="info-panel-hint">
-          {state.reason}. Claude Code를 설치하고 터미널에서 <code>claude auth login</code>으로 로그인하면 요약을 만든다
-        </span>
-      )}
+      {state.phase === "unavailable" && <Unavailable node={node} reason={state.reason} />}
     </div>
   );
 }

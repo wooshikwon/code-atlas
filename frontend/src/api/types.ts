@@ -304,6 +304,43 @@ export interface Found {
   venv: boolean | null;
 }
 
+/** 로그인 셸에서 환경을 읽은 결과. 앱이 띄운 실행에서만 읽는다. */
+export interface ShellEnv {
+  /** 사용자 계정의 셸 경로 */
+  shell: string;
+  ok: boolean;
+  /** 읽지 못한 까닭. 읽었으면 빈 글이다. */
+  detail: string;
+  /** 읽는 데 걸린 초 */
+  seconds: number;
+}
+
+/** 환경 점검의 값. shell은 터미널에서 띄운 실행에서 null이고, python은 연 레포가 없으면 null이다. */
+export interface Tools {
+  shell: ShellEnv | null;
+  claude: Found;
+  git: Found;
+  python: Found | null;
+}
+
+/** 직접 고르는 도구 */
+export type Pickable = "claude" | "git";
+
+/** `claude -p`에 요청 하나를 보내 본 결과. detail은 답하지 않은 까닭이고 답했으면 빈 글이다. */
+export interface Answer {
+  ok: boolean;
+  seconds: number;
+  detail: string;
+}
+
+/** 앱의 판. commit과 built는 빌드 명령으로 만든 앱에서만 값이 있다. */
+export interface About {
+  commit: string | null;
+  built: string | null;
+  python: string;
+  basedpyright: string;
+}
+
 /** 고른 폴더를 레포로 열기 전의 판정 */
 export interface Probe {
   /** 디스크에 적힌 대소문자로 맞춘 절대 경로 */
