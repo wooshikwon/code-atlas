@@ -23,6 +23,7 @@ from . import venv
 from .cache import Answers, Cache, Stored, environment
 from .collect import RepoFiles, SourceFile, collect, config_texts, module_id
 from .extract import FileFacts, assigned_names, defined_names, extract, read_source
+from .git import WORKTREE
 from .graph import build
 from .lsp import REQUEST_TIMEOUT, Location, Session
 from .model import Analysis, Node, Site
@@ -259,11 +260,18 @@ class _Judging:
     그 밖의 판정이 내장·외부인 지점은 환경 지문이 같은 동안 다시 묻지 않는다.
     """
 
-    def __init__(self, files: RepoFiles, texts: dict[str, str], stored: dict[str, Stored], base: dict[str, Answers]):
+    def __init__(
+        self,
+        files: RepoFiles,
+        texts: dict[str, str],
+        stored: dict[str, Stored],
+        base: dict[str, Answers],
+        origin: Path | None = None,
+    ):
         self.texts = texts
         self.names = {path: [*kept.names, *kept.variables] for path, kept in stored.items()}
         self.facts = {f.path: stored[f.path].facts for f in files.files}
-        self.index = Index(files.root, list(self.facts.values()))
+        self.index = Index(files.root, list(self.facts.values()), origin)
         self.owner = {node.id: path for path, facts in self.facts.items() for node in facts.nodes}
         self.owner.update((var.node_id, path) for path, facts in self.facts.items() for var in facts.variables)
         self.paths = {facts.file.module_id: path for path, facts in self.facts.items()}
@@ -449,7 +457,8 @@ async def refresh(
     previous: Analyzed | None = None,
     cache: Cache | None = None,
     rebuild: bool = False,
-    snapshot: str = "worktree",
+    snapshot: str = WORKTREE,
+    origin: Path | None = None,
     report: Callable[[Progress], None] = lambda progress: None,
     drafted: Callable[[Analyzed], None] | None = None,
 ) -> Analyzed:
@@ -457,7 +466,8 @@ async def refresh(
 
     `session`은 띄워 둔 세션이거나, 파일 목록과 지금의 환경 지문을 받아 그 환경에서 띄운 세션을 돌려주는 함수다.
     다시 물을 지점이 없으면 세션을 쓰지 않고, 있으면 세션의 파일을 지금 본문에 맞춘 뒤 묻는다. 세션은 닫지 않는다. `rebuild`가 참이면 캐시를 읽지 않고 모든 지점을 물어 캐시를
-    덮어쓴다. 캐시의 판정으로 조립한 결과가 있고 다시 물을 지점이 남았으면 그 결과를 `drafted`로 먼저 낸다.
+    덮어쓴다. `snapshot`이 커밋이면 `repo`는 그 커밋을 꺼낸 폴더이고 `origin`이 원본 레포 루트다. 그 시점이 캐시에
+    없으면 달라진 파일이 없어도 저장한다. 캐시의 판정으로 조립한 결과가 있고 다시 물을 지점이 남았으면 그 결과를 `drafted`로 먼저 낸다.
     `report`는 단계가 바뀌거나 진행 수가 늘 때마다 불리고, 추출 단계에서는 다른 스레드에서 불린다.
     """
     started = time.monotonic()
@@ -474,7 +484,7 @@ async def refresh(
             base = previous.answers if previous.env == env else {}
         else:
             base = cache.answers(snapshot, env) if cache is not None and not rebuild else {}
-        judging = _Judging(files, texts, stored, base)
+        judging = _Judging(files, texts, stored, base, origin)
         facts = list(judging.facts.values())
         probe = _probe(facts)
 
@@ -512,7 +522,12 @@ async def refresh(
 
         report(Progress("build"))
         result = await asyncio.to_thread(analyzed, judging.answers(stored))
-        if cache is not None and (fresh or judging.changed or judging.gone):
+        unsaved = (
+            cache is not None
+            and snapshot != WORKTREE
+            and snapshot not in await asyncio.to_thread(cache.snapshots, env)
+        )
+        if cache is not None and (fresh or judging.changed or judging.gone or unsaved):
             await asyncio.to_thread(cache.save, snapshot, env, {path: stored[path] for path in fresh}, result.answers)
         return result
     finally:

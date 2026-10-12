@@ -52,13 +52,15 @@ class Resolution:
 class Index:
     """레포 안 위치를 노드 id로 찾는 표."""
 
-    def __init__(self, root: Path, facts: list[FileFacts]):
+    def __init__(self, root: Path, facts: list[FileFacts], origin: Path | None = None):
         self.root = disk_path(root)
+        self.origin = disk_path(origin) if origin is not None else None  # 꺼낸 폴더를 분석할 때의 원본 레포 루트
         self.modules: dict[str, str] = {}  # 레포 루트 기준 경로 → 그 파일의 노드 id
         self.names: dict[tuple[str, int, int], str] = {}  # (경로, 줄, 열) → 노드 id나 변수 후보 id
         self.kinds: dict[str, str] = {}
         self.ranges: dict[str, list[tuple[int, int, str]]] = {}  # 레포 루트 기준 경로 → (시작 줄, 끝 줄, 노드 id)
         self._relative: dict[str, str | None] = {}  # 언어 서버가 돌려준 경로 → 레포 루트 기준 경로
+        self._original: dict[str, bool] = {}  # 언어 서버가 돌려준 경로 → 원본 레포의 소스인지
         for f in facts:
             self.modules[f.file.path] = f.nodes[0].id
             for node in f.nodes:
@@ -79,6 +81,22 @@ class Index:
             except ValueError:
                 self._relative[path] = None
         return self._relative[path]
+
+    def original(self, path: str) -> bool:
+        """꺼낸 폴더의 분석에서 경로가 원본 레포의 소스를 가리킨다.
+
+        가상환경에 경로를 `.pth`로 건 개발 모드 설치가 있으면 언어 서버가 꺼낸 폴더에 없는 모듈을 원본 레포에서 찾는다.
+        원본 레포 안 `site-packages`의 파일은 설치된 패키지이므로 해당하지 않는다.
+        """
+        if self.origin is None:
+            return False
+        if path not in self._original:
+            try:
+                rel = disk_path(path).relative_to(self.origin).as_posix()
+                self._original[path] = "/site-packages/" not in "/" + rel
+            except ValueError:
+                self._original[path] = False
+        return self._original[path]
 
     def enclosing(self, path: str, line: int, col: int) -> str | None:
         """레포 루트 기준 경로의 위치를 품은 가장 안쪽 노드 id. 파일 첫 위치는 모듈이고, 분석 대상 파일이 아니면 None이다."""
@@ -156,7 +174,7 @@ def resolve_site(site: Site, locations: list[Location], index: Index, externals:
                 if site.kind in ACCESS_KINDS or index.kinds[target] != "variable":
                     return found
                 held = held or found
-        elif external is None:
+        elif external is None and not index.original(loc.path):
             external = external_of(loc.path)
     if external is None:
         return held or ResolvedSite(**base, status="unresolved")

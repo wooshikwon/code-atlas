@@ -1,6 +1,7 @@
 import asyncio
+import sqlite3
 import sys
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, closing
 from pathlib import Path
 
 import pytest
@@ -383,6 +384,37 @@ async def test_reopening_from_the_cache_asks_nothing_and_starts_no_session(sampl
     assert judged(again) == judged(fresh)
     assert again.answers == fresh.answers and again.env == fresh.env
     assert [p.phase for p in phases if p.phase != "extract"] == ["collect", "build"] and drafts == []
+
+
+@pytest.mark.asyncio
+async def test_commit_snapshot_is_saved_even_when_nothing_changed(sample_repo, tmp_path):
+    store = Cache(sample_repo, tmp_path / "cache")
+    session = FakeSession()
+    first = await refresh(sample_repo, sys.executable, session, cache=store)
+    assert store.snapshots(first.env) == {"worktree"}
+    asked = len(session.asked)
+
+    again = await refresh(sample_repo, sys.executable, session, previous=first, cache=store)
+    assert store.snapshots(first.env) == {"worktree"}  # 작업 중인 상태는 달라진 파일이 없으면 저장하지 않는다
+
+    commit = "0123abc"
+    past = await refresh(sample_repo, sys.executable, session, previous=again, cache=store, snapshot=commit)
+    assert store.snapshots(first.env) == {"worktree", commit} and len(session.asked) == asked
+    assert store.answers(commit, first.env) == past.answers == first.answers
+    saved = store.path.stat().st_mtime_ns, rows_of(store)
+
+    async def never(files, env):
+        pytest.fail("세션을 띄웠다")
+
+    reopened = await refresh(sample_repo, sys.executable, never, cache=store, snapshot=commit)
+    assert judged(reopened) == judged(first)
+    assert rows_of(store) == saved[1]  # 캐시에 있는 시점은 다시 저장하지 않는다
+    store.close()
+
+
+def rows_of(store: Cache) -> list[tuple]:
+    with closing(sqlite3.connect(store.path)) as db:
+        return db.execute("SELECT name, env, saved FROM snapshots ORDER BY name").fetchall()
 
 
 @pytest.mark.asyncio
