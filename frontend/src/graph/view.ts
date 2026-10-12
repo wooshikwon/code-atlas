@@ -226,14 +226,16 @@ function straightened(points: Point[]): Point[] {
 /**
  * 형제가 아닌 두 노드를 잇는 경로. 두 노드를 형제가 될 때까지 올린 상자 사이의 배치 경로 trunk를 따라가고, 올린 쪽 끝은 올린 상자
  * 밖의 세로 줄에서 원래 노드까지 상자를 지나지 않는 길(`legs`)로 잇는다. source와 target은 올린 상자에서 원래 노드까지의 사슬이고 올리지
- * 않은 쪽은 null이다. 그런 길이 없거나 사슬이 원래 노드 하나뿐인 쪽은 원래 노드의 가운데 높이에서 가로로 곧게 잇는다. trunk의 첫 선분과 끝 선분이 가로가 아니면
+ * 않은 쪽은 null이다. 그런 길이 없거나 사슬이 원래 노드 하나뿐인 쪽은 원래 노드의 가운데 높이에서 가로로 곧게 잇는다. 배치 경로의 첫 선분과 끝 선분이 가로가 아니면
  * null이다.
  */
-function alongRoute(trunk: Point[], source: string[] | null, target: string[] | null, rooms: Rooms, layout: Layout): Point[] | null {
-  const last = trunk.length - 1;
-  if (last < 1 || trunk[0].y !== trunk[1].y || trunk[last].y !== trunk[last - 1].y) {
+function alongRoute(route: Point[], source: string[] | null, target: string[] | null, rooms: Rooms, layout: Layout): Point[] | null {
+  const last = route.length - 1;
+  if (last < 1 || Math.abs(route[0].y - route[1].y) >= SAME || Math.abs(route[last].y - route[last - 1].y) >= SAME) {
     return null;
   }
+  /** 배치가 낸 가로 선분의 두 끝은 높이가 소수 오차만큼 다를 수 있으므로 양 끝 점의 높이를 이웃 점에 맞춘다. */
+  const trunk = route.map((point, i) => (i === 0 ? { x: point.x, y: route[1].y } : i === last && last > 1 ? { x: point.x, y: route[last - 1].y } : point));
   const forward = trunk[1].x >= trunk[0].x;
   const arriving = trunk[last].x >= trunk[last - 1].x;
   /**

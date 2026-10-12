@@ -152,7 +152,7 @@ describe("elkGraphs", () => {
     const full = find(all.components[0], "pkg.mod")!;
     expect(full.children?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse"]);
     expect(all.packs.get("pkg.mod")!.width).toBe(measure("내부 함수 2개 접기") + 12);
-    expect(find(closed.components[0], "pkg")!.layoutOptions?.["elk.padding"]).toBe("[top=28,left=16,bottom=16,right=16]");
+    expect(find(closed.components[0], "pkg")!.layoutOptions?.["elk.padding"]).toBe("[top=44,left=16,bottom=16,right=16]");
     const partition = (node: ElkNode, id: string) => find(node, id)!.layoutOptions?.["elk.partitioning.partition"];
     expect(partition(part, "pkg.mod:Store")).toBe(partition(full, "pkg.mod:Store"));
   });
@@ -173,10 +173,10 @@ describe("elkGraphs", () => {
     expect(main.children).toBeUndefined();
   });
 
-  it("펼친 폴더는 머리 줄 28px와 여백 16px를 둔 부모 노드이고 접은 폴더는 이름표 폭에 36을 더한 높이 40 상자다", () => {
+  it("펼친 폴더는 머리 줄 28px 아래와 옆·아래에 여백 16px를 둔 부모 노드이고 접은 폴더는 이름표 폭에 36을 더한 높이 40 상자다", () => {
     const region = find(closed.components[0], "pkg")!;
-    expect(region.layoutOptions?.["elk.padding"]).toBe("[top=28,left=16,bottom=16,right=16]");
-    expect(region.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("pkg/") + 32}, 44)`);
+    expect(region.layoutOptions?.["elk.padding"]).toBe("[top=44,left=16,bottom=16,right=16]");
+    expect(region.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("pkg/") + 32}, 60)`);
     const folded = elkGraphs(repoFixture, shownFor(null, ["pkg"]), cols, measure, new Map());
     expect(find(folded.components[0], "pkg")).toMatchObject({ width: measure("pkg/") + 36, height: 40 });
   });
@@ -193,7 +193,7 @@ describe("elkGraphs", () => {
     expect(find(folded, "lazy")).toMatchObject({ width: measure("lazy/") + 36, height: 40 });
     const open = input([]);
     expect(find(open, "ring.a")).toMatchObject({ width: 320, height: 40 });
-    expect(find(open, "ring")!.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("ring/") + 32}, 44)`);
+    expect(find(open, "ring")!.layoutOptions?.["elk.nodeSize.minimum"]).toBe(`(${measure("ring/") + 32}, 60)`);
   });
 
   it("접힌 폴더 상자는 접힌 파일 상자처럼 아래 글자의 줄을 상자 아래에 잡아 둔다", () => {
