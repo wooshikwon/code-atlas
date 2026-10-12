@@ -3083,11 +3083,10 @@ async function summaryBusy(t, page) {
     await page.waitForSelector(`${face(extra.owner)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
     await settle(page);
     const both = await busyAt(page, extra.owner, node(extra.owner));
-    /** 안에 든 것의 수 배지가 상자의 오른쪽과 위로 나간 폭 */
+    /** 안에 든 것의 수 배지가 상자의 오른쪽과 위로 나간 폭. 오른쪽은 배지의 폭이 정수가 아니면 offset 값이 1px 어긋나므로 계산된 `right`로 읽는다. */
     const mark = await page.evaluate((sel) => {
       const badge = document.querySelector(sel);
-      const parent = badge?.offsetParent;
-      return badge == null ? null : { right: badge.offsetLeft + badge.offsetWidth - parent.clientWidth, above: -badge.offsetTop };
+      return badge == null ? null : { right: -parseFloat(getComputedStyle(badge).right), above: -badge.offsetTop };
     }, `${face(extra.owner)} .badge-inside`);
     t.check(
       "배지가 있는 접힌 상자는 도는 원을 왼쪽 위에, 안에 든 것의 수 배지를 오른쪽 위에 단다",
@@ -9723,7 +9722,7 @@ const entryMarks = (page, root) =>
 /** 진입점 표지. 굵은 체크를 SVG로 그리고 화면에 세모와 체크 글자를 적지 않는다. 사진은 `hf3-entry-mark-{이름}.png`로 남긴다. */
 async function entryMark(t, page) {
   const graph = await api("/api/graph");
-  const entries = graph.nodes.filter((n) => n.entry && !n.test);
+  const entries = graph.nodes.filter((n) => n.entry && !veiled(n));
   const glyphs = () => page.evaluate(() => [...document.body.innerText.matchAll(/[▶►✓✔]/g)].length);
   await load(page);
   await page.click(".legend-button");
@@ -9840,7 +9839,7 @@ const menuTokens = (page) =>
  */
 async function entry(t, page) {
   const graph = await api("/api/graph");
-  const entries = graph.nodes.filter((n) => n.entry && !n.test);
+  const entries = graph.nodes.filter((n) => n.entry && !veiled(n));
   const title = (n) => (n.kind === "module" ? `${n.id.replaceAll(".", "/")}.py` : null);
   await load(page);
   const ink = await colorOf(page, "--ink");
@@ -9992,7 +9991,7 @@ async function entry(t, page) {
     t.skip("진입점이 많으면 메뉴가 화면 안에서 스크롤한다", "sync-engine의 진입점은 두 개다 — --wide-url을 주지 않았다");
     return;
   }
-  const wide = (await api("/api/graph", wideUrl)).nodes.filter((n) => n.entry && !n.test);
+  const wide = (await api("/api/graph", wideUrl)).nodes.filter((n) => n.entry && !veiled(n));
   await page.setViewportSize({ width: VIEW.width, height: 260 });
   await page.goto(wideUrl);
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
