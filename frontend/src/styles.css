@@ -2418,23 +2418,13 @@ button.line-cell:focus-visible {
   flex: none;
 }
 
-/* 정보 패널의 구역 머리는 화살표를 구역의 왼쪽 여백(12px)에 그려 구역 이름과 본문의 왼쪽 끝을 맞춘다. */
-.info-panel-facts > .info-section-head,
-.info-panel-summary .info-section-head {
-  gap: 0;
-  margin-left: calc(-1 * var(--space-5));
+/* 구역 머리는 화살표를 구역 이름 뒤에 그려 구역 이름과 본문이 같은 안쪽 여백에서 시작한다. */
+.info-section-head .info-section-caret {
+  order: 1;
 }
 
-:is(.info-panel-facts, .info-panel-summary) .info-section-head .info-section-caret {
-  margin: 0 3.5px 0 2.5px;
-}
-
-:is(.info-panel-facts, .info-panel-summary) .info-section-head[aria-expanded="false"] .info-section-caret {
-  margin: 0 4px 0 4.5px;
-}
-
-:is(.info-panel-facts, .info-panel-summary) .info-section-brief {
-  margin-left: var(--space-3);
+.info-section-head .info-section-brief {
+  order: 2;
 }
 
 .info-section-head:hover .info-panel-label {
@@ -4341,20 +4331,6 @@ ol.summary-list {
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-1) var(--space-4);
-}
-
-/* 행 머리의 화살표는 창의 왼쪽 여백에 그려 도구 이름과 그 아래의 경로, 까닭, 시도 목록의 왼쪽 끝을 맞춘다. */
-.tools-head .info-section-head {
-  gap: 0;
-  margin-left: calc(-1 * var(--space-5));
-}
-
-.tools-head .info-section-caret {
-  margin: 0 3.5px 0 2.5px;
-}
-
-.tools-head .info-section-head[aria-expanded="false"] .info-section-caret {
-  margin: 0 4px 0 4.5px;
 }
 
 .tools-head .info-section-head:disabled {
