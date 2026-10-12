@@ -98,8 +98,8 @@ def _skipped(root: Path, rel: str, ignore: pathspec.PathSpec) -> bool:
     return (root / rel / "pyvenv.cfg").exists() or ignore.match_file(rel + "/")
 
 
-def _walk(root: Path, ignore: pathspec.PathSpec, suffixes: tuple[str, ...] = (".py",)) -> list[str]:
-    found: list[str] = []
+def _each(root: Path, ignore: pathspec.PathSpec, suffixes: tuple[str, ...]):
+    """훑지 않는 폴더와 `.gitignore`에 걸린 파일을 건너뛰며 `suffixes`로 끝나는 파일의 레포 루트 기준 경로를 하나씩 낸다."""
     stack = [root]
     while stack:
         current = stack.pop()
@@ -109,8 +109,16 @@ def _walk(root: Path, ignore: pathspec.PathSpec, suffixes: tuple[str, ...] = (".
                 if not _skipped(root, rel, ignore):
                     stack.append(entry)
             elif entry.suffix in suffixes and not ignore.match_file(rel):
-                found.append(rel)
-    return sorted(found)
+                yield rel
+
+
+def _walk(root: Path, ignore: pathspec.PathSpec, suffixes: tuple[str, ...] = (".py",)) -> list[str]:
+    return sorted(_each(root, ignore, suffixes))
+
+
+def any_source(root: Path) -> bool:
+    """`collect`가 모을 `.py` 파일이 하나라도 있다. 첫 파일을 찾으면 더 훑지 않는다."""
+    return next(_each(root, _load_gitignore(root), (".py",)), None) is not None
 
 
 def _read_pyproject(root: Path) -> tuple[list[str], list[str]]:

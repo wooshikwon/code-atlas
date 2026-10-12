@@ -105,7 +105,7 @@ def test_renamed_file_keeps_its_definitions_unmarked(served):
 
 def test_files_changed_after_the_analysis_show_only_the_file(served):
     client = served()
-    repo = client.app.state.analyzed.files.root
+    repo = client.app.state.workspace.analyzed.files.root
     (repo / ORDERS).write_text((repo / ORDERS).read_text() + "\n\ndef late():\n    return 1\n")
     body = client.get("/api/changes").json()
     assert {"path": ORDERS, "status": "modified", "stale": True, "test": False} in body["files"]
@@ -124,11 +124,11 @@ def test_head_files_are_read_once_per_head(served, monkeypatch):
 
     monkeypatch.setattr(api.git, "show", counted)
     first = client.get("/api/changes").json()
-    head = git.head(client.app.state.analyzed.files.root)
+    head = git.head(client.app.state.workspace.analyzed.files.root)
     assert shown == [(head, "src/shop/pricing.py")]
     assert client.get("/api/changes").json() == first and len(shown) == 1
 
-    repo = client.app.state.analyzed.files.root
+    repo = client.app.state.workspace.analyzed.files.root
     run(repo, "add", "-A")
     run(repo, "commit", "-q", "-m", "커밋")
     assert client.get("/api/changes").json()["nodes"] == {} and len(shown) == 1

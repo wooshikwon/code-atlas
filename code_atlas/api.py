@@ -1,9 +1,13 @@
 """HTTP 경로를 메모리의 분석 결과와 미사용 후보, 언어 서버 세션, 요약 캐시, git 변경 내용, 시점 비교에 연결하고, 빌드한 프론트엔드를 같은 포트에서 서빙한다.
 
-서버는 분석을 기다리지 않고 뜬다. lifespan이 `Runner`로 분석 태스크를 띄우고, 태스크가 낸 결과를 `install` 한 곳에서
+서버는 레포 하나를 열어 두거나 연 레포 없이 뜬다. 연 레포에 묶인 상태는 `Workspace` 하나에 모여 있고, `POST /api/open`과
+`POST /api/close`가 앞의 레포에 묶인 태스크와 세션을 닫은 뒤 그 객체를 통째로 바꾸며 `session`을 센다. 고른 폴더의
+판정은 `opening`이, 연 레포의 목록은 `settings`가 맡는다.
+
+서버는 분석을 기다리지 않고 뜬다. 레포를 열면 `Runner`로 분석 태스크를 띄우고, 태스크가 낸 결과를 `install` 한 곳에서
 응답이 읽는 상태에 넣으며 판 번호를 센다. 결과가 없는 동안 `/api/status`가 단계와 진행 수를 알리고 분석 결과를 읽는
-경로는 503을 낸다. `POST /api/reload`는 앞의 결과에서 증분으로 다시 분석한다. 세션과 분석 캐시는 `Runner`가 맡고
-서버가 내려갈 때 닫는다.
+경로는 503을, 연 레포가 없으면 409를 낸다. `POST /api/reload`는 앞의 결과에서 증분으로 다시 분석한다. 세션과 분석
+캐시는 `Runner`가 맡고 레포를 닫을 때와 서버가 내려갈 때 닫는다.
 
 시점 비교는 두 시점의 이름(커밋 해시나 `worktree`)을 받아 기준과 대상을 정리하고, 비교 태스크 하나가 `Snapshots`로 과거
 시점을 분석한 뒤 `compare.compare`의 판정을 응답으로 만든다. 요약 경로는 마지막 비교의 대상이 커밋인 동안 그 시점의
@@ -19,22 +23,25 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import asdict, astuple, replace
+from dataclasses import asdict, astuple, dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import TypeVar
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import compare, git
+from . import compare, git, opening, tools
 from .analyze import Analyzed, Progress
-from .collect import RepoFiles, SourceFile, collected, is_test_path, module_id
+from .collect import RepoFiles, SourceFile, any_source, collected, disk_path, is_test_path, module_id
 from .extract import FileFacts, extract
 from .lsp import Location, Session, to_utf8
 from .model import Analysis, Node, to_dict
 from .resolve import EXTERNAL_PREFIX, external_of
 from .runner import Runner
+from .settings import Settings
 from .snapshot import Snapshots
 from .summary import (
     MAX_QUESTION,
@@ -164,27 +171,70 @@ def _change(change: compare.NodeChange) -> dict:
     return found
 
 
+@dataclass
+class Workspace:
+    """연 레포 하나에 묶인 상태. 레포를 열 때 새로 만들고 닫을 때 통째로 버린다."""
+
+    runner: Runner
+    running: asyncio.Task | None = None  # 분석 태스크
+    closed: bool = False
+    revision: int = 0
+    draft: bool = False
+    analyzed: Analyzed | None = None
+    nodes: dict[str, Node] = field(default_factory=dict)
+    repo: dict | None = None
+    tree: dict | None = None
+    graph: dict | None = None
+    unused: dict | None = None
+    stale: tuple[Analyzed | None, float, dict] = (None, 0.0, NOT_STALE)
+    snapshots: Snapshots | None = None  # 첫 비교가 만드는 `Snapshots`
+    comparing: tuple[tuple[str, str], asyncio.Task] | None = None  # ((기준, 대상), 비교 태스크)
+    compare: Progress | None = None  # 비교할 시점을 분석하는 단계와 진행 수
+    compared: tuple[tuple, bytes] | None = None  # (기준, 대상, 판 번호, 바뀐 파일, 토막, 분석 뒤 바뀐 파일)과 그 응답
+    shown: tuple[str, Analyzed, dict[str, Node]] | None = None  # 마지막 비교의 대상이 커밋이면 (커밋 해시, 분석 결과, 노드)
+    seen: set[str] = field(default_factory=set)  # 이 레포를 연 동안 비교에 쓴 커밋
+    # (`HEAD` 해시, 경로) → 그 커밋의 추출 결과와 본문
+    heads: dict[tuple[str, str], tuple[FileFacts, str] | None] = field(default_factory=dict)
+
+
+class Folder(BaseModel):
+    """`POST /api/probe`의 본문."""
+
+    path: str
+
+
+class Opening(BaseModel):
+    """`POST /api/open`의 본문. `python`은 인터프리터를 고르는 화면에서 고른 경로다."""
+
+    path: str
+    python: str | None = None
+
+
 def create_app(
-    repo: str | Path,
+    repo: str | Path | None = None,
     python: str | None = None,
     on_ready: Callable[[Analysis], None] | None = None,
     style_guide: Path | None = None,
     cache: bool = True,
+    settings: Settings | None = None,
+    origin: str | None = None,
 ) -> FastAPI:
-    """앱을 만든다. `on_ready`는 첫 분석 결과가 나올 때 한 번 불린다. `cache`가 거짓이면 첫 분석이 캐시를 읽지 않는다."""
-    runner = Runner(repo, python, cache)
+    """앱을 만든다. `repo`를 주지 않으면 연 레포 없이 뜬다. `on_ready`는 레포마다 첫 분석 결과가 나올 때 한 번 불린다.
 
-    def install(analyzed: Analyzed, draft: bool) -> None:
+    `cache`가 거짓이면 `repo`의 첫 분석이 캐시를 읽지 않는다. `settings`를 주지 않으면 연 레포의 목록을 읽지도 쓰지도
+    않는다. `origin`을 주면 그 출처의 화면이 보내는 요청을 받는다.
+    """
+
+    def install(state: Workspace, analyzed: Analyzed, draft: bool) -> None:
         """분석 결과를 응답이 읽는 상태에 한꺼번에 넣고 판 번호를 1 늘린다. 응답이 쓰는 분석 결과는 이 함수만 바꾼다."""
         analysis, files = analyzed.analysis, analyzed.files
-        state = app.state
         state.analyzed = analyzed
         state.nodes = {n.id: n for n in analysis.nodes}
         state.repo = {
             "name": files.root.name,
             "root": str(files.root),
             "source_root": files.source_root,
-            "python": runner.python,
+            "python": state.runner.python,
             "stats": analysis.stats,
         }
         state.tree = {"entries": _tree(files, analysis)}
@@ -199,62 +249,76 @@ def create_app(
         if state.revision == 1 and on_ready is not None:
             on_ready(analysis)
 
-    async def begin() -> None:
-        """서버가 뜬 뒤의 첫 분석. 캐시로 조립한 결과가 먼저 나오면 그 결과를 넣고, 다시 물은 뒤의 결과로 한 번 더 바꾼다."""
-        await runner.run(landed=install)
+    async def begin(state: Workspace) -> None:
+        """레포를 연 뒤의 첫 분석. 캐시로 조립한 결과가 먼저 나오면 그 결과를 넣고, 다시 물은 뒤의 결과로 한 번 더 바꾼다."""
+        await state.runner.run(landed=partial(install, state))
         await app.state.summaries.unavailable()
 
-    async def reload() -> None:
+    async def reload(state: Workspace) -> None:
         """앞의 결과에서 증분으로 다시 분석해 결과를 바꾼다. 분석이 끝날 때까지 앞의 결과로 답한다."""
-        await runner.run(app.state.analyzed, install)
+        await state.runner.run(state.analyzed, partial(install, state))
+
+    def start(state: Workspace, chosen: str | None = None) -> None:
+        """레포의 첫 분석을 띄우고 연 레포의 목록에 적는다. `chosen`은 사용자가 직접 고른 인터프리터이고 그 레포의 값으로 저장한다."""
+        state.running = asyncio.create_task(begin(state))
+        # 실패한 까닭은 `/api/status`가 알린다.
+        state.running.add_done_callback(lambda task: task.cancelled() or task.exception())
+        if settings is not None:
+            settings.opened(disk_path(state.runner.repo), chosen)
+
+    async def shut(state: Workspace) -> None:
+        """레포에 묶인 분석 태스크와 비교 태스크를 멈추고 시점 분석, 세션, 분석 캐시를 닫는다."""
+        state.closed = True
+        tasks = [task for task in (state.running, state.comparing and state.comparing[1]) if task is not None]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if state.snapshots is not None:
+            state.snapshots.close()
+        await state.runner.close()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.summaries = Summaries(style_guide=style_guide)
-        running = app.state.running = asyncio.create_task(begin())
-        # 실패한 까닭은 `/api/status`가 알린다.
-        running.add_done_callback(lambda task: task.cancelled() or task.exception())
+        if app.state.workspace is not None:
+            start(app.state.workspace)
         try:
             yield
         finally:
-            running = app.state.running
-            running.cancel()
-            comparing = [app.state.comparing[1]] if app.state.comparing is not None else []
-            for task in comparing:
-                task.cancel()
-            await asyncio.gather(running, *comparing, return_exceptions=True)
-            if app.state.snapshots is not None:
-                app.state.snapshots.close()
-            await runner.close()
+            async with switching:
+                if app.state.workspace is not None:
+                    await shut(app.state.workspace)
 
     app = FastAPI(title="code-atlas", lifespan=lifespan)
-    app.state.runner = runner
-    app.state.revision = 0
-    app.state.draft = False
-    app.state.stale = (None, 0.0, NOT_STALE)
-    app.state.snapshots = None  # 첫 비교가 만드는 `Snapshots`
-    app.state.comparing = None  # ((기준, 대상), 비교 태스크)
-    app.state.compare = None  # 비교할 시점을 분석하는 단계와 진행 수
-    app.state.compared = None  # (기준, 대상, 판 번호, 바뀐 파일, 토막, 분석 뒤 바뀐 파일)과 그 응답
-    app.state.shown = None  # 마지막 비교의 대상이 커밋이면 (커밋 해시, 분석 결과, 노드)
+    if origin is not None:
+        app.add_middleware(CORSMiddleware, allow_origins=[origin], allow_methods=["*"], allow_headers=["*"])
+    app.state.workspace = Workspace(Runner(repo, python, cache)) if repo is not None else None
+    app.state.session = 1  # 레포를 열거나 닫을 때마다 1씩 는다
+    switching = asyncio.Lock()  # 열기와 닫기의 차례
     counting = threading.Lock()
-    seen: set[str] = set()  # 이번 실행에서 비교에 쓴 커밋
-    heads: dict[tuple[str, str], tuple[FileFacts, str] | None] = {}  # (`HEAD` 해시, 경로) → 그 커밋의 추출 결과와 본문
 
-    def analysed() -> None:
-        """분석 결과를 읽는 경로의 공통 의존 함수. 결과가 아직 없으면 503을 낸다."""
-        if app.state.revision == 0:
+    def analysed() -> Workspace:
+        """분석 결과를 읽는 경로의 공통 의존 함수. 연 레포를 돌려준다. 연 레포가 없으면 409를, 결과가 아직 없으면 503을 낸다."""
+        state = opened()
+        if state.revision == 0:
             raise HTTPException(status_code=503, detail="분석 중이다")
+        return state
 
-    ready = [Depends(analysed)]
+    def opened() -> Workspace:
+        state = app.state.workspace
+        if state is None:
+            raise HTTPException(status_code=409, detail="연 레포가 없다")
+        return state
 
-    def stale() -> dict:
+    ready = Depends(analysed)
+
+    def stale(state: Workspace) -> dict:
         """지금 판을 분석한 뒤 내용이 바뀐 파일, 생긴 파일, 없어진 파일의 수와 앞의 경로 `STALE_LISTED`개.
 
         `STALE_MEMO`초 안에 다시 물으면 앞의 값을 돌려준다. 수정 시각과 크기가 그대로인 파일은 읽지 않는다.
         """
         with counting:
-            analyzed, counted, found = app.state.stale
+            analyzed, counted, found = state.stale
             if analyzed is None or time.monotonic() - counted < STALE_MEMO:
                 return found
             try:
@@ -262,20 +326,20 @@ def create_app(
             except OSError:
                 return found
             found = {"count": len(paths), "paths": paths[:STALE_LISTED]}
-            if app.state.stale[0] is analyzed:
-                app.state.stale = (analyzed, time.monotonic(), found)
+            if state.stale[0] is analyzed:
+                state.stale = (analyzed, time.monotonic(), found)
             return found
 
-    def shown() -> tuple[Analyzed, dict[str, Node]]:
+    def shown(state: Workspace) -> tuple[Analyzed, dict[str, Node]]:
         """지금 보이는 시점의 분석 결과와 노드. 마지막 비교의 대상이 커밋이면 그 시점이고 그 밖에는 작업 중인 상태다."""
-        held = app.state.shown
-        return (held[1], held[2]) if held is not None else (app.state.analyzed, app.state.nodes)
+        held = state.shown
+        return (held[1], held[2]) if held is not None else (state.analyzed, state.nodes)
 
-    async def ask(path: str, request: Callable[[Session], Awaitable[T]]) -> T:
-        if path not in app.state.analyzed.texts:
+    async def ask(state: Workspace, path: str, request: Callable[[Session], Awaitable[T]]) -> T:
+        if path not in state.analyzed.texts:
             raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
         try:
-            return await request(await runner.session())
+            return await request(await state.runner.session())
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"언어 서버가 응답하지 않는다: {exc!r}") from exc
 
@@ -285,72 +349,156 @@ def create_app(
 
     @app.get("/api/status")
     def get_status() -> dict:
-        """분석의 단계와 진행 수, 결과 판 번호, 언어 서버의 상태, 지금 판을 분석한 뒤 바뀐 파일."""
-        state = app.state
-        progress = runner.progress
+        """분석의 단계와 진행 수, 결과 판 번호, 언어 서버의 상태, 지금 판을 분석한 뒤 바뀐 파일, 레포를 열고 닫은 횟수.
+
+        연 레포가 없으면 단계가 idle이다.
+        """
+        state = app.state.workspace
+        if state is None:
+            progress, lsp, error = Progress("idle"), "starting", None
+        else:
+            progress, lsp, error = state.runner.progress, state.runner.lsp, state.runner.error
         return {
             "phase": progress.phase,
             "done": progress.done,
             "total": progress.total,
-            "revision": state.revision,
-            "draft": state.draft,
-            "lsp": runner.lsp,
-            "error": runner.error,
-            "stale": stale(),
-            "compare": asdict(state.compare) if state.compare is not None else None,
+            "revision": state.revision if state is not None else 0,
+            "draft": state is not None and state.draft,
+            "lsp": lsp,
+            "error": error,
+            "stale": stale(state) if state is not None else NOT_STALE,
+            "compare": asdict(state.compare) if state is not None and state.compare is not None else None,
+            "session": app.state.session,
         }
 
-    @app.get("/api/repo", dependencies=ready)
-    def get_repo() -> dict:
-        return app.state.repo
+    @app.post("/api/probe")
+    async def post_probe(folder: Folder) -> dict:
+        """고른 폴더를 레포로 열기 전의 판정. 폴더를 읽지 못하면 까닭을 적은 400이다."""
+        try:
+            return asdict(await asyncio.to_thread(opening.probe, folder.path, settings))
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"폴더를 읽지 못했다: {exc}") from exc
+
+    def openable(target: Opening) -> tuple[Path, str]:
+        """열 폴더의 루트와 확인을 통과한 인터프리터. 열지 못하는 폴더와 인터프리터는 까닭을 적은 400이다."""
+        root = disk_path(Path(target.path).expanduser())
+        try:
+            if not root.is_dir():
+                raise HTTPException(status_code=400, detail=f"폴더가 없다: {root}")
+            if not any_source(root):
+                raise HTTPException(status_code=400, detail=f"파이썬 파일이 없는 폴더는 열지 못한다: {root}")
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"폴더를 읽지 못했다: {exc}") from exc
+        found = tools.python(root, target.python, settings)
+        if target.python is not None and found.source != tools.SAVED:
+            reason = next((attempt.detail for attempt in found.attempts if attempt.source == tools.SAVED), "실행하지 못했다")
+            raise HTTPException(status_code=400, detail=f"Python 인터프리터가 아니다: {target.python} ({reason})")
+        if found.path is None:
+            raise HTTPException(status_code=400, detail=f"{root.name}의 Python 인터프리터를 찾지 못했다")
+        return root, found.path
+
+    @app.post("/api/open")
+    async def post_open(target: Opening) -> dict:
+        """폴더를 레포로 연다. 앞의 레포를 닫은 뒤 새 레포의 첫 분석을 띄우고, 분석을 기다리지 않고 응답한다.
+
+        폴더가 없거나 `.py` 파일이 없거나 인터프리터가 확인을 통과하지 못하면 앞의 레포를 그대로 두고 까닭을 적은 400을 낸다.
+        `python`은 확인을 통과하면 그 레포의 인터프리터로 저장한다.
+        """
+        async with switching:
+            root, python = await asyncio.to_thread(openable, target)
+            if app.state.workspace is not None:
+                await shut(app.state.workspace)
+            app.state.workspace = Workspace(Runner(root, python))
+            start(app.state.workspace, python if target.python is not None else None)
+            app.state.session += 1
+            return {"session": app.state.session}
+
+    @app.post("/api/close")
+    async def post_close() -> dict:
+        """연 레포를 닫는다. 그 레포에 묶인 태스크와 세션이 끝난 뒤에 응답한다."""
+        async with switching:
+            await shut(opened())
+            app.state.workspace = None
+            app.state.session += 1
+            return {"session": app.state.session}
+
+    @app.get("/api/repos")
+    def get_repos() -> dict:
+        """연 적이 있는 레포. 마지막으로 연 레포가 앞이고, 폴더가 없어진 레포는 `exists`가 거짓이다."""
+        found = settings.repos() if settings is not None else []
+        return {
+            "repos": [
+                {"root": r.root, "name": Path(r.root).name, "python": r.python, "opened": r.opened, "exists": Path(r.root).is_dir()}
+                for r in found
+            ]
+        }
+
+    @app.delete("/api/repos")
+    def delete_repo(root: str) -> dict:
+        if settings is not None:
+            settings.forget(root)
+        return {"deleted": True}
+
+    @app.get("/api/repo")
+    def get_repo(state: Workspace = ready) -> dict:
+        return state.repo
 
     @app.post("/api/reload")
-    async def post_reload() -> dict:
+    async def post_reload(state: Workspace = Depends(opened)) -> dict:
         """레포를 다시 분석하고 새 `/api/repo` 값을 돌려준다. 분석하는 중에 들어온 요청은 그 분석이 끝나기를 함께 기다린다.
 
         분석하지 못하면 앞의 분석 결과를 그대로 두고 까닭을 적은 500을 돌려준다. 첫 분석이 실패해 결과가 없으면 첫 분석을 다시 한다.
+        기다리는 동안 레포를 닫으면 409를 돌려준다.
         """
-        state = app.state
+        if state.closed:
+            raise HTTPException(status_code=409, detail="레포를 닫았다")
         if state.revision == 0:
             if not state.running.done():
                 analysed()
-            runner.progress = Progress("collect")
-            state.running = asyncio.create_task(begin())
+            state.runner.progress = Progress("collect")
+            state.running = asyncio.create_task(begin(state))
         elif state.running.done():
-            state.running = asyncio.create_task(reload())
+            state.running = asyncio.create_task(reload(state))
+        running = state.running
         try:
-            await asyncio.shield(state.running)
+            await asyncio.shield(running)
+        except asyncio.CancelledError:
+            if not running.cancelled():
+                raise
+            raise HTTPException(status_code=409, detail="레포를 닫아 분석을 멈췄다") from None
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"다시 분석하지 못했다: {exc}") from exc
         return state.repo
 
-    @app.get("/api/tree", dependencies=ready)
-    def get_tree() -> dict:
-        return app.state.tree
+    @app.get("/api/tree")
+    def get_tree(state: Workspace = ready) -> dict:
+        return state.tree
 
-    @app.get("/api/graph", dependencies=ready)
-    def get_graph() -> dict:
+    @app.get("/api/graph")
+    def get_graph(state: Workspace = ready) -> dict:
         """작업 중인 상태의 그래프. 화면이 비교를 끄고 이 그래프로 돌아오므로 지금 보이는 시점도 작업 중인 상태로 되돌린다."""
-        app.state.shown = None
-        return app.state.graph
+        state.shown = None
+        return state.graph
 
-    @app.get("/api/file", dependencies=ready)
-    async def get_file(path: str, at: str | None = None) -> dict:
+    @app.get("/api/file")
+    async def get_file(path: str, at: str | None = None, state: Workspace = ready) -> dict:
         """분석할 때 읽은 본문. `at`이 커밋 해시면 그 커밋의 본문이고, 이번 실행에서 비교에 쓴 커밋만 받는다."""
         if at is None or at == git.WORKTREE:
-            analyzed: Analyzed = app.state.analyzed
-        elif at not in seen:
+            analyzed: Analyzed = state.analyzed
+        elif at not in state.seen:
             raise HTTPException(status_code=404, detail=f"비교에 쓴 커밋이 아니다: {at}")
         else:
-            analyzed = snapshots().held(at) or await snapshots().at(at, [app.state.analyzed])
+            analyzed = snapshots(state).held(at) or await snapshots(state).at(at, [state.analyzed])
         if path not in analyzed.texts:
             raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
         return {"path": path, "text": analyzed.texts[path]}
 
-    def snapshots() -> Snapshots:
-        if app.state.snapshots is None:
-            app.state.snapshots = Snapshots(app.state.analyzed.files.root, runner.python, runner.cache)
-        return app.state.snapshots
+    def snapshots(state: Workspace) -> Snapshots:
+        if state.closed:
+            raise HTTPException(status_code=409, detail="레포를 닫았다")
+        if state.snapshots is None:
+            state.snapshots = Snapshots(state.analyzed.files.root, state.runner.python, state.runner.cache)
+        return state.snapshots
 
     def moment(name: str) -> str:
         """시점의 이름(40자 커밋 해시나 `worktree`)인지 확인한다."""
@@ -358,9 +506,9 @@ def create_app(
             raise HTTPException(status_code=400, detail=f"시점의 이름이 아니다: {name}")
         return name
 
-    def versioned(*moments: str) -> tuple[Path, str]:
+    def versioned(state: Workspace, *moments: str) -> tuple[Path, str]:
         """레포 루트와 지금 커밋의 해시. 커밋이 있는 git 저장소가 아니거나 `moments`의 커밋이 없으면 404를 낸다."""
-        root = app.state.analyzed.files.root
+        root = state.analyzed.files.root
         head = git.head(root)
         if head is None:
             raise HTTPException(status_code=404, detail="커밋이 있는 git 저장소가 아니다")
@@ -369,7 +517,7 @@ def create_app(
                 raise HTTPException(status_code=404, detail=f"없는 커밋이다: {name}")
         return root, head
 
-    def arranged(a: str, b: str) -> tuple[str, str, str | None]:
+    def arranged(state: Workspace, a: str, b: str) -> tuple[str, str, str | None]:
         """고른 두 시점을 (기준, 대상, 갈라진 커밋)으로 정리한다.
 
         조상 관계면 조상 쪽이 기준이고, 아니면 두 시점이 갈라진 커밋이 기준이며 새 쪽이 대상이다. 작업 중인 상태는
@@ -377,7 +525,7 @@ def create_app(
         """
         if a == b:
             raise HTTPException(status_code=400, detail="같은 시점을 골랐다")
-        root, head = versioned(a, b)
+        root, head = versioned(state, a, b)
         picked = b if a == git.WORKTREE else a
         other = head if git.WORKTREE in (a, b) else b
         target = git.WORKTREE if git.WORKTREE in (a, b) else None
@@ -391,10 +539,10 @@ def create_app(
         newer = max((picked, other), key=lambda commit: (git.committed(root, commit) or 0, commit))
         return fork, target or newer, fork
 
-    @app.get("/api/history", dependencies=ready)
-    def get_history(skip: int = Query(0, ge=0), limit: int = Query(HISTORY_PAGE, ge=1, le=1000)) -> dict:
+    @app.get("/api/history")
+    def get_history(skip: int = Query(0, ge=0), limit: int = Query(HISTORY_PAGE, ge=1, le=1000), state: Workspace = ready) -> dict:
         """커밋 그래프의 `skip`번째 줄부터 `limit`줄. git 저장소가 아니면 `git`이 거짓이고 목록이 비어 있다."""
-        root = app.state.analyzed.files.root
+        root = state.analyzed.files.root
         states = git.status(root)
         if states is None:
             return {"git": False, "head": None, "branch": None, "default": None, "dirty": False, "commits": [], "more": False}
@@ -410,11 +558,11 @@ def create_app(
             "more": len(found) > limit,
         }
 
-    @app.get("/api/compare/stat", dependencies=ready)
-    def get_stat(a: str, b: str) -> dict:
+    @app.get("/api/compare/stat")
+    def get_stat(a: str, b: str, state: Workspace = ready) -> dict:
         """고른 두 시점의 기준·대상·갈라진 커밋과, 그 사이에 바뀐 분석 대상 `.py` 파일의 수와 줄 수."""
-        base, target, fork = arranged(moment(a), moment(b))
-        root = app.state.analyzed.files.root
+        base, target, fork = arranged(state, moment(a), moment(b))
+        root = state.analyzed.files.root
         added, deleted = _counted(git.hunks(root, base, target))
         return {
             "base": base,
@@ -465,14 +613,13 @@ def create_app(
         }
         return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
 
-    async def compared(base: str, target: str) -> bytes:
+    async def compared(state: Workspace, base: str, target: str) -> bytes:
         """두 시점을 분석하고 견준 응답. 대상이 커밋이면 대상을 먼저 분석하고 기준을 그 결과에서 증분으로 분석한다.
 
         대상이 작업 중인 상태면 돌고 있는 분석이 끝나기를 기다리고, 분석한 뒤 바뀐 파일이 있으면 다시 분석해 그 결과를
         쓴다. 다시 분석하지 못하면 앞의 결과를 쓰고 바뀐 파일은 파일의 상태와 줄 수만 낸다. 진행 수는
-        `app.state.compare`에 적는다.
+        `state.compare`에 적는다.
         """
-        state = app.state
         mine = asyncio.current_task()
 
         def report(progress: Progress | None) -> None:
@@ -484,14 +631,14 @@ def create_app(
             root = state.analyzed.files.root
             if target == git.WORKTREE:
                 if state.running.done() and await asyncio.to_thread(unsaved, state.analyzed):
-                    state.running = asyncio.create_task(reload())
+                    state.running = asyncio.create_task(reload(state))
                 await asyncio.gather(asyncio.shield(state.running), return_exceptions=True)
                 after, revision = state.analyzed, state.revision
                 near = [after]
             else:
-                after, revision = await snapshots().at(target, [state.analyzed], report), 0
+                after, revision = await snapshots(state).at(target, [state.analyzed], report), 0
                 near = [state.analyzed, after]
-            before = await snapshots().at(base, near, report)
+            before = await snapshots(state).at(base, near, report)
             report(Progress("build"))
             files, hunks, skip = await asyncio.gather(
                 asyncio.to_thread(git.changed, root, base, target),
@@ -502,29 +649,28 @@ def create_app(
             if state.compared is None or state.compared[0] != key:
                 body = await asyncio.to_thread(answer, base, target, revision, before, after, files, hunks, skip)
                 state.compared = (key, body)
-            seen.update(name for name in (base, target) if name != git.WORKTREE)
+            state.seen.update(name for name in (base, target) if name != git.WORKTREE)
             state.shown = None if target == git.WORKTREE else (target, after, {n.id: n for n in after.analysis.nodes})
             return state.compared[1]
         finally:
             report(None)
 
-    @app.post("/api/compare", dependencies=ready)
-    async def post_compare(ends: Ends) -> Response:
+    @app.post("/api/compare")
+    async def post_compare(ends: Ends, state: Workspace = ready) -> Response:
         """기준과 대상을 견준 그래프와 변경 내용. 두 시점의 분석이 끝난 뒤에 응답한다.
 
         같은 두 시점의 요청이 분석 중에 다시 오면 그 분석이 끝나기를 함께 기다리고, 다른 두 시점의 요청이 오면 앞의
-        분석을 멈추고 앞의 요청에 409를 돌려준다. 분석하지 못하면 까닭을 적은 500을 돌려준다.
+        분석을 멈추고 앞의 요청에 409를 돌려준다. 기다리는 동안 레포를 닫아도 409다. 분석하지 못하면 까닭을 적은 500을 돌려준다.
         """
         base, target = moment(ends.base), moment(ends.target)
         if base == git.WORKTREE or base == target:
             raise HTTPException(status_code=400, detail="기준은 대상과 다른 커밋이어야 한다")
-        await asyncio.to_thread(versioned, base, target)
-        state = app.state
+        await asyncio.to_thread(versioned, state, base, target)
         current = state.comparing
         if current is None or current[0] != (base, target) or current[1].done():
             if current is not None:
                 current[1].cancel()
-            task = asyncio.create_task(compared(base, target))
+            task = asyncio.create_task(compared(state, base, target))
             task.add_done_callback(lambda task: task.cancelled() or task.exception())
             state.comparing = current = ((base, target), task)
         try:
@@ -532,45 +678,47 @@ def create_app(
         except asyncio.CancelledError:
             if not current[1].cancelled():
                 raise
+            if state.comparing is current:
+                raise HTTPException(status_code=409, detail="레포를 닫아 비교를 멈췄다") from None
             raise HTTPException(status_code=409, detail="다른 두 시점의 비교가 시작되어 이 비교를 멈췄다") from None
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"비교하지 못했다: {exc}") from exc
 
-    @app.get("/api/hover", dependencies=ready)
-    async def get_hover(path: str, line: int = Query(ge=1), col: int = Query(ge=0)) -> dict:
-        hover = await ask(path, lambda session: session.hover(path, line, col, LSP_TIMEOUT))
+    @app.get("/api/hover")
+    async def get_hover(path: str, line: int = Query(ge=1), col: int = Query(ge=0), state: Workspace = ready) -> dict:
+        hover = await ask(state, path, lambda session: session.hover(path, line, col, LSP_TIMEOUT))
         if hover is None:
             return {"markdown": None, "range": None}
         return {"markdown": hover.markdown, "range": hover.range}
 
-    @app.get("/api/definition", dependencies=ready)
-    async def get_definition(path: str, line: int = Query(ge=1), col: int = Query(ge=0)) -> dict:
-        locations = await ask(path, lambda session: session.definition_at(path, line, col, LSP_TIMEOUT))
-        return {"targets": [_target(loc, app.state.analyzed, app.state.nodes) for loc in locations]}
+    @app.get("/api/definition")
+    async def get_definition(path: str, line: int = Query(ge=1), col: int = Query(ge=0), state: Workspace = ready) -> dict:
+        locations = await ask(state, path, lambda session: session.definition_at(path, line, col, LSP_TIMEOUT))
+        return {"targets": [_target(loc, state.analyzed, state.nodes) for loc in locations]}
 
-    def summarized(node_id: str) -> str:
+    def summarized(state: Workspace, node_id: str) -> str:
         """노드 id를 설명을 만들 프롬프트로 바꾼다."""
-        analyzed, nodes = shown()
+        analyzed, nodes = shown(state)
         prompt = prompt_of(nodes, analyzed.analysis.edges, analyzed.texts, node_id)
         if prompt is None:
             raise HTTPException(status_code=404, detail=f"요약할 노드가 아니다: {node_id}")
         return prompt
 
-    @app.get("/api/summary", dependencies=ready)
-    async def get_summary(node: str) -> dict:
-        prompt = summarized(node)
+    @app.get("/api/summary")
+    async def get_summary(node: str, state: Workspace = ready) -> dict:
+        prompt = summarized(state, node)
         summaries: Summaries = app.state.summaries
         reason = await summaries.unavailable()
-        summary, stale = summaries.kept(prompt, Subject(app.state.repo["root"], "node", node))
+        summary, stale = summaries.kept(prompt, Subject(state.repo["root"], "node", node))
         return {"summary": summary, "stale": stale, "available": reason is None, "reason": reason}
 
-    @app.get("/api/summaries", dependencies=ready)
-    def get_summaries() -> dict:
+    @app.get("/api/summaries")
+    def get_summaries(state: Workspace = ready) -> dict:
         """노드마다 남겨 둔 가장 최근 요약의 요지. 지금 보이는 시점의 분석 결과에 있는 노드만 담는다."""
-        kept = app.state.summaries.latest.listed(app.state.repo["root"], "node")
-        _, nodes = shown()
+        kept = app.state.summaries.latest.listed(state.repo["root"], "node")
+        _, nodes = shown(state)
         found = [{"node": k.name, "lead": lead_of(k.text)} for k in kept if k.name in nodes]
         return {"summaries": sorted(found, key=lambda s: s["node"])}
 
@@ -590,10 +738,10 @@ def create_app(
         except SummaryError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @app.post("/api/summary", dependencies=ready)
-    async def make_summary(request: Request, node: str, refresh: bool = False) -> dict:
-        subject = Subject(app.state.repo["root"], "node", node)
-        summary = await made(request, app.state.summaries.make(summarized(node), refresh, "node", subject))
+    @app.post("/api/summary")
+    async def make_summary(request: Request, node: str, refresh: bool = False, state: Workspace = ready) -> dict:
+        subject = Subject(state.repo["root"], "node", node)
+        summary = await made(request, app.state.summaries.make(summarized(state, node), refresh, "node", subject))
         return {"summary": summary.text, "usage": summary.usage and asdict(summary.usage)}
 
     def between(base: str | None, target: str | None, old_start: int | None, old_end: int | None) -> tuple[int, int] | None:
@@ -606,6 +754,7 @@ def create_app(
         return old_start, old_end
 
     def explained(
+        state: Workspace,
         path: str,
         start: int,
         end: int,
@@ -620,21 +769,21 @@ def create_app(
         `code`는 두 시점을 엮은 문서에서 고른 범위의 표시 붙은 본문이다. `old`가 있으면 삭제된 줄이 든 범위이고 설명을 그 두
         시점의 비교에 묶는다. 없으면 대상 시점의 파일과 줄 범위에 묶는다.
         """
-        analyzed, nodes = shown()
+        analyzed, nodes = shown(state)
         prompt = range_prompt_of(
             nodes, analyzed.analysis.edges, analyzed.texts, path, start, end, code, old, question or None
         )
         if prompt is None:
             raise HTTPException(status_code=404, detail=f"설명할 코드 범위가 아니다: {path} {start}~{end}줄")
-        root = app.state.repo["root"]
+        root = state.repo["root"]
         if old is not None:
             name = asked_name(compared_name(base, target, path, old, (start, end)), question)
             return prompt, Subject(root, "compared", name, digest_of(code), question)
         digest = digest_of(range_code(analyzed.texts, path, start, end))
         return prompt, Subject(root, "range", asked_name(f"{path}:{start}-{end}", question), digest, question)
 
-    @app.get("/api/explanations", dependencies=ready)
-    def get_explanations(path: str, base: str | None = None, target: str | None = None) -> dict:
+    @app.get("/api/explanations")
+    def get_explanations(path: str, base: str | None = None, target: str | None = None, state: Workspace = ready) -> dict:
         """파일에 남겨 둔 코드 범위 설명. 설명을 만든 뒤 그 줄 범위의 코드가 달라졌으면 `stale`이 참이다.
 
         같은 줄 범위에 질문이 다른 설명이 여럿이면 만든 순서로 담고, `question`은 그 설명의 질문(없으면 빈 글)이다.
@@ -643,9 +792,9 @@ def create_app(
         만든 때의 표시 붙은 본문의 지문이고, 지금 본문과 같은지는 그 본문을 가진 화면이 가린다. 두 시점을 넘기면 대상 시점에 없는
         파일도 404가 아니다.
         """
-        analyzed, _ = shown()
+        analyzed, _ = shown(state)
         latest = app.state.summaries.latest
-        root = app.state.repo["root"]
+        root = state.repo["root"]
         if path not in analyzed.texts and (base is None or target is None):
             raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
         found = []
@@ -670,7 +819,7 @@ def create_app(
                 compared.append({**lines, "text": kept.text, "digest": kept.digest, "created": kept.created})
         return {**listed, "compared": sorted(compared, key=lambda e: (e["old_start"], e["old_end"], e["start"]))}
 
-    @app.post("/api/explanation", dependencies=ready)
+    @app.post("/api/explanation")
     async def make_explanation(
         request: Request,
         path: str,
@@ -683,6 +832,7 @@ def create_app(
         old_end: int | None = Query(None, ge=1),
         code: str | None = Body(None, embed=True),
         question: str | None = Body(None, embed=True),
+        state: Workspace = ready,
     ) -> dict:
         """코드 범위의 설명을 만든다. 두 시점을 엮은 문서에서 고른 범위에 바뀐 줄이 있으면 본문 `code`에 표시 붙은 본문이 온다.
 
@@ -695,12 +845,12 @@ def create_app(
         if old is not None and code is None:
             raise HTTPException(status_code=422, detail="두 시점의 비교에 묶는 범위는 표시 붙은 본문 code를 넘긴다")
         asked = (question or "").strip()[:MAX_QUESTION]
-        prompt, subject = explained(path, start, end, code, base, target, old, asked)
+        prompt, subject = explained(state, path, start, end, code, base, target, old, asked)
         explanation = await made(request, app.state.summaries.make(prompt, refresh, "range", subject))
         lines = {"start": start, "end": end, "question": asked}
         return {**lines, "text": explanation.text, "stale": False, "usage": explanation.usage and asdict(explanation.usage)}
 
-    @app.delete("/api/explanation", dependencies=ready)
+    @app.delete("/api/explanation")
     def delete_explanation(
         path: str,
         start: int = Query(ge=0),
@@ -710,32 +860,34 @@ def create_app(
         old_start: int | None = Query(None, ge=1),
         old_end: int | None = Query(None, ge=1),
         question: str = "",
+        state: Workspace = ready,
     ) -> dict:
         old = between(base, target, old_start, old_end)
         latest = app.state.summaries.latest
         if old is None:
-            latest.delete(app.state.repo["root"], "range", asked_name(f"{path}:{start}-{end}", question))
+            latest.delete(state.repo["root"], "range", asked_name(f"{path}:{start}-{end}", question))
         else:
             name = asked_name(compared_name(base, target, path, old, (start, end)), question)
-            latest.delete(app.state.repo["root"], "compared", name)
+            latest.delete(state.repo["root"], "compared", name)
         return {"deleted": True}
 
-    def at_head(head: str, path: str, source_root: str) -> tuple[FileFacts, str] | None:
+    def at_head(state: Workspace, head: str, path: str, source_root: str) -> tuple[FileFacts, str] | None:
         """`HEAD`에 든 파일의 추출 결과와 본문. (`HEAD` 해시, 경로)로 기억하고 `HEAD`가 바뀌면 앞의 것을 버린다."""
         key = (head, path)
+        heads = state.heads
         if key not in heads:
             for old in [k for k in heads if k[0] != head]:
                 del heads[old]
-            text = git.show(app.state.analyzed.files.root, head, path)
+            text = git.show(state.analyzed.files.root, head, path)
             is_init = path == "__init__.py" or path.endswith("/__init__.py")
             file = SourceFile(path, module_id(path, source_root), is_test_path(path), is_init)
             heads[key] = (extract(file, text, frozenset()), text) if text is not None else None
         return heads[key]
 
-    @app.get("/api/changes", dependencies=ready)
-    def get_changes() -> dict:
+    @app.get("/api/changes")
+    def get_changes(state: Workspace = ready) -> dict:
         """마지막 커밋 뒤에 바뀐 파일과 정의. 정의의 판정은 `HEAD`와 작업 중인 상태를 견준 `compare.definitions`의 것이다."""
-        analyzed: Analyzed = app.state.analyzed
+        analyzed: Analyzed = state.analyzed
         root = analyzed.files.root
         stale = analyzed.stale()
         found = git.status(root)
@@ -751,11 +903,11 @@ def create_app(
         committed = {
             path: found_at
             for path in (c.old or c.path for c in files if c.status != git.ADDED)
-            if (found_at := at_head(head, path, analyzed.files.source_root)) is not None
+            if (found_at := at_head(state, head, path, analyzed.files.source_root)) is not None
         }
         changes, _ = compare.definitions(
             {path: facts for path, (facts, _) in committed.items()},
-            list(app.state.nodes.values()),
+            list(state.nodes.values()),
             {path: text for path, (_, text) in committed.items()},
             analyzed.texts,
             files,
@@ -763,13 +915,13 @@ def create_app(
             stale,
         )
         nodes: dict[str, str] = {}
-        for node in app.state.nodes.values():
-            state = states.get(node.path)
-            if state is None or state == git.DELETED:
+        for node in state.nodes.values():
+            status = states.get(node.path)
+            if status is None or status == git.DELETED:
                 continue
             # 파일의 노드는 늘 `git status`의 상태로 넣고, 그 안의 정의는 `HEAD`의 정의와 견준 판정으로 넣는다.
             if node.kind in ("module", "package"):
-                nodes[node.id] = state
+                nodes[node.id] = status
             elif (change := changes.get(node.id)) is not None and change.change in (git.ADDED, git.MODIFIED):
                 nodes[node.id] = change.change
         for path in stale:
@@ -784,9 +936,9 @@ def create_app(
             "nodes": nodes,
         }
 
-    @app.get("/api/unused", dependencies=ready)
-    def get_unused() -> dict:
-        return app.state.unused
+    @app.get("/api/unused")
+    def get_unused(state: Workspace = ready) -> dict:
+        return state.unused
 
     @app.get("/{path:path}", include_in_schema=False)
     def get_static(path: str) -> FileResponse:
