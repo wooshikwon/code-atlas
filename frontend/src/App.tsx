@@ -17,6 +17,7 @@ import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
 import { Palette } from "./search/Palette";
 import { watch } from "./state/changes";
+import { useCompare } from "./state/compare";
 import { busy, reload } from "./state/reload";
 import { litOf, pinned, useAtlas } from "./state/store";
 import { FileTree } from "./tree/FileTree";
@@ -85,7 +86,7 @@ export function App() {
 
   useEffect(() => (opened ? watch() : undefined), [opened]);
 
-  // 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
+  // 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 비교 창이 펴져 있으면 그 창만 접는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
   // 정보 패널에 연 파일이 있으면 그 파일만 닫는다. 함수 시점 뷰에서는 구조 뷰로 돌아가고, 구조 뷰에서는 선택을 푼다.
   // 새로고침 단축키는 새로고침 버튼을 누른 것과 같다. 팔레트와 펼친 메뉴, 필터 창, 고정한 선의 말풍선을 닫고 새로고침한다.
   useEffect(
@@ -95,7 +96,14 @@ export function App() {
         forward: () => useAtlas.getState().forward(),
         escape: () => {
           const state = useAtlas.getState();
-          if (state.paletteOpen || usePick.getState().close() || state.cancelArranging()) {
+          if (state.paletteOpen) {
+            return;
+          }
+          if (useCompare.getState().open) {
+            useCompare.getState().toggle();
+            return;
+          }
+          if (usePick.getState().close() || state.cancelArranging()) {
             return;
           }
           if (useOpened.getState().path !== null) {
