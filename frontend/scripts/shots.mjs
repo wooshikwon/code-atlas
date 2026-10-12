@@ -174,7 +174,7 @@ function columnsOf(list, skip = () => false) {
 }
 
 /**
- * 관계 그래프 영역 area, 정보 패널 panel, 패널이 가리지 않는 가장 넓은 사각형 free, 패널과 왼쪽 아래 칸(펼친 칸과 버튼 줄)이
+ * 관계 그래프 영역 area, 정보 패널 panel, 패널이 가리지 않는 가장 넓은 사각형 free, 패널과 왼쪽 아래 칸(펼친 칸과 버튼 줄), 비교 버튼이
  * 모두 가리지 않는 가장 넓은 사각형 clear(frontend/src/graph/viewport.ts의 freeRect와 같은 계산)
  */
 const stageOf = (page) =>
@@ -182,7 +182,7 @@ const stageOf = (page) =>
     const plain = (r) => ({ x: r.left, y: r.top, width: r.width, height: r.height });
     const area = plain(document.querySelector(".graph").getBoundingClientRect());
     const panel = plain(document.querySelector(".info-panel").getBoundingClientRect());
-    const dock = [...document.querySelectorAll(".dock-panels > *, .dock-buttons")].map((element) => plain(element.getBoundingClientRect()));
+    const dock = [...document.querySelectorAll(".dock-panels > *, .dock-buttons, .compare-button")].map((element) => plain(element.getBoundingClientRect()));
     const [right, bottom] = [area.x + area.width, area.y + area.height];
     const clampX = (x) => Math.max(area.x, Math.min(x, right));
     const clampY = (y) => Math.max(area.y, Math.min(y, bottom));
