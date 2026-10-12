@@ -31,7 +31,8 @@ import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { compared, type Compared } from "./compare";
 import { cycles } from "./cycles";
-import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
+import { EdgeLayer } from "./edges/EdgeLayer";
+import { Markers, useFlowEdges } from "./edges/OrthogonalEdge";
 import { useFlight, useFlying } from "./flight";
 import { DIM, flow, opacities, type Flow } from "./flow";
 import { functionCounts, labelOf, layout, packId, packLabel, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
@@ -696,20 +697,13 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
     >
       <Markers />
       <ReactFlow
-        edgesFocusable={false}
         nodes={drawnNodes}
-        edges={edges}
         nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}
         onNodeMouseEnter={onNodeOver}
         onNodeMouseMove={onNodeOver}
         onNodeMouseLeave={onNodeLeave}
-        onEdgeClick={aim.onEdgeClick}
-        onEdgeMouseEnter={aim.onEdgeEnter}
-        onEdgeMouseMove={aim.onEdgeMove}
-        onEdgeMouseLeave={aim.onEdgeLeave}
         onPaneClick={onPaneClick}
         onMoveStart={grabbed}
         onMove={released}
@@ -723,6 +717,7 @@ function StructureView({ home, reset }: { home: RefObject<Viewport | null>; rese
         maxZoom={ZOOM_MAX}
         proOptions={{ hideAttribution: true }}
       >
+        <EdgeLayer edges={edges} onClick={aim.onEdgeClick} onEnter={aim.onEdgeEnter} onMove={aim.onEdgeMove} onLeave={aim.onEdgeLeave} />
         {reached !== null && !moving && !flying && scene.layout.boxes.has(reached.id) && (
           <ViewportPortal>
             <span

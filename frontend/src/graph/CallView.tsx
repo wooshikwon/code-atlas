@@ -19,7 +19,8 @@ import { useAim } from "./aim";
 import { Arranging, watchLayout } from "./arranging";
 import { liveGraph } from "./compare";
 import { callEdges, callElk, callLabel, callLane, callSize, callTitle, callview, fileLabel, type Calls } from "./calls";
-import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
+import { EdgeLayer } from "./edges/EdgeLayer";
+import { Markers, useFlowEdges } from "./edges/OrthogonalEdge";
 import { useFlight, useFlying } from "./flight";
 import { fromElk, measureText, runElk, type Box, type Layout } from "./layout";
 import { Dock } from "./Dock";
@@ -294,20 +295,13 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     >
       <Markers />
       <ReactFlow
-        edgesFocusable={false}
         nodes={drawnNodes}
-        edges={edges}
         nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}
         onNodeMouseEnter={onNodeOver}
         onNodeMouseMove={onNodeOver}
         onNodeMouseLeave={onLeave}
-        onEdgeClick={aim.onEdgeClick}
-        onEdgeMouseEnter={aim.onEdgeEnter}
-        onEdgeMouseMove={aim.onEdgeMove}
-        onEdgeMouseLeave={aim.onEdgeLeave}
         onPaneClick={onPaneClick}
         onMoveStart={grabbed}
         nodesDraggable={false}
@@ -318,7 +312,9 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
         minZoom={ZOOM_MIN}
         maxZoom={ZOOM_MAX}
         proOptions={{ hideAttribution: true }}
-      />
+      >
+        <EdgeLayer edges={edges} onClick={aim.onEdgeClick} onEnter={aim.onEdgeEnter} onMove={aim.onEdgeMove} onLeave={aim.onEdgeLeave} />
+      </ReactFlow>
       <Dock />
       <Arranging />
       {aim.bubble}

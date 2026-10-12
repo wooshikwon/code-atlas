@@ -1,6 +1,7 @@
 // 그릴 선과 배치를 합쳐 노드와 선 컴포넌트가 그대로 그리는 값을 만든다.
 import type { AtlasNode, EdgeGroup, EdgeKind, Graph } from "../api/types";
 import { siblings } from "./columns";
+import { cornerRadii, pathOf } from "./edges/strokes";
 import {
   ARROW_LENGTH,
   BADGE_HEIGHT,
@@ -447,7 +448,7 @@ const ROW = 64;
 /** 숫자를 놓을 곳을 찾아 구간을 따라 옮기는 걸음 */
 const NUMBER_STEP = 4;
 /** 꺾이는 모서리의 둥근 반지름. `roundedPath`의 기본값이다. */
-const CORNER = 4;
+export const CORNER = 4;
 
 function overlap(a: Box, b: Box): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
@@ -660,23 +661,9 @@ export function trunkViews(views: EdgeView[], lettered: Box[]): Lines {
   return { views: parted, trunks, blocked: blockedOf(parted, trunks, lettered) };
 }
 
-/** 꺾이는 점마다 반지름 radius 원호를 넣은 SVG 경로. 선분이 짧으면 반지름을 선분 절반으로 줄인다. */
-export function roundedPath(points: Point[], radius = 4): string {
-  if (points.length === 0) {
-    return "";
-  }
-  let d = `M${points[0].x},${points[0].y}`;
-  for (let i = 1; i < points.length - 1; i++) {
-    const prev = points[i - 1];
-    const here = points[i];
-    const next = points[i + 1];
-    const r = Math.min(radius, distance(prev, here) / 2, distance(here, next) / 2);
-    const a = toward(here, prev, r);
-    const b = toward(here, next, r);
-    d += ` L${a.x},${a.y} Q${here.x},${here.y} ${b.x},${b.y}`;
-  }
-  const last = points[points.length - 1];
-  return `${d} L${last.x},${last.y}`;
+/** 꺾이는 점마다 반지름 radius의 곡선을 넣은 SVG 경로. 선분이 짧으면 반지름을 선분 절반으로 줄인다. */
+export function roundedPath(points: Point[], radius = CORNER): string {
+  return pathOf(points, cornerRadii(points, radius));
 }
 
 /** 경로를 따라 시작점에서 length만큼 간 점 */

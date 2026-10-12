@@ -1,10 +1,9 @@
 // 커서 밑을 지나는 선의 집합으로 선의 hover와 클릭을 판정한다. 구조 뷰와 함수 시점 뷰가 함께 쓴다. 화면을 끄는 동안에는 hover를 받지 않는다.
 // 선에 마우스를 올리면 그 구간을 지나는 선을 강조하고 말풍선(`LineBubble.tsx`)에 선마다 푼 줄(`rows.ts`)을 적는다.
 // 선을 누르면 선이 하나여도 그 말풍선을 그곳에 고정하고, 줄의 출발·도착 이름을 누르면 그 노드로, 관계를 누르면 코드 줄 목록으로 간다.
-import { useReactFlow, type EdgeMouseHandler } from "@xyflow/react";
+import { useReactFlow } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { create } from "zustand";
-import type { FlowEdge } from "./edges/OrthogonalEdge";
 import type { Box, Point } from "./layout";
 import { LineBubble, moveBubble, type Bubble } from "./LineBubble";
 import type { CellName, LineRow } from "./rows";
@@ -117,7 +116,7 @@ export function useAim({ lines, boxes, name, rows, only, skip, go, open }: AimOp
     usePick.getState().close();
   };
   /** 마우스 버튼을 누른 동안(화면을 끄는 동안)에는 선을 강조하지 않고 말풍선을 띄우지 않는다. */
-  const over: EdgeMouseHandler<FlowEdge> = (event) => {
+  const over = (event: ReactMouseEvent) => {
     const shown = usePick.getState().bubble;
     if (shown?.pinned === true) {
       return;
@@ -136,7 +135,7 @@ export function useAim({ lines, boxes, name, rows, only, skip, go, open }: AimOp
       usePick.getState().show({ x: event.clientX, y: event.clientY, rows: table(views), pinned: false, lit: keys, lines: drawn });
     }
   };
-  const onEdgeClick: EdgeMouseHandler<FlowEdge> = (event) => {
+  const onEdgeClick = (event: ReactMouseEvent) => {
     tooltip.hide();
     setAimed([]);
     usePick.getState().close();

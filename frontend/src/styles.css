@@ -1032,17 +1032,56 @@ ul {
   font-size: var(--text-md);
 }
 
-.react-flow__node,
-.edge {
+.react-flow__node {
   transition: opacity 200ms ease-out;
 }
 
-/* 선 하나만 그리는 선 묶음은 진하기를 선의 불투명도로 받는다(edges/OrthogonalEdge.tsx의 shadeStyle). */
+/* 선 묶음의 진하기(edges/OrthogonalEdge.tsx의 shadeStyle). 긴 선은 선의 불투명도로, 장식 묶음(.edge-part)은 묶음의 불투명도로 이 값을 받는다.
+   묶음 전체에 불투명도를 주면 브라우저가 묶음을 덮는 크기의 버퍼를 따로 만들어 합성하므로, 가르지 않고 그리는 묶음(data-shade="group")에만 준다.
+   수로 등록해야 값이 바뀔 때 전환 효과가 걸린다. */
+@property --shade {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
 .edge {
-  transition-property: opacity, stroke-opacity;
+  transition: --shade 200ms ease-out;
+}
+
+:is(.edge-line, .edge-stroke) {
+  stroke-opacity: var(--shade);
+}
+
+.edge-part,
+.edge[data-shade="group"] {
+  opacity: var(--shade);
+}
+
+:is(.edge-part, .edge[data-shade="group"]) :is(.edge-line, .edge-stroke) {
+  stroke-opacity: 1;
+}
+
+/* 갈라 그린 묶음의 경로. 긴 선과 장식 밑의 토막(.edge-stroke)이 대신 그리고, 이 경로는 선의 길과 모양을 읽는 데만 쓴다. */
+.edge-line[data-cut] {
+  visibility: hidden;
+}
+
+.edge-stroke {
+  pointer-events: none;
+}
+
+/* 마우스를 올린 선은 위층에 한 번 더 그리고(.edge-raised) 아래층의 묶음은 누름 영역만 남긴다(edges/EdgeLayer.tsx). */
+.react-flow__edge[data-raised] > .edge > :not(.edge-hit) {
+  visibility: hidden;
+}
+
+.edge-raised {
+  pointer-events: none;
 }
 
 .graph[data-moving] .edge {
+  visibility: hidden;
   opacity: 0 !important;
   pointer-events: none;
   transition: none;
@@ -1714,17 +1753,18 @@ ul {
 }
 
 .edge-line,
+.edge-stroke,
 .legend-edge {
   fill: none;
   stroke-width: 1.5;
 }
 
-.edge-use .edge-line,
+.edge-use :is(.edge-line, .edge-stroke),
 .legend-edge.edge-use {
   stroke-dasharray: 5 3;
 }
 
-.edge-derive .edge-line,
+.edge-derive :is(.edge-line, .edge-stroke),
 .legend-edge.edge-derive {
   stroke-width: 3;
 }
@@ -1738,6 +1778,7 @@ ul {
 }
 
 .edge-line,
+.edge-stroke,
 .legend-edge {
   stroke: var(--tone);
 }
@@ -1783,11 +1824,11 @@ ul {
 }
 
 /* 선을 눌러 온 상태에서 지나온 선. 고른 노드에 닿는 다른 선과 같은 본문 잉크에 마우스를 올린 선의 굵기로 그리고 빛은 두르지 않는다. */
-.edge[data-via] .edge-line {
+.edge[data-via] :is(.edge-line, .edge-stroke) {
   stroke-width: 2.5;
 }
 
-.edge-derive[data-via] .edge-line {
+.edge-derive[data-via] :is(.edge-line, .edge-stroke) {
   stroke-width: 4;
 }
 
@@ -2835,11 +2876,11 @@ ol.summary-list {
 
 /* 경로의 걸음은 3px로 그리고 실행 선이 없는 생성자 이음과 오버라이드 이음은 점선으로 그린다. 색과 불투명도는 graph/scope.ts의
    drawn이 본문 잉크 100%로 정한다. 마우스를 올리면 다른 선처럼 1px 굵어진다. */
-.edge[data-route] .edge-line {
+.edge[data-route] :is(.edge-line, .edge-stroke) {
   stroke-width: 3;
 }
 
-.edge:is([data-route="init"], [data-route="overridden"]) .edge-line {
+.edge:is([data-route="init"], [data-route="overridden"]) :is(.edge-line, .edge-stroke) {
   stroke-dasharray: 4 3;
 }
 

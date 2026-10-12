@@ -3,14 +3,13 @@
 // 강조하는 경로의 걸음은 `data-route`에 걸음 종류를 받아 굵게 그리고, 선을 눌러 온 상태에서 지나온 선은 `data-via`를 받아 1px 굵게 그린다.
 // 순환 의존 표시가 켜진 동안의 순환 선만 critical 색으로 그린다.
 // 시점 비교에서 삭제된 관계만 든 선은 `data-gone`을 받아 마우스를 올려도 진하기를 올리지 않고, 수 대신 빨강 점(`.edge-gone`)을 그린다.
-import type { Edge, EdgeProps, EdgeTypes } from "@xyflow/react";
-import { useMemo, useRef, type CSSProperties } from "react";
+import { useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import type { EdgeGroup } from "../../api/types";
 import { LAYER } from "../layers";
 import { lifted, type EdgeKey, type Tone } from "../scope";
-import type { Point } from "../layout";
-import { emphasized, MARK_SIZE, ownNumbers, roundedPath, trunkShade, type EdgeView, type Lines, type TrunkView } from "../view";
-import { Trunk } from "./Trunk";
+import { ARROW_LENGTH, NUMBER_HEIGHT, numberWidth, type Box, type Point } from "../layout";
+import { CORNER, emphasized, MARK_SIZE, ownNumbers, roundedPath, trunkShade, type EdgeView, type Lines, type TrunkView } from "../view";
+import { split, type Cover } from "./strokes";
 
 /**
  * pointed는 마우스를 올린 선이고 cycle은 순환 의존 표시가 칠하는 순환 선이다. whole은 줄기에 든 선이 줄기 위에 전체 경로를 그리는지다.
@@ -18,13 +17,21 @@ import { Trunk } from "./Trunk";
  * 줄기의 들어오는 합계를 자기 선 위에 한 번 더 적을 점과 값이다. 전체 경로가 줄기의 합계를 덮기 때문이다. dot은 빨강 점을 그리는
  * 가운데 점이다. 그 선의 `mark`이고, 줄기가 점을 그리는 선이 전체 경로를 그리면 줄기의 점을 한 번 더 그린다.
  */
-export type AtlasFlowEdge = Edge<
-  EdgeView & { pointed: boolean; cycle: boolean; whole: boolean; own: Point | null; sum: { at: Point; sites: number } | null; dot: Point | null },
-  "orthogonal"
->;
+export interface AtlasFlowEdge {
+  id: EdgeKey;
+  type: "orthogonal";
+  data: EdgeView & { pointed: boolean; cycle: boolean; whole: boolean; own: Point | null; sum: { at: Point; sites: number } | null; dot: Point | null };
+  /** 그리는 층(`layers.ts`의 `LAYER.edge`나 `LAYER.pointed`) */
+  zIndex: number;
+}
 
 /** 줄기 하나. pointed는 마우스를 올린 줄기다. */
-export type TrunkFlowEdge = Edge<TrunkView & { tone: Tone; opacity: number; pointed: boolean }, "trunk">;
+export interface TrunkFlowEdge {
+  id: EdgeKey;
+  type: "trunk";
+  data: TrunkView & { tone: Tone; opacity: number; pointed: boolean };
+  zIndex: number;
+}
 
 export type FlowEdge = AtlasFlowEdge | TrunkFlowEdge;
 
@@ -79,8 +86,6 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
     const dot = view.mark ?? stem?.mark ?? null;
     return kept({
       id: view.key,
-      source: view.source,
-      target: view.target,
       type: "orthogonal",
       data: { ...view, ...(on && !view.gone ? lifted(view) : {}), pointed: on, cycle, whole, own, sum, dot },
       zIndex: on ? LAYER.pointed : LAYER.edge,
@@ -93,8 +98,6 @@ export function flowEdges(all: Lines, pointed: Set<EdgeKey>, cycles: Set<EdgeKey
     const shade = trunkShade(members, (view) => emphasized(view, marks(view)));
     return kept({
       id: trunk.key,
-      source: members[0].source,
-      target: members[0].target,
       type: "trunk",
       data: { ...trunk, ...(on && trunk.mark === null ? lifted(shade) : shade), pointed: on },
       zIndex: on ? LAYER.pointed : LAYER.edge,
@@ -142,28 +145,125 @@ export function Markers() {
   );
 }
 
+/** 점선 한 주기의 길이. `styles.css`의 `stroke-dasharray`와 같은 값이다(사용 선 `5 3`, 생성자 이음과 오버라이드 이음 `4 3`). 실선은 0이다. */
+export function dashPeriod(group: EdgeGroup, route: EdgeView["route"]): number {
+  return route === "init" || route === "overridden" ? 7 : group === "use" ? 8 : 0;
+}
+
+/** 화살촉이 선의 끝을 덮는 길이. 가장 긴 계승 화살촉과 그 테두리다. */
+export const TIP_COVER = ARROW_LENGTH + 2;
+
+/** 가운데가 at인 사각형. 장식이 선을 덮는 범위(`strokes.ts`의 `Cover`)로 쓴다. */
+export function around(at: Point, width: number, height: number): Box {
+  return { x: at.x - width / 2, y: at.y - height / 2, width, height };
+}
+
+/** 선 위의 숫자가 선을 덮는 범위. 숫자 둘레의 바탕색 테두리까지다. */
+export function numberCover(at: Point, sites: number): Cover {
+  return { box: around(at, numberWidth(String(sites).length), NUMBER_HEIGHT) };
+}
+
+/** 선 묶음에 그리는 장식 하나와 그 장식이 선을 덮는 범위 */
+export interface Decor {
+  cover: Cover;
+  node: ReactNode;
+}
+
+/**
+ * 선 묶음의 선과 장식을 그린다. lines는 묶음이 그리는 경로(`.edge-line`)이고 pieces는 그 경로의 점이다.
+ * 경로가 하나이고 장식이 없으면 선만 긋는다. 그 밖의 묶음이 흐리면 긴 선(`.edge-stroke`)과 장식 묶음(`.edge-part`)으로 갈라 그리고(`strokes.ts`),
+ * `.edge-line`은 경로와 선 모양을 읽는 데만 쓰도록 숨긴다. 커서를 올린 묶음은 선에 빛을 두르므로, 진하기가 1인 묶음은 버퍼가 필요 없으므로
+ * 가르지 않고 묶음 전체의 불투명도로 그린다(`data-shade="group"`).
+ */
+export function strokes(lines: { d: string; arrow?: string }[], pieces: Point[][], decor: Decor[], period: number, whole: boolean, arrow: string | undefined) {
+  const lone = decor.length === 0 && lines.length === 1;
+  if (lone || whole) {
+    return {
+      shade: lone ? undefined : "group",
+      body: (
+        <>
+          {lines.map((line, i) => (
+            <path key={i} className="edge-line" d={line.d} markerEnd={line.arrow} />
+          ))}
+          {decor.map((one) => one.node)}
+        </>
+      ),
+    };
+  }
+  const cut = split(
+    pieces,
+    decor.map((one) => one.cover),
+    period,
+    CORNER,
+  );
+  return {
+    shade: undefined,
+    body: (
+      <>
+        {lines.map((line, i) => (
+          <path key={i} className="edge-line" data-cut="" d={line.d} markerEnd={line.arrow} />
+        ))}
+        {cut.d !== "" && <path className="edge-stroke" d={cut.d} />}
+        {cut.parts.map((part) => (
+          <g key={part.covers[0]} className="edge-part">
+            {part.d !== "" && <path className="edge-stroke" d={part.d} style={part.tip ? { markerEnd: arrow } : undefined} />}
+            {part.covers.map((id) => decor[id].node)}
+          </g>
+        ))}
+      </>
+    ),
+  };
+}
+
 /**
  * 선 하나. 줄기에 든 선은 두 줄기 사이의 가지를 그리고, 강조하는 선이면 그 위에 출발부터 도착까지의 경로를 화살촉과 함께
  * 한 번 더 그린다. 가지는 들어오는 줄기에 들지 않았을 때만 화살촉을 단다. 누름 영역은 가지다. 숫자는 도착 노드 앞의 들어오는 합계와,
  * 강조하는 선 위에 적는 그 선의 수 두 가지다. 삭제된 관계만 든 선은 숫자 대신 빨강 점을 그린다.
+ * clone은 위층에 한 번 더 그리는 것이어서(`EdgeLayer.tsx`) 선을 찾는 키와 누름 영역을 두지 않는다.
  */
-export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
-  if (data === undefined) {
-    return null;
-  }
+export function OrthogonalEdge({ data, clone }: { data: AtlasFlowEdge["data"]; clone: boolean }) {
   const ink: Ink = data.cycle ? "critical" : data.tone;
   const branch = roundedPath(data.branch);
   const arrow = `url(#${markerId(data.group, ink)})`;
   /** 따로 들어가는 선은 도착 노드 앞의 합계를 늘 적고, 들어오는 줄기에 든 선은 활성화됐을 때만 그 선 위에 그 선의 수를 적는다. */
   const number = data.into ?? data.own;
   const tipped = data.whole || data.trunks.in === null;
-  const lone = !tipped && number === null && data.sum === null && data.dot === null && !data.pointed;
+  const points = data.whole ? data.points : data.branch;
+  const decor: Decor[] = [];
+  if (tipped) {
+    decor.push({ cover: { piece: 0, tail: TIP_COVER }, node: null });
+  }
+  if (number !== null) {
+    decor.push({
+      cover: numberCover(number, data.sites),
+      node: (
+        <text key="number" className="edge-weight" x={number.x} y={number.y} dy="0.35em" textAnchor="middle">
+          {data.sites}
+        </text>
+      ),
+    });
+  }
+  if (data.sum !== null) {
+    decor.push({
+      cover: numberCover(data.sum.at, data.sum.sites),
+      node: (
+        <text key="sum" className="edge-weight edge-sum" x={data.sum.at.x} y={data.sum.at.y} dy="0.35em" textAnchor="middle">
+          {data.sum.sites}
+        </text>
+      ),
+    });
+  }
+  if (data.dot !== null) {
+    decor.push({ cover: { box: around(data.dot, MARK_SIZE + 2, MARK_SIZE + 2) }, node: <circle key="dot" className="edge-gone" cx={data.dot.x} cy={data.dot.y} r={MARK_SIZE / 2} /> });
+  }
+  const line = { d: data.whole ? roundedPath(data.points) : branch, arrow: tipped ? arrow : undefined };
+  const { shade, body } = strokes([line], [points], decor, dashPeriod(data.group, data.route), data.pointed || data.opacity === 1, arrow);
   return (
     <g
       className={`edge edge-${data.group} tone-${ink}`}
-      data-key={data.key}
-      data-trunk-in={data.trunks.in ?? undefined}
-      data-trunk-out={data.trunks.out ?? undefined}
+      data-key={clone ? undefined : data.key}
+      data-trunk-in={clone ? undefined : (data.trunks.in ?? undefined)}
+      data-trunk-out={clone ? undefined : (data.trunks.out ?? undefined)}
       data-whole={data.whole ? "" : undefined}
       data-below={data.below ? "" : undefined}
       data-sites={data.sites}
@@ -172,36 +272,16 @@ export function OrthogonalEdge({ data }: EdgeProps<AtlasFlowEdge>) {
       data-route={data.route ?? undefined}
       data-via={data.via ? "" : undefined}
       data-gone={data.gone ? "" : undefined}
-      style={shadeStyle(data.opacity, lone)}
+      data-shade={shade}
+      style={shadeStyle(data.opacity)}
     >
-      <path className="edge-hit" d={branch} />
-      {data.whole ? (
-        <path className="edge-line" d={roundedPath(data.points)} markerEnd={arrow} />
-      ) : (
-        <path className="edge-line" d={branch} markerEnd={tipped ? arrow : undefined} />
-      )}
-      {number !== null && (
-        <text className="edge-weight" x={number.x} y={number.y} dy="0.35em" textAnchor="middle">
-          {data.sites}
-        </text>
-      )}
-      {data.sum !== null && (
-        <text className="edge-weight edge-sum" x={data.sum.at.x} y={data.sum.at.y} dy="0.35em" textAnchor="middle">
-          {data.sum.sites}
-        </text>
-      )}
-      {data.dot !== null && <circle className="edge-gone" cx={data.dot.x} cy={data.dot.y} r={MARK_SIZE / 2} />}
+      {!clone && <path className="edge-hit" d={branch} />}
+      {body}
     </g>
   );
 }
 
-/**
- * 선 묶음의 진하기. 묶음에 그리는 것이 선 하나뿐이면(화살촉, 숫자, 점, 원이 없고 빛도 두르지 않는다) 묶음의 불투명도 대신 선의
- * 불투명도(`stroke-opacity`)로 준다. 선 하나는 겹치는 부분이 없어 두 방식의 모습이 같고, 묶음의 불투명도는 브라우저가 묶음마다
- * 그 묶음을 덮는 크기의 버퍼를 따로 만들어 합성하므로 선이 길수록 그리는 비용이 크다.
- */
-export function shadeStyle(opacity: number, lone: boolean): CSSProperties {
-  return lone ? { strokeOpacity: opacity } : { opacity };
+/** 선 묶음의 진하기. 선과 장식 묶음이 이 값을 불투명도로 받는다(`styles.css`의 `--shade`). */
+export function shadeStyle(opacity: number): CSSProperties {
+  return { "--shade": opacity } as CSSProperties;
 }
-
-export const edgeTypes: EdgeTypes = { orthogonal: OrthogonalEdge, trunk: Trunk };
