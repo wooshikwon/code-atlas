@@ -12,7 +12,7 @@ export interface Area {
 export const MIN_WIDTH = 260;
 /** 기본 사각형의 폭과, 기본 사각형이 영역의 위·오른쪽·아래 끝에서 띄우는 여백을 관계 그래프 영역의 폭으로 나눈 값 */
 const DEFAULT_SHARE = 0.4;
-const DEFAULT_GAP = 0.01;
+const DEFAULT_GAP = 0.005;
 export const MIN_HEIGHT = 58;
 /** 경계선을 끌어 줄일 때 LLM 요약 칸과 코드 뷰어에 남기는 높이 */
 export const MIN_SUMMARY = 56;
@@ -34,7 +34,7 @@ export function clamp(rect: Rect, area: Area): Rect {
 }
 
 /**
- * 사용자가 옮기거나 크기를 바꾸기 전의 사각형. 영역 폭의 40%를 차지하고 영역의 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운다.
+ * 사용자가 옮기거나 크기를 바꾸기 전의 사각형. 영역 폭의 40%를 차지하고 영역의 위·오른쪽·아래 끝에서 영역 폭의 0.5%씩 띄운다.
  * 세 여백은 같은 값이다. 영역 폭의 40%가 최소 폭보다 좁으면 최소 폭으로 그린다.
  */
 export function initial(area: Area): Rect {

@@ -1,5 +1,5 @@
 // 정보 패널의 비율 사각형을 저장소에서 읽어 관계 그래프 영역의 픽셀 사각형으로 바꾸고, 머리 줄과 손잡이를 끄는 동작을 사각형으로 바꾼다.
-// 저장한 비율 사각형이 없으면 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운 기본 사각형을 쓴다.
+// 저장한 비율 사각형이 없으면 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 0.5%씩 띄운 기본 사각형을 쓴다.
 // 두 사각형 모두 영역의 크기가 바뀔 때마다 다시 계산한다.
 import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useAtlas, type Rect } from "../state/store";

@@ -5,13 +5,13 @@ const area = { width: 1000, height: 800 };
 const rect = { x: 400, y: 100, width: 480, height: 420 };
 
 describe("initial", () => {
-  it("영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운다", () => {
-    expect(initial(area)).toEqual({ x: 590, y: 10, width: 400, height: 780 });
-    expect(initial({ width: 1440, height: 600 })).toEqual({ x: 850, y: 14, width: 576, height: 572 });
+  it("영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 0.5%씩 띄운다", () => {
+    expect(initial(area)).toEqual({ x: 595, y: 5, width: 400, height: 790 });
+    expect(initial({ width: 1440, height: 600 })).toEqual({ x: 857, y: 7, width: 576, height: 586 });
   });
 
   it("영역 폭의 40%가 최소 폭보다 좁으면 최소 폭으로 그리고 오른쪽 여백은 그대로다", () => {
-    expect(initial({ width: 460, height: 800 })).toEqual({ x: 460 - 5 - MIN_WIDTH, y: 5, width: MIN_WIDTH, height: 790 });
+    expect(initial({ width: 460, height: 800 })).toEqual({ x: 460 - 2 - MIN_WIDTH, y: 2, width: MIN_WIDTH, height: 796 });
   });
 
   it("영역이 최소 높이보다 낮으면 최소 높이다", () => {

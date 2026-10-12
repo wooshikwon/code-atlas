@@ -34,7 +34,7 @@ const HALF = 0.6;
 const NAMED_ZOOM = 0.8;
 /** 정보 패널의 기본 폭과 기본 여백(위·오른쪽·아래)을 관계 그래프 영역의 폭으로 나눈 값, 패널의 최소 폭 */
 const PANEL_SHARE = 0.4;
-const PANEL_GAP = 0.01;
+const PANEL_GAP = 0.005;
 const PANEL_MIN = 260;
 /** 큰 상자를 패널을 뺀 영역의 시작 끝에서 띄우는 폭 */
 const INSET = 20;
@@ -749,7 +749,7 @@ async function open(t, page) {
   const gaps = { top: panel.y - area.y, right: area.x + area.width - panel.x - panel.width, bottom: area.y + area.height - panel.y - panel.height };
   const gap = Math.round(area.width * PANEL_GAP);
   t.check(
-    "정보 패널이 관계 그래프 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운다",
+    "정보 패널이 관계 그래프 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 0.5%씩 띄운다",
     near(gaps.top, gap) && near(gaps.bottom, gap) && near(gaps.right, gap) && near(panel.width, area.width * PANEL_SHARE),
     `여백 위 ${gaps.top}, 오른쪽 ${gaps.right}, 아래 ${gaps.bottom}, 기대 여백 ${gap}, 패널 ${panel.width}×${panel.height}, 영역 ${area.width}×${area.height}`,
   );
@@ -1023,7 +1023,7 @@ async function body(t, page) {
   t.check("선택이 바뀌지 않는다", before.selected === FUNCTION && same(after, before), `누른 곳 (${spot.x}, ${spot.y}), 선택 ${after.selected}`);
 }
 
-/** 기본 사각형이 지금의 관계 그래프 영역에서 폭의 40%(최소 폭보다 좁으면 최소 폭)를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄우는지 */
+/** 기본 사각형이 지금의 관계 그래프 영역에서 폭의 40%(최소 폭보다 좁으면 최소 폭)를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 0.5%씩 띄우는지 */
 async function docked(page) {
   const { area, panel: box } = await stageOf(page);
   const width = Math.max(PANEL_MIN, Math.round(area.width * PANEL_SHARE));
@@ -1074,7 +1074,7 @@ async function panel(t, page) {
   await page.setViewportSize(VIEW);
   await redocked(page);
   const wide = await docked(page);
-  t.check("기본 패널은 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운다", wide.ok && sameRect(await rectOf(page, ".info-panel"), start), wide.text);
+  t.check("기본 패널은 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 0.5%씩 띄운다", wide.ok && sameRect(await rectOf(page, ".info-panel"), start), wide.text);
   await drag(page, center(await rectOf(page, ".info-panel-head")), -300, 40);
   await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="nw"]')), -60, 80);
   const moved = await rectOf(page, ".info-panel");
@@ -1143,7 +1143,7 @@ async function panelRatio(t, page) {
     await page.setViewportSize(size);
     await load(page);
     const first = await docked(page);
-    t.check(`창 ${size.width}×${size.height}에서 처음 연 패널이 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운다`, first.ok, first.text);
+    t.check(`창 ${size.width}×${size.height}에서 처음 연 패널이 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 0.5%씩 띄운다`, first.ok, first.text);
     await page.screenshot({ path: HF11(size.width) });
   }
   const [small, middle, large] = SIZES;
@@ -3952,7 +3952,7 @@ async function toolbar(t, page) {
           last: last === null ? null : { text: last.textContent, width: Math.round(last.getBoundingClientRect().width), whole: last.scrollWidth <= last.clientWidth, inside: last.getBoundingClientRect().right <= area.right },
           cut: document.querySelector(".trail-cut")?.dataset.tip ?? null,
           stale: document.querySelector(".reload-dot") !== null,
-          gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom, Math.round(stage.width * 0.01)],
+          gaps: [panel.top - stage.top, stage.bottom - panel.bottom, stage.top - area.bottom, Math.round(stage.width * PANEL_GAP)],
           filters: filters === undefined ? null : { inside: filters.left >= area.left && filters.right <= Math.min(area.right, window.innerWidth) && filters.bottom <= window.innerHeight },
         };
       });
@@ -3968,7 +3968,7 @@ async function toolbar(t, page) {
       `마지막 단계 "${bar.last?.text}" ${bar.last?.width}px${bar.last?.whole ? "" : "(말줄임)"}, 줄인 단계 "${bar.cut ?? "없음"}"`,
     );
     t.check(
-      `${name}: 관계 그래프 영역이 상단 줄 바로 아래에서 시작하고 정보 패널이 영역의 위·아래 끝에서 영역 폭의 1%씩 띄운다`,
+      `${name}: 관계 그래프 영역이 상단 줄 바로 아래에서 시작하고 정보 패널이 영역의 위·아래 끝에서 영역 폭의 0.5%씩 띄운다`,
       near(bar.gaps[2], 0) && near(bar.gaps[0], bar.gaps[3]) && near(bar.gaps[1], bar.gaps[3]),
       `패널 위 ${bar.gaps[0]}, 아래 ${bar.gaps[1]}, 기대 여백 ${bar.gaps[3]}, 상단 줄과 영역 사이 ${bar.gaps[2]}`,
     );
