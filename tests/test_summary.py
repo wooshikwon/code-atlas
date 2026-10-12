@@ -7,7 +7,7 @@ import pytest
 
 from code_atlas import summary
 from code_atlas.model import Edge, Node, SiteRef
-from code_atlas.summary import Cache, Summaries, SummaryError
+from code_atlas.summary import Cache, Made, Summaries, SummaryError, Usage
 
 MADE = "설정을 받아 엔진을 만들고 시작한다.\n\n하는 일\n엔진을 만든다.\n\n앞뒤 흐름\n`main`이 호출한다."
 
@@ -17,8 +17,10 @@ cat > "$RECORD/stdin"
 pwd > "$RECORD/cwd"
 for arg in "$@"; do printf '%s\\n' "$arg"; done > "$RECORD/args"
 echo run >> "$RECORD/runs"
-printf '%s\\n' '{"is_error": false, "result": "\\n설정을 받아 엔진을 만들고 시작한다.\\n\\n**하는 일**\\n엔진을 만든다.\\n\\n## 앞뒤 흐름\\n`main`이 호출한다.\\n"}'
+printf '%s\\n' '{"is_error": false, "result": "\\n설정을 받아 엔진을 만들고 시작한다.\\n\\n**하는 일**\\n엔진을 만든다.\\n\\n## 앞뒤 흐름\\n`main`이 호출한다.\\n", "usage": {"input_tokens": 2, "cache_creation_input_tokens": 1487, "cache_read_input_tokens": 16411, "output_tokens": 527, "service_tier": "standard"}}'
 """
+USAGE = ', "usage": {"input_tokens": 2, "cache_creation_input_tokens": 1487, "cache_read_input_tokens": 16411, "output_tokens": 527, "service_tier": "standard"}'
+USED = Usage(input=2, cache_write=1487, cache_read=16411, output=527)
 ONE_SENTENCE = """printf '%s\\n' '{"is_error": false, "result": "한 문장 요약이다."}'\n"""
 SLOW = "sleep 30\n"
 FAILING = "echo '인증 서버에 닿지 못했다' >&2\nexit 3\n"
@@ -73,7 +75,7 @@ async def test_generate_sends_system_prompt_as_argument_and_prompt_on_stdin(fake
     record = fake_cli(OK)
     system = "첫 줄\n둘째 줄 '따옴표' \"큰따옴표\" $HOME"
     prompt = "[대상]\n종류: 함수\n이름: run_engine\n"
-    assert await summary.generate(system, prompt) == MADE
+    assert await summary.generate(system, prompt) == Made(MADE, USED)
 
     assert (record / "stdin").read_text() == prompt
     args = (record / "args").read_text()
@@ -108,6 +110,21 @@ def test_shaped_normalizes_marks_and_joins_lead():
     ):
         with pytest.raises(SummaryError):
             summary.shaped(broken)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "usage",
+    [
+        "",
+        ', "usage": null',
+        ', "usage": {"input_tokens": 2, "output_tokens": 527}',
+        ', "usage": {"input_tokens": "2", "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 527}',
+    ],
+)
+async def test_generate_without_readable_usage_still_gives_the_summary(fake_cli, usage):
+    fake_cli(OK.replace(USAGE, usage))
+    assert await summary.generate("s", "p") == Made(MADE, None)
 
 
 @pytest.mark.asyncio
@@ -464,14 +481,14 @@ async def test_make_generates_once_for_overlapping_requests_and_caches(fake_cli,
     prompt = "def f(): ..."
     assert summaries.cached(prompt) is None
     results = await asyncio.gather(*(summaries.make(prompt) for _ in range(3)))
-    assert set(results) == {MADE}
+    assert set(results) == {Made(MADE, USED)}
     assert (record / "runs").read_text().count("run") == 1
 
-    assert await summaries.make(prompt) == results[0]
-    assert Summaries(tmp_path / "summaries.db").cached(prompt) == results[0]
+    assert await summaries.make(prompt) == Made(MADE, None)
+    assert Summaries(tmp_path / "summaries.db").cached(prompt) == MADE
     assert (record / "runs").read_text().count("run") == 1
 
-    await summaries.make(prompt, refresh=True)
+    assert await summaries.make(prompt, refresh=True) == Made(MADE, USED)
     assert (record / "runs").read_text().count("run") == 2
 
 
@@ -483,7 +500,7 @@ async def test_make_does_not_cache_failure(fake_cli, tmp_path):
         await summaries.make("def f(): ...")
     assert summaries.cached("def f(): ...") is None
     fake_cli(OK)
-    assert await summaries.make("def f(): ...") == MADE
+    assert await summaries.make("def f(): ...") == Made(MADE, USED)
 
 
 @pytest.mark.asyncio
@@ -496,7 +513,7 @@ async def test_make_runs_two_processes_at_most(tmp_path, monkeypatch):
         peak = max(peak, running)
         await asyncio.sleep(0.05)
         running -= 1
-        return json.dumps(prompt)
+        return Made(json.dumps(prompt))
 
     monkeypatch.setattr(summary, "generate", generate)
     summaries = Summaries(tmp_path / "summaries.db")
@@ -512,7 +529,7 @@ async def test_make_waiting_for_a_slot_is_dropped_when_every_caller_leaves(tmp_p
     async def generate(system, prompt):
         made.append(prompt)
         await release.wait()
-        return f"{prompt} 요약"
+        return Made(f"{prompt} 요약")
 
     monkeypatch.setattr(summary, "generate", generate)
     summaries = Summaries(tmp_path / "summaries.db")
@@ -528,13 +545,13 @@ async def test_make_waiting_for_a_slot_is_dropped_when_every_caller_leaves(tmp_p
     waiting[1].cancel()
     await asyncio.sleep(0.01)
     release.set()
-    assert await running[1] == "def f1(): ... 요약"
+    assert await running[1] == Made("def f1(): ... 요약")
     await asyncio.sleep(0.01)
     assert made == ["def f0(): ...", "def f1(): ..."]
     assert summaries.cached("def f0(): ...") == "def f0(): ... 요약"
     assert summaries.cached("def late(): ...") is None
 
-    assert await summaries.make("def late(): ...") == "def late(): ... 요약"
+    assert await summaries.make("def late(): ...") == Made("def late(): ... 요약")
     assert len(made) == 3
 
 
@@ -658,13 +675,15 @@ async def test_make_of_range_uses_range_system_prompt_plain_text_and_keeps_lates
     record = fake_cli(OK.replace("**하는 일**", "둘째 문단이다.").replace("## 앞뒤 흐름", ""))
     summaries = Summaries(tmp_path / "summaries.db")
     subject = summary.Subject("/repo", "range", "src/core.py:30-31", "d1")
-    text = await summaries.make("[대상]\n종류: 코드 범위", kind="range", subject=subject)
+    made = await summaries.make("[대상]\n종류: 코드 범위", kind="range", subject=subject)
+    text = made.text
+    assert made.usage == USED
     assert text == "설정을 받아 엔진을 만들고 시작한다.\n둘째 문단이다.\n엔진을 만든다.\n`main`이 호출한다."
     assert summary.system_prompt_of(None, "range") in (record / "args").read_text()
     assert summaries.latest.get("/repo", "range", subject.name).text == text
 
     moved = summary.Subject("/repo", "range", "src/core.py:40-41", "d1")
-    assert await summaries.make("[대상]\n종류: 코드 범위", kind="range", subject=moved) == text
+    assert await summaries.make("[대상]\n종류: 코드 범위", kind="range", subject=moved) == Made(text, None)
     assert (record / "runs").read_text().count("run") == 1
     assert summaries.latest.get("/repo", "range", moved.name).text == text
 
@@ -675,7 +694,7 @@ async def test_kept_gives_the_latest_summary_of_a_node_as_stale_when_the_prompt_
     summaries = Summaries(tmp_path / "summaries.db")
     subject = summary.Subject("/repo", "node", "core:run_engine")
     assert summaries.kept("def f(): 1", subject) == (None, False)
-    made = await summaries.make("def f(): 1", subject=subject)
+    made = (await summaries.make("def f(): 1", subject=subject)).text
     assert summaries.kept("def f(): 1", subject) == (made, False)
     assert summaries.latest.get("/repo", "node", subject.name).digest == summary.key_of(summary.system_prompt_of(None), "def f(): 1")
     assert summaries.kept("def f(): 2", subject) == (made, True)
