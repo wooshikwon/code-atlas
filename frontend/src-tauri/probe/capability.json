@@ -1,0 +1,6 @@
+{
+  "identifier": "probe",
+  "description": "확인 통로의 명령",
+  "windows": ["main"],
+  "permissions": ["allow-probe-report", "allow-probe-done", "allow-probe-window", "allow-probe-close", "allow-probe-menu"]
+}

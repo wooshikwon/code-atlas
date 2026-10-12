@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Code Atlas",
+  "productName": "Atlas",
   "version": "0.1.0",
-  "identifier": "com.wooshikwon.code-atlas",
+  "identifier": "com.wooshikwon.atlas",
   "build": {
     "frontendDist": "../dist",
     "beforeBuildCommand": "npm run build"
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Code Atlas",
+        "title": "Atlas",
         "width": 1440,
         "height": 900,
         "minWidth": 640,
