@@ -10220,7 +10220,13 @@ async function entry(t, page) {
     t.skip("진입점이 많으면 메뉴가 화면 안에서 스크롤한다", "sync-engine의 진입점은 두 개다 — --wide-url을 주지 않았다");
     return;
   }
-  const wide = (await api("/api/graph", wideUrl)).nodes.filter((n) => n.entry && !veiled(n));
+  const marked = (await api("/api/graph", wideUrl)).nodes.filter((n) => n.entry);
+  const wide = marked.filter((n) => !veiled(n));
+  t.check(
+    "변수 노드는 진입점이 아니다",
+    marked.every((n) => n.kind !== "variable"),
+    `진입점 ${marked.length}개 가운데 변수 ${marked.filter((n) => n.kind === "variable").length}개`,
+  );
   await page.setViewportSize({ width: VIEW.width, height: 260 });
   await page.goto(wideUrl);
   await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
