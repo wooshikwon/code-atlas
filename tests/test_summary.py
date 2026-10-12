@@ -636,6 +636,40 @@ def test_range_prompt_of_top_level_code_has_no_flow_and_bad_ranges_are_none():
         assert summary.range_prompt_of(NODES, EDGES, TEXTS, path, start, end) is None
 
 
+def test_range_prompt_of_marked_code_holds_the_marks_and_what_they_mean():
+    marked = " def run_engine(config: Config) -> Engine:\n-    engine = Engine()\n+    engine = Engine(config)"
+    prompt = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 29, 30, marked, (40, 41))
+    found = sections(prompt)
+    assert found["대상"].startswith("종류: 코드 범위\n위치: src/core.py 29~30줄 (기준 시점 40~41줄)\n범위가 든 정의: core.py::run_engine")
+    assert found["두 시점의 비교"] == f"{summary.MARKED_NOTE} {summary.MARKED_WHOLE}".split("\n", 1)[1]
+    assert found["고른 범위의 코드"] == marked
+    assert "30>     engine = Engine(config)" in found["범위가 든 정의의 전체 코드"] and "대상을 호출하는 쪽" in found
+    assert prompt.endswith(summary.RANGE_TAIL + summary.MARKED_TAIL)
+
+    added = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 30, 30, "+    engine = Engine(config)")
+    assert sections(added)["대상"].startswith("종류: 코드 범위\n위치: src/core.py 30~30줄\n") and "[두 시점의 비교]" in added
+
+
+def test_range_prompt_of_a_range_without_target_lines_holds_only_the_marked_code():
+    marked = "-def gone():\n-    return 1"
+    prompt = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/old.py", 0, 0, marked, (3, 4))
+    found = sections(prompt)
+    assert found["대상"] == "종류: 코드 범위\n위치: src/old.py 기준 시점 3~4줄. 대상 시점에는 없는 줄이다"
+    assert found["두 시점의 비교"] == summary.MARKED_NOTE.split("\n", 1)[1] and found["고른 범위의 코드"] == marked
+    assert "범위가 든 정의의 전체 코드" not in found and prompt.endswith(summary.RANGE_TAIL + summary.MARKED_TAIL)
+    assert summary.range_prompt_of(NODES, EDGES, TEXTS, "src/old.py", 0, 0, " \n", (3, 4)) is None
+    assert summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 0, 0, marked) is None
+    assert summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 30, 99, marked, (3, 4)) is None
+
+
+def test_compared_name_is_read_back_for_the_same_two_points_and_file():
+    name = summary.compared_name("aaa", "worktree", "src/core.py", (3, 4), (0, 0))
+    assert summary.compared_spans(name, "aaa", "worktree", "src/core.py") == ((3, 4), (0, 0))
+    assert summary.compared_spans(name, "aaa", "bbb", "src/core.py") is None
+    assert summary.compared_spans(name, "aaa", "worktree", "src/core") is None
+    assert summary.compared_spans("aaa..worktree:src/core.py:x-4:0-0", "aaa", "worktree", "src/core.py") is None
+
+
 def test_range_prompt_of_cuts_a_long_definition_around_the_range():
     lines = ["def big():", *(f"    x{n} = {'1' * 40}" for n in range(2, 2001))]
     texts = {**TEXTS, "src/big.py": "\n".join(lines)}

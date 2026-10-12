@@ -158,6 +158,18 @@ RANGE_TAIL = """[내기 전에 확인]
 - "~에 대해", "~를 통해", "~에 의해", 행위자가 있는 피동, "첫째·둘째", 줄표가 있으면 고친다.
 """
 
+# 두 시점을 엮은 문서에서 고른 범위에 바뀐 줄이 있을 때 프롬프트에 넣는 구획. 줄 머리의 표시가 뜻하는 것과 설명할 내용을 적는다.
+MARKED_NOTE = """[두 시점의 비교]
+고른 범위는 기준 시점과 대상 시점의 코드를 한 문서로 엮은 화면에서 골랐다. 고른 범위의 코드는 줄 머리의 한 글자가 표시다. `-`는 기준 시점에 있다가 대상 시점에서 삭제된 줄, `+`는 대상 시점에 추가된 줄, 빈칸은 두 시점에 그대로 있는 줄이다. 표시는 코드에 들지 않는다.
+삭제된 줄과 추가된 줄을 견줘 무엇이 지워지고 무엇이 더해졌는지, 그래서 동작이 어떻게 달라졌는지를 설명한다."""
+
+# 범위에 대상 시점의 줄이 있을 때 `MARKED_NOTE` 뒤에 붙이는 문장
+MARKED_WHOLE = "범위가 든 정의의 전체 코드와 앞뒤 흐름 자료는 대상 시점의 것이다."
+
+# 바뀐 줄이 든 범위의 프롬프트에서 `RANGE_TAIL` 뒤에 붙이는 확인 항목
+MARKED_TAIL = """- 삭제된 줄과 추가된 줄을 견줘 지워진 동작과 더해진 동작을 적었는가. `-`와 `+` 표시를 코드로 옮겨 적지 않았는가.
+"""
+
 PROMPT_TAIL = """[내기 전에 확인]
 - 요지가 동사로 끝나는가. "함수다", "클래스다", "모듈이다"로 끝나면 고친다.
 - 대상의 이름, "이 함수는", "이 클래스는", "이 파일은"이 주어인 문장이 있으면 주어를 뺀다.
@@ -632,13 +644,33 @@ def range_code(texts: Mapping[str, str], path: str, start: int, end: int) -> str
 
 
 def range_prompt_of(
-    nodes: Mapping[str, Node], edges: Iterable[Edge], texts: Mapping[str, str], path: str, start: int, end: int
+    nodes: Mapping[str, Node],
+    edges: Iterable[Edge],
+    texts: Mapping[str, str],
+    path: str,
+    start: int,
+    end: int,
+    marked: str | None = None,
+    old: tuple[int, int] | None = None,
 ) -> str | None:
     """고른 범위의 위치와 코드, 범위가 든 정의의 시그니처·전체 코드·앞뒤 흐름 자료, 확인 목록을 구획으로 나눈 프롬프트.
 
     설명할 수 없는 범위면 None이다. 범위가 든 정의의 전체 코드는 줄 번호를 붙이고 고른 범위의 줄에 `>`를 단다.
     범위가 어느 정의에도 들지 않으면 파일의 최상위 코드로 보고 앞뒤 흐름 자료를 넣지 않는다.
+
+    `marked`는 두 시점을 엮은 문서에서 고른 범위의 본문이고 줄 머리에 `-`·`+`·빈칸 표시가 붙어 있다. 넘기면 고른 범위의 코드로
+    그 본문을 적고 표시의 뜻을 적은 구획을 넣는다. `old`는 그 범위에 삭제된 줄이 들었을 때 기준 시점의 줄 범위다.
+    범위에 대상 시점의 줄이 없으면 `start`와 `end`가 0이고, 그때는 범위가 든 정의의 자료 없이 표시 붙은 본문만 적는다.
     """
+    between = "" if old is None else f" (기준 시점 {old[0]}~{old[1]}줄)"
+    tail = RANGE_TAIL if marked is None else RANGE_TAIL + MARKED_TAIL
+    if marked is not None:
+        marked = marked[:MAX_CODE] + ("\n(이하 생략)" if len(marked) > MAX_CODE else "")
+    if marked is not None and old is not None and start == 0 and end == 0:
+        if not marked.strip():
+            return None
+        where = f"[대상]\n종류: 코드 범위\n위치: {path} 기준 시점 {old[0]}~{old[1]}줄. 대상 시점에는 없는 줄이다"
+        return "\n\n".join([where, MARKED_NOTE, f"[고른 범위의 코드]\n{marked}", tail])
     code = range_code(texts, path, start, end)
     owner = enclosing(nodes, path, start, end)
     if code is None or owner is None or not code.strip():
@@ -662,20 +694,21 @@ def range_prompt_of(
     whole = "\n".join(numbered)[: 2 * MAX_CODE]
     head = "\n\n".join(
         [
-            f"[대상]\n종류: 코드 범위\n위치: {path} {start}~{end}줄\n범위가 든 정의: {inside}",
-            f"[고른 범위의 코드]\n{code}",
+            f"[대상]\n종류: 코드 범위\n위치: {path} {start}~{end}줄{between}\n범위가 든 정의: {inside}",
+            *([] if marked is None else [f"{MARKED_NOTE} {MARKED_WHOLE}"]),
+            f"[고른 범위의 코드]\n{code if marked is None else marked}",
             *([f"[범위가 든 정의의 시그니처]\n{signature}"] if signature else []),
             f"[범위가 든 정의의 전체 코드]\n{whole}",
         ]
     )
     if owner.kind == "module":
-        return f"{head}\n\n{RANGE_TAIL}"
+        return f"{head}\n\n{tail}"
     flow = flow_of(nodes, list(edges), texts, owner)
     for detail in DETAILS[1:]:
-        prompt = f"{head}\n\n{_flow_text(flow, owner, texts, detail)}\n\n{RANGE_TAIL}"
+        prompt = f"{head}\n\n{_flow_text(flow, owner, texts, detail)}\n\n{tail}"
         if len(prompt) <= MAX_PROMPT:
             return prompt
-    return f"{head}\n\n{RANGE_TAIL}"
+    return f"{head}\n\n{tail}"
 
 
 def plain(result: str) -> str:
@@ -820,9 +853,27 @@ class Subject:
     """설명 하나가 가리키는 레포 안의 대상과 그 설명을 만든 때의 지문."""
 
     repo: str
-    kind: str  # node·range
-    name: str  # 노드 id, 또는 `파일 경로:시작 줄-끝 줄`
+    kind: str  # node·range·compared
+    name: str  # 노드 id, `파일 경로:시작 줄-끝 줄`, 또는 두 시점의 비교에 묶는 `compared_name`의 이름
     digest: str | None = None  # 코드 범위는 범위 코드의 해시다. None이면 설명을 만든 캐시 키를 쓴다
+
+
+def compared_name(base: str, target: str, path: str, old: tuple[int, int], span: tuple[int, int]) -> str:
+    """두 시점의 비교에 묶는 코드 범위 설명의 이름. `old`는 기준 시점의 줄 범위, `span`은 대상 시점의 줄 범위(없으면 0, 0)다."""
+    return f"{base}..{target}:{path}:{old[0]}-{old[1]}:{span[0]}-{span[1]}"
+
+
+def compared_spans(name: str, base: str, target: str, path: str) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """`compared_name`의 이름이 그 두 시점과 파일의 것이면 기준 시점의 줄 범위와 대상 시점의 줄 범위. 아니면 None이다."""
+    prefix = f"{base}..{target}:{path}:"
+    if not name.startswith(prefix):
+        return None
+    old, _, span = name[len(prefix) :].partition(":")
+    try:
+        (a, b), (c, d) = (tuple(int(n) for n in part.split("-")) for part in (old, span))
+    except ValueError:
+        return None
+    return (a, b), (c, d)
 
 
 @dataclass(frozen=True)

@@ -17,7 +17,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TypeVar
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import changes
@@ -27,7 +27,19 @@ from .lsp import Location, Session, to_utf8
 from .model import Analysis, Node, to_dict
 from .resolve import EXTERNAL_PREFIX, external_of
 from .runner import Runner
-from .summary import Made, Subject, Summaries, SummaryError, digest_of, lead_of, prompt_of, range_code, range_prompt_of
+from .summary import (
+    Made,
+    Subject,
+    Summaries,
+    SummaryError,
+    compared_name,
+    compared_spans,
+    digest_of,
+    lead_of,
+    prompt_of,
+    range_code,
+    range_prompt_of,
+)
 
 HOST = "127.0.0.1"
 PORT = 8766
@@ -331,23 +343,53 @@ def create_app(
         summary = await made(request, app.state.summaries.make(summarized(node), refresh, "node", subject))
         return {"summary": summary.text, "usage": summary.usage and asdict(summary.usage)}
 
-    def explained(path: str, start: int, end: int) -> tuple[str, Subject]:
-        """파일의 줄 범위를 설명을 만들 프롬프트와, 그 설명을 남길 대상으로 바꾼다."""
+    def between(base: str | None, target: str | None, old_start: int | None, old_end: int | None) -> tuple[int, int] | None:
+        """두 시점의 비교에 묶는 범위면 기준 시점의 줄 범위. 두 시점과 기준 시점의 줄 가운데 일부만 왔으면 422다."""
+        given = [base, target, old_start, old_end]
+        if all(value is None for value in given):
+            return None
+        if None in given or old_start > old_end:
+            raise HTTPException(status_code=422, detail="base, target, old_start, old_end를 함께 넘긴다")
+        return old_start, old_end
+
+    def explained(
+        path: str,
+        start: int,
+        end: int,
+        code: str | None = None,
+        base: str | None = None,
+        target: str | None = None,
+        old: tuple[int, int] | None = None,
+    ) -> tuple[str, Subject]:
+        """파일의 줄 범위를 설명을 만들 프롬프트와, 그 설명을 남길 대상으로 바꾼다.
+
+        `code`는 두 시점을 엮은 문서에서 고른 범위의 표시 붙은 본문이다. `old`가 있으면 삭제된 줄이 든 범위이고 설명을 그 두
+        시점의 비교에 묶는다. 없으면 대상 시점의 파일과 줄 범위에 묶는다.
+        """
         analyzed: Analyzed = app.state.analyzed
-        code = range_code(analyzed.texts, path, start, end)
-        prompt = range_prompt_of(app.state.nodes, analyzed.analysis.edges, analyzed.texts, path, start, end)
-        if code is None or prompt is None:
+        prompt = range_prompt_of(app.state.nodes, analyzed.analysis.edges, analyzed.texts, path, start, end, code, old)
+        if prompt is None:
             raise HTTPException(status_code=404, detail=f"설명할 코드 범위가 아니다: {path} {start}~{end}줄")
-        return prompt, Subject(app.state.repo["root"], "range", f"{path}:{start}-{end}", digest_of(code))
+        root = app.state.repo["root"]
+        if old is not None:
+            return prompt, Subject(root, "compared", compared_name(base, target, path, old, (start, end)), digest_of(code))
+        return prompt, Subject(root, "range", f"{path}:{start}-{end}", digest_of(range_code(analyzed.texts, path, start, end)))
 
     @app.get("/api/explanations", dependencies=ready)
-    def get_explanations(path: str) -> dict:
-        """파일에 남겨 둔 코드 범위 설명. 설명을 만든 뒤 그 줄 범위의 코드가 달라졌으면 `stale`이 참이다."""
+    def get_explanations(path: str, base: str | None = None, target: str | None = None) -> dict:
+        """파일에 남겨 둔 코드 범위 설명. 설명을 만든 뒤 그 줄 범위의 코드가 달라졌으면 `stale`이 참이다.
+
+        `base`와 `target`을 넘기면 그 두 시점의 비교에 묶어 둔 설명을 `compared`에 함께 담는다. 그 설명의 `digest`는 설명을
+        만든 때의 표시 붙은 본문의 지문이고, 지금 본문과 같은지는 그 본문을 가진 화면이 가린다. 두 시점을 넘기면 대상 시점에 없는
+        파일도 404가 아니다.
+        """
         analyzed: Analyzed = app.state.analyzed
-        if path not in analyzed.texts:
+        latest = app.state.summaries.latest
+        root = app.state.repo["root"]
+        if path not in analyzed.texts and (base is None or target is None):
             raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
         found = []
-        for kept in app.state.summaries.latest.listed(app.state.repo["root"], "range"):
+        for kept in latest.listed(root, "range") if path in analyzed.texts else []:
             file, _, span = kept.name.rpartition(":")
             if file != path:
                 continue
@@ -355,19 +397,59 @@ def create_app(
             code = range_code(analyzed.texts, path, start, end)
             stale = code is None or digest_of(code) != kept.digest
             found.append({"start": start, "end": end, "text": kept.text, "stale": stale, "created": kept.created})
-        return {"explanations": sorted(found, key=lambda e: (e["start"], e["end"]))}
+        listed = {"explanations": sorted(found, key=lambda e: (e["start"], e["end"]))}
+        if base is None or target is None:
+            return listed
+        compared = []
+        for kept in latest.listed(root, "compared"):
+            spans = compared_spans(kept.name, base, target, path)
+            if spans is not None:
+                (old_start, old_end), (start, end) = spans
+                lines = {"start": start, "end": end, "old_start": old_start, "old_end": old_end}
+                compared.append({**lines, "text": kept.text, "digest": kept.digest, "created": kept.created})
+        return {**listed, "compared": sorted(compared, key=lambda e: (e["old_start"], e["old_end"], e["start"]))}
 
     @app.post("/api/explanation", dependencies=ready)
     async def make_explanation(
-        request: Request, path: str, start: int = Query(ge=1), end: int = Query(ge=1), refresh: bool = False
+        request: Request,
+        path: str,
+        start: int = Query(ge=0),
+        end: int = Query(ge=0),
+        refresh: bool = False,
+        base: str | None = None,
+        target: str | None = None,
+        old_start: int | None = Query(None, ge=1),
+        old_end: int | None = Query(None, ge=1),
+        code: str | None = Body(None, embed=True),
     ) -> dict:
-        prompt, subject = explained(path, start, end)
+        """코드 범위의 설명을 만든다. 두 시점을 엮은 문서에서 고른 범위에 바뀐 줄이 있으면 본문 `code`에 표시 붙은 본문이 온다.
+
+        삭제된 줄이 든 범위는 두 시점과 기준 시점의 줄(`old_start`, `old_end`)이 함께 오고, `start`와 `end`는 대상 시점의
+        줄이며 그 범위에 대상 시점의 줄이 없으면 둘 다 0이다.
+        """
+        old = between(base, target, old_start, old_end)
+        if old is not None and code is None:
+            raise HTTPException(status_code=422, detail="두 시점의 비교에 묶는 범위는 표시 붙은 본문 code를 넘긴다")
+        prompt, subject = explained(path, start, end, code, base, target, old)
         explanation = await made(request, app.state.summaries.make(prompt, refresh, "range", subject))
         return {"start": start, "end": end, "text": explanation.text, "stale": False, "usage": explanation.usage and asdict(explanation.usage)}
 
     @app.delete("/api/explanation", dependencies=ready)
-    def delete_explanation(path: str, start: int = Query(ge=1), end: int = Query(ge=1)) -> dict:
-        app.state.summaries.latest.delete(app.state.repo["root"], "range", f"{path}:{start}-{end}")
+    def delete_explanation(
+        path: str,
+        start: int = Query(ge=0),
+        end: int = Query(ge=0),
+        base: str | None = None,
+        target: str | None = None,
+        old_start: int | None = Query(None, ge=1),
+        old_end: int | None = Query(None, ge=1),
+    ) -> dict:
+        old = between(base, target, old_start, old_end)
+        latest = app.state.summaries.latest
+        if old is None:
+            latest.delete(app.state.repo["root"], "range", f"{path}:{start}-{end}")
+        else:
+            latest.delete(app.state.repo["root"], "compared", compared_name(base, target, path, old, (start, end)))
         return {"deleted": True}
 
     @app.get("/api/changes", dependencies=ready)

@@ -640,10 +640,58 @@ def test_explanation_is_stale_after_the_range_code_changes(client, generated):
     assert listed["stale"] is True and listed["text"] == "src/app/core.py 32~33줄 설명 1"
 
 
+def test_explanation_of_marked_code_keeps_added_ranges_on_the_file_and_deleted_ranges_on_the_comparison(client, generated):
+    path = "src/app/core.py"
+    between = {"base": "a" * 40, "target": "worktree"}
+
+    added = "     engine = Engine(config)\n+    engine.start(config)"
+    made = client.post("/api/explanation", params={"path": path, "start": 32, "end": 33}, json={"code": added}).json()
+    assert (made["start"], made["end"]) == (32, 33)
+    assert f"[고른 범위의 코드]\n{added}\n" in generated[0][1] and "[두 시점의 비교]" in generated[0][1]
+    assert [e["start"] for e in client.get("/api/explanations", params={"path": path}).json()["explanations"]] == [32]
+
+    mixed = "-    engine = Engine()\n+    engine = Engine(config)"
+    span = {"path": path, "start": 32, "end": 32, **between, "old_start": 40, "old_end": 40}
+    client.post("/api/explanation", params=span, json={"code": mixed})
+    assert "위치: src/app/core.py 32~32줄 (기준 시점 40~40줄)" in generated[1][1]
+    gone = {"path": "src/app/old.py", "start": 0, "end": 0, **between, "old_start": 3, "old_end": 4}
+    client.post("/api/explanation", params=gone, json={"code": "-def gone():\n-    return 1"})
+    assert "범위가 든 정의의 전체 코드" not in generated[2][1]
+
+    listed = client.get("/api/explanations", params={"path": path, **between}).json()
+    assert [e["start"] for e in listed["explanations"]] == [32]
+    (kept,) = listed["compared"]
+    assert {k: kept[k] for k in ("start", "end", "old_start", "old_end", "digest")} == {
+        "start": 32, "end": 32, "old_start": 40, "old_end": 40, "digest": summary.digest_of(mixed)
+    }
+    assert kept["text"] and kept["created"]
+    assert client.get("/api/explanations", params={"path": path, "base": "b" * 40, "target": "worktree"}).json()["compared"] == []
+    removed = client.get("/api/explanations", params={"path": "src/app/old.py", **between}).json()
+    assert removed["explanations"] == [] and [(e["old_start"], e["start"]) for e in removed["compared"]] == [(3, 0)]
+
+    assert client.delete("/api/explanation", params=span).json() == {"deleted": True}
+    assert client.get("/api/explanations", params={"path": path, **between}).json()["compared"] == []
+    assert [e["start"] for e in client.get("/api/explanations", params={"path": path}).json()["explanations"]] == [32]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"path": "src/app/core.py", "start": 32, "end": 32, "base": "a" * 40, "target": "worktree"},
+        {"path": "src/app/core.py", "start": 32, "end": 32, "base": "a" * 40, "target": "worktree", "old_start": 5, "old_end": 4},
+    ],
+)
+def test_explanation_of_a_compared_range_needs_both_points_and_the_base_lines(client, generated, params):
+    assert client.post("/api/explanation", params=params, json={"code": "-x"}).status_code == 422
+    assert client.post("/api/explanation", params={**params, "old_start": 4, "old_end": 5}).status_code == 422
+    assert generated == []
+
+
 @pytest.mark.parametrize(
     "params",
     [
         {"path": "src/app/none.py", "start": 1, "end": 2},
+        {"path": "src/app/core.py", "start": 0, "end": 0},
         {"path": "src/app/core.py", "start": 33, "end": 32},
         {"path": "src/app/core.py", "start": 30, "end": 999},
     ],
