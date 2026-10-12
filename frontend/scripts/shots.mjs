@@ -12433,19 +12433,37 @@ const goneLines = (page) =>
     }),
   );
 
-/** 코드 뷰어에 그린 삭제된 줄과 추가된 줄의 수, 줄 번호 칸의 글(빈칸은 `_`), 편집기의 수 */
+/**
+ * 코드 뷰어에 그린 삭제된 줄과 추가된 줄의 수, 편집기의 수, 보이는 줄마다 줄 번호 칸의 글(labels)과 줄 번호 칸 옆의 표시로 읽은
+ * 줄의 종류(kinds)
+ */
 const wovenOf = (page) =>
-  page.evaluate(() => ({
-    deleted: document.querySelectorAll(".info-panel .code .view-overlays .code-deleted").length,
-    added: document.querySelectorAll(".info-panel .code .view-overlays .code-added").length,
-    editors: document.querySelectorAll(".info-panel .code .monaco-editor").length,
-    split: document.querySelectorAll(".info-panel .monaco-diff-editor").length,
-    labels: [...document.querySelectorAll(".info-panel .code .line-numbers")]
-      .filter((label) => label.getBoundingClientRect().top >= document.querySelector(".info-panel .monaco-editor").getBoundingClientRect().top - 1)
-      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
-      .map((label) => label.textContent.replaceAll(" ", "_").replaceAll(" ", "_")),
-    text: [...document.querySelectorAll(".info-panel .code .view-line")].map((line) => line.textContent.replaceAll(" ", " ")).join("\n"),
-  }));
+  page.evaluate(() => {
+    const top = document.querySelector(".info-panel .monaco-editor").getBoundingClientRect().top;
+    const numbers = [...document.querySelectorAll(".info-panel .code .line-numbers")]
+      .filter((label) => label.getBoundingClientRect().top >= top - 1)
+      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+    const kindOf = (line) => (line.querySelector(".code-deleted-sign") !== null ? "deleted" : line.querySelector(".code-added-sign") !== null ? "added" : "same");
+    return {
+      deleted: document.querySelectorAll(".info-panel .code .view-overlays .code-deleted").length,
+      added: document.querySelectorAll(".info-panel .code .view-overlays .code-added").length,
+      editors: document.querySelectorAll(".info-panel .code .monaco-editor").length,
+      split: document.querySelectorAll(".info-panel .monaco-diff-editor").length,
+      labels: numbers.map((label) => label.textContent),
+      kinds: numbers.map((label) => kindOf(label.parentElement)),
+      text: [...document.querySelectorAll(".info-panel .code .view-line")].map((line) => line.textContent.replaceAll("\u00a0", " ")).join("\n"),
+    };
+  });
+
+/** 파일의 첫 줄부터 보이는 엮은 문서에서 줄의 종류 kinds대로 줄 번호 칸에 적힐 글. 그대로인 줄과 추가된 줄은 대상 시점의 번호, 삭제된 줄은 기준 시점의 번호다. */
+function numbersOf(kinds) {
+  let [base, target] = [0, 0];
+  return kinds.map((kind) => {
+    base += kind === "added" ? 0 : 1;
+    target += kind === "deleted" ? 0 : 1;
+    return String(kind === "deleted" ? base : target);
+  });
+}
 
 async function waitCode(page) {
   await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 });
@@ -12904,7 +12922,7 @@ async function compareCode(t, page) {
   await waitSelected(page, target);
   await waitCode(page);
   const code = await wovenOf(page);
-  const kinds = code.labels.map((label) => (/^_*\d+_+\d+$/.test(label) ? "same" : /\d_+$/.test(label) ? "deleted" : "added"));
+  const kinds = code.kinds;
   const mixed = kinds.some((kind, i) => kind === "deleted" && kinds[i + 1] === "added");
   t.check(
     "코드 뷰어가 편집기 하나에 두 시점을 엮어 보이고 삭제된 줄 바로 아래에 추가된 줄이 이어진다",
@@ -12916,6 +12934,24 @@ async function compareCode(t, page) {
     code.deleted === file.deleted && code.added === file.added && kinds.filter((kind) => kind === "deleted").length === file.deleted && kinds.filter((kind) => kind === "added").length === file.added,
     `줄 번호 칸 ${code.labels.length}줄`,
   );
+  const numbers = numbersOf(kinds);
+  const gone = kinds.indexOf("deleted");
+  t.check(
+    "줄 번호 칸은 한 칸이고 그대로인 줄과 추가된 줄은 대상 시점의 번호를, 삭제된 줄은 기준 시점의 번호를 적는다",
+    code.labels.length > 0 && code.labels.every((label) => /^\d+$/.test(label)) && same(code.labels, numbers),
+    `${code.labels.join(" ")}${gone === -1 ? "" : ` (첫 삭제된 줄 ${code.labels[gone]})`}`,
+  );
+  const gutter = await page.evaluate(() => {
+    const label = [...document.querySelectorAll(".info-panel .code .line-numbers")].find((each) => each.textContent !== "");
+    const digit = document.createElement("span");
+    digit.textContent = "0";
+    label.append(digit);
+    const width = digit.getBoundingClientRect().width;
+    digit.remove();
+    return { chars: Math.round(label.getBoundingClientRect().width / width) };
+  });
+  const most = Math.max(...code.labels.map((label) => label.length));
+  t.check(`줄 번호 칸의 폭이 가장 큰 줄 번호의 자릿수 ${most}자다`, gutter.chars === most, `${gutter.chars}자`);
   const head = await page.evaluate(() => document.querySelector(".info-panel-compared")?.textContent ?? "");
   t.check("정보 패널의 머리 줄이 수정과 그 정의의 줄 수를 적는다", head === `수정+${result.nodes[target].added}−${result.nodes[target].deleted}`, head);
   const deletedFile = result.files.find((each) => each.status === "deleted");
@@ -12928,6 +12964,7 @@ async function compareCode(t, page) {
     `${deletedFile.path} ${old.text.split("\n").length - 1}줄, ${renamedFile.old} ${past.status}`,
   );
   await t.shot();
+  await page.screenshot({ path: join(OUT, "hf10-onecol.png"), clip: await rectOf(page, ".info-panel .code") });
   // 패널의 왼쪽 변을 끌어 폭을 넓힌다.
   const panel = await rectOf(page, ".info-panel");
   await page.mouse.move(panel.x + 1, panel.y + panel.height / 2);
@@ -12984,7 +13021,7 @@ async function compareRange(t, page) {
   await waitSelected(page, target);
   await waitCode(page);
   const code = await wovenOf(page);
-  const kinds = code.labels.map((label) => (/^_*\d+_+\d+$/.test(label) ? "same" : /\d_+$/.test(label) ? "deleted" : "added"));
+  const kinds = code.kinds;
   // 삭제된 줄에서 시작해 바로 아래 추가된 줄까지 끈다.
   const first = kinds.findIndex((kind, i) => kind === "deleted" && kinds.slice(i).includes("added") && kinds[i - 1] === "same");
   const last = first + kinds.slice(first).findIndex((kind, i, rest) => kind === "added" && rest[i + 1] !== "added");

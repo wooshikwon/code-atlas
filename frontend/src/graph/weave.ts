@@ -135,13 +135,14 @@ export function marked(woven: Woven, from: number, to: number, texts: string[] =
   return texts.map((text, i) => (plain ? text : MARKS[rows[i].kind] + text)).join("\n");
 }
 
-/** 줄 번호 칸에 두 시점의 번호를 나란히 적는 함수와 그 글자 수. 그 시점에 없는 줄의 번호는 비운다. */
+/**
+ * 줄 번호 칸에 번호 하나를 적는 함수와 그 글자 수. 그대로인 줄과 추가된 줄은 대상 시점의 번호를, 삭제된 줄은 기준 시점의 번호를 적는다.
+ * 글자 수는 두 시점의 가장 큰 줄 번호의 자릿수다.
+ */
 export function gutter(woven: Woven): { chars: number; label(line: number): string } {
-  const width = (side: Side) => String(woven.rows.reduce((most, row) => Math.max(most, row[side] ?? 0), 0)).length;
-  const widths = { base: width("base"), target: width("target") };
-  const cell = (side: Side, row: Row | undefined) => String(row?.[side] ?? "").padStart(widths[side], " ");
+  const number = (row: Row | undefined) => row?.target ?? row?.base ?? null;
   return {
-    chars: widths.base + widths.target + 1,
-    label: (line) => `${cell("base", woven.rows[line - 1])} ${cell("target", woven.rows[line - 1])}`,
+    chars: String(woven.rows.reduce((most, row) => Math.max(most, number(row) ?? 0), 0)).length,
+    label: (line) => String(number(woven.rows[line - 1]) ?? ""),
   };
 }

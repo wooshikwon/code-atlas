@@ -160,14 +160,16 @@ describe("marked", () => {
 });
 
 describe("gutter", () => {
-  it("두 시점의 번호를 폭을 맞춰 나란히 적고 없는 번호는 비운다", () => {
+  it("그대로인 줄과 추가된 줄은 대상 시점의 번호를, 삭제된 줄은 기준 시점의 번호를 적는다", () => {
+    const { label } = gutter(weave(BASE, TARGET, HUNKS));
+    expect(Array.from({ length: 11 }, (_, i) => label(i + 1))).toEqual(["1", "2", "2", "3", "4", "5", "6", "6", "7", "7", "8"]);
+    expect(label(12)).toBe("");
+  });
+
+  it("글자 수는 두 시점의 가장 큰 줄 번호의 자릿수다", () => {
     const lines = Array.from({ length: 12 }, (_, i) => `l${i}`);
-    const { chars, label } = gutter(weave(text(lines), text([...lines.slice(0, 9), "new", ...lines.slice(10)]), [[10, 1, 10, 1]]));
-    const drawnLabel = (line: number) => label(line).replaceAll(" ", "_");
-    expect(chars).toBe(5);
-    expect(drawnLabel(1)).toBe("_1__1");
-    expect(drawnLabel(10)).toBe("10___");
-    expect(drawnLabel(11)).toBe("___10");
-    expect(drawnLabel(13)).toBe("12_12");
+    expect(gutter(weave(BASE, TARGET, HUNKS)).chars).toBe(1);
+    expect(gutter(weave(text(lines), text(lines.slice(0, 8)), [[9, 4, 8, 0]])).chars).toBe(2);
+    expect(gutter(weave(text(lines.slice(0, 8)), text(lines), [[8, 0, 9, 4]])).chars).toBe(2);
   });
 });
