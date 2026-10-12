@@ -4,7 +4,7 @@
 import { useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
-import { gone } from "../graph/compare";
+import { compared, gone } from "../graph/compare";
 import { flow } from "../graph/flow";
 import { routeText } from "../graph/names";
 import { arriving, edgeKey, picked, trunkTarget } from "../graph/scope";
@@ -63,8 +63,8 @@ export function InfoPanel() {
   const depth = useAtlas((s) => s.depth);
   const finder = useAtlas((s) => s.finder);
   /** 시점 비교에서 대상 시점에 없는 노드와 선. 그 노드의 줄 범위와 그 선의 코드 줄은 기준 시점의 값이다. */
-  const compared = useCompare((s) => s.result);
-  const past = useMemo(() => gone(compared), [compared]);
+  const result = useCompare((s) => s.result);
+  const past = useMemo(() => gone(result), [result]);
   const split = useAtlas((s) => s.split);
   const setSplit = useAtlas((s) => s.setSplit);
   const summaryOpen = useAtlas((s) => s.summaryOpen);
@@ -88,20 +88,23 @@ export function InfoPanel() {
   /** 고정 중에 강조하는 경로 */
   const lit = useMemo(() => litOf(finder), [finder.route, finder.pick]);
 
+  /** 그래프 뷰가 그리는 것과 같은 비교. 저장소의 그래프가 켜져 있는 비교의 그래프일 때만 있다. */
+  const compare = useMemo(() => (graph === null || result === null || result.graph !== graph ? null : compared(graph, result)), [graph, result]);
+
   /** 그래프가 지금 화면을 그릴 때와 같은 흐름·강조하는 경로와 보이는 노드 */
   const scene = useMemo(() => {
     if (graph === null || index === null || off === null) {
       return null;
     }
     const toggles = { showTests, showExternal };
-    const boxes = { collapsed, unpacked, marked: overlay === "unused" ? candidates : undefined, candidates };
+    const boxes = { collapsed, unpacked, marked: overlay === "unused" ? candidates : undefined, candidates, compare };
     if (lit !== null) {
       return { flow: null, lit, shown: shown(graph, { ...toggles, ...boxes, flow: null, lit }) };
     }
     const focus = focusOf(selection);
     const focused = focus !== null && index.nodes.has(focus) && !off.has(focus) ? flow(graph, focus, depth, off) : null;
     return { flow: focused, lit, shown: shown(graph, { ...toggles, ...boxes, flow: focused, lit }) };
-  }, [graph, index, off, selection, showTests, showExternal, collapsed, unpacked, overlay, candidates, depth, lit]);
+  }, [graph, index, off, selection, showTests, showExternal, collapsed, unpacked, overlay, candidates, depth, lit, compare]);
 
   /** 고른 줄기의 도착 노드와 그 노드로 들어오는 그린 선 */
   const trunk = useMemo(() => {
@@ -109,15 +112,15 @@ export function InfoPanel() {
     if (graph === null || scene === null || scene.lit !== null || target === null) {
       return null;
     }
-    return { target, edges: arriving(graph, scene.shown, scene.flow, target) };
-  }, [graph, scene, selection]);
+    return { target, edges: arriving(graph, scene.shown, scene.flow, target, compare?.gone.edges) };
+  }, [graph, scene, selection, compare]);
 
   const edge = useMemo(() => {
     if (graph === null || scene === null || scene.lit !== null || selection?.type !== "edge" || trunkTarget(selection.key) !== null) {
       return null;
     }
-    return picked(graph, scene.shown, scene.flow, selection.key);
-  }, [graph, scene, selection]);
+    return picked(graph, scene.shown, scene.flow, selection.key, compare?.gone.edges);
+  }, [graph, scene, selection, compare]);
 
   const chosen = chosenOf({ finder, selection });
   const node = file === null && chosen !== null ? index?.nodes.get(chosen) : undefined;
