@@ -1035,6 +1035,11 @@ ul {
   transition: opacity 200ms ease-out;
 }
 
+/* 선 하나만 그리는 선 묶음은 진하기를 선의 불투명도로 받는다(edges/OrthogonalEdge.tsx의 shadeStyle). */
+.edge {
+  transition-property: opacity, stroke-opacity;
+}
+
 .graph[data-moving] .edge {
   opacity: 0 !important;
   pointer-events: none;

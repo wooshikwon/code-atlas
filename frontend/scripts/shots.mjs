@@ -241,7 +241,7 @@ const edgesOf = (page) =>
         source,
         target,
         tone: edge.classList.contains("tone-strong") ? "strong" : "muted",
-        opacity: Number(getComputedStyle(edge).opacity),
+        opacity: Number(getComputedStyle(edge).opacity) * Number(getComputedStyle(edge).strokeOpacity),
         stroke: getComputedStyle(edge.querySelector(".edge-line")).stroke,
       };
     }),
@@ -272,7 +272,7 @@ const linesOf = (page) =>
         layer: getComputedStyle(edge.closest("svg")).zIndex,
         pointed: edge.hasAttribute("data-pointed"),
         tone: edge.classList.contains("tone-strong") ? "strong" : "muted",
-        opacity: Number(getComputedStyle(edge).opacity),
+        opacity: Number(getComputedStyle(edge).opacity) * Number(getComputedStyle(edge).strokeOpacity),
         stroke: getComputedStyle(line).stroke,
         // 선 가운데 숫자의 글자색. 숫자가 없는 선은 null이다.
         digits: edge.querySelector(".edge-weight") === null ? null : getComputedStyle(edge.querySelector(".edge-weight")).fill,
@@ -5264,7 +5264,7 @@ const routeLinesOf = (page) =>
         width: parseFloat(style.strokeWidth),
         stroke: style.stroke,
         dashed: style.strokeDasharray !== "none",
-        opacity: Number(getComputedStyle(edge).opacity),
+        opacity: Number(getComputedStyle(edge).opacity) * Number(getComputedStyle(edge).strokeOpacity),
       };
     }),
   );
@@ -6540,7 +6540,7 @@ const cycleLinesOf = (page) =>
       key: edge.dataset.key,
       cycle: edge.hasAttribute("data-cycle"),
       stroke: getComputedStyle(edge.querySelector(".edge-line")).stroke,
-      opacity: Number(getComputedStyle(edge).opacity),
+      opacity: Number(getComputedStyle(edge).opacity) * Number(getComputedStyle(edge).strokeOpacity),
     })),
   );
 
@@ -7527,7 +7527,7 @@ async function dim(t, page) {
       const tally = (elements) => {
         const counts = {};
         for (const element of elements) {
-          const opacity = getComputedStyle(element).opacity;
+          const opacity = String(Number(getComputedStyle(element).opacity) * Number(getComputedStyle(element).strokeOpacity));
           counts[opacity] = (counts[opacity] ?? 0) + 1;
         }
         return counts;
@@ -8193,7 +8193,7 @@ const trunksOf = (page, end = "in") =>
         joints: trunk.querySelectorAll(`.edge-joint-${side}`).length,
         arrows: trunk.querySelectorAll(".edge-line[marker-end]").length,
         tone: trunk.classList.contains("tone-strong") ? "strong" : "muted",
-        opacity: Number(getComputedStyle(trunk).opacity),
+        opacity: Number(getComputedStyle(trunk).opacity) * Number(getComputedStyle(trunk).strokeOpacity),
         width: parseFloat(getComputedStyle(line).strokeWidth),
         pointed: trunk.hasAttribute("data-pointed"),
         step: trunk.hasAttribute("data-step"),
@@ -10081,7 +10081,7 @@ const viaLines = (page) =>
       key: edge.dataset.key,
       via: edge.hasAttribute("data-via"),
       strong: edge.classList.contains("tone-strong"),
-      opacity: Number(getComputedStyle(edge).opacity),
+      opacity: Number(getComputedStyle(edge).opacity) * Number(getComputedStyle(edge).strokeOpacity),
       width: parseFloat(getComputedStyle(edge.querySelector(".edge-line")).strokeWidth),
       derive: edge.classList.contains("edge-derive"),
     })),
@@ -13020,7 +13020,7 @@ const goneLines = (page) =>
         numbers: [...edge.querySelectorAll(".edge-weight, .edge-sum, .edge-trunk-count")].map((n) => n.textContent),
         dots: dots.map((dot) => ({ x: Number(dot.getAttribute("cx")), y: Number(dot.getAttribute("cy")), fill: getComputedStyle(dot).fill, opacity: Number(getComputedStyle(dot).opacity) })),
         end: { x: end.x, y: end.y },
-        opacity: Number(getComputedStyle(edge).opacity),
+        opacity: Number(getComputedStyle(edge).opacity) * Number(getComputedStyle(edge).strokeOpacity),
       };
     }),
   );

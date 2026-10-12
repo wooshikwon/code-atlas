@@ -4,7 +4,7 @@
 import type { EdgeProps } from "@xyflow/react";
 import { FORK_RIM, JOINT_RADIUS } from "../layout";
 import { MARK_SIZE, roundedPath } from "../view";
-import { markerId, type TrunkFlowEdge } from "./OrthogonalEdge";
+import { markerId, shadeStyle, type TrunkFlowEdge } from "./OrthogonalEdge";
 
 export function Trunk({ data }: EdgeProps<TrunkFlowEdge>) {
   if (data === undefined) {
@@ -12,6 +12,7 @@ export function Trunk({ data }: EdgeProps<TrunkFlowEdge>) {
   }
   const [first, ...rest] = data.pieces.map((piece) => roundedPath(piece));
   const all = [first, ...rest].join(" ");
+  const lone = rest.length === 0 && data.end === "out" && data.joints.length === 0 && data.at === null && data.mark === null && !data.pointed;
   return (
     <g
       className={`edge edge-trunk edge-${data.group} tone-${data.tone}`}
@@ -21,7 +22,7 @@ export function Trunk({ data }: EdgeProps<TrunkFlowEdge>) {
       data-pointed={data.pointed ? "" : undefined}
       data-step={data.route ? "" : undefined}
       data-gone={data.mark !== null ? "" : undefined}
-      style={{ opacity: data.opacity }}
+      style={shadeStyle(data.opacity, lone)}
     >
       <path className="edge-hit" d={all} />
       <path className="edge-line" d={first} markerEnd={data.end === "in" ? `url(#${markerId(data.group, data.tone)})` : undefined} />
