@@ -2254,7 +2254,7 @@ async function tips(t, page) {
   await settle(page);
   const onFunction = await settled(`${face(FUNCTION)} .node-label`);
   t.check("요약이 있는 함수 노드에 올리면 말풍선이 그 요지를 적는다", onFunction === LEAD, onFunction);
-  const sibling = definedIn(graph, FILE).find((n) => n.kind === "function" && n.id !== FUNCTION && n.name.length < 30);
+  const sibling = definedIn(graph, FILE).find((n) => n.kind === "function" && n.id !== FUNCTION && n.name.length < 18);
   const treeRow = `.tree-row.tree-symbol[data-node="${sibling.id}"]`;
   const before = await settled(`${treeRow} .tree-label`);
   await page.click(treeRow);
@@ -6377,7 +6377,7 @@ async function unusedScenario(t, page) {
     `${plain} → ${caption}, arbiter.py "${await belowOf(page, FILE)}"`,
   );
   const tip = await tipOver(page, `${face(file)} .node-below`);
-  t.check("아래 글자에 올리면 미사용 후보 수와 뜻을 말풍선에 적는다", tip.startsWith(`미사용 후보 ${inFile.length}개 · 이 파일 안의 정의에서 합친 수`) && tip.includes("동적 호출이면 실제로는 쓰일 수 있다"), tip.replaceAll("\n", " / "));
+  t.check("아래 글자에 올리면 미사용 후보 수와 뜻을 말풍선에 적는다", tip.startsWith(`미사용 후보 ${inFile.length}개 · 이 파일 안의 정의에서 합친 수`) && tip.includes("동적 호출이면 실제로는 쓰일 수 있습니다"), tip.replaceAll("\n", " / "));
   await page.mouse.move(5, 5);
   const overview = await page.evaluate(() => ({
     count: document.querySelector(".overview .overview-count")?.textContent ?? "",
@@ -13894,9 +13894,10 @@ async function welcome(page) {
   await page.waitForSelector(".welcome", { timeout: 30_000 });
 }
 
-/** 레포 열기 화면의 경로 입력 칸에 경로를 적고 연다. */
+/** 레포 열기 화면의 `폴더 열기…`로 경로 입력 창을 띄워 경로를 적고 연다. */
 async function typePath(page, path) {
-  await page.fill(".welcome .open-input", path);
+  await page.click(".welcome-pick");
+  await page.fill(".ask .open-input", path);
   await page.keyboard.press("Enter");
 }
 
@@ -13938,8 +13939,7 @@ async function openWelcome(t, page) {
   const seen = await page.evaluate(() => ({
     panels: document.querySelectorAll(".app, .toolbar, .explorer").length,
     title: document.querySelector(".welcome-title")?.textContent ?? "",
-    input: document.querySelector(".welcome .open-input")?.getAttribute("placeholder") ?? null,
-    focused: document.activeElement === document.querySelector(".welcome .open-input"),
+    input: document.querySelectorAll(".welcome .open-input").length,
     buttons: [...document.querySelectorAll(".welcome button")].map((button) => ({ text: button.textContent.trim(), disabled: button.disabled })),
     recent: document.querySelectorAll(".recent, .recent-row").length,
     text: document.body.innerText,
@@ -13947,8 +13947,8 @@ async function openWelcome(t, page) {
   const status = await api("/api/status", openUrl);
   t.check("연 레포가 없으면 칸 묶음 대신 레포 열기 화면을 그린다", status.phase === "idle" && seen.panels === 0 && seen.title === "레포 열기", `phase ${status.phase}, 칸 ${seen.panels}개`);
   t.check(
-    "브라우저는 포커스가 든 경로 입력 칸과 열기 버튼, 환경 점검 버튼을 그리고, 경로가 비어 있으면 열기를 누를 수 없다",
-    seen.input === "레포 폴더의 경로" && seen.focused && same(seen.buttons, [{ text: "열기", disabled: true }, { text: "환경 점검", disabled: false }]),
+    "레포 열기 화면은 경로 입력 칸 없이 폴더 열기… 버튼과 환경 점검 버튼을 그린다",
+    seen.input === 0 && same(seen.buttons, [{ text: "폴더 열기…", disabled: false }, { text: "환경 점검", disabled: false }]),
     JSON.stringify(seen.buttons),
   );
   t.check("연 적이 있는 레포가 없으면 목록을 그리지 않는다", seen.recent === 0);
@@ -14107,8 +14107,8 @@ async function openRecent(t, page) {
   await page.reload();
   await page.waitForSelector(".recent-row");
   const gone = (await rowsOf())[1];
-  const faded = await page.evaluate(() => getComputedStyle(document.querySelectorAll(".recent-open")[1]).color === getComputedStyle(document.querySelector(".recent-title")).color);
-  t.check("폴더가 없어진 레포는 흐리게 그리고 폴더가 없다고 적으며 누를 수 없다", gone.missing && gone.disabled && gone.day === "폴더가 없다" && faded, JSON.stringify(gone));
+  const faded = await page.evaluate(() => getComputedStyle(document.querySelectorAll(".recent-open")[1]).color !== getComputedStyle(document.querySelectorAll(".recent-open")[0]).color);
+  t.check("폴더가 없어진 레포는 흐리게 그리고 폴더 없음을 적으며 누를 수 없다", gone.missing && gone.disabled && gone.day === "폴더 없음" && faded, JSON.stringify(gone));
   await page.hover(".recent-forget >> nth=1");
   await page.waitForSelector(".tooltip");
   t.check("지우기 버튼의 말풍선이 목록에서 지우기를 적는다", (await page.textContent(".tooltip")) === "목록에서 지우기", await page.textContent(".tooltip"));
@@ -14505,8 +14505,8 @@ async function toolsMissing(t, page) {
   await page.waitForFunction(() => document.querySelector(".summary-unavailable .tools-command") !== null);
   const missing = await cell();
   t.check(
-    "claude를 찾지 못하면 LLM 요약 칸이 까닭과 설치 명령, 복사 버튼, 환경 점검 버튼을 그린다",
-    same(missing.trouble, ["Claude Code CLI를 찾지 못했습니다"]) && same(missing.commands, [CLAUDE_INSTALL]) && same(missing.buttons, ["복사", "다시 확인", "환경 점검"]),
+    "claude를 찾지 못하면 LLM 요약 칸이 까닭과 설치 명령·로그인 명령의 단계, 복사 버튼, 환경 점검 버튼을 그린다",
+    same(missing.trouble, ["Claude Code CLI를 찾지 못했습니다"]) && same(missing.commands, [CLAUDE_INSTALL, CLAUDE_LOGIN]) && same(missing.buttons, ["복사", "복사", "다시 확인", "환경 점검"]),
     `${missing.trouble.join(" / ")} · ${missing.commands.join(" / ")} · ${missing.buttons.join(", ")}`,
   );
   t.check("요약 칸의 문구에 서버, 백엔드, sidecar라는 말이 없다", !FORBIDDEN.test(missing.text), missing.text.replace(/\s+/g, " "));
@@ -14517,11 +14517,11 @@ async function toolsMissing(t, page) {
   await page.screenshot({ path: TOOLS_SHOT("summary-missing") });
   const lost = (await rows()).claude;
   t.check(
-    "환경 점검 화면의 Claude Code 행이 같은 까닭과 설치 명령을 적고 시도한 후보 여섯 곳을 펴 둔다",
-    !lost.ok && lost.state === "찾지 못함" && same(lost.notes, ["Claude Code CLI를 찾지 못했습니다"]) && same(lost.commands, [CLAUDE_INSTALL]) && lost.attempts.length === 6 && lost.attempts.every((line) => line[2] === "없는 파일"),
+    "환경 점검 화면의 Claude Code 행이 같은 까닭과 설치 명령·로그인 명령의 단계를 적고 시도한 후보 여섯 곳을 펴 둔다",
+    !lost.ok && lost.state === "찾지 못함" && same(lost.notes, ["Claude Code CLI를 찾지 못했습니다"]) && same(lost.commands, [CLAUDE_INSTALL, CLAUDE_LOGIN]) && lost.attempts.length === 6 && lost.attempts.every((line) => line[2] === "없는 파일"),
     `${lost.state} / ${lost.notes.join(" / ")} / 시도 ${lost.attempts.length}곳`,
   );
-  t.check("찾지 못한 도구에는 응답 확인을 그리지 않는다", same(lost.buttons, ["다시 확인", "직접 고르기", "복사"]), lost.buttons.join(", "));
+  t.check("찾지 못한 도구에는 응답 확인을 그리지 않는다", same(lost.buttons, ["다시 확인", "직접 고르기", "복사", "복사"]), lost.buttons.join(", "));
   await t.shot();
   await page.screenshot({ path: TOOLS_SHOT("claude-missing") });
   await closeTools(page);

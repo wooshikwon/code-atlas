@@ -1,5 +1,5 @@
-// 연 레포가 없을 때 칸 묶음 대신 그리는 레포 열기 화면. 가운데에 폴더를 여는 입구와 최근에 연 레포 목록, 환경 점검 화면을 여는 버튼을 둔다. 앱은 폴더 선택
-// 대화상자를 여는 버튼을 그리고 창 어디에 폴더를 끌어다 놓아도 받는다. 브라우저는 경로 입력 칸을 그린다.
+// 연 레포가 없을 때 칸 묶음 대신 그리는 레포 열기 화면. 가운데에 `폴더 열기…` 버튼과 최근에 연 레포 목록, 환경 점검 화면을 여는 버튼을 둔다. 버튼을 누르면
+// 앱은 폴더 선택 대화상자를, 브라우저는 경로 입력 창을 띄운다. 앱은 창 어디에 폴더를 끌어다 놓아도 받는다.
 // 앱에서 백엔드가 뜨는 동안과 멈췄을 때 화면 가운데에 그리는 표시도 여기에 있다.
 import { useEffect, useState } from "react";
 import { host, type Backend } from "../host";
@@ -7,7 +7,7 @@ import { useOpening } from "../state/opening";
 import { useTools } from "../state/tools";
 import { Recent } from "./Recent";
 
-/** 브라우저에서 폴더의 경로를 받는 칸. 레포 열기 화면과 경로 입력 창이 함께 쓴다. */
+/** 브라우저에서 폴더의 경로를 받는 칸. 경로 입력 창이 쓴다. */
 export function PathField({ autoFocus }: { autoFocus?: boolean }) {
   const choose = useOpening((s) => s.choose);
   const [path, setPath] = useState("");
@@ -51,16 +51,10 @@ export function Welcome() {
     <main className="welcome">
       <div className="welcome-body">
         <h1 className="welcome-title">레포 열기</h1>
-        {host.app ? (
-          <>
-            <button className="toolbar-button welcome-pick" disabled={busy} onClick={() => void browse()}>
-              폴더 열기…
-            </button>
-            <p className="welcome-hint">Python 레포의 폴더를 이 창에 끌어다 놓아도 열립니다</p>
-          </>
-        ) : (
-          <PathField autoFocus />
-        )}
+        <button className="toolbar-button confirm-button welcome-pick" disabled={busy} onClick={() => void browse()}>
+          폴더 열기…
+        </button>
+        {host.app && <p className="welcome-hint">Python 레포의 폴더를 이 창에 끌어다 놓아도 열립니다</p>}
         {busy && (
           <p className="welcome-hint" role="status">
             여는 중

@@ -262,7 +262,7 @@ export function RangeNotes({ editor, path, woven, between }: RangeNotesProps) {
       const classes = ["code-note-glyph", making ? "code-note-making" : "", stale ? "code-note-stale" : ""];
       return {
         range: new monaco.Range(from, 1, from, 1),
-        options: { glyphMarginClassName: classes.filter((name) => name !== "").join(" "), glyphMarginHoverMessage: { value: titleOf(list[0].note) } },
+        options: { linesDecorationsClassName: classes.filter((name) => name !== "").join(" "), linesDecorationsTooltip: titleOf(list[0].note) },
       };
     });
     const held = [shown.find((each) => groupKey(each) === open), asking === null ? undefined : { from: asking.start, to: asking.end }];
@@ -282,7 +282,7 @@ export function RangeNotes({ editor, path, woven, between }: RangeNotesProps) {
   useEffect(() => {
     const listener = editor.onMouseDown((event) => {
       const line = event.target.position?.lineNumber;
-      if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN || line === undefined) {
+      if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS || line === undefined) {
         return;
       }
       const found = drawn.current.find((each) => each.from === line);

@@ -48,6 +48,11 @@ export type RunElk = (graph: ElkNode) => Promise<ElkNode>;
 const LABEL_FONT = 12;
 const FONT = `${LABEL_FONT}px system-ui, -apple-system, "Segoe UI", sans-serif`;
 export const HEADER = 32;
+/**
+ * 펼친 파일 상자에서 머리 줄과 첫 자식 사이에 더 두는 높이. 머리 줄(32px)의 글자 아래에 남는 8px와 합쳐, 폴더 영역이 머리 줄의 띠와
+ * 첫 자식 사이에 두는 안쪽 여백 PAD(16px)와 같은 간격이 된다.
+ */
+export const HEAD_GAP = 8;
 /** 자식을 그리는 상자의 안쪽 여백 */
 export const PAD = 16;
 export const TABLE_HEAD = 24;
@@ -396,7 +401,7 @@ function leafSize(node: AtlasNode, measure: Measure, marks: Marks): Size {
  * 받아, 자식을 놓는 영역 아래에 형제 노드 사이의 간격과 손잡이 한 줄을 아래 여백에 더하고 손잡이의 폭이 들어가게 한다.
  */
 function boxOptions(node: AtlasNode, functions: number, measure: Measure, marks: Marks, handle: Size | null): Record<string, string> {
-  let top = node.kind === "package" ? REGION_HEAD + PAD : HEADER;
+  let top = node.kind === "package" ? REGION_HEAD + PAD : node.kind === "module" ? HEADER + HEAD_GAP : HEADER;
   let minWidth = labelWidth(node, measure, true, marks) + 2 * PAD;
   if (node.kind === "module") {
     minWidth += CHANGE_GAP + measure(CHANGE_MARK, true) + COUNT_GAP + measure(moduleHeader(node, functions));

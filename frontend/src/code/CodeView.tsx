@@ -101,7 +101,9 @@ const OPTIONS = {
   readOnly: true,
   domReadOnly: true,
   minimap: { enabled: false },
-  glyphMargin: true,
+  // 줄 번호 왼쪽에 칸을 두지 않는다. 번호 오른쪽의 표시 칸에 시점 비교의 `−`·`+`(앞 10px)와 코드 분석의 표지(그 뒤 14px)를 그린다.
+  glyphMargin: false,
+  lineDecorationsWidth: 24,
   scrollBeyondLastLine: false,
   // 첫 줄 위의 여백과 코드 사이에 스크롤 그림자가 줄을 긋지 않게 한다.
   scrollbar: { useShadows: false },

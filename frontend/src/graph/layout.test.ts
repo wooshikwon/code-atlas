@@ -150,7 +150,7 @@ describe("elkGraphs", () => {
     const part = find(input.components[0], "pkg.mod")!;
     expect(part.children?.map((c) => c.id)).toEqual(["pkg.mod:Store"]);
     expect([...input.packs]).toEqual([["pkg.mod", { width: measure("내부 함수 2개") + 12, height: 18 }]]);
-    expect(part.layoutOptions?.["elk.padding"]).toBe("[top=32,left=16,bottom=58,right=16]");
+    expect(part.layoutOptions?.["elk.padding"]).toBe("[top=40,left=16,bottom=58,right=16]");
     const all = elkGraphs(repoFixture, shownFor("pkg.mod"), cols, measure, new Map());
     const full = find(all.components[0], "pkg.mod")!;
     expect(full.children?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse"]);
@@ -213,7 +213,7 @@ describe("elkGraphs", () => {
 
   it("펼친 파일 상자는 머리 줄 여백과 손잡이 줄을 두고 안의 노드를 소스 정의 순서로 품는다", () => {
     const mod = find(opened.components[0], "pkg.mod")!;
-    expect(mod.layoutOptions?.["elk.padding"]).toBe("[top=32,left=16,bottom=58,right=16]");
+    expect(mod.layoutOptions?.["elk.padding"]).toBe("[top=40,left=16,bottom=58,right=16]");
     expect(kidsOf(mod)?.map((c) => c.id)).toEqual(["pkg.mod:Store", "pkg.mod:Row", "pkg.mod:parse"]);
     expect(kidsOf(mod)?.map((c) => c.layoutOptions?.["elk.partitioning.partition"])).toEqual(["0", "1", "1"]);
     expect(kidsOf(find(mod, "pkg.mod:Store"))?.map((c) => c.id)).toEqual(["pkg.mod:Store.load", "pkg.mod:Store.save"]);
@@ -409,8 +409,8 @@ describe("arrange", async () => {
     const box = result.boxes.get("scratch")!;
     const todo = result.boxes.get("scratch:todo")!;
     expect(todo.x).toBe(box.x + 16);
-    expect(todo.y).toBe(box.y + 32);
-    expect(result.positions.get("scratch:todo")).toEqual({ x: 16, y: 32 });
+    expect(todo.y).toBe(box.y + 40);
+    expect(result.positions.get("scratch:todo")).toEqual({ x: 16, y: 40 });
   });
 
   it("부모 기준 좌표를 더해 절대 좌표를 만든다", () => {
