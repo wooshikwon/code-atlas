@@ -167,7 +167,7 @@ function Ask({ left, top, width, send, close }: { left: number; top: number; wid
   );
 }
 
-/** 코드 뷰어의 본문이나 문법 색으로 그리는 범위가 바뀌면 `key`로 새로 그린다. */
+/** 코드 뷰어의 본문이나 문법 색으로 그리는 범위가 바뀌거나 노드를 고르면 `key`로 새로 그린다. */
 export function RangeNotes({ editor, path, woven, between }: RangeNotesProps) {
   /** 대상 시점의 파일과 줄 범위에 묶은 설명. 대상 시점에 없는 파일에는 없다. */
   const plain = useExplanations((s) => s.files[path]) ?? NONE;

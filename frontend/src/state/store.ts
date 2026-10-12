@@ -92,6 +92,11 @@ export interface AtlasStore {
   epoch: number;
   /** 화면을 초기화한 횟수(`resetView`). 구조 뷰가 이 값이 늘 때마다 화면을 레포를 연 처음 화면처럼 맞춘다. */
   homed: number;
+  /**
+   * 노드를 고른 횟수. 이미 고른 노드를 다시 골라 선택이 그대로일 때와 경로 고정 중에 경로 위의 노드를 골랐을 때도 는다.
+   * 코드 뷰어가 이 값이 늘 때마다 보이는 범위를 처음 골랐을 때처럼 다시 가운데에 둔다.
+   */
+  picked: number;
   /** 배치 계산이 펼치기·접기의 움직임 시간을 넘겨 도는 중이다(`graph/arranging.tsx`). 그동안 그래프는 앞의 배치를 그대로 그린다. */
   arranging: boolean;
   /** 화면에 그린 배치를 계산하기 시작한 때의 탐색 이력. 그린 배치가 없으면 null이다. */
@@ -125,7 +130,7 @@ export interface AtlasStore {
    * select(null)과 show(null)은 고정 중에 아무것도 하지 않는다.
    *
    * 노드를 고르고 그 노드를 품은 접은 폴더를 펼친다. 폴더를 고르면 그 폴더를 접는다.
-   * null을 넘기거나 고른 파일 상자·폴더·외부 노드를 다시 고르면 선택을 푼다. 고른 함수·클래스·메서드를 다시 고르면 아무것도 바꾸지 않는다.
+   * null을 넘기거나 고른 파일 상자·폴더·외부 노드를 다시 고르면 선택을 푼다. 고른 함수·클래스·메서드를 다시 고르면 picked만 1 늘린다.
    */
   select(id: string | null): void;
   /** 구조 뷰로 돌아가 select처럼 노드를 고른다. 이미 고른 노드여도 선택을 풀지 않는다. null을 넘기면 구조 뷰로 돌아가 선택을 푼다. */
@@ -374,13 +379,14 @@ function cover(graph: Graph, toggles: { showTests: boolean; showExternal: boolea
 export const useAtlas = create<AtlasStore>()((set, get) => {
   /**
    * 뷰·선택·지나온 선·접은 폴더·전부 펼친 상자를 바꾸고 바뀐 뒤의 단계를 이력에 넣는다. 선택을 바꾸는 change가 지나온 선을
-   * 주지 않으면 지나온 선을 지운다.
+   * 주지 않으면 지나온 선을 지운다. change가 노드를 고르면 picked를 1 늘린다.
    */
   const visit = (change: Partial<Pick<AtlasStore, "view" | "selection" | "via" | "collapsed" | "unpacked">>) =>
     set((state) => {
       const next = { ...("selection" in change ? { via: null } : {}), ...change };
       const unpacked = unpackedFor({ ...state, ...next });
-      return { ...next, unpacked, history: push(state.history, placeOf({ ...state, ...next, unpacked })) };
+      const picked = change.selection?.type === "node" ? state.picked + 1 : state.picked;
+      return { ...next, unpacked, picked, history: push(state.history, placeOf({ ...state, ...next, unpacked })) };
     });
 
   /** 이력의 지금 단계를 화면에 되돌린다. 이력에 새 단계를 넣지 않는다. 그 단계를 넣은 뒤 토글이 바뀌었으면 전부 펼친 상자를 지금 토글로 다시 맞춘다. */
@@ -409,14 +415,14 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
       }
     };
 
-  /** 경로 고정 중에 null이나 강조한 경로 위의 노드를 받았는지. 경로 위의 노드면 finder.focus를 그 노드로 바꾼다. */
+  /** 경로 고정 중에 null이나 강조한 경로 위의 노드를 받았는지. 경로 위의 노드면 finder.focus를 그 노드로 바꾸고 picked를 1 늘린다. */
   const focused = (id: string | null): boolean => {
     const finder = get().finder;
     if (!pinned(finder) || (id !== null && litOf(finder)?.nodes.has(id) !== true)) {
       return false;
     }
     if (id !== null) {
-      set({ finder: { ...finder, focus: id, aimed: finder.aimed + 1 } });
+      set((state) => ({ finder: { ...finder, focus: id, aimed: finder.aimed + 1 }, picked: state.picked + 1 }));
     }
     return true;
   };
@@ -495,6 +501,7 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
     reloadError: null,
     epoch: 0,
     homed: 0,
+    picked: 0,
     arranging: false,
     arranged: null,
     fitted: false,
@@ -563,6 +570,8 @@ export const useAtlas = create<AtlasStore>()((set, get) => {
         if (selection?.type === "node" && selection.id === id) {
           if (kind === "module" || kind === "package" || kind === "external") {
             visit({ selection: null });
+          } else {
+            set((state) => ({ picked: state.picked + 1 }));
           }
           return;
         }

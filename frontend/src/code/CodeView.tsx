@@ -114,6 +114,7 @@ const OPTIONS = {
 export function CodeView({ path, range, highlight, base = false }: CodeViewProps) {
   const theme = useAtlas((s) => s.theme);
   const select = useAtlas((s) => s.select);
+  const picked = useAtlas((s) => s.picked);
   const compared = useCompare((s) => s.result);
   const source = useMemo(() => sourceOf(compared, path, base), [compared, path, base]);
   const [shown, setShown] = useState<Shown | null>(null);
@@ -245,7 +246,7 @@ export function CodeView({ path, range, highlight, base = false }: CodeViewProps
   }, [editor, code, lit]);
 
   // 바탕을 칠한 줄이 있으면 그 줄을, 없으면 범위를 코드 뷰어의 가운데에 둔다. 파일 전체를 보일 때는 1번 줄부터 보인다.
-  // 뷰어의 높이가 바뀌면 다시 가운데에 두고, 사용자가 스크롤한 뒤에는 옮기지 않는다.
+  // 뷰어의 높이가 바뀌면 다시 가운데에 두고, 사용자가 스크롤한 뒤에는 옮기지 않는다. 노드를 고를 때마다(`picked`) 처음부터 다시 한다.
   const [from, to] = lit !== undefined ? [lit, lit] : [start, end];
   useEffect(() => {
     if (editor === null || code === undefined) {
@@ -288,7 +289,7 @@ export function CodeView({ path, range, highlight, base = false }: CodeViewProps
       dom.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("pointerup", onUp, true);
     };
-  }, [editor, code, from, to]);
+  }, [editor, code, from, to, picked]);
 
   // Mod+클릭한 이름의 정의가 레포 안에 있으면 그 노드를 고르고, 레포 밖에 있으면 외부 모듈 이름을 띄운다.
   useEffect(() => {
@@ -413,7 +414,7 @@ export function CodeView({ path, range, highlight, base = false }: CodeViewProps
         />
       )}
       {editor !== null && code !== undefined && (
-        <RangeNotes key={`${key}:${start}-${end}`} editor={editor} path={file} woven={woven} between={woven === null ? null : source.compared} />
+        <RangeNotes key={`${key}:${start}-${end}:${picked}`} editor={editor} path={file} woven={woven} between={woven === null ? null : source.compared} />
       )}
       {note !== null && (
         <div className="code-note" style={{ left: note.x, top: note.y }}>
