@@ -15,6 +15,7 @@ import { bind, dismiss } from "./nav/keys";
 import { NodeMenu, SummaryNotice } from "./nav/NodeMenu";
 import { Trail } from "./nav/Trail";
 import { Asks } from "./open/Asks";
+import { Tools } from "./open/Tools";
 import { Starting, useBackend, Welcome } from "./open/Welcome";
 import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
@@ -25,6 +26,7 @@ import { asking, useOpening } from "./state/opening";
 import { busy, reload } from "./state/reload";
 import { useStatus } from "./state/status";
 import { litOf, pinned, useAtlas } from "./state/store";
+import { useTools } from "./state/tools";
 import { FileTree } from "./tree/FileTree";
 
 function Toolbar() {
@@ -95,7 +97,7 @@ export function App() {
 
   useEffect(() => (opened ? watch() : undefined), [opened]);
 
-  // 레포를 여는 동안 뜬 창이 있으면 Esc는 그 창만 닫는다. 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 비교 창이 펴져 있으면 그 창만 접는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
+  // 레포를 여는 동안 뜬 창이 있으면 Esc는 그 창만 닫고, 환경 점검 화면이 떠 있으면 그 화면만 닫는다. 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 비교 창이 펴져 있으면 그 창만 접는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
   // 정보 패널에 연 파일이 있으면 그 파일만 닫는다. 함수 시점 뷰에서는 구조 뷰로 돌아가고, 구조 뷰에서는 선택을 푼다.
   // 새로고침 단축키는 새로고침 버튼을 누른 것과 같다. 팔레트와 펼친 메뉴, 필터 창, 고정한 선의 말풍선을 닫고 새로고침한다.
   useEffect(
@@ -107,6 +109,10 @@ export function App() {
           const state = useAtlas.getState();
           if (asking(useOpening.getState())) {
             useOpening.getState().cancel();
+            return;
+          }
+          if (useTools.getState().shown) {
+            useTools.getState().hide();
             return;
           }
           if (state.paletteOpen) {
@@ -149,6 +155,7 @@ export function App() {
     return (
       <>
         <Welcome />
+        <Tools />
         <Asks />
         <Tooltip />
       </>
@@ -184,6 +191,7 @@ export function App() {
         </Panel>
       </Group>
       <NodeMenu />
+      <Tools />
       <Asks />
       <Tooltip />
     </>

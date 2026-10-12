@@ -1,9 +1,10 @@
-// 연 레포가 없을 때 칸 묶음 대신 그리는 레포 열기 화면. 가운데에 폴더를 여는 입구와 최근에 연 레포 목록을 둔다. 앱은 폴더 선택
+// 연 레포가 없을 때 칸 묶음 대신 그리는 레포 열기 화면. 가운데에 폴더를 여는 입구와 최근에 연 레포 목록, 환경 점검 화면을 여는 버튼을 둔다. 앱은 폴더 선택
 // 대화상자를 여는 버튼을 그리고 창 어디에 폴더를 끌어다 놓아도 받는다. 브라우저는 경로 입력 칸을 그린다.
 // 앱에서 백엔드가 뜨는 동안과 멈췄을 때 화면 가운데에 그리는 표시도 여기에 있다.
 import { useEffect, useState } from "react";
 import { host, type Backend } from "../host";
 import { useOpening } from "../state/opening";
+import { useTools } from "../state/tools";
 import { Recent } from "./Recent";
 
 /** 브라우저에서 폴더의 경로를 받는 칸. 레포 열기 화면과 경로 입력 창이 함께 쓴다. */
@@ -66,6 +67,9 @@ export function Welcome() {
           </p>
         )}
         <Recent />
+        <button className="welcome-tools" onClick={() => useTools.getState().show()}>
+          환경 점검
+        </button>
       </div>
     </main>
   );

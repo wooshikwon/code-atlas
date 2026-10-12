@@ -23,7 +23,7 @@ export type SummaryState =
   | { phase: "making" }
   | { phase: "done"; summary: string; available: boolean; stale: boolean; usage: Usage | null }
   | { phase: "failed"; error: string; refresh: boolean }
-  | { phase: "unavailable"; reason: string };
+  | { phase: "unavailable"; reason: string; code: string | null };
 
 /**
  * 요청 묶음의 진행. 묶음은 기다리는 요청도 보낸 요청도 없을 때 들어온 요청에서 시작하고, 둘이 다시 없어지면 끝난다.
@@ -147,7 +147,7 @@ export const useSummaries = create<SummaryStore>()((set, get) => {
           if (cached.summary !== null) {
             put(node, { phase: "done", summary: cached.summary, available: cached.available, stale: cached.stale, usage: null });
           } else if (!cached.available) {
-            put(node, { phase: "unavailable", reason: cached.reason ?? "Claude Code CLI를 부르지 못한다" });
+            put(node, { phase: "unavailable", reason: cached.reason ?? "Claude Code CLI를 부르지 못한다", code: cached.code });
           } else {
             put(node, { phase: "empty" });
           }

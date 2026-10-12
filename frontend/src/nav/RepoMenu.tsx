@@ -1,9 +1,10 @@
-// 탐색 경로 표시의 레포 이름 옆 아래 화살표. 누르면 화살표 아래로 최근에 연 다른 레포와 `폴더 열기…`, `레포 닫기`가 든 메뉴가
+// 탐색 경로 표시의 레포 이름 옆 아래 화살표. 누르면 화살표 아래로 최근에 연 다른 레포와 `폴더 열기…`, `환경 점검`, `레포 닫기`가 든 메뉴가
 // 내려온다. 레포를 고르면 그 레포로 바꿔 연다. 폴더가 없어진 레포는 고를 수 없다. 화살표는 진입점 버튼의 것과 같은 모양이다.
 import { useEffect, useRef, useState } from "react";
 import { host } from "../host";
 import { useOpening } from "../state/opening";
 import { useAtlas } from "../state/store";
+import { useTools } from "../state/tools";
 import { modName } from "./keys";
 import { MenuList, type MenuItem } from "./MenuList";
 
@@ -37,6 +38,7 @@ export function RepoMenu() {
         }),
       ),
     { key: "open", label: "폴더 열기…", tip: host.app ? modName("O") : undefined, rule: true, run: () => void opening.browse() },
+    { key: "tools", label: "환경 점검", run: () => useTools.getState().show() },
     { key: "close", label: "레포 닫기", run: () => void opening.close() },
   ];
   const rect = menu === null ? undefined : button.current?.getBoundingClientRect();

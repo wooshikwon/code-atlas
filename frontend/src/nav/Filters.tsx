@@ -1,10 +1,12 @@
 // 상단 줄의 필터 버튼과 그 아래에 열리는 필터 창. 창은 보기 설정(흐름 단계, 분석 표시, 토글 세 개)과
-// 레포 정보(통계, 브랜치) 두 구역이다. 버튼은 기본값과 다른 보기 설정의 수를 적는다.
-import { useRef, useState } from "react";
+// 레포 정보(통계, 브랜치, 인터프리터) 두 구역이다. 버튼은 기본값과 다른 보기 설정의 수를 적는다.
+import { useEffect, useRef, useState } from "react";
 import { useBranch } from "../state/changes";
 import { useCycles } from "../state/cycles";
+import { useOpening } from "../state/opening";
 import { useOverlay } from "../state/overlay";
 import { pinned, useAtlas, type Depth } from "../state/store";
+import { gitLine, useTools } from "../state/tools";
 import { changed, filterTip, OVERLAY_NAMES, type FilterOverlay } from "./settings";
 import { useDismiss } from "./menu";
 
@@ -38,6 +40,40 @@ function OverlayOptions() {
   );
 }
 
+/**
+ * 레포의 인터프리터를 적는 두 줄. 첫 줄에 판과 인터프리터를 고르는 화면을 띄우는 `바꾸기`를, 둘째 줄에 경로를 적는다. 레포 안의
+ * 인터프리터는 레포 루트 기준 경로로 적는다. 판과 `바꾸기`는 환경 점검의 값을 받은 뒤에 쓴다.
+ */
+function Interpreter({ close }: { close: () => void }) {
+  const root = useAtlas((s) => s.repo?.root ?? null);
+  const python = useAtlas((s) => s.repo?.python ?? null);
+  const found = useTools((s) => s.tools?.python ?? null);
+  if (root === null) {
+    return null;
+  }
+  const path = python === null ? "찾지 못했다" : python.startsWith(`${root}/`) ? python.slice(root.length + 1) : python;
+  return (
+    <>
+      <span className="filter-python">
+        <span className="filter-python-name">인터프리터{found?.version != null && ` Python ${found.version}`}</span>
+        <button
+          className="summary-action"
+          disabled={found === null}
+          onClick={() => {
+            close();
+            void useOpening.getState().pick(root, found!);
+          }}
+        >
+          바꾸기
+        </button>
+      </span>
+      <span className="filter-python-path" data-full={python ?? undefined}>
+        <bdi>{path}</bdi>
+      </span>
+    </>
+  );
+}
+
 export function Filters() {
   const stats = useAtlas((s) => s.repo?.stats);
   const branch = useBranch();
@@ -55,6 +91,15 @@ export function Filters() {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
   useDismiss(open, root, setOpen);
+  /** git을 찾지 못한 까닭. 찾았거나 환경 점검의 값을 받기 전이면 null이다. */
+  const gitTrouble = useTools((s) => (s.tools === null ? null : gitLine(s.tools.git)));
+
+  // 인터프리터의 판과 git을 찾았는지는 창을 펼 때마다 다시 받는다.
+  useEffect(() => {
+    if (open) {
+      void useTools.getState().load();
+    }
+  }, [open]);
 
   const names = changed({ depth, overlay, showTests, showExternal, autoSummary });
   const rate = stats === undefined || stats.call_sites === 0 ? "-" : `${Math.round((stats.resolved / stats.call_sites) * 1000) / 10}%`;
@@ -117,6 +162,8 @@ export function Filters() {
                 브랜치 {branch}
               </span>
             )}
+            {gitTrouble !== null && <span className="filter-note">{gitTrouble}</span>}
+            <Interpreter close={() => setOpen(false)} />
           </section>
         </div>
       )}

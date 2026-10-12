@@ -25,6 +25,7 @@ const found = (extra: Partial<Found> = {}): Found => ({
   auth: null,
   prefix: "/repos/shop/.venv",
   venv: true,
+  code: "ok",
   ...extra,
 });
 
@@ -39,7 +40,7 @@ const probe = (extra: Partial<Probe> = {}): Probe => ({
   ...extra,
 });
 
-const missing = found({ path: null, version: null, source: null, prefix: null, venv: null, attempts: [{ source: "env", path: null, ok: false, detail: "가상환경 폴더가 없다" }] });
+const missing = found({ path: null, version: null, source: null, prefix: null, venv: null, attempts: [{ source: "env", path: null, ok: false, detail: "가상환경 폴더가 없다", code: "missing" }], code: "not_found" });
 const system = found({ path: "/opt/homebrew/bin/python3.13", source: null, prefix: "/opt/homebrew", venv: false });
 
 const store = () => useOpening.getState();
@@ -143,6 +144,59 @@ describe("choose", () => {
     await store().choose("/repos/shop", { asIs: true, python: "/bin/ls" });
     expect(store().step).toEqual({ kind: "ask-python", path: "/repos/shop", found: missing, candidates: [system], error: "Python 인터프리터가 아니다: /bin/ls (종료 코드 2)" });
     expect(page.reload).not.toHaveBeenCalled();
+  });
+
+  it("이 기기의 인터프리터를 찾는 동안에도 고르는 화면이 떠 있고, 받으면 목록에 넣는다", async () => {
+    vi.mocked(postProbe).mockResolvedValue(probe({ python: missing }));
+    let arrive!: (value: { found: Found[] }) => void;
+    vi.mocked(getInterpreters).mockReturnValue(new Promise((resolve) => (arrive = resolve)));
+    const chosen = store().choose("/repos/shop");
+    await vi.waitFor(() => expect(store().step).toEqual({ kind: "ask-python", path: "/repos/shop", found: missing, candidates: [], seeking: true }));
+    arrive({ found: [system] });
+    await chosen;
+    expect(store().step).toEqual({ kind: "ask-python", path: "/repos/shop", found: missing, candidates: [system] });
+  });
+
+  it("찾는 동안 고른 인터프리터로 열지 못하면 그 사이에 받은 목록과 까닭을 함께 그린다", async () => {
+    vi.mocked(postProbe).mockResolvedValue(probe({ python: missing }));
+    let arrive!: (value: { found: Found[] }) => void;
+    vi.mocked(getInterpreters).mockReturnValue(new Promise((resolve) => (arrive = resolve)));
+    const chosen = store().choose("/repos/shop");
+    await vi.waitFor(() => expect(store().step.kind).toBe("ask-python"));
+    let refuse!: (error: Error) => void;
+    vi.mocked(postOpen).mockReturnValue(new Promise((_, reject) => (refuse = reject)));
+    const opened = store().choose("/repos/shop", { asIs: true, python: "/bin/ls" });
+    expect(store().step).toEqual({ kind: "opening", path: "/repos/shop" });
+    arrive({ found: [system] });
+    await chosen;
+    refuse(new Error("Python 인터프리터가 아니다: /bin/ls (종료 코드 2)"));
+    await opened;
+    expect(store().step).toEqual({ kind: "ask-python", path: "/repos/shop", found: missing, candidates: [system], error: "Python 인터프리터가 아니다: /bin/ls (종료 코드 2)" });
+  });
+
+  it("찾는 동안 창을 닫으면 늦게 온 목록으로 창을 다시 띄우지 않는다", async () => {
+    vi.mocked(postProbe).mockResolvedValue(probe({ python: missing }));
+    let arrive!: (value: { found: Found[] }) => void;
+    vi.mocked(getInterpreters).mockReturnValue(new Promise((resolve) => (arrive = resolve)));
+    const chosen = store().choose("/repos/shop");
+    await vi.waitFor(() => expect(store().step.kind).toBe("ask-python"));
+    store().cancel();
+    arrive({ found: [system] });
+    await chosen;
+    expect(store().step).toEqual({ kind: "idle" });
+  });
+
+  it("pick은 판정 없이 인터프리터를 고르는 화면을 띄우고 지금 찾은 인터프리터를 넘긴다", async () => {
+    useOpening.setState({ typing: true });
+    await store().pick("/repos/shop", found());
+    expect(postProbe).not.toHaveBeenCalled();
+    expect(store().typing).toBe(false);
+    expect(store().step).toEqual({ kind: "ask-python", path: "/repos/shop", found: found(), candidates: [system] });
+    expect(asking(store())).toBe(true);
+
+    await store().choose("/repos/shop", { asIs: true, python: system.path! });
+    expect(postOpen).toHaveBeenCalledWith("/repos/shop", system.path);
+    expect(page.reload).toHaveBeenCalledTimes(1);
   });
 
   it("판정이나 열기가 실패하면 까닭을 적는다", async () => {

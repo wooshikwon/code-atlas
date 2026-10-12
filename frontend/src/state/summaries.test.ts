@@ -40,14 +40,14 @@ describe("read", () => {
       store().read(node);
     }
     expect(store().states.a).toEqual({ phase: "reading" });
-    reads[0].resolve({ summary: "요지", stale: true, available: true, reason: null });
-    reads[1].resolve({ summary: null, stale: false, available: true, reason: null });
-    reads[2].resolve({ summary: null, stale: false, available: false, reason: "Claude Code CLI를 찾지 못했다" });
+    reads[0].resolve({ summary: "요지", stale: true, available: true, reason: null, code: null });
+    reads[1].resolve({ summary: null, stale: false, available: true, reason: null, code: null });
+    reads[2].resolve({ summary: null, stale: false, available: false, reason: "Claude Code CLI를 찾지 못했다", code: "not_found" });
     await settle();
     expect(store().states).toEqual({
       a: { phase: "done", summary: "요지", available: true, stale: true, usage: null },
       b: { phase: "empty" },
-      c: { phase: "unavailable", reason: "Claude Code CLI를 찾지 못했다" },
+      c: { phase: "unavailable", reason: "Claude Code CLI를 찾지 못했다", code: "not_found" },
     });
   });
 
@@ -55,7 +55,7 @@ describe("read", () => {
     store().read("a");
     store().read("a");
     expect(reads).toHaveLength(1);
-    reads[0].resolve({ summary: null, stale: false, available: true, reason: null });
+    reads[0].resolve({ summary: null, stale: false, available: true, reason: null, code: null });
     await settle();
     store().read("a");
     expect(reads).toHaveLength(2);
@@ -109,7 +109,7 @@ describe("make", () => {
   it("만드는 동안 늦게 온 읽기 응답은 만드는 중 상태를 덮지 않는다", async () => {
     store().read("a");
     store().make("a", false);
-    reads[0].resolve({ summary: null, stale: false, available: true, reason: null });
+    reads[0].resolve({ summary: null, stale: false, available: true, reason: null, code: null });
     await settle();
     expect(store().states.a).toEqual({ phase: "making" });
   });
@@ -222,7 +222,7 @@ describe("leads", () => {
     store().make("a", true);
     makes[0].resolve({ summary: "새 요지\n\n하는 일\n문단\n\n앞뒤 흐름\n문단", usage: null });
     store().read("c");
-    reads[0].resolve({ summary: "c의 요지\n\n하는 일\n문단", stale: true, available: true, reason: null });
+    reads[0].resolve({ summary: "c의 요지\n\n하는 일\n문단", stale: true, available: true, reason: null, code: null });
     await settle();
     expect(store().leads).toEqual({ a: "새 요지", b: "b의 요지", c: "c의 요지" });
   });

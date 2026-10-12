@@ -5,9 +5,11 @@ import { nameOf, useOpening, type Step } from "../state/opening";
 import { Interpreters } from "./Interpreters";
 import { PathField } from "./Welcome";
 
-/** 창 하나. 뜰 때 data-first가 붙은 요소(없으면 창)에 포커스를 두고, 닫히면 열기 전에 포커스가 있던 요소로 돌려준다. */
-function Ask({ wide, children }: { wide?: boolean; children: ReactNode }) {
-  const cancel = useOpening((s) => s.cancel);
+/**
+ * 창 하나. 뜰 때 data-first가 붙은 요소(없으면 창)에 포커스를 두고, 닫히면 열기 전에 포커스가 있던 요소로 돌려준다.
+ * 창 밖을 누르면 close를 부른다.
+ */
+export function Ask({ wide, close, children }: { wide?: boolean; close: () => void; children: ReactNode }) {
   const box = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -21,7 +23,7 @@ function Ask({ wide, children }: { wide?: boolean; children: ReactNode }) {
   }, []);
 
   return (
-    <div className="ask-backdrop" onPointerDown={(event) => event.target === event.currentTarget && cancel()}>
+    <div className="ask-backdrop" onPointerDown={(event) => event.target === event.currentTarget && close()}>
       <div ref={box} className={wide === true ? "ask ask-wide" : "ask"} role="dialog" aria-modal aria-labelledby="ask-title" tabIndex={-1}>
         {children}
       </div>
@@ -29,7 +31,7 @@ function Ask({ wide, children }: { wide?: boolean; children: ReactNode }) {
   );
 }
 
-function Title({ children }: { children: ReactNode }) {
+export function Title({ children }: { children: ReactNode }) {
   return (
     <h2 className="ask-title" id="ask-title">
       {children}
@@ -123,7 +125,7 @@ export function Asks() {
 
   if (typing) {
     return (
-      <Ask>
+      <Ask close={cancel}>
         <Title>열 레포 폴더의 경로를 적는다</Title>
         <PathField autoFocus />
         <div className="ask-buttons">
@@ -138,7 +140,7 @@ export function Asks() {
     return null;
   }
   return (
-    <Ask key={step.kind} wide={step.kind === "ask-python"}>
+    <Ask key={step.kind} wide={step.kind === "ask-python"} close={cancel}>
       <Body step={step} />
     </Ask>
   );
