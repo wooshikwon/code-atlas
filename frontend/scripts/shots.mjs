@@ -10094,14 +10094,30 @@ const menuTokens = (page) =>
     return { backgroundColor, color, borderTopColor };
   });
 
+/** API 엔드포인트를 적는 글(`graph/names.ts`의 `routeText`) */
+const routeText = (route) => [...(route.methods.length > 0 ? [route.methods.join("·")] : []), route.path ?? "(주소 미확인)"].join(" ");
+
+/**
+ * 진입점 메뉴의 줄(`nav/Entries.tsx`). 엔드포인트가 없는 진입점이 그래프 순서로 오고, 그 아래에 엔드포인트가 주소순으로 한 줄씩 온다.
+ * key는 줄의 `data-key`, text는 엔드포인트의 글이고 엔드포인트가 아닌 줄은 null이다.
+ */
+function entryRows(graph) {
+  const entries = graph.nodes.filter((n) => n.entry && !veiled(n));
+  const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const endpoints = entries
+    .flatMap((n) => n.routes.map((route, i) => ({ id: n.id, key: `${n.id}#${i}`, kind: n.kind, path: route.path, text: routeText(route) })))
+    .sort((a, b) => Number(a.path === null) - Number(b.path === null) || compare(a.path ?? "", b.path ?? "") || compare(a.text, b.text));
+  return [...entries.filter((n) => n.routes.length === 0).map((n) => ({ id: n.id, key: n.id, kind: n.kind, text: null })), ...endpoints];
+}
+
 /**
  * 상단 줄의 진입점 버튼. 테두리와 바탕이 없는 글자 버튼이고 누르면 글자 아래로 메뉴가 내려온다. 필터 창에는 진입점이 없다.
  * 사진은 `hf3-entry-{이름}.png`로 남긴다.
  */
 async function entry(t, page) {
   const graph = await api("/api/graph");
-  const entries = graph.nodes.filter((n) => n.entry && !veiled(n));
-  const title = (n) => (n.kind === "module" ? `${n.id.replaceAll(".", "/")}.py` : null);
+  const entries = entryRows(graph);
+  const title = (n) => n.text ?? (n.kind === "module" ? `${n.id.replaceAll(".", "/")}.py` : null);
   await load(page);
   const ink = await colorOf(page, "--ink");
   const idle = await entriesButton(page);
@@ -10172,7 +10188,7 @@ async function entry(t, page) {
   const home = await listOf(page);
   t.check(
     "Enter로 열면 첫 항목이 활성 항목이고 아래 화살표, End, Home이 활성 항목을 옮긴다",
-    byKey?.focused === true && byKey.pointed && byKey.active === entries[0].id && second.active === entries[Math.min(1, entries.length - 1)].id && last.active === entries.at(-1).id && home.active === entries[0].id,
+    byKey?.focused === true && byKey.pointed && byKey.active === entries[0].key && second.active === entries[Math.min(1, entries.length - 1)].key && last.active === entries.at(-1).key && home.active === entries[0].key,
     [byKey?.active, second?.active, last?.active, home?.active].join(" → "),
   );
   await page.keyboard.press("Escape");
@@ -10252,8 +10268,9 @@ async function entry(t, page) {
     t.skip("진입점이 많으면 메뉴가 화면 안에서 스크롤한다", "sync-engine의 진입점은 두 개다 — --wide-url을 주지 않았다");
     return;
   }
-  const marked = (await api("/api/graph", wideUrl)).nodes.filter((n) => n.entry);
-  const wide = marked.filter((n) => !veiled(n));
+  const wideGraph = await api("/api/graph", wideUrl);
+  const marked = wideGraph.nodes.filter((n) => n.entry);
+  const wide = entryRows(wideGraph);
   t.check(
     "변수 노드는 진입점이 아니다",
     marked.every((n) => n.kind !== "variable"),
@@ -10268,7 +10285,7 @@ async function entry(t, page) {
   const long = await listOf(page);
   t.check(
     `진입점 ${wide.length}개의 메뉴는 높이 260px 창 안에 열려 안에서 스크롤하고, 위 화살표로 간 마지막 항목이 보인다`,
-    long !== null && long.items.length === wide.length && long.inside && long.scrolls && long.active === wide.at(-1).id && long.activeShown,
+    long !== null && long.items.length === wide.length && long.inside && long.scrolls && long.active === wide.at(-1).key && long.activeShown,
     long === null ? "메뉴 없음" : `항목 ${long.items.length}개, 창 안 ${long.inside}, 스크롤 ${long.scrolls}, 활성 ${long.active}${long.activeShown ? "" : "(메뉴 밖)"}`,
   );
   await page.screenshot({ path: HF3("entry-long") });

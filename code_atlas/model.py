@@ -25,6 +25,8 @@ class Node:
     origin: str | None = None  # stdlib·thirdparty
     value: dict[str, str | int | None] | None = None  # 변수 노드만: 값의 종류 kind, 원소 수 size, 값의 글 text
     external_value: bool = False  # 변수 노드만: 값을 만든 호출의 대상이 외부 노드다
+    # 이 함수에 붙었거나 이 함수 안에서 선언한 API 엔드포인트: 메서드 목록 methods, 주소 path(읽지 못하면 None), 처리 함수 이름 handler, 그 줄 line
+    routes: list[dict[str, list[str] | str | int | None]] = field(default_factory=list)
 
 
 @dataclass
@@ -54,7 +56,8 @@ class Site:
     클래스인지 확인한 뒤 construct가 된다. read·write는 모듈 변수와 이름이 같은 식별자가 값으로 쓰이거나
     바뀌는 위치다. request_line·request_col은 언어 서버에
     정의 위치를 물을 위치이고, dynamic이거나 builtin이면 묻지 않는다. builtin은 식이
-    그 파일에서 묶이지 않은 내장 이름 하나인 지점이다.
+    그 파일에서 묶이지 않은 내장 이름 하나인 지점이다. route는 라우트 데코레이터 모양인 decorate 지점이 담는
+    데코레이터 이름 name, 주소 path, `methods=`의 메서드 methods, 처리 함수 이름 handler, 그 줄 line이다.
     """
 
     kind: str
@@ -68,6 +71,7 @@ class Site:
     dynamic: bool = False
     deferred: bool = False
     builtin: bool = False
+    route: dict | None = None
 
 
 @dataclass

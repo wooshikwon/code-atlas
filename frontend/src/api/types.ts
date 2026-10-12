@@ -41,9 +41,21 @@ export interface Field {
   type: string | null;
 }
 
+/** API 엔드포인트 하나. 웹 프레임워크의 라우트 데코레이터 하나에서 읽는다. */
+export interface Route {
+  /** HTTP 메서드. 웹소켓은 `WS`이고, 읽지 못했으면 비어 있다. */
+  methods: string[];
+  /** 주소. 문자열 상수로 적히지 않아 읽지 못했으면 null이다. */
+  path: string | null;
+  /** 데코레이터가 붙은 함수의 이름 */
+  handler: string;
+  /** 그 함수의 `def` 줄 */
+  line: number;
+}
+
 /** 모듈 변수의 첫 대입문이 담은 값의 요약 */
 export interface Value {
-  /** 값의 종류: `str`, `dict`, `TaskPreset(…)`, `식` */
+  /** 값의 종류: `str`, `dict`, `TaskPreset(…)`, `alias`, `type`, `expr` */
   kind: string;
   /** 컨테이너의 원소 수. 셀 수 없는 값은 null이다. */
   size: number | null;
@@ -73,6 +85,8 @@ export interface AtlasNode {
   value: Value | null;
   /** 값을 만든 호출의 대상이 외부 노드인 변수다 */
   external_value: boolean;
+  /** 이 함수에 붙었거나 이 함수 안에서 선언한 API 엔드포인트. 소스 순서다. */
+  routes: Route[];
 }
 
 export type EdgeGroup = "run" | "use" | "derive";

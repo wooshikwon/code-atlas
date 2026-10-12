@@ -6,6 +6,7 @@ import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { gone } from "../graph/compare";
 import { flow } from "../graph/flow";
+import { routeText } from "../graph/names";
 import { arriving, edgeKey, picked, trunkTarget } from "../graph/scope";
 import { folderLines, hidden, nodeIndex, shown, unitOf, unresolvedWithin } from "../graph/visible";
 import { useCompare } from "../state/compare";
@@ -188,6 +189,9 @@ export function InfoPanel() {
     }
     if (facts.contents.length > 0) {
       rows.push({ id: "contents", topic: "포함", text: facts.contents.map(({ name, count }) => `${name} ${count}개`).join(", ") });
+    }
+    if (node.routes.length > 0) {
+      rows.push({ id: "api", topic: "API", text: node.routes.map(routeText).join(", ") });
     }
     rows.push(linkRow("out", "나가는 연결", facts.out), linkRow("into", "들어오는 연결", facts.into));
     if (facts.unresolved > 0) {

@@ -71,7 +71,7 @@ export const CallNode = memo(function CallNode({ data }: NodeProps<CallFlowNode>
         <span className="call-text">
           <span className="call-name">
             <span className="node-label">
-              {data.node.entry && <EntryMark className="node-entry" />}
+              {data.node.entry && <EntryMark node={data.node} className="node-entry" />}
               {data.label}
             </span>
           </span>

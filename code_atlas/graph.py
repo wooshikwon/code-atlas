@@ -8,9 +8,10 @@ from .collect import RepoFiles, is_test_path
 from .extract import DATA_BASES, FileFacts, VarInfo
 from .lsp import to_utf16
 from .model import Analysis, Edge, Node, SiteRef
-from .resolve import ACCESS_KINDS, Resolution, ResolvedSite
+from .resolve import ACCESS_KINDS, EXTERNAL_PREFIX, Resolution, ResolvedSite
+from .routes import judged
 
-ENTRY_DECORATORS = {"command", "group", "route", "get", "post", "put", "patch", "delete", "websocket"}
+ENTRY_DECORATORS = {"command", "group"}
 EDGE_GROUPS = {
     "call": "run",
     "construct": "run",
@@ -120,6 +121,19 @@ def _mark_entries(repo: RepoFiles, facts: list[FileFacts], nodes: dict[str, Node
                 d.rsplit(".", 1)[-1] in ENTRY_DECORATORS for d in info.decorators
             ):
                 node.entry = True
+
+
+def _mark_routes(sites: list[ResolvedSite], nodes: dict[str, Node]) -> None:
+    """외부 패키지의 라우트 데코레이터로 답한 지점마다 그 지점을 품은 함수에 엔드포인트를 더하고 진입점으로 표시한다."""
+    for site in sites:
+        if site.route is None or site.status != "external":
+            continue
+        methods = judged(site.route, site.target[len(EXTERNAL_PREFIX) :])
+        if methods is None:
+            continue
+        node = nodes[site.enclosing]
+        node.routes = [*node.routes, {"methods": methods, **{k: site.route[k] for k in ("path", "handler", "line")}}]
+        node.entry = True
 
 
 def _source(site: ResolvedSite, nodes: dict[str, Node], modules: dict[str, str]) -> str:
@@ -250,6 +264,7 @@ def build(repo: RepoFiles, facts: list[FileFacts], resolution: Resolution, texts
     for e in override_edges:
         e.sites = [site_ref(s.path, s.line, s.col) for s in e.sites]
     _mark_entries(repo, facts, nodes)
+    _mark_routes(resolution.sites, nodes)
 
     calls = [s for s in resolution.sites if s.kind == "call" and s.status != "builtin"]
     edge_list = [*edges.values(), *override_edges]

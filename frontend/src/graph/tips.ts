@@ -2,10 +2,12 @@
 // 그래프에서는 그래프 뷰가 마우스 아래 배지와 표시에서 그 글을 찾아 노드의 말풍선 대신 띄운다. 줄은 `\n`으로 나눈다.
 // 선의 말풍선은 줄마다 세 칸으로 따로 그린다(`rows.ts`, `LineBubble.tsx`).
 import type { AtlasNode, Change } from "../api/types";
-import { valueAside } from "./names";
+import { routeText, valueAside } from "./names";
 import type { Pack } from "./visible";
 
 export const ENTRY_TIP = "진입점: 실행을 시작하는 코드";
+/** 상단 줄의 진입점 버튼. 진입점의 뜻 아래에 API 엔드포인트로 알아보는 것과 주소의 한계를 적는다. */
+export const ENTRIES_TIP = `${ENTRY_TIP}\nAPI 엔드포인트: FastAPI·Starlette·Flask의 라우트 데코레이터가 붙은 함수 · 다른 파일에서 붙인 앞 주소는 적지 않는다`;
 
 export const CHANGE_TIPS: Record<Change, string> = {
   modified: "수정: 마지막 커밋 뒤 바뀜",
@@ -41,6 +43,14 @@ export function busyTip(node: AtlasNode, count: number): string {
 export function valueTip(node: AtlasNode): string {
   const aside = valueAside(node);
   return node.value === null || node.value.text === "" ? aside : `${aside} · ${node.value.text}`;
+}
+
+/** 진입점 표지. API 엔드포인트가 있는 함수는 그 엔드포인트를 적고 여섯 개부터는 "외 k개"로 줄인다. */
+export function entryTip(node: AtlasNode): string {
+  if (node.routes.length === 0) {
+    return ENTRY_TIP;
+  }
+  return `진입점: API 엔드포인트 ${node.routes.length}개 · ${listed(node.routes.map(routeText))}`;
 }
 
 const NAMES_MAX = 5;

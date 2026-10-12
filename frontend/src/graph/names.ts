@@ -1,5 +1,5 @@
 // 노드 종류와 선 분류·종류를 화면에 적는 이름과, 수로 세는 관계의 종류, 선에 든 관계를 종류와 수로 적는 글. 그래프의 말풍선·범례와 정보 패널이 함께 쓴다.
-import type { AtlasNode, EdgeGroup, EdgeKind } from "../api/types";
+import type { AtlasNode, EdgeGroup, EdgeKind, Route } from "../api/types";
 import type { StepKind } from "./route";
 
 export const KIND_NAMES: Record<AtlasNode["kind"], string> = {
@@ -91,6 +91,11 @@ export function valueAside(node: AtlasNode): string {
     return "";
   }
   return node.value.size === null ? node.value.kind : `${node.value.kind} · ${node.value.size}개`;
+}
+
+/** API 엔드포인트를 적는 글: `GET /api/graph`, `GET·POST /items`. 읽지 못한 주소는 `(주소 미확인)`으로 적고, 읽지 못한 메서드는 적지 않는다. */
+export function routeText(route: Route): string {
+  return [...(route.methods.length > 0 ? [route.methods.join("·")] : []), route.path ?? "(주소 미확인)"].join(" ");
 }
 
 /** 노드를 그 노드 하나로 가리킬 때 적는 이름. 파일은 파일 이름, 폴더는 `이름/`, 메서드는 `클래스.메서드()`, 변수는 괄호 없는 이름이다. */
