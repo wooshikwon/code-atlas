@@ -25,7 +25,9 @@ const OUT = join(homedir(), "data", "code-atlas", "screenshots");
 const FILE = "arbiter";
 const FUNCTION = "arbiter:_rebuild_note_sections";
 /** 초점 상태에서 흐름 밖 노드가 받는 불투명도 */
-const DIM = 0.35;
+const DIM = 0.4;
+/** 중간 단계의 불투명도. 나가는 흐름의 마지막 단계에 든 노드와 고른 노드가 없을 때의 선이 받는다. */
+const HALF = 0.6;
 /** 함수 이름표가 모두 보이는 확대 비율 구간의 시작값. 이보다 작은 확대 비율에서 노드를 고르면 이 값이 된다. */
 const NAMED_ZOOM = 0.8;
 /** 정보 패널의 기본 폭과 기본 여백(위·오른쪽·아래)을 관계 그래프 영역의 폭으로 나눈 값, 패널의 최소 폭 */
@@ -313,7 +315,7 @@ async function hittable(page, lines) {
 /** 진하기 단계를 연한 것부터 적은 사다리(`graph/scope.ts`의 `SHADES`). 마우스를 올린 선과 노드는 한 단계 위로 그린다. */
 const SHADES = [
   { tone: "muted", opacity: DIM },
-  { tone: "muted", opacity: 0.5 },
+  { tone: "muted", opacity: HALF },
   { tone: "muted", opacity: 1 },
   { tone: "strong", opacity: 1 },
 ];
@@ -1421,8 +1423,8 @@ async function edge(t, page) {
   const muted = (await colorOf(page, "--muted")).rgb;
   const border = await page.evaluate(() => getComputedStyle(document.querySelector(".react-flow__node > .node-body.node-module")).borderTopColor);
   t.check(
-    "고른 노드가 없으면 모든 선이 muted 잉크에 불투명도 0.5여서 불투명도 1인 상자 테두리보다 연하다",
-    lines.length > 0 && lines.every((line) => line.tone === "muted" && line.opacity === 0.5 && line.stroke === muted) && border === muted,
+    `고른 노드가 없으면 모든 선이 muted 잉크에 불투명도 ${HALF}여서 불투명도 1인 상자 테두리보다 연하다`,
+    lines.length > 0 && lines.every((line) => line.tone === "muted" && line.opacity === HALF && line.stroke === muted) && border === muted,
     `선 ${lines.length}개, 불투명도 ${[...new Set(lines.map((line) => line.opacity))].join("·")}, 상자 테두리 ${border}`,
   );
   t.check("고른 노드가 없을 때 선 가운데 숫자의 색이 선의 색과 같다", digitsMatch(lines) && lines.some((line) => line.digits !== null), `숫자 ${lines.filter((line) => line.digits !== null).length}개`);
@@ -6421,7 +6423,7 @@ async function nodeHover(t, page) {
   const leaf = (item) => item.kind !== "region" && item.kind !== "module-open";
   const levels = [
     ["활성 노드", list.find((item) => leaf(item) && item.opacity === 1 && item.id !== FUNCTION)],
-    ["불투명도 50%인 흐름 노드", list.find((item) => leaf(item) && item.opacity === 0.5)],
+    [`불투명도 ${HALF * 100}%인 흐름 노드`, list.find((item) => leaf(item) && item.opacity === HALF)],
     ["흐린 노드", list.find((item) => leaf(item) && item.opacity === DIM)],
   ];
   for (const [name, at] of levels) {
@@ -6813,7 +6815,7 @@ async function hoverStep(t, page) {
   await step("어두운 화면에서 그 밖의 선", SHADES[0], "rest-dark");
   await step("어두운 화면에서 고른 노드에 닿는 선", SHADES[3], "strong-dark");
 
-  // 미사용 후보 표시의 후보 노드는 단계 사이의 불투명도 40%에서 바로 위 단계 50%로 오른다.
+  // 미사용 후보 표시의 후보 노드는 불투명도 40%에서 바로 위 단계로 오른다.
   await theme("light");
   await setOverlay(page, "unused");
   const [graph, unused] = [await api("/api/graph"), await api("/api/unused")];
@@ -6839,7 +6841,7 @@ async function hoverStep(t, page) {
     return null;
   });
   if (faded === null) {
-    t.skip("미사용 후보 노드에 마우스를 올리면 불투명도 40%에서 50%로 오른다", "화면에 이름표가 눌리는 불투명도 40%의 후보가 없다");
+    t.skip(`미사용 후보 노드에 마우스를 올리면 불투명도 40%에서 ${HALF * 100}%로 오른다`, "화면에 이름표가 눌리는 불투명도 40%의 후보가 없다");
   } else {
     await page.mouse.move(faded.x, faded.y);
     await page.waitForTimeout(300);
@@ -6848,13 +6850,13 @@ async function hoverStep(t, page) {
       return { opacity: Number(getComputedStyle(body).opacity), inked: body.classList.contains("tone-strong"), pointed: body.classList.contains("pointed") };
     }, faded.id);
     await shot("unused-light", faded);
-    t.check("미사용 후보 노드에 마우스를 올리면 불투명도 40%에서 50%로 오르고 테두리는 본문 잉크가 되지 않는다", on.pointed && on.opacity === 0.5 && !on.inked, `${faded.id}: 불투명도 ${on.opacity}, 본문 잉크 테두리 ${on.inked}`);
+    t.check(`미사용 후보 노드에 마우스를 올리면 불투명도 40%에서 ${HALF * 100}%로 오르고 테두리는 본문 잉크가 되지 않는다`, on.pointed && on.opacity === HALF && !on.inked, `${faded.id}: 불투명도 ${on.opacity}, 본문 잉크 테두리 ${on.inked}`);
   }
   await away();
 }
 
 /**
- * 함수를 고른 화면에서 흐린 노드와 선이 흐린 단계의 불투명도로 그려지고 한 단계 위(50%)와 다른 값인지 본다. 흐린 항목의 이름이 읽히는지와
+ * 함수를 고른 화면에서 흐린 노드와 선이 흐린 단계의 불투명도로 그려지고 한 단계 위(중간 단계)와 다른 값인지 본다. 흐린 항목의 이름이 읽히는지와
  * 두 단계가 눈으로 구분되는지는 사진 `hf3-dim-{레포}-{화면 색}.png`로 본다. `--wide-url`을 받으면 그 레포에서 `mdp/settings/loader.py`의 함수도 본다.
  */
 async function dim(t, page) {
@@ -6880,23 +6882,23 @@ async function dim(t, page) {
     const found = await levels();
     const text = (counts) => Object.entries(counts).map(([opacity, count]) => `${opacity}: ${count}개`).join(", ");
     t.check(
-      `${name}: 흐린 노드와 선의 불투명도가 ${DIM}이고 노드의 단계는 1, 0.5, ${DIM}, 선의 단계는 1, ${DIM}뿐이다`,
-      found.nodes[DIM] > 0 && found.lines[DIM] > 0 && Object.keys(found.nodes).every((opacity) => [1, 0.5, DIM].includes(Number(opacity))) && Object.keys(found.lines).every((opacity) => [1, DIM].includes(Number(opacity))),
+      `${name}: 흐린 노드와 선의 불투명도가 ${DIM}이고 노드의 단계는 1, ${HALF}, ${DIM}, 선의 단계는 1, ${DIM}뿐이다`,
+      found.nodes[DIM] > 0 && found.lines[DIM] > 0 && Object.keys(found.nodes).every((opacity) => [1, HALF, DIM].includes(Number(opacity))) && Object.keys(found.lines).every((opacity) => [1, DIM].includes(Number(opacity))),
       `노드 ${text(found.nodes)} / 선 ${text(found.lines)}`,
     );
-    /** 불투명도 50%인 노드가 화면에 있으면 그 둘레 560×360px도 남겨 흐린 단계와 나란히 본다. */
-    const half = await page.evaluate(() => {
+    /** 중간 단계인 노드가 화면에 있으면 그 둘레 560×360px도 남겨 흐린 단계와 나란히 본다. */
+    const half = await page.evaluate((level) => {
       const area = document.querySelector(".graph").getBoundingClientRect();
       const panel = document.querySelector(".info-panel").getBoundingClientRect();
       for (const face of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
         const rect = face.getBoundingClientRect();
-        if (face.style.opacity === "0.5" && rect.left > area.left && rect.right < panel.left && rect.top > area.top && rect.bottom < area.bottom) {
+        if (face.style.opacity === level && rect.left > area.left && rect.right < panel.left && rect.top > area.top && rect.bottom < area.bottom) {
           const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
           return { x: clamp(rect.left + rect.width / 2 - 280, area.left, panel.left - 560), y: clamp(rect.top + rect.height / 2 - 180, area.top, area.bottom - 360), width: 560, height: 360 };
         }
       }
       return null;
-    });
+    }, String(HALF));
     const shots = async (theme) => {
       await page.screenshot({ path: join(OUT, `hf3-dim-${name}-${theme}.png`) });
       if (half !== null) {
