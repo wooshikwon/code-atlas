@@ -95,21 +95,9 @@ export function anchorOn(before: Point, after: Point, view: View): View {
 }
 
 /**
- * 상자의 왼쪽 위 모서리가 clear의 20px 안쪽에 들어오도록 가장 적게 옮긴 화면 위치. 이미 들어 있는 축은 그대로 둔다.
- * 확대 비율은 그대로다.
- */
-export function cornerInto(corner: Point, clear: Rect, view: View): View {
-  const along = (start: number, low: number, room: number, at: number) => {
-    const from = start * view.zoom + at;
-    return at + Math.min(Math.max(from, low + INSET), low + room - INSET) - from;
-  };
-  return { x: along(corner.x, clear.x, clear.width, view.x), y: along(corner.y, clear.y, clear.height, view.y), zoom: view.zoom };
-}
-
-/**
  * 코드가 스스로 맞추는 화면(레포를 연 처음 화면, 전체 맞춤 상태에서 배치가 바뀐 뒤). whole은 그래프 전체를 free에 맞춘 화면이다.
  * whole의 확대 비율이 `NAMED_ZOOM` 이상이면 whole을 쓴다. 그보다 작으면 이름표가 읽히도록 확대 비율을 `NAMED_ZOOM`에 두고
- * corner(사용자가 방금 가리킨 상자의 왼쪽 위, 가리킨 것이 없으면 그래프의 왼쪽 위)를 free의 왼쪽 위에서 24px 안쪽에 놓는다.
+ * corner(선을 눌러 간 폴더의 왼쪽 위, 그런 폴더가 없으면 그래프의 왼쪽 위)를 free의 왼쪽 위에서 24px 안쪽에 놓는다.
  */
 export function autoView(whole: View, corner: Point, free: Rect): View {
   if (whole.zoom >= NAMED_ZOOM) {
