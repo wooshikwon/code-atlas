@@ -2,7 +2,7 @@
 
 서버는 레포 하나를 열어 두거나 연 레포 없이 뜬다. 연 레포에 묶인 상태는 `Workspace` 하나에 모여 있고, `POST /api/open`과
 `POST /api/close`가 앞의 레포에 묶인 태스크와 세션을 닫은 뒤 그 객체를 통째로 바꾸며 `session`을 센다. 고른 폴더의
-판정은 `opening`이, 연 레포의 목록은 `settings`가 맡는다.
+판정은 `opening`이, 연 레포의 목록은 `settings`가, `claude`·`git`·인터프리터를 찾는 일은 `tools`가 맡는다.
 
 서버는 분석을 기다리지 않고 뜬다. 레포를 열면 `Runner`로 분석 태스크를 띄우고, 태스크가 낸 결과를 `install` 한 곳에서
 응답이 읽는 상태에 넣으며 판 번호를 센다. 결과가 없는 동안 `/api/status`가 단계와 진행 수를 알리고 분석 결과를 읽는
@@ -35,7 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
-from . import compare, git, opening, tools
+from . import compare, git, opening, shellenv, tools
 from .analyze import Analyzed, Progress
 from .collect import RepoFiles, SourceFile, any_source, collected, disk_path, is_test_path, module_id
 from .extract import FileFacts, extract
@@ -51,6 +51,7 @@ from .summary import (
     Subject,
     Summaries,
     SummaryError,
+    answering,
     asked_name,
     compared_name,
     compared_spans,
@@ -207,6 +208,12 @@ class Folder(BaseModel):
     path: str
 
 
+class Chosen(BaseModel):
+    """`PUT /api/tools/{tool}`의 본문. 사용자가 직접 고른 실행 파일의 경로다."""
+
+    path: str
+
+
 class Opening(BaseModel):
     """`POST /api/open`의 본문. `python`은 인터프리터를 고르는 화면에서 고른 경로다."""
 
@@ -290,8 +297,10 @@ def create_app(
             yield
         finally:
             async with switching:
+                closing = [app.state.summaries.close()]
                 if app.state.workspace is not None:
-                    await shut(app.state.workspace)
+                    closing.append(shut(app.state.workspace))
+                await asyncio.gather(*closing)
 
     app = FastAPI(title="code-atlas", lifespan=lifespan)
     if origin is not None:
@@ -392,6 +401,7 @@ def create_app(
     @app.post("/api/probe")
     async def post_probe(folder: Folder) -> dict:
         """고른 폴더를 레포로 열기 전의 판정. 폴더를 읽지 못하면 까닭을 적은 400이다."""
+        tools.fresh(tools.PYTHON.name)
         try:
             return asdict(await asyncio.to_thread(opening.probe, folder.path, settings))
         except OSError as exc:
@@ -407,6 +417,7 @@ def create_app(
                 raise HTTPException(status_code=400, detail=f"파이썬 파일이 없는 폴더는 열지 못한다: {root}")
         except OSError as exc:
             raise HTTPException(status_code=400, detail=f"폴더를 읽지 못했다: {exc}") from exc
+        tools.fresh(tools.PYTHON.name)
         found = tools.python(root, target.python, settings)
         if target.python is not None and found.source != tools.SAVED:
             reason = next((attempt.detail for attempt in found.attempts if attempt.source == tools.SAVED), "실행하지 못했다")
@@ -456,6 +467,70 @@ def create_app(
         if settings is not None:
             settings.forget(root)
         return {"deleted": True}
+
+    def found_tools() -> dict:
+        """로그인 셸에서 읽은 환경의 결과와 `claude`, `git`, 연 레포의 인터프리터를 찾은 결과."""
+        state: Workspace | None = app.state.workspace
+        shell = shellenv.last
+        return {
+            "shell": {k: v for k, v in asdict(shell).items() if k != "env"} if shell is not None else None,
+            "claude": asdict(tools.claude(settings)),
+            "git": asdict(tools.git(settings)),
+            "python": asdict(tools.python(Path(state.runner.repo), state.runner.python, settings)) if state is not None else None,
+        }
+
+    def named(tool: str) -> Callable[[Settings | None], tools.Found]:
+        """직접 고르는 도구를 찾는 함수. 그 밖의 이름은 404다."""
+        finders = {tools.CLAUDE.name: tools.claude, tools.GIT.name: tools.git}
+        if tool not in finders:
+            raise HTTPException(status_code=404, detail=f"직접 고르는 도구가 아니다: {tool}")
+        return finders[tool]
+
+    @app.get("/api/tools")
+    def get_tools() -> dict:
+        return found_tools()
+
+    @app.post("/api/tools/check")
+    def check_tools() -> dict:
+        """찾아 둔 값을 버리고 다시 찾는다."""
+        tools.fresh()
+        return found_tools()
+
+    @app.post("/api/tools/claude/ask")
+    async def ask_claude() -> dict:
+        """`claude -p`가 답하는지 요청 하나로 확인한다. 화면의 `응답 확인`을 누를 때만 부른다."""
+        ok, seconds, detail = await answering()
+        return {"ok": ok, "seconds": seconds, "detail": detail}
+
+    @app.put("/api/tools/{tool}")
+    def put_tool(tool: str, chosen: Chosen):
+        """직접 고른 실행 파일을 확인 명령으로 실행해 통과하면 저장한다. 통과하지 못하면 시도 기록을 적은 400이다."""
+        find = named(tool)
+        if settings is None:
+            raise HTTPException(status_code=400, detail="설정 파일을 쓰지 않는 실행이라 경로를 저장하지 못한다")
+        tried = tools.attempt(tool, chosen.path)
+        if not tried.ok:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"실행하지 못했다: {tried.path} ({tried.detail})", "code": tried.code, "attempt": asdict(tried)},
+            )
+        settings.keep_tool(tool, tried.path)
+        tools.fresh(tool)
+        return asdict(find(settings))
+
+    @app.delete("/api/tools/{tool}")
+    def delete_tool(tool: str) -> dict:
+        """저장한 경로를 지우고 다시 찾는다."""
+        find = named(tool)
+        if settings is not None:
+            settings.keep_tool(tool, None)
+        tools.fresh(tool)
+        return asdict(find(settings))
+
+    @app.get("/api/interpreters")
+    def get_interpreters() -> dict:
+        """인터프리터를 고르는 화면의 후보."""
+        return {"found": [asdict(found) for found in tools.interpreters()]}
 
     @app.get("/api/repo")
     def get_repo(state: Workspace = ready) -> dict:
@@ -730,7 +805,7 @@ def create_app(
         summaries: Summaries = app.state.summaries
         reason = await summaries.unavailable()
         summary, stale = summaries.kept(prompt, Subject(state.repo["root"], "node", node))
-        return {"summary": summary, "stale": stale, "available": reason is None, "reason": reason}
+        return {"summary": summary, "stale": stale, "available": reason is None, "reason": reason, "code": summaries.code}
 
     @app.get("/api/summaries")
     def get_summaries(state: Workspace = ready) -> dict:

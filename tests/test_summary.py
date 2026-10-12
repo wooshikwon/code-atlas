@@ -9,12 +9,13 @@ from contextlib import closing
 
 import pytest
 
-from code_atlas import summary
+from code_atlas import summary, tools
 from code_atlas.model import Edge, Node, SiteRef
 from code_atlas.summary import Cache, Made, Summaries, SummaryError, Usage
 
 MADE = "설정을 받아 엔진을 만들고 시작한다.\n\n하는 일\n엔진을 만든다.\n\n앞뒤 흐름\n`main`이 호출한다."
 
+VERSION = 'if [ "$1" = "--version" ]; then echo "2.1.288 (Claude Code)"; exit 0; fi\n'
 OK = """
 if [ "$1" = "auth" ]; then echo '{"loggedIn": true}'; exit 0; fi
 cat > "$RECORD/stdin"
@@ -26,7 +27,7 @@ printf '%s\\n' '{"is_error": false, "result": "\\n설정을 받아 엔진을 만
 USAGE = ', "usage": {"input_tokens": 2, "cache_creation_input_tokens": 1487, "cache_read_input_tokens": 16411, "output_tokens": 527, "service_tier": "standard"}'
 USED = Usage(input=2, cache_write=1487, cache_read=16411, output=527)
 ONE_SENTENCE = """printf '%s\\n' '{"is_error": false, "result": "한 문장 요약이다."}'\n"""
-SLOW = "sleep 30\n"
+SLOW = """if [ "$1" = "auth" ]; then echo '{"loggedIn": true}'; exit 0; fi\nsleep 30\n"""
 FAILING = "echo '인증 서버에 닿지 못했다' >&2\nexit 3\n"
 LOGGED_OUT = """
 if [ "$1" = "auth" ]; then echo '{"loggedIn": false}'; exit 1; fi
@@ -37,41 +38,35 @@ exit 1
 
 @pytest.fixture
 def fake_cli(tmp_path, monkeypatch):
-    """임시 폴더에 가짜 `claude` 셸 스크립트를 두고 `PATH`와 홈 폴더를 그 폴더로 돌린다. 스크립트가 받은 값은 돌려준 폴더에 남는다."""
+    """임시 폴더에 가짜 `claude` 셸 스크립트를 두고 `PATH`와 홈 폴더를 그 폴더로 돌린다. 스크립트가 받은 값은 돌려준 폴더에 남는다.
+
+    스크립트는 `--version`에 판 번호를 답하고 그 밖의 인자는 받은 본문대로 처리한다.
+    """
     bin_dir, record = tmp_path / "bin", tmp_path / "record"
     bin_dir.mkdir()
     record.mkdir()
     monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("RECORD", str(record))
+    monkeypatch.delenv(tools.NO_CLAUDE_ENV)
+    monkeypatch.setattr(tools, "_claude_refused", lambda: None)
 
     def install(body: str):
         script = bin_dir / "claude"
-        script.write_text("#!/bin/sh\n" + body)
+        script.write_text("#!/bin/sh\n" + VERSION + body)
         script.chmod(0o755)
         return record
 
     return install
 
 
-def test_find_cli_reads_path_then_local_bin(tmp_path, monkeypatch):
-    home = tmp_path / "home"
-    local = home / ".local" / "bin" / "claude"
-    local.parent.mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+def test_find_cli_gives_only_a_cli_that_passed_the_check(fake_cli, tmp_path):
     assert summary.find_cli() is None
-
-    local.write_text("#!/bin/sh\n")
+    fake_cli(OK)
+    cli = tmp_path / "bin" / "claude"
+    assert summary.find_cli() == str(cli)
+    cli.write_text("#!/bin/sh\nexit 1\n")
     assert summary.find_cli() is None
-    local.chmod(0o755)
-    assert summary.find_cli() == str(local)
-
-    on_path = tmp_path / "bin" / "claude"
-    on_path.parent.mkdir()
-    on_path.write_text("#!/bin/sh\n")
-    on_path.chmod(0o755)
-    assert summary.find_cli() == str(on_path)
 
 
 @pytest.mark.asyncio
@@ -142,6 +137,44 @@ async def test_generate_times_out_and_ends_process(fake_cli, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_generate_past_its_time_limit_lets_the_cli_finish_on_sigterm(fake_cli, tmp_path, monkeypatch):
+    record = fake_cli(
+        """if [ "$1" = "auth" ]; then echo '{"loggedIn": true}'; exit 0; fi
+trap 'echo saved > "$RECORD/saved"; exit 0' TERM
+sleep 30 &
+wait
+"""
+    )
+    monkeypatch.setattr(summary, "GENERATE_TIMEOUT", 0.5)
+    with pytest.raises(SummaryError, match="응답하지 않았다"):
+        await summary.generate("s", "p")
+    assert (record / "saved").read_text() == "saved\n"
+    assert tools.CLAUDE_TURNS.enter()  # 끝난 호출이 차례를 돌려준다
+    tools.CLAUDE_TURNS.leave()
+
+
+@pytest.mark.asyncio
+async def test_closing_the_summaries_ends_the_running_cli_with_sigterm(fake_cli, tmp_path):
+    record = fake_cli(
+        """if [ "$1" = "auth" ]; then echo '{"loggedIn": true}'; exit 0; fi
+echo started > "$RECORD/started"
+trap 'echo saved > "$RECORD/saved"; exit 0' TERM
+sleep 30 &
+wait
+"""
+    )
+    summaries = Summaries(tmp_path / "summaries.db")
+    making = asyncio.create_task(summaries.make("프롬프트"))
+    while not (record / "started").exists():
+        await asyncio.sleep(0.05)
+    started = time.monotonic()
+    await summaries.close()
+    assert time.monotonic() - started < 4 and (record / "saved").read_text() == "saved\n"
+    with pytest.raises(asyncio.CancelledError):
+        await making
+
+
+@pytest.mark.asyncio
 async def test_generate_reports_nonzero_exit(fake_cli):
     fake_cli(FAILING)
     with pytest.raises(SummaryError, match="종료 코드 3.*인증 서버에 닿지 못했다"):
@@ -168,6 +201,20 @@ async def test_unavailable_reasons(fake_cli):
     assert await summary.unavailable() == "Claude Code에 로그인돼 있지 않다"
     fake_cli(OK)
     assert await summary.unavailable() is None
+
+
+@pytest.mark.asyncio
+async def test_unavailable_asks_the_login_once_however_often_it_is_asked(fake_cli, tmp_path):
+    counted = 'echo "$1" >> "$RECORD/calls"\n'
+    fake_cli(counted + LOGGED_OUT)
+    for _ in range(5):
+        assert await summary.unavailable() == "Claude Code에 로그인돼 있지 않다"
+    assert (tmp_path / "record" / "calls").read_text().split() == ["auth"]
+
+    tools.fresh("claude")  # 화면의 `다시 확인`
+    fake_cli(counted + OK)
+    assert await summary.unavailable() is None and await summary.unavailable() is None
+    assert (tmp_path / "record" / "calls").read_text().split() == ["auth", "auth"]
 
 
 def test_cache_get_and_put(tmp_path):

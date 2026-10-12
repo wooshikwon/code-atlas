@@ -14,6 +14,12 @@ import sys
 import threading
 import webbrowser
 
+from . import shellenv
+
+# 앱 껍데기가 띄운 실행은 아래의 무거운 import와 함께 로그인 셸의 환경을 읽는다.
+if "--hosted" in sys.argv[1:]:
+    shellenv.start()
+
 from .analyze import PythonNotFound, analyze, require_python
 from .api import HOST, PORT, create_app
 from .model import to_dict
@@ -75,6 +81,7 @@ def _bind_or_exit(port: int) -> socket.socket:
 def _serve_command(args: argparse.Namespace) -> int:
     import uvicorn
 
+    shellenv.adopt()
     sock = _bind_or_exit(args.port)
     python = _python_or_exit(args.repo, args.python) if args.repo is not None else None
     url = f"http://{HOST}:{sock.getsockname()[1]}"

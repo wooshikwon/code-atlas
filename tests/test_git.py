@@ -6,6 +6,7 @@ from conftest import FIXTURE, git
 from history import run
 
 from code_atlas import git as reader
+from code_atlas import tools
 from code_atlas.git import (
     Ref,
     WORKTREE,
@@ -212,21 +213,43 @@ def test_outside_git_nothing_is_read(sample_repo, tmp_path):
         export(sample_repo, "HEAD", tmp_path / "out")
 
 
-def test_missing_git_is_none(git_repo, monkeypatch):
+@pytest.fixture
+def only_on_path(monkeypatch):
+    """git을 시험이 정한 `PATH`에서만 찾게 한다. 알려진 위치를 비우고, 찾아 둔 git을 시험 앞뒤로 버린다."""
+    monkeypatch.setattr(tools, "PLACES", {**tools.PLACES, "git": ()})
+    tools.fresh("git")
+    yield
+    tools.fresh("git")
+
+
+def test_missing_git_is_none(git_repo, monkeypatch, only_on_path):
     monkeypatch.setenv("PATH", str(git_repo / "nowhere"))
     assert status(git_repo) is None
     assert head(git_repo) is None
     assert commits(git_repo, 0, 10) == []
 
 
-def test_slow_git_is_none(git_repo, tmp_path, monkeypatch):
+def test_slow_git_is_none(git_repo, tmp_path, monkeypatch, only_on_path):
     fake = tmp_path / "bin" / "git"
     fake.parent.mkdir()
-    fake.write_text("#!/bin/sh\nexec sleep 5\n")
+    fake.write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then echo "git version 0.0.0"; exit 0; fi\nexec sleep 5\n')
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", str(fake.parent), prepend=":")
     monkeypatch.setattr(reader, "GIT_TIMEOUT", 0.2)
+    assert tools.git().path == str(fake)
     assert status(git_repo) is None
+
+
+def test_git_that_stops_running_is_looked_up_again(git_repo, tmp_path, monkeypatch, only_on_path):
+    fake = tmp_path / "bin" / "git"
+    fake.parent.mkdir()
+    fake.write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then echo "git version 0.0.0"; fi\nexit 1\n')
+    fake.chmod(0o755)
+    real = tools.git().path
+    monkeypatch.setenv("PATH", str(fake.parent), prepend=":")
+    assert head(git_repo) is not None  # 찾아 둔 git이 그대로면 `PATH`를 다시 보지 않는다
+    tools.fresh("git")
+    assert tools.git().path == real and tools.git().attempts[0].path == str(fake)  # 확인을 통과하지 못한 git은 쓰지 않는다
 
 
 def test_reading_does_not_write_the_index(git_repo):

@@ -1,7 +1,7 @@
 """Claude Code CLI로 노드의 설명(요지, 하는 일, 앞뒤 흐름)과 코드 범위의 설명을 만들고 캐시한다.
 
-설명은 그 컴퓨터에 로그인한 Claude Code 구독 계정으로 `claude -p`를 불러 만든다.
-실행 파일 찾기, 앞뒤 흐름 자료, 프롬프트, 호출, 캐시는 이 모듈만 한다.
+설명은 그 컴퓨터의 Claude Code에 로그인한 계정으로 `claude -p`를 불러 만든다. 실행 파일은 `tools.claude`가 확인한
+경로를 쓰고, 앞뒤 흐름 자료, 프롬프트, 호출, 캐시는 이 모듈만 한다.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import signal
 import sqlite3
 import tempfile
@@ -24,6 +23,7 @@ from contextlib import closing
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from . import tools
 from .model import Edge, Node
 
 logger = logging.getLogger(__name__)
@@ -31,13 +31,14 @@ logger = logging.getLogger(__name__)
 PROMPT_VERSION = 3
 MODEL = "sonnet"
 GENERATE_TIMEOUT = 120.0
-STATUS_TIMEOUT = 10.0
 MAX_CODE = 24_000
 MAX_PROMPT = 60_000
 MAX_STYLE_GUIDE = 100_000
 MAX_DOC = 400
 MAX_FILE_DOC = 1_200
 MAX_PROCESSES = 2
+STYLE_GUIDE_UNREADABLE = "style_guide_unreadable"
+TURN_POLL = 0.05  # `claude`의 확인 명령이 끝났는지 다시 보는 간격
 CACHE_PATH = Path.home() / ".cache" / "code-atlas" / "summaries.db"
 STYLE_GUIDE_ENV = "CODE_ATLAS_STYLE_GUIDE"
 
@@ -202,7 +203,6 @@ GENERATE_TAIL = (
     "--output-format",
     "json",
 )
-STATUS_ARGS = ("auth", "status", "--json")
 
 
 class SummaryError(Exception):
@@ -236,12 +236,8 @@ class Made:
 
 
 def find_cli() -> str | None:
-    """`PATH`와 `~/.local/bin/claude`에서 Claude Code 실행 파일을 찾는다."""
-    found = shutil.which("claude")
-    if found is not None:
-        return found
-    local = Path.home() / ".local" / "bin" / "claude"
-    return str(local) if os.access(local, os.X_OK) else None
+    """`tools.claude`가 확인한 Claude Code 실행 파일의 경로. 찾지 못했으면 None이다."""
+    return tools.claude().path
 
 
 def find_style_guide(option: str | None) -> Path | None:
@@ -757,40 +753,57 @@ def lead_of(summary: str) -> str:
 
 
 async def _run(cli: str, args: tuple[str, ...], stdin: str, timeout: float) -> tuple[int, str, str]:
-    """빈 임시 폴더에서 CLI를 띄워 종료 코드, 표준 출력, 표준 오류를 돌려준다. 시간 안에 끝나지 않으면 프로세스 묶음을 끝낸다."""
-    with tempfile.TemporaryDirectory(prefix="code-atlas-summary-") as cwd:
-        process = await asyncio.create_subprocess_exec(
-            cli,
-            *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            start_new_session=True,
-        )
-        try:
-            out, err = await asyncio.wait_for(process.communicate(stdin.encode()), timeout)
-        finally:
-            if process.returncode is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                await process.wait()
+    """빈 임시 폴더에서 CLI를 띄워 종료 코드, 표준 출력, 표준 오류를 돌려준다.
+
+    `tools`가 `claude`의 확인 명령을 실행하는 동안에는 띄우지 않고 기다린다. 시간 안에 끝나지 않거나 기다리던 쪽이
+    취소되면 프로세스 묶음에 SIGTERM을 보내고, `tools.TERM_GRACE`가 지나도 남아 있으면 SIGKILL을 보낸다.
+    """
+    while not tools.CLAUDE_TURNS.enter():
+        await asyncio.sleep(TURN_POLL)
+    try:
+        with tempfile.TemporaryDirectory(prefix="code-atlas-summary-") as cwd:
+            process = await asyncio.create_subprocess_exec(
+                cli,
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                start_new_session=True,
+            )
+            try:
+                out, err = await asyncio.wait_for(process.communicate(stdin.encode()), timeout)
+            finally:
+                if process.returncode is None:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        await asyncio.wait_for(asyncio.shield(process.wait()), tools.TERM_GRACE)
+                    except asyncio.TimeoutError:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        await process.wait()
+    finally:
+        tools.CLAUDE_TURNS.leave()
     return process.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
 
 async def unavailable() -> str | None:
-    """Claude Code CLI를 부를 수 없는 까닭. 부를 수 있으면 None이다."""
-    cli = find_cli()
-    if cli is None:
+    """Claude Code CLI를 부를 수 없는 까닭. 부를 수 있으면 None이다.
+
+    로그인 여부는 `tools.claude`가 찾을 때 확인해 둔 값이고 물을 때마다 CLI를 실행하지 않는다.
+    """
+    if await asyncio.to_thread(find_cli) is None:
         return "Claude Code CLI를 찾지 못했다"
+    return tools.claude().note
+
+
+async def answering() -> tuple[bool, float, str]:
+    """`claude -p`에 한 낱말을 답하게 해 응답이 오는지 본다. 응답이 왔는지, 걸린 초, 오지 않은 까닭을 낸다."""
+    started = time.monotonic()
     try:
-        _, out, _ = await _run(cli, STATUS_ARGS, "", STATUS_TIMEOUT)
-    except (OSError, asyncio.TimeoutError):
-        return "Claude Code CLI가 응답하지 않는다"
-    try:
-        logged_in = json.loads(out).get("loggedIn")
-    except (ValueError, AttributeError):
-        return None
-    return "Claude Code에 로그인돼 있지 않다" if logged_in is False else None
+        await _ask("한 낱말로만 답한다.", "'예'라고 답한다.")
+    except SummaryError as exc:
+        return False, round(time.monotonic() - started, 2), str(exc)
+    return True, round(time.monotonic() - started, 2), ""
 
 
 def usage_of(body: object) -> Usage | None:
@@ -806,7 +819,7 @@ def usage_of(body: object) -> Usage | None:
 
 async def _ask(system: str, prompt: str) -> Made:
     """`claude -p`에 시스템 프롬프트를 인자로, 프롬프트를 표준 입력으로 넘겨 CLI가 낸 글과 사용량을 받는다."""
-    cli = find_cli()
+    cli = await asyncio.to_thread(find_cli)
     if cli is None:
         raise SummaryError("Claude Code CLI를 찾지 못했다")
     try:
@@ -814,6 +827,7 @@ async def _ask(system: str, prompt: str) -> Made:
     except asyncio.TimeoutError:
         raise SummaryError(f"Claude Code CLI가 {GENERATE_TIMEOUT:.0f}초 안에 응답하지 않았다") from None
     except OSError as exc:
+        tools.fresh(tools.CLAUDE.name)
         raise SummaryError(f"Claude Code CLI를 띄우지 못했다: {exc}") from exc
     try:
         body = json.loads(out)
@@ -984,6 +998,8 @@ class Summaries:
         self._making: dict[str, _Making] = {}
         self._checking = asyncio.Lock()
         self._ready = False
+        # 마지막 `unavailable`이 낸 까닭의 경우. `tools.Found.code`의 값이거나 style_guide_unreadable이고, 까닭이 없으면 None이다
+        self.code: str | None = None
 
     async def unavailable(self) -> str | None:
         """설명을 만들 수 없는 까닭. 서술 규약 문서를 읽지 못하거나 Claude Code CLI를 부를 수 없으면 그 까닭이고, 만들 수 있으면 None이다.
@@ -993,13 +1009,24 @@ class Summaries:
         try:
             system_prompt_of(self.style_guide)
         except SummaryError as exc:
+            self.code = STYLE_GUIDE_UNREADABLE
             return str(exc)
         async with self._checking:
             if self._ready:
+                self.code = None
                 return None
             reason = await unavailable()
             self._ready = reason is None
+            found = tools.last(tools.CLAUDE.name)
+            self.code = None if reason is None else found.code if found is not None else tools.NOT_FOUND
             return reason
+
+    async def close(self) -> None:
+        """만드는 중인 설명을 멈추고 그 `claude` 프로세스가 끝날 때까지 기다린다."""
+        tasks = [making.task for making in self._making.values()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     def cached(self, prompt: str) -> str | None:
         """캐시에 있는 설명. 서술 규약 문서를 읽지 못하면 None이다."""

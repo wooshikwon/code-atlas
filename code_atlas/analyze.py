@@ -10,7 +10,6 @@ import asyncio
 import hashlib
 import logging
 import re
-import shutil
 import sqlite3
 import threading
 import time
@@ -19,7 +18,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from . import venv
+from . import tools
 from .cache import Answers, Cache, Stored, environment
 from .collect import RepoFiles, SourceFile, collect, config_texts, module_id
 from .extract import FileFacts, assigned_names, defined_names, extract, read_source
@@ -101,14 +100,14 @@ def _stamp(file: Path) -> tuple[int, int] | None:
 
 
 def require_python(repo: str | Path, python: str | None) -> str:
-    """분석에 쓸 인터프리터. `python`을 주지 않으면 레포의 가상환경에서 찾고, 준 경로를 실행할 수 없으면 분석하지 않는다."""
+    """분석에 쓸 인터프리터의 경로. `tools.python`이 확인을 통과한 것을 찾지 못하면 시도한 것을 적고 분석하지 않는다."""
+    found = tools.python(Path(repo), python)
+    if found.path is not None:
+        return found.path
+    tried = "".join(f"\n  {attempt.path or attempt.source}: {attempt.detail}" for attempt in found.attempts)
     if python is None:
-        python = venv.find(repo)
-        if python is None:
-            raise PythonNotFound(f"{repo}에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.")
-    elif shutil.which(python) is None:
-        raise PythonNotFound(f"--python에 준 경로를 실행할 수 없다: {python}. 인터프리터의 실행 파일 경로를 지정한다.")
-    return python
+        raise PythonNotFound(f"{repo}에서 가상환경을 찾지 못했다. --python으로 인터프리터 경로를 지정한다.{tried}")
+    raise PythonNotFound(f"--python에 준 경로를 실행할 수 없다: {python}. 인터프리터의 실행 파일 경로를 지정한다.{tried}")
 
 
 def _imported_module(site: Site) -> str:
