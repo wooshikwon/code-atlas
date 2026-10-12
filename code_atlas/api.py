@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import threading
 import time
@@ -228,6 +229,10 @@ def create_app(
             await runner.close()
 
     app = FastAPI(title="code-atlas", lifespan=lifespan)
+    if origin := os.environ.get("CODE_ATLAS_PROBE_ORIGIN"):  # 임시: U6 선행 확인용. U1의 `--origin`이 들어오면 지운다
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(CORSMiddleware, allow_origins=[origin], allow_methods=["*"], allow_headers=["*"])
     app.state.runner = runner
     app.state.revision = 0
     app.state.draft = False
