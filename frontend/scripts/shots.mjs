@@ -12465,6 +12465,14 @@ function numbersOf(kinds) {
   });
 }
 
+/** 코드 뷰어의 줄 번호 칸의 폭과, 코드 뷰어의 왼쪽 끝에서 코드의 왼쪽 끝까지의 거리 */
+const gutterOf = (page) =>
+  page.evaluate(() => {
+    const editor = document.querySelector(".info-panel .code .monaco-editor").getBoundingClientRect();
+    const label = [...document.querySelectorAll(".info-panel .code .line-numbers")].find((each) => each.textContent !== "");
+    return { width: label.getBoundingClientRect().width, left: document.querySelector(".info-panel .code .view-lines").getBoundingClientRect().left - editor.left };
+  });
+
 async function waitCode(page) {
   await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 });
   await page.waitForTimeout(600);
@@ -12941,17 +12949,6 @@ async function compareCode(t, page) {
     code.labels.length > 0 && code.labels.every((label) => /^\d+$/.test(label)) && same(code.labels, numbers),
     `${code.labels.join(" ")}${gone === -1 ? "" : ` (첫 삭제된 줄 ${code.labels[gone]})`}`,
   );
-  const gutter = await page.evaluate(() => {
-    const label = [...document.querySelectorAll(".info-panel .code .line-numbers")].find((each) => each.textContent !== "");
-    const digit = document.createElement("span");
-    digit.textContent = "0";
-    label.append(digit);
-    const width = digit.getBoundingClientRect().width;
-    digit.remove();
-    return { chars: Math.round(label.getBoundingClientRect().width / width) };
-  });
-  const most = Math.max(...code.labels.map((label) => label.length));
-  t.check(`줄 번호 칸의 폭이 가장 큰 줄 번호의 자릿수 ${most}자다`, gutter.chars === most, `${gutter.chars}자`);
   const head = await page.evaluate(() => document.querySelector(".info-panel-compared")?.textContent ?? "");
   t.check("정보 패널의 머리 줄이 수정과 그 정의의 줄 수를 적는다", head === `수정+${result.nodes[target].added}−${result.nodes[target].deleted}`, head);
   const deletedFile = result.files.find((each) => each.status === "deleted");
@@ -12965,6 +12962,7 @@ async function compareCode(t, page) {
   );
   await t.shot();
   await page.screenshot({ path: join(OUT, "hf10-onecol.png"), clip: await rectOf(page, ".info-panel .code") });
+  const woven = await gutterOf(page);
   // 패널의 왼쪽 변을 끌어 폭을 넓힌다.
   const panel = await rectOf(page, ".info-panel");
   await page.mouse.move(panel.x + 1, panel.y + panel.height / 2);
@@ -12977,6 +12975,19 @@ async function compareCode(t, page) {
     "패널의 폭을 넓혀도 비교는 한 칸이다",
     (await rectOf(page, ".info-panel")).width > panel.width + 200 && wide.editors === 1 && wide.split === 0 && wide.deleted === code.deleted && wide.added === code.added,
     `폭 ${panel.width.toFixed(0)} → ${(await rectOf(page, ".info-panel")).width.toFixed(0)}`,
+  );
+  // 바뀐 줄이 없는 파일로 옮겨 줄 번호 칸의 폭과 코드의 왼쪽 끝을 견준다.
+  const changed = new Set(result.files.flatMap((each) => [each.path, each.old]));
+  const kept = result.graph.nodes.find((n) => n.kind === "module" && n.path !== null && !changed.has(n.path));
+  await page.click(`.tree-row.tree-file[data-node="${kept.id}"]`);
+  await waitSelected(page, kept.id);
+  await waitCode(page);
+  const plain = await wovenOf(page);
+  const whole = await gutterOf(page);
+  t.check(
+    `바뀐 줄이 없는 ${kept.path}로 옮겨도 줄 번호 칸의 폭과 코드의 왼쪽 끝이 그대로다`,
+    plain.deleted === 0 && plain.added === 0 && near(woven.width, whole.width, 0.5) && near(woven.left, whole.left, 0.5),
+    `줄 번호 칸 ${woven.width.toFixed(1)} → ${whole.width.toFixed(1)}, 코드의 왼쪽 끝 ${woven.left.toFixed(1)} → ${whole.left.toFixed(1)}`,
   );
 }
 

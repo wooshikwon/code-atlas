@@ -145,7 +145,8 @@ export function CodeView({ path, range, highlight, base = false }: CodeViewProps
       return OPTIONS;
     }
     const { chars, label } = gutter(woven);
-    return { ...OPTIONS, lineNumbers: label, lineNumbersMinChars: chars };
+    // 줄 번호 칸의 폭은 엮지 않은 본문의 코드 뷰어가 쓰는 최소 글자 수보다 좁아지지 않는다.
+    return { ...OPTIONS, lineNumbers: label, lineNumbersMinChars: Math.max(monaco.editor.EditorOptions.lineNumbersMinChars.defaultValue, chars) };
   }, [woven]);
 
   useEffect(() => {
