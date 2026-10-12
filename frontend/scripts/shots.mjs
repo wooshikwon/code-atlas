@@ -8869,7 +8869,7 @@ async function entry(t, page) {
 
 /**
  * 노드의 우클릭 메뉴. 그래프의 노드와 파일트리의 행에서 LLM 요약을 요청하고, 선택과 화면, 탐색 이력이 그대로인지 본다.
- * 요지 목록과 요약은 서버 대신 답하고 LLM을 부르지 않는다. 사진은 `hf3-menu-{이름}.png`로 남긴다.
+ * 요지 목록과 요약은 서버 대신 답하고 LLM을 부르지 않는다. 사진은 `hf3-menu-{이름}.png`와 `hf4-menu-all.png`로 남긴다.
  */
 async function menu(t, page) {
   const graph = await api("/api/graph");
@@ -8974,13 +8974,16 @@ async function menu(t, page) {
   t.check('요약이 있는 함수 노드의 항목은 "요약 다시 만들기"이고 메뉴 밖을 누르면 닫힌다', same(kept, ["요약 다시 만들기"]) && outside, `${kept?.join(", ")}, 밖을 눌러 닫힘 ${outside}`);
   await clickNode(page, FILE, 1, "right");
   const onFile = await labels();
-  const bare = defined.length - 1;
+  const allLabel = (count) => `이 파일과 안에 든 정의 모두 요약 (${count}개)`;
+  // 요약이 있는 정의 하나를 빼고 파일 자신을 더한 수다.
+  const bare = defined.length;
   t.check(
-    `파일 노드에는 요약이 없는 정의의 수(${bare})를 적은 "안에 든 정의 N개 모두 요약"이 더해진다`,
-    same(onFile, ["LLM 요약 요청", `안에 든 정의 ${bare}개 모두 요약`]),
+    `파일 노드에는 그 파일과 안에 든 정의 가운데 요약이 없는 것의 수(${bare})를 적은 "이 파일과 안에 든 정의 모두 요약 (N개)"가 더해진다`,
+    same(onFile, ["LLM 요약 요청", allLabel(bare)]),
     onFile?.join(", "),
   );
   await page.screenshot({ path: HF3("menu-file") });
+  await page.screenshot({ path: HF4("menu-all") });
   await page.keyboard.press("Escape");
   const folder = graph.nodes.find((n) => n.kind === "package" && !n.test && n.parent !== null) ?? graph.nodes.find((n) => n.kind === "package" && !n.test);
   await rightClick(`.tree-row.tree-dir[data-node="${folder.id}"] .tree-label`);
@@ -9031,24 +9034,34 @@ async function menu(t, page) {
   await page.click('.menu-item[data-key="all"]');
   await page.waitForTimeout(300);
   const sentNow = posts.filter((post) => !post.done).length;
-  const boxBusy = await page.evaluate((sel) => document.querySelectorAll(`${sel} .badge-busy`).length, ".react-flow__viewport");
+  const boxBusy = await page.evaluate((sel) => ({ corner: document.querySelectorAll(`${sel} > .node-module .badge-busy`).length, ring: document.querySelectorAll(`${sel} .busy-ring`).length }), face(FILE));
+  const fileBusy = await busyAt(page, FILE, node(FILE));
   await clickNode(page, FILE, 1, "right");
   const drained = await labels();
   await page.keyboard.press("Escape");
   t.check(
-    `파일의 "모두 요약"은 요약이 없는 정의 ${rest3}개만 요청하고, 서버로는 둘씩 보내며, 요청한 뒤에는 0개가 되어 누를 수 없다`,
-    same(fewer, ["LLM 요약 요청", `안에 든 정의 ${rest3}개 모두 요약`]) && sentNow === 2 && boxBusy > 0 && same(drained, ["LLM 요약 요청", "안에 든 정의 0개 모두 요약(비활성)"]),
-    `${fewer?.join(", ")} → ${drained?.join(", ")}, 보낸 요청 ${sentNow}개, 도는 표시 ${boxBusy}개`,
+    `파일의 "모두 요약"은 그 파일과 요약이 없는 정의 ${rest3 - 1}개를 요청하고, 서버로는 둘씩 보내며, 요청한 뒤에는 0개가 되어 누를 수 없다`,
+    same(fewer, ["LLM 요약 요청", allLabel(rest3)]) && sentNow === 2 && same(drained, ["요약 만드는 중(비활성)", `${allLabel(0)}(비활성)`]),
+    `${fewer?.join(", ")} → ${drained?.join(", ")}, 보낸 요청 ${sentNow}개`,
+  );
+  t.check(
+    "요약을 만드는 중인 파일 상자는 왼쪽 위 모서리에 도는 원을 달고 원 위의 고리는 없다",
+    boxBusy.corner === 1 && boxBusy.ring === 0 && atCorner(fileBusy),
+    `도는 원 ${boxBusy.corner}개, 고리 ${boxBusy.ring}개, ${cornerText(fileBusy)}`,
   );
   await answerAll();
-  await page.waitForFunction(() => document.querySelector(".badge-busy") === null, null, { timeout: 15_000 }).catch(() => {});
+  await page.waitForFunction((sel) => document.querySelector(sel) === null, BUSY, { timeout: 15_000 }).catch(() => {});
   const all = posts.map((post) => post.node);
-  const wanted = defined.filter((n) => n.id !== FUNCTION).map((n) => n.id);
+  const wanted = [FILE, ...defined.filter((n) => n.id !== FUNCTION).map((n) => n.id)];
   t.check(
-    "모두 요약이 끝나면 파일 자신과 이미 요약이 있던 정의를 뺀 나머지 정의마다 요청이 한 번씩 갔다",
-    wanted.every((id) => all.filter((each) => each === id).length === (id === a ? 2 : 1)) && !all.includes(FILE) && !all.includes(FUNCTION) && same(await stateOf(), before),
-    `POST ${all.length}번, 정의 ${wanted.length}개`,
+    "모두 요약이 끝나면 그 파일과, 이미 요약이 있던 정의를 뺀 나머지 정의마다 요청이 한 번씩 갔고 도는 표시가 모두 사라졌다",
+    wanted.every((id) => all.filter((each) => each === id).length === (id === a ? 2 : 1)) && !all.includes(FUNCTION) && (await count(page, BUSY)) === 0 && same(await stateOf(), before),
+    `POST ${all.length}번, 파일과 정의 ${wanted.length}개`,
   );
+  await clickNode(page, FILE, 1, "right");
+  const filled = await labels();
+  await page.keyboard.press("Escape");
+  t.check('모두 요약한 파일의 항목은 "요약 다시 만들기"와 누를 수 없는 0개다', same(filled, ["요약 다시 만들기", `${allLabel(0)}(비활성)`]), filled?.join(", "));
 
   // 실패한 요청
   /** 이름표의 가운데 점이 눌리는 접힌 파일 상자. skip은 고르지 않을 상자를 정한다. */
@@ -9104,7 +9117,7 @@ async function menu(t, page) {
   await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
   await page.keyboard.press("Enter");
   await page.waitForTimeout(200);
-  t.check("메뉴 키로 열어 Enter를 누르면 활성 항목인 파일의 요약을 요청한다", posts.at(-1).node === FILE && !posts.at(-1).refresh && (await count(page, ".menu")) === 0 && same(await stateOf(), before), `POST ${posts.at(-1).node}`);
+  t.check("메뉴 키로 열어 Enter를 누르면 활성 항목인 파일의 요약을 다시 만드는 요청을 보낸다", posts.at(-1).node === FILE && posts.at(-1).refresh && (await count(page, ".menu")) === 0 && same(await stateOf(), before), `POST ${posts.at(-1).node} refresh=${posts.at(-1).refresh}`);
   await answerAll();
 
   // 어두운 화면

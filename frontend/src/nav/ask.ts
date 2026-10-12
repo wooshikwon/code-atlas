@@ -22,8 +22,8 @@ const making = (store: Kept, id: string) => store.states[id]?.phase === "making"
 const kept = (store: Kept, id: string) => store.states[id]?.phase === "done" || store.leads[id] !== undefined;
 
 /**
- * 노드 id의 요약 항목. 첫 항목은 그 노드의 요약이고 이름은 요약 상태를 따른다. 파일은 안에 든 클래스·함수·메서드 가운데
- * 요약이 없고 만드는 중도 아닌 정의를 모두 요청하는 항목이 더해진다. 요약이 없는 종류의 노드와 그래프에 없는 id는 항목이 없다.
+ * 노드 id의 요약 항목. 첫 항목은 그 노드의 요약이고 이름은 요약 상태를 따른다. 파일은 그 파일과 안에 든 클래스·함수·메서드 가운데
+ * 요약이 없고 만드는 중도 아닌 것을 모두 요청하는 항목이 더해진다. 요약이 없는 종류의 노드와 그래프에 없는 id는 항목이 없다.
  */
 export function asksOf(graph: Graph, store: Kept, id: string): Ask[] {
   const nodes = nodeIndex(graph);
@@ -40,7 +40,7 @@ export function asksOf(graph: Graph, store: Kept, id: string): Ask[] {
     return [one];
   }
   const bare = graph.nodes
-    .filter((each) => each.id !== id && SUMMARIZED.has(each.kind) && within(nodes, each.id, id) && !making(store, each.id) && !kept(store, each.id))
+    .filter((each) => SUMMARIZED.has(each.kind) && within(nodes, each.id, id) && !making(store, each.id) && !kept(store, each.id))
     .map((each) => each.id);
-  return [one, { key: "all", label: `안에 든 정의 ${bare.length}개 모두 요약`, disabled: bare.length === 0, nodes: bare, refresh: false }];
+  return [one, { key: "all", label: `이 파일과 안에 든 정의 모두 요약 (${bare.length}개)`, disabled: bare.length === 0, nodes: bare, refresh: false }];
 }
