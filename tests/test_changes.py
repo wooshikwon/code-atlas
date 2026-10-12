@@ -76,6 +76,21 @@ def test_method_changed_marks_its_class(served):
     }
 
 
+def test_variable_node_with_changed_assignment_is_modified_and_untouched_one_is_left_out(served):
+    def edit(repo):
+        pricing = repo / "src/shop/pricing.py"
+        pricing.write_text(pricing.read_text().replace("RATE = 0.1\n", "RATE = 0.2\nFLOOR = 0\n"))
+        orders = repo / ORDERS
+        orders.write_text(orders.read_text() + "\n\ndef rate():\n    from shop import inventory, pricing\n\n    return pricing.RATE, pricing.FLOOR, inventory.LEVELS\n")
+
+    client = served(edit)
+    kinds = {n["id"]: n["kind"] for n in client.get("/api/graph").json()["nodes"]}
+    assert kinds["shop.pricing:RATE"] == kinds["shop.pricing:FLOOR"] == kinds["shop.inventory:LEVELS"] == "variable"
+    nodes = client.get("/api/changes").json()["nodes"]
+    assert (nodes["shop.pricing:RATE"], nodes["shop.pricing:FLOOR"]) == ("modified", "added")
+    assert "shop.inventory:LEVELS" not in nodes
+
+
 def test_renamed_file_keeps_its_definitions_unmarked(served):
     def edit(repo):
         run(repo, "mv", "src/shop/report.py", "src/shop/printing.py")

@@ -210,7 +210,7 @@ def _definitions(
     hunks: dict[str, list[Hunk]],
     skip: set[str] | frozenset[str],
     folders: list[Node],
-) -> tuple[_Definitions, dict[str, list[str]], dict[str, list[str]]]:
+) -> _Definitions:
     file_nodes = _file_nodes(target)
     live = {n.id for n in target}
     old_lines = {path: text.splitlines() for path, text in base_texts.items()}
@@ -220,9 +220,12 @@ def _definitions(
     found = _Definitions(paired, moved, homes, {}, [])
     changes, deleted = found.changes, found.deleted
     by_path: dict[str, dict[str, Node]] = {f.path: {} for f in paired}
+    variables: dict[str, list[Node]] = {f.path: [] for f in paired}
     for n in target:
         if n.kind in DEFINITION_KINDS and n.path in by_path:
             by_path[n.path][n.id] = n
+        elif n.kind == "variable" and n.path in variables:
+            variables[n.path].append(n)
 
     for f in paired:
         change = _file_change(f)
@@ -248,7 +251,14 @@ def _definitions(
         for node_id, t in after.items():
             if node_id not in before:
                 changes[node_id] = NodeChange(ADDED, _within(f.inserted, t.range), 0)
-    return found, old_lines, new_lines
+        candidates = {moved.get(v.node_id, v.node_id): v for v in facts.variables} if facts else {}
+        for t in variables[f.path] if at_target else []:
+            candidate = candidates.get(t.id)
+            if candidate is None:
+                changes[t.id] = NodeChange(ADDED, _within(f.inserted, t.range), 0)
+            elif _span_text(was, candidate.range) != _span_text(now, t.range):
+                changes[t.id] = NodeChange(MODIFIED, _within(f.inserted, t.range), _within(f.removed, candidate.range))
+    return found
 
 
 def definitions(
@@ -264,45 +274,25 @@ def definitions(
 
     `base`와 `base_texts`의 키는 기준 시점의 경로이고 `target`은 대상 시점의 노드다. 정의는 id로 짝을 짓는다. 짝이 없는
     대상 쪽은 추가, 짝이 없는 기준 쪽은 삭제, 두 시점에서 줄 범위에 든 글이 다른 짝은 수정이고 글이 같은 짝은 내지 않는다.
+    대상 시점의 변수 노드는 기준 시점의 변수 후보와 짝을 지어 같은 규칙으로 추가와 수정을 낸다.
     `skip`은 분석한 뒤 본문이 바뀐 파일의 경로이고 그 파일은 파일 노드의 상태와 줄 수만 낸다.
     """
-    found, _, _ = _definitions(base, target, base_texts, target_texts, files, hunks, skip, [])
+    found = _definitions(base, target, base_texts, target_texts, files, hunks, skip, [])
     return found.changes, found.deleted
 
 
-def _variables(
-    found: _Definitions,
-    base: Analysis,
-    base_facts: dict[str, FileFacts],
-    target: Analysis,
-    target_facts: dict[str, FileFacts],
-    old_lines: dict[str, list[str]],
-    new_lines: dict[str, list[str]],
-) -> None:
-    """바뀐 파일의 변수 노드를 두 시점의 변수 후보로 짝지어 판정한다. 대입문이 양쪽에 있으면 추가도 삭제도 아니다."""
+def _variables(found: _Definitions, base: Analysis, target_facts: dict[str, FileFacts]) -> None:
+    """바뀐 파일에서 기준 시점에만 있는 변수 노드를 삭제로 판정한다. 대상 시점에 대입문이 남아 있으면 삭제가 아니다."""
     moved = found.moved
-    files = {f.path: f for f in found.files if not f.shallow and (f.status == DELETED or f.path in target_facts)}
-    olds = {f.base: f for f in files.values() if f.base is not None}
-    was = {
-        f.path: {moved.get(v.node_id, v.node_id): v for v in base_facts[f.base].variables}
-        for f in files.values()
-        if f.base is not None
+    olds = {
+        f.base: f
+        for f in found.files
+        if not f.shallow and f.base is not None and (f.status == DELETED or f.path in target_facts)
     }
     now = {
         f.path: set() if f.status == DELETED else {v.node_id for v in target_facts[f.path].variables}
-        for f in files.values()
+        for f in olds.values()
     }
-    for n in target.nodes:
-        f = files.get(n.path) if n.kind == "variable" else None
-        if f is None:
-            continue
-        candidate = was.get(f.path, {}).get(n.id)
-        if candidate is None:
-            found.changes[n.id] = NodeChange(ADDED, _within(f.inserted, n.range), 0)
-        elif _span_text(old_lines.get(f.base, []), candidate.range) != _span_text(new_lines.get(f.path, []), n.range):
-            found.changes[n.id] = NodeChange(
-                MODIFIED, _within(f.inserted, n.range), _within(f.removed, candidate.range)
-            )
     for n in base.nodes:
         f = olds.get(n.path) if n.kind == "variable" else None
         node_id = moved.get(n.id, n.id)
@@ -331,10 +321,8 @@ def compare(
     `only`가 base인 노드로 더한다. 패키지 노드의 줄 수는 아래 파일의 합이다.
     """
     folders = [n for n in base.nodes if n.kind == "package"]
-    found, old_lines, new_lines = _definitions(
-        base_facts, target.nodes, base_texts, target_texts, files, hunks, skip, folders
-    )
-    _variables(found, base, base_facts, target, target_facts, old_lines, new_lines)
+    found = _definitions(base_facts, target.nodes, base_texts, target_texts, files, hunks, skip, folders)
+    _variables(found, base, target_facts)
     moved, changes = found.moved, found.changes
     nodes: dict[str, Node] = {n.id: n for n in target.nodes}
     live = set(nodes)
