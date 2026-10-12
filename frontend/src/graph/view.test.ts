@@ -94,6 +94,16 @@ describe("edgeViews", () => {
       { x: 188, y: 70 },
       { x: 220, y: 70 },
     ]);
+
+    // 배치가 낸 가로 선분의 두 끝 높이가 소수 오차만큼 달라도 그 경로를 따라간다.
+    layout.routes.set("agg|pkg|main", [
+      { x: 40, y: 10 - 1e-13 },
+      { x: 200, y: 10 },
+    ]);
+    const uneven = edgeViews(drawn(repoFixture, visible, picked, null, null), layout, nodes).views.find(
+      (v) => v.key === "pkg.mod:Store.save|main:helper|call",
+    )!;
+    expect(uneven.points).toEqual(straight.points);
   });
 
   it("진입점 단위 사이 선은 보이는 양 끝 상자의 위치로 정한 경로를 받는다", () => {
