@@ -9,6 +9,7 @@ import {
 import "@xyflow/react/dist/base.css";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { AtlasNode } from "../api/types";
+import { useNodeMenu } from "../nav/NodeMenu";
 import type { History } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { useAtlas } from "../state/store";
@@ -225,6 +226,13 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     clicked.current = { id: node.data.node.id, from: useAtlas.getState().history };
     select(node.data.node.id);
   };
+  /** 노드를 우클릭하면 그 노드의 메뉴를 연다. 선택과 화면은 그대로 둔다. */
+  const onNodeContextMenu: NodeMouseHandler<CallFlowNode> = (event, node) => {
+    if (useNodeMenu.getState().show(node.data.node.id, event.clientX, event.clientY, false)) {
+      event.preventDefault();
+      tooltip.hide();
+    }
+  };
   const onPaneClick = (event: ReactMouseEvent) => {
     tooltip.hide();
     if (repeated(event)) {
@@ -280,6 +288,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
+        onNodeContextMenu={onNodeContextMenu}
         onNodeMouseEnter={onNodeOver}
         onNodeMouseMove={onNodeOver}
         onNodeMouseLeave={onLeave}

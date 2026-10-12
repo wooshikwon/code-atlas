@@ -21,7 +21,7 @@ vi.mock("../api/client", () => ({
     new Promise<MadeSummary>((resolve, reject) => makes.push({ node, refresh, resolve, reject })),
 }));
 
-const { makingKey, makingOf, useSummaries } = await import("./summaries");
+const { makingKey, makingOf, MAX_REQUESTS, useSummaries } = await import("./summaries");
 
 const store = () => useSummaries.getState();
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -30,7 +30,7 @@ beforeEach(() => {
   reads.length = 0;
   makes.length = 0;
   lists.length = 0;
-  useSummaries.setState({ states: {}, leads: {} });
+  useSummaries.setState({ states: {}, leads: {}, waiting: [], sent: 0 });
 });
 
 describe("read", () => {
@@ -79,6 +79,30 @@ describe("make", () => {
     expect(store().states.a).toEqual({ phase: "done", summary: "요지", available: true, stale: false });
     store().make("a", true);
     expect(makes).toHaveLength(2);
+  });
+
+  it("요청이 여럿이면 서버로 MAX_REQUESTS개만 보내고, 하나가 끝나거나 실패할 때마다 기다리던 요청을 차례로 보낸다", async () => {
+    const nodes = ["a", "b", "c", "d"];
+    for (const node of nodes) {
+      store().make(node, node === "d");
+    }
+    expect(MAX_REQUESTS).toBe(2);
+    expect(makes.map((m) => m.node)).toEqual(["a", "b"]);
+    expect(nodes.map((node) => store().states[node].phase)).toEqual(["making", "making", "making", "making"]);
+    store().make("c", false);
+    expect(store().waiting.map((w) => w.node)).toEqual(["c", "d"]);
+    makes[1].resolve({ summary: "b의 요지" });
+    await settle();
+    expect(makes.map((m) => [m.node, m.refresh])).toEqual([["a", false], ["b", false], ["c", false]]);
+    makes[0].reject(new Error("실패"));
+    await settle();
+    expect(makes.map((m) => [m.node, m.refresh]).at(-1)).toEqual(["d", true]);
+    expect(nodes.map((node) => store().states[node].phase)).toEqual(["failed", "done", "making", "making"]);
+    makes[2].resolve({ summary: "c의 요지" });
+    makes[3].resolve({ summary: "d의 요지" });
+    await settle();
+    expect(store().sent).toBe(0);
+    expect(store().leads).toEqual({ b: "b의 요지", c: "c의 요지", d: "d의 요지" });
   });
 
   it("만드는 동안 늦게 온 읽기 응답은 만드는 중 상태를 덮지 않는다", async () => {

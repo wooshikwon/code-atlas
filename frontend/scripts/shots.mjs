@@ -445,8 +445,8 @@ async function asidePanel(page) {
   });
 }
 
-/** 노드의 이름표(펼친 파일 상자는 머리 줄) 가운데를 마우스로 누른다. times가 2면 더블클릭이다. */
-async function clickNode(page, id, times = 1) {
+/** 노드의 이름표(펼친 파일 상자는 머리 줄) 가운데를 마우스로 누른다. times가 2면 더블클릭이고, button이 "right"면 우클릭이다. */
+async function clickNode(page, id, times = 1, button = "left") {
   const at = await page.evaluate(
     ([body, text]) => {
       const wrappers = [document.querySelector(body), document.querySelector(text)];
@@ -466,7 +466,7 @@ async function clickNode(page, id, times = 1) {
   if (!at.hit) {
     throw new Error(`노드가 화면 밖에 있거나 다른 요소에 가려 누르지 못한다: ${id} (${Math.round(at.x)}, ${Math.round(at.y)})`);
   }
-  await (times === 2 ? page.mouse.dblclick(at.x, at.y) : page.mouse.click(at.x, at.y));
+  await (times === 2 ? page.mouse.dblclick(at.x, at.y) : page.mouse.click(at.x, at.y, { button }));
 }
 
 /**
@@ -1001,6 +1001,23 @@ const codeRows = (page) =>
   });
 
 /** 파일을 고르면 파일 전체가, 함수를 고르면 파일 전체에서 그 함수 밖의 줄만 흐리게 보이는지 본다. */
+/**
+ * 코드 뷰어에서 줄 범위 [from, to]가 놓인 곳. first는 범위 첫 줄의 위 끝, top은 1번 줄의 위 끝이고(둘 다 뷰어의 위 끝에서 잰다),
+ * off는 범위의 세로 가운데에서 뷰어의 세로 가운데를 뺀 값이다. 화면에 그린 줄 하나의 위치와 줄 높이로 센다.
+ */
+const placedOf = (page, range) =>
+  page.evaluate(([from, to]) => {
+    const editor = document.querySelector(".info-panel .monaco-editor");
+    const box = editor.getBoundingClientRect();
+    const line = editor.querySelector(".view-line").getBoundingClientRect().height;
+    const shown = [...editor.querySelectorAll(".line-numbers")].find((element) => element.textContent !== "");
+    const y = (n) => shown.getBoundingClientRect().top - box.top + (n - Number(shown.textContent)) * line;
+    return { first: y(from), top: y(1), off: (y(from) + y(to) + line - box.height) / 2, line, height: box.height, long: (to - from + 1) * line > box.height };
+  }, range);
+/** 규칙대로 놓였는지: 뷰어보다 긴 범위는 첫 줄이 뷰어 맨 위에 있고, 그 밖의 범위는 가운데가 뷰어 가운데와 줄 높이 한 줄 안에서 같다. */
+const centered = (at) => (at.long ? near(at.first, 0, 2) : Math.abs(at.off) <= at.line);
+const placedText = (at) => `첫 줄의 위 끝 ${Math.round(at.first)}px, 가운데 차이 ${Math.round(at.off)}px, 줄 높이 ${at.line}px, 뷰어 높이 ${Math.round(at.height)}px`;
+
 async function codeScope(t, page) {
   const asked = [];
   page.on("request", (request) => {
@@ -1028,11 +1045,13 @@ async function codeScope(t, page) {
   await page.waitForTimeout(300);
   const code = await rectOf(page, ".info-panel .code");
   const opened = await codeRows(page);
+  const long = await placedOf(page, target.range);
   t.check(
-    `함수를 고르면 정의의 첫 줄 ${target.range[0]}번이 코드 뷰어 맨 위에 있고 그 줄부터 흐리지 않다`,
-    opened[0]?.line === target.range[0] && near(opened[0].y, 0, 2) && dimmedOutside(opened, target.range),
+    `코드 뷰어보다 긴 함수를 고르면 정의의 첫 줄 ${target.range[0]}번이 코드 뷰어 맨 위에 있고 그 줄부터 흐리지 않다`,
+    long.long && opened[0]?.line === target.range[0] && near(opened[0].y, 0, 2) && dimmedOutside(opened, target.range),
     `첫 줄 번호 ${opened[0]?.line}, 높이 ${opened[0]?.y}`,
   );
+  await page.screenshot({ path: HF3("code-center-long") });
   const gap = await page.evaluate(() => {
     const [viewer, editor] = [document.querySelector(".info-panel .code"), document.querySelector(".info-panel .monaco-editor")];
     return {
@@ -1076,10 +1095,48 @@ async function codeScope(t, page) {
   await waitLine(later.range[0]);
   await page.waitForTimeout(300);
   const moved = await codeRows(page);
+  const movedAt = await placedOf(page, later.range);
   t.check(
-    `같은 파일의 다른 함수를 고르면 그 정의의 첫 줄 ${later.range[0]}번이 맨 위로 오고 흐린 범위가 바뀐다`,
-    moved[0]?.line === later.range[0] && dimmedOutside(moved, later.range),
-    `첫 줄 번호 ${moved[0]?.line}`,
+    `스크롤한 뒤에 같은 파일의 다른 함수(${later.range[0]}~${later.range[1]}번 줄)를 고르면 그 정의가 가운데 규칙대로 놓이고 흐린 범위가 바뀐다`,
+    centered(movedAt) && moved.some((row) => row.line === later.range[0]) && dimmedOutside(moved, later.range),
+    placedText(movedAt),
+  );
+
+  // 짧은 정의는 범위의 가운데가 뷰어 가운데에 온다. 뷰어 높이가 바뀌면 다시 가운데에 두고, 스크롤한 뒤에는 옮기지 않는다.
+  const short = graph.nodes.find((n) => n.kind === "function" && n.path === path && (n.range[1] - n.range[0] + 1) * long.line < long.height / 3 && n.range[0] > 100 && n.range[1] < total - 100);
+  await page.click(`.tree-row.tree-symbol[data-node="${short.id}"]`);
+  await waitSelected(page, short.id);
+  await waitLine(short.range[0]);
+  await page.waitForTimeout(300);
+  const shortAt = await placedOf(page, short.range);
+  t.check(
+    `코드 뷰어보다 짧은 함수(${short.range[0]}~${short.range[1]}번 줄)를 고르면 범위의 가운데가 뷰어의 가운데와 줄 높이 한 줄 안에서 같다`,
+    !shortAt.long && Math.abs(shortAt.off) <= shortAt.line && shortAt.first > shortAt.line,
+    placedText(shortAt),
+  );
+  await page.screenshot({ path: HF3("code-center-short") });
+  const divide = () => rectOf(page, ".info-panel-divide").then(center);
+  await drag(page, await divide(), 0, 160);
+  await page.waitForTimeout(400);
+  const resized = await placedOf(page, short.range);
+  t.check(
+    "요약 칸과 코드 뷰어 사이의 경계선을 끌어 뷰어 높이를 바꾸면 그 정의를 다시 가운데에 둔다",
+    Math.abs(resized.height - shortAt.height) > 100 && Math.abs(resized.off) <= resized.line,
+    `${placedText(shortAt)} → ${placedText(resized)}`,
+  );
+  await page.screenshot({ path: HF3("code-center-resized") });
+  const viewer = await rectOf(page, ".info-panel .code");
+  await page.mouse.move(viewer.x + viewer.width / 2, viewer.y + viewer.height / 2);
+  await page.mouse.wheel(0, 200);
+  await page.waitForTimeout(300);
+  const wheeled = await placedOf(page, short.range);
+  await drag(page, await divide(), 0, -160);
+  await page.waitForTimeout(400);
+  const kept = await placedOf(page, short.range);
+  t.check(
+    "사용자가 스크롤한 뒤에는 뷰어 높이를 바꿔도 스크롤 위치를 옮기지 않는다",
+    resized.first - wheeled.first > wheeled.line && near(kept.first, wheeled.first, 1) && near(kept.height, shortAt.height, 2) && Math.abs(kept.off) > kept.line,
+    `스크롤한 뒤 첫 줄의 위 끝 ${Math.round(wheeled.first)}px → 높이를 되돌린 뒤 ${Math.round(kept.first)}px`,
   );
   await page.click(`.tree-row.tree-file[data-node="${FILE}"]`);
   await waitSelected(page, FILE);
@@ -1091,7 +1148,31 @@ async function codeScope(t, page) {
     whole[0]?.line === 1 && whole.every((row) => !row.dim),
     `첫 줄 번호 ${whole[0]?.line}, 흐린 줄 ${whole.filter((row) => row.dim).length}개`,
   );
-  t.check(`함수 둘과 파일을 차례로 고르는 동안 /api/file 요청이 ${path} 한 번뿐이다`, same(asked, [path]), asked.join(", "));
+  t.check(`함수 셋과 파일을 차례로 고르는 동안 /api/file 요청이 ${path} 한 번뿐이다`, same(asked, [path]), asked.join(", "));
+
+  // 파일 맨 위의 정의는 가운데에 둘 줄이 위에 없으므로 1번 줄부터 보인다. 창을 높여 뷰어 높이의 절반 안에서 끝나는 정의를 찾는다.
+  await page.setViewportSize({ width: VIEW.width, height: 1400 });
+  await rest(page);
+  const tall = (await rectOf(page, ".info-panel .monaco-editor")).height;
+  const head = graph.nodes
+    .filter((n) => ["function", "class", "dataclass"].includes(n.kind) && !n.test && n.range !== null && (n.range[0] + n.range[1]) * long.line < tall)
+    .sort((x, y) => x.range[0] - y.range[0])[0];
+  if (head === undefined) {
+    t.skip("파일 맨 위의 정의를 고르면 1번 줄부터 보인다", "범위의 가운데가 뷰어 높이의 절반보다 위에 있는 정의가 없다");
+    return;
+  }
+  const owner = graph.nodes.find((n) => n.kind === "module" && n.path === head.path);
+  await pickInTree(page, { id: head.id, owner: owner.id });
+  await waitLine(head.range[0]);
+  await page.waitForTimeout(300);
+  const headAt = await placedOf(page, head.range);
+  const headRows = await codeRows(page);
+  t.check(
+    `파일 맨 위의 정의(${head.path} ${head.range[0]}~${head.range[1]}번 줄)를 고르면 스크롤 위치가 0이어서 1번 줄이 여백 바로 아래에 보인다`,
+    near(headAt.top, 0, 1) && headRows[0]?.line === 1 && headAt.off < 0 && dimmedOutside(headRows, head.range),
+    `1번 줄의 위 끝 ${Math.round(headAt.top)}px, ${placedText(headAt)}`,
+  );
+  await page.screenshot({ path: HF3("code-center-top") });
 }
 
 /** 코드 뷰어에서 word가 처음 나오는 곳의 화면 사각형 */
@@ -3134,7 +3215,8 @@ async function toolbar(t, page) {
       options: [...section("보기 설정").querySelectorAll(".overlay-option")].map((option) => option.dataset.kind),
       stats: [...section("레포 정보").querySelectorAll(".filter-stats")].map((line) => line.textContent),
       branch: section("레포 정보").querySelector(".filter-branch")?.textContent ?? null,
-      entries: [...section("레포 정보").querySelectorAll(".filter-entry")].map((item) => item.dataset.node),
+      entries: root.querySelectorAll('[data-node], [role="menuitem"]').length,
+      text: root.textContent,
     };
   });
   t.check(
@@ -3151,7 +3233,7 @@ async function toolbar(t, page) {
       (reply.git && reply.branch !== null ? panel.branch === `브랜치 ${reply.branch}` : panel.branch === null),
     `${panel.stats.join(" / ")} / ${panel.branch}`,
   );
-  t.check(`레포 정보 구역이 진입점 ${entries.length}개의 이름을 적는다`, entries.length > 0 && same([...panel.entries].sort(), [...entries].sort()), panel.entries.join(", "));
+  t.check("필터 창에 진입점 목록이 없다", entries.length > 0 && panel.entries === 0 && !panel.text.includes("진입점"), `노드 항목 ${panel.entries}개`);
   await t.shot();
 
   // 보기 설정을 바꿔도 창이 닫히지 않고 필터 버튼이 바꾼 설정의 수를 적는다.
@@ -3179,11 +3261,10 @@ async function toolbar(t, page) {
   });
   await rest(page);
 
-  // 진입점 이름을 고르면 그 노드로 가고 창이 닫힌다. 창 밖을 누르거나 Esc를 눌러도 창만 닫힌다.
-  await page.click(".filter-button");
-  await page.click(`.filter-entry[data-node="${entries.at(-1)}"]`);
+  // 노드를 고른 채로 창 밖을 누르거나 Esc를 누르면 창만 닫힌다.
+  await page.click(".toolbar-entries");
+  await page.click(`.menu-item[data-node="${entries.at(-1)}"]`);
   await waitSelected(page, entries.at(-1)).catch(() => {});
-  t.check("진입점 이름을 고르면 그래프가 그 노드를 선택하고 창이 닫힌다", (await selectedOf(page)) === entries.at(-1) && (await count(page, ".filter-panel")) === 0, `선택 ${await selectedOf(page)}`);
   await page.click(".filter-button");
   await page.waitForSelector(".filter-panel", { timeout: 5_000 }).catch(() => {});
   await page.keyboard.press("Escape");
@@ -8338,6 +8419,607 @@ async function panelHead(t, page) {
   await t.shot();
 }
 
+/** hotfix 3의 사진. `hf3-{이름}.png`로 남긴다. */
+const HF3 = (name) => join(OUT, `hf3-${name}.png`);
+
+/** 화면에 그린 진입점 표지마다 SVG 윤곽이 있는지, 글자가 있는지, 칸의 크기와 채운 색, 이름표의 글자 색 */
+const entryMarks = (page, root) =>
+  page.evaluate((sel) => {
+    return [...document.querySelectorAll(`${sel} .entry-mark`)].map((mark) => {
+      const [rect, path] = [mark.getBoundingClientRect(), mark.querySelector("svg path")];
+      const scale = rect.width / mark.offsetWidth;
+      return {
+        drawn: path !== null && path.getBBox().width > 0,
+        text: mark.textContent,
+        size: [mark.offsetWidth, mark.offsetHeight],
+        fill: path === null ? null : getComputedStyle(path).fill,
+        ink: getComputedStyle(mark.parentElement).color,
+        name: mark.getAttribute("aria-label"),
+        tip: mark.dataset.tip,
+        scale,
+      };
+    });
+  }, root);
+
+/** 진입점 표지. 굵은 체크를 SVG로 그리고 화면에 세모와 체크 글자를 적지 않는다. 사진은 `hf3-entry-mark-{이름}.png`로 남긴다. */
+async function entryMark(t, page) {
+  const graph = await api("/api/graph");
+  const entries = graph.nodes.filter((n) => n.entry && !n.test);
+  const glyphs = () => page.evaluate(() => [...document.body.innerText.matchAll(/[▶►✓✔]/g)].length);
+  await load(page);
+  await page.click(".legend-button");
+  await pick(page, FILE);
+  const light = await entryMarks(page, ".react-flow__viewport");
+  const shown = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`.react-flow__node[data-id="${id}#face"]`) !== null), entries.map((n) => n.id));
+  t.check(
+    `화면에 보이는 진입점 노드 ${shown.length}개가 이름표 앞에 SVG 체크를 달고 표지 안에 글자가 없다`,
+    shown.length > 0 && light.length === shown.length && light.every((mark) => mark.drawn && mark.text === ""),
+    `표지 ${light.length}개`,
+  );
+  t.check(
+    '표지는 12px 칸에 이름표의 글자 색으로 그리고 접근성 이름 "진입점"과 말풍선 글을 그대로 둔다',
+    light.every((mark) => same(mark.size, [12, 12]) && mark.fill === mark.ink && mark.name === "진입점" && mark.tip.startsWith("진입점")),
+    light.map((mark) => `${mark.size.join("×")} ${mark.fill}`).join(", "),
+  );
+  const fits = await page.evaluate((sel) => {
+    const [head, label, loc] = [".node-module-head", ".node-label", ".loc"].map((each) => document.querySelector(`${sel} ${each}`).getBoundingClientRect());
+    return { whole: label.right <= loc.left && loc.right <= head.right, gap: Math.round(loc.left - label.right) };
+  }, face(FILE));
+  t.check("펼친 진입점 파일 상자의 머리 줄에서 표지와 이름표가 줄 수 숫자와 겹치지 않는다", fits.whole, `이름표와 줄 수 사이 ${fits.gap}px`);
+  const legend = await page.evaluate(() => {
+    const row = [...document.querySelectorAll(".legend li")].find((item) => item.textContent === "진입점");
+    return { path: row?.querySelector("path.legend-entry") !== null, text: row?.querySelector("svg")?.textContent ?? null };
+  });
+  const head = await entryMarks(page, ".info-panel-head");
+  t.check(
+    "범례의 진입점 견본과 정보 패널 이름 줄의 표지도 같은 SVG 체크다",
+    legend.path && legend.text === "" && head.length === 1 && head[0].drawn && head[0].text === "",
+    `범례 ${legend.path}, 이름 줄 ${head.length}개`,
+  );
+  t.check("화면의 글에 세모(▶)와 체크(✔) 글자가 없다", (await glyphs()) === 0, `${await glyphs()}개`);
+  await page.screenshot({ path: HF3("entry-mark-light") });
+
+  // 미사용 덮개와 순환 아이콘 옆에서도 체크가 진입점 표지에만 쓰인다.
+  await setOverlay(page, "unused");
+  await settle(page);
+  const checks = await page.evaluate(() => document.querySelectorAll(".graph svg.entry-icon").length);
+  t.check("미사용 덮개를 켜도 그래프의 체크 아이콘은 진입점 표지뿐이다", checks === light.length, `체크 ${checks}개, 표지 ${light.length}개`);
+  await page.screenshot({ path: HF3("entry-mark-unused") });
+  await setOverlay(page, "none");
+
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  const dark = await entryMarks(page, ".react-flow__viewport");
+  const ink = await colorOf(page, "--ink");
+  t.check("어두운 화면에서 표지가 어두운 화면의 글자 색을 따른다", dark.length === light.length && dark.every((mark) => mark.fill === mark.ink && mark.fill === ink.rgb), dark.map((mark) => mark.fill).join(", "));
+  await page.screenshot({ path: HF3("entry-mark-dark") });
+}
+
+/** 진입점 버튼의 글자, 테두리 폭과 바탕, 글자 색, 상단 줄 왼쪽 칸에서 앞뒤에 놓인 요소 */
+const entriesButton = (page) =>
+  page.evaluate(() => {
+    const button = document.querySelector(".toolbar-entries");
+    const style = getComputedStyle(button);
+    const rect = button.getBoundingClientRect();
+    return {
+      text: button.getAttribute("aria-label"),
+      shown: [...button.children].filter((child) => child.getBoundingClientRect().width > 0).length,
+      borders: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth].map(parseFloat),
+      background: style.backgroundColor,
+      shadow: style.boxShadow,
+      color: style.color,
+      arrow: button.querySelector("svg path") !== null,
+      before: button.previousElementSibling?.getAttribute("aria-label") ?? null,
+      after: button.nextElementSibling?.className ?? null,
+      nav: button.parentElement.className,
+      expanded: button.getAttribute("aria-expanded"),
+      disabled: button.disabled,
+      rect: { left: rect.left, right: rect.right, bottom: rect.bottom },
+    };
+  });
+
+/** 편 메뉴의 역할과 항목, 활성 항목, 화면 사각형 */
+const listOf = (page) =>
+  page.evaluate(() => {
+    const menu = document.querySelector(".menu");
+    if (menu === null) {
+      return null;
+    }
+    const rect = menu.getBoundingClientRect();
+    const items = [...menu.querySelectorAll(".menu-item")];
+    const active = menu.querySelector("[data-active]");
+    return {
+      role: menu.getAttribute("role"),
+      label: menu.getAttribute("aria-label"),
+      roles: [...new Set(items.map((item) => item.getAttribute("role")))],
+      items: items.map((item) => ({ key: item.dataset.key, node: item.dataset.node ?? null, text: item.textContent, disabled: item.getAttribute("aria-disabled") === "true", icon: item.querySelector("svg.entry-icon") !== null })),
+      active: active?.dataset.key ?? null,
+      activeShown: active === null || (active.getBoundingClientRect().top >= rect.top - 1 && active.getBoundingClientRect().bottom <= rect.bottom + 1),
+      pointed: menu.getAttribute("aria-activedescendant") === (active?.id ?? null),
+      focused: document.activeElement === menu,
+      scrolls: menu.scrollHeight > menu.clientHeight,
+      rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+      inside: rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight,
+      style: (({ backgroundColor, color, borderTopColor }) => ({ backgroundColor, color, borderTopColor }))(getComputedStyle(menu)),
+    };
+  });
+
+/** 말풍선과 선 목록이 쓰는 칸 바탕색, 본문 잉크, 경계선 색을 브라우저가 계산한 값 */
+const menuTokens = (page) =>
+  page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.style.cssText = "background: var(--panel-bg); color: var(--ink); border: 1px solid var(--line)";
+    document.body.append(probe);
+    const { backgroundColor, color, borderTopColor } = getComputedStyle(probe);
+    probe.remove();
+    return { backgroundColor, color, borderTopColor };
+  });
+
+/**
+ * 상단 줄의 진입점 버튼. 테두리와 바탕이 없는 글자 버튼이고 누르면 글자 아래로 메뉴가 내려온다. 필터 창에는 진입점이 없다.
+ * 사진은 `hf3-entry-{이름}.png`로 남긴다.
+ */
+async function entry(t, page) {
+  const graph = await api("/api/graph");
+  const entries = graph.nodes.filter((n) => n.entry && !n.test);
+  const title = (n) => (n.kind === "module" ? `${n.id.replaceAll(".", "/")}.py` : null);
+  await load(page);
+  const ink = await colorOf(page, "--ink");
+  const idle = await entriesButton(page);
+  t.check(
+    `상단 줄 왼쪽 칸의 앞으로 버튼과 탐색 경로 사이에 "진입점 ${entries.length}"과 아래 화살표를 적은 버튼이 있다`,
+    idle.text === `진입점 ${entries.length}` && idle.arrow && idle.before === "앞으로" && idle.after === "toolbar-trail" && idle.nav === "toolbar-nav",
+    `"${idle.text}", 앞 ${idle.before}, 뒤 ${idle.after}`,
+  );
+  await page.hover(".toolbar-entries");
+  const hovered = await entriesButton(page);
+  const bare = (button) => button.borders.every((width) => width === 0) && button.background === "rgba(0, 0, 0, 0)" && button.shadow === "none";
+  t.check(
+    "버튼은 테두리와 바탕이 없고, 커서를 올려도 상자가 생기지 않고 글자만 본문 잉크로 진해진다",
+    bare(idle) && bare(hovered) && idle.color !== ink.rgb && hovered.color === ink.rgb,
+    `평소 ${idle.color}, 올렸을 때 ${hovered.color}, 테두리 ${hovered.borders.join("/")}, 바탕 ${hovered.background}`,
+  );
+  await page.mouse.move(5, 5);
+  await page.screenshot({ path: HF3("entry-button") });
+
+  await page.click(".toolbar-entries");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  const opened = await listOf(page);
+  const button = await entriesButton(page);
+  t.check(
+    "버튼을 누르면 글자 바로 아래로 진입점 이름의 메뉴가 내려온다",
+    opened !== null &&
+      button.expanded === "true" &&
+      near(opened.rect.left, button.rect.left) &&
+      opened.rect.top >= button.rect.bottom &&
+      opened.rect.top - button.rect.bottom < 12 &&
+      same(opened.items.map((item) => item.node), entries.map((n) => n.id)) &&
+      opened.items.every((item, i) => item.icon && (title(entries[i]) === null || item.text === title(entries[i]))),
+    opened === null ? "메뉴 없음" : `항목 ${opened.items.map((item) => item.text).join(", ")}, 버튼 아래 ${Math.round(opened.rect.top - button.rect.bottom)}px`,
+  );
+  const tokens = await menuTokens(page);
+  t.check(
+    "메뉴는 role=menu와 menuitem이고 말풍선·선 목록과 같은 칸 바탕색, 경계선, 본문 잉크를 쓴다",
+    opened?.role === "menu" && opened.label === "진입점" && same(opened.roles, ["menuitem"]) && same(opened.style, tokens),
+    JSON.stringify(opened?.style),
+  );
+  await page.screenshot({ path: HF3("entry-open-light") });
+
+  // 필터 창에는 진입점이 없고, 필터 버튼을 누르면 메뉴가 닫힌다.
+  await page.click(".filter-button");
+  await page.waitForSelector(".filter-panel", { timeout: 5_000 }).catch(() => {});
+  const filters = await page.evaluate(() => document.querySelector(".filter-panel")?.textContent ?? "");
+  t.check("메뉴 밖의 필터 버튼을 누르면 메뉴가 닫히고, 필터 창에는 진입점이 없다", (await count(page, ".menu")) === 0 && filters !== "" && !filters.includes("진입점"), filters.slice(0, 60));
+  await page.screenshot({ path: HF3("entry-filters") });
+  await page.click(".filter-button");
+
+  // 고르기
+  const target = entries.at(-1);
+  await page.click(".toolbar-entries");
+  await page.click(`.menu-item[data-node="${target.id}"]`);
+  await waitSelected(page, target.id).catch(() => {});
+  t.check("이름을 고르면 그래프가 그 노드를 고르고 화면을 옮긴 뒤 메뉴가 닫힌다", (await selectedOf(page)) === target.id && (await count(page, ".menu")) === 0 && (await entriesButton(page)).expanded === "false", `선택 ${await selectedOf(page)}`);
+
+  // 키보드
+  await page.focus(".toolbar-entries");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  const byKey = await listOf(page);
+  await page.keyboard.press("ArrowDown");
+  const second = await listOf(page);
+  await page.keyboard.press("End");
+  const last = await listOf(page);
+  await page.keyboard.press("Home");
+  const home = await listOf(page);
+  t.check(
+    "Enter로 열면 첫 항목이 활성 항목이고 아래 화살표, End, Home이 활성 항목을 옮긴다",
+    byKey?.focused === true && byKey.pointed && byKey.active === entries[0].id && second.active === entries[Math.min(1, entries.length - 1)].id && last.active === entries.at(-1).id && home.active === entries[0].id,
+    [byKey?.active, second?.active, last?.active, home?.active].join(" → "),
+  );
+  await page.keyboard.press("Escape");
+  const escaped = { menu: await count(page, ".menu"), selected: await selectedOf(page), focus: await page.evaluate(() => document.activeElement?.className ?? "") };
+  t.check("Esc는 메뉴만 닫고 선택을 그대로 두며 초점을 버튼에 돌려준다", escaped.menu === 0 && escaped.selected === target.id && escaped.focus === "toolbar-entries", JSON.stringify(escaped));
+  const ring = await page.evaluate(() => {
+    const style = (selector) => {
+      const element = document.querySelector(selector);
+      return { visible: element.matches(":focus-visible"), outline: getComputedStyle(element).outlineStyle };
+    };
+    const own = style(".toolbar-entries");
+    document.querySelector('.toolbar-button[aria-label="앞으로"]').disabled = false;
+    return { own };
+  });
+  await page.keyboard.press("Shift+Tab");
+  const other = await page.evaluate(() => ({ label: document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.className, outline: getComputedStyle(document.activeElement).outlineStyle }));
+  t.check("키보드 초점을 받은 진입점 버튼은 다른 상단 줄 버튼과 같은 초점 테두리를 그린다", ring.own.visible && ring.own.outline !== "none" && ring.own.outline === other.outline, `진입점 ${ring.own.outline}, ${other.label} ${other.outline}`);
+  await page.focus(".toolbar-entries");
+  await page.keyboard.press("ArrowDown");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  await page.keyboard.press("Enter");
+  await waitSelected(page, entries[0].id).catch(() => {});
+  t.check("버튼에서 아래 화살표로 열고 Enter로 고르면 활성 항목의 노드를 고른다", (await selectedOf(page)) === entries[0].id && (await count(page, ".menu")) === 0, `선택 ${await selectedOf(page)}`);
+  await page.click(".toolbar-entries");
+  await page.click(".toolbar-trail", { position: { x: 2, y: 2 } });
+  t.check("메뉴 밖을 누르면 메뉴가 닫히고 선택이 그대로다", (await count(page, ".menu")) === 0 && (await selectedOf(page)) === entries[0].id, `선택 ${await selectedOf(page)}`);
+
+  // 어두운 화면
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  await page.click(".toolbar-entries");
+  const dark = await listOf(page);
+  const darkTokens = await menuTokens(page);
+  t.check("어두운 화면의 메뉴는 어두운 칸 바탕색에 밝은 글자다", same(dark?.style, darkTokens) && dark.style.backgroundColor !== opened.style.backgroundColor && bare(await entriesButton(page)), JSON.stringify(dark?.style));
+  await page.screenshot({ path: HF3("entry-open-dark") });
+  await page.keyboard.press("Escape");
+
+  // 창 폭 720px
+  await page.setViewportSize({ width: 720, height: 900 });
+  await rest(page);
+  await page.click(".toolbar-entries");
+  const narrow = await page.evaluate(() => {
+    const toolbar = document.querySelector(".toolbar");
+    const rect = document.querySelector(".toolbar-entries").getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return { fits: toolbar.scrollWidth <= toolbar.clientWidth, height: toolbar.getBoundingClientRect().height, hit: hit?.closest(".toolbar-entries") !== null, right: rect.right <= window.innerWidth };
+  });
+  const narrowMenu = await listOf(page);
+  t.check(
+    "창 폭 720px에서 상단 줄이 한 줄에 들어가고 진입점 버튼이 눌리며 메뉴가 창 안에 열린다",
+    narrow.fits && narrow.height < 40 && narrow.hit && narrow.right && narrowMenu?.inside === true,
+    `상단 줄 높이 ${narrow.height}, 넘침 없음 ${narrow.fits}, 메뉴 창 안 ${narrowMenu?.inside}`,
+  );
+  await page.screenshot({ path: HF3("entry-720") });
+  await page.keyboard.press("Escape");
+  await page.setViewportSize(VIEW);
+
+  // 진입점이 없는 레포: /api/graph의 진입점 표시를 모두 지워 연다.
+  const isGraph = (at) => at.pathname === "/api/graph";
+  await page.route(isGraph, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, json: { ...body, nodes: body.nodes.map((n) => ({ ...n, entry: false })) } });
+  });
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  const none = await entriesButton(page);
+  const muted = await colorOf(page, "--muted");
+  await page.click(".toolbar-entries", { force: true });
+  t.check("진입점이 없으면 버튼이 \"진입점 0\"을 muted 잉크로 적고 눌러도 메뉴가 열리지 않는다", none.text === "진입점 0" && none.disabled && none.color === muted.rgb && (await count(page, ".menu")) === 0, `"${none.text}" ${none.color}`);
+  await page.screenshot({ path: HF3("entry-none") });
+  await page.unroute(isGraph);
+
+  // 진입점이 많은 레포: 낮은 창에서 메뉴가 창 안에서 스크롤하고, 함수 진입점을 고르면 그 노드가 표지를 달고 그려진다.
+  if (wideUrl === null) {
+    t.skip("진입점이 많으면 메뉴가 화면 안에서 스크롤한다", "sync-engine의 진입점은 두 개다 — --wide-url을 주지 않았다");
+    return;
+  }
+  const wide = (await api("/api/graph", wideUrl)).nodes.filter((n) => n.entry && !n.test);
+  await page.setViewportSize({ width: VIEW.width, height: 260 });
+  await page.goto(wideUrl);
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  await page.click(".toolbar-entries");
+  await page.keyboard.press("ArrowUp");
+  const long = await listOf(page);
+  t.check(
+    `진입점 ${wide.length}개의 메뉴는 높이 260px 창 안에 열려 안에서 스크롤하고, 위 화살표로 간 마지막 항목이 보인다`,
+    long !== null && long.items.length === wide.length && long.inside && long.scrolls && long.active === wide.at(-1).id && long.activeShown,
+    long === null ? "메뉴 없음" : `항목 ${long.items.length}개, 창 안 ${long.inside}, 스크롤 ${long.scrolls}, 활성 ${long.active}${long.activeShown ? "" : "(메뉴 밖)"}`,
+  );
+  await page.screenshot({ path: HF3("entry-long") });
+  await page.keyboard.press("Escape");
+  await page.setViewportSize(VIEW);
+  const fn = wide.find((n) => n.kind === "function");
+  if (fn === undefined) {
+    t.skip("함수 진입점을 고르면 그 노드가 표지를 달고 그려진다", "함수 진입점이 없다");
+    return;
+  }
+  await page.click(".toolbar-entries");
+  await page.click(`.menu-item[data-node="${fn.id}"]`);
+  await waitSelected(page, fn.id).catch(() => {});
+  const drawn = await page.evaluate((sel) => {
+    const label = document.querySelector(`${sel} .node-label`);
+    const wrapper = document.querySelector(sel);
+    const loc = document.querySelector(`${sel} .loc`);
+    return label === null ? null : { mark: label.querySelector(".entry-mark svg path") !== null, inside: (loc ?? label).getBoundingClientRect().right <= wrapper.getBoundingClientRect().right + 0.5 };
+  }, face(fn.id));
+  t.check("함수 진입점을 메뉴에서 고르면 그 함수 노드가 체크 표지를 달고 이름표와 줄 수가 노드 폭 안에 그려진다", (await selectedOf(page)) === fn.id && drawn?.mark === true && drawn.inside, JSON.stringify(drawn));
+  await page.screenshot({ path: HF3("entry-function") });
+}
+
+/**
+ * 노드의 우클릭 메뉴. 그래프의 노드와 파일트리의 행에서 LLM 요약을 요청하고, 선택과 화면, 탐색 이력이 그대로인지 본다.
+ * 요지 목록과 요약은 서버 대신 답하고 LLM을 부르지 않는다. 사진은 `hf3-menu-{이름}.png`로 남긴다.
+ */
+async function menu(t, page) {
+  const graph = await api("/api/graph");
+  const defined = definedIn(graph, FILE).filter((n) => !n.test);
+  const functions = defined.filter((n) => n.kind === "function" && n.id !== FUNCTION);
+  const KEPT = "노트의 구역을 다시 지어 바뀐 구역만 파일에 쓴다.";
+  const leadOf = (id) => `${id.split(":").at(-1)}의 요지다.`;
+  const text = (lead) => `${lead}\n\n하는 일\n문단\n\n앞뒤 흐름\n문단`;
+  /** 화면이 보낸 POST /api/summary. 시나리오가 answer나 fail로 답할 때까지 붙잡아 둔다. */
+  const posts = [];
+  await page.route((at) => at.pathname === "/api/summaries", (route) => route.fulfill({ json: { summaries: [{ node: FUNCTION, lead: KEPT }] } }));
+  await page.route(
+    (at) => at.pathname === "/api/summary",
+    (route) => {
+      const id = new URL(route.request().url()).searchParams.get("node");
+      if (route.request().method() === "POST") {
+        posts.push({
+          node: id,
+          refresh: new URL(route.request().url()).searchParams.get("refresh") === "true",
+          done: false,
+          answer: () => route.fulfill({ json: { summary: text(leadOf(id)) } }),
+          fail: (error) => route.fulfill({ status: 503, json: { error } }),
+        });
+        return undefined;
+      }
+      return route.fulfill({ json: { summary: id === FUNCTION ? text(KEPT) : null, stale: false, available: true, reason: null } });
+    },
+  );
+  /** 붙잡아 둔 요청에 차례로 답한다. 답하면 화면이 기다리던 다음 요청을 보내므로 더 오지 않을 때까지 되풀이한다. */
+  const answerAll = async () => {
+    for (let quiet = 0; quiet < 3; ) {
+      const open = posts.filter((post) => !post.done);
+      for (const post of open) {
+        post.done = true;
+        await post.answer();
+      }
+      quiet = open.length === 0 ? quiet + 1 : 0;
+      await page.waitForTimeout(150);
+    }
+  };
+  await page.addInitScript(() => {
+    window.__shotsMenus = [];
+    window.addEventListener("contextmenu", (event) => setTimeout(() => window.__shotsMenus.push(event.defaultPrevented)));
+  });
+  const blocked = async () => {
+    await page.waitForTimeout(50);
+    return page.evaluate(() => window.__shotsMenus.at(-1) ?? null);
+  };
+  /** 선택, 화면 위치, 뒤로·앞으로 버튼이 눌리는지, 탐색 경로의 글. 메뉴가 바꾸면 안 되는 값이다. */
+  const stateOf = () =>
+    page.evaluate(() => ({
+      selected: document.querySelector(".react-flow__node .node-selected")?.closest(".react-flow__node")?.dataset.id ?? null,
+      view: document.querySelector(".react-flow__viewport").style.transform,
+      steps: [...document.querySelectorAll(".toolbar-nav > .toolbar-button")].map((button) => button.disabled),
+      trail: document.querySelector(".toolbar-trail").textContent,
+      nodes: document.querySelectorAll(".react-flow__node").length,
+    }));
+  const busyOn = (ids) => page.evaluate((sels) => sels.filter((sel) => document.querySelector(`${sel} .badge-busy`) !== null).length, ids.map(face));
+  const labels = async () => (await listOf(page))?.items.map((item) => `${item.text}${item.disabled ? "(비활성)" : ""}`) ?? null;
+  const rightClick = async (selector) => {
+    await page.locator(selector).scrollIntoViewIfNeeded();
+    const rect = await rectOf(page, selector);
+    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2, { button: "right" });
+  };
+  const tip = async (selector) => {
+    const rect = await rectOf(page, selector);
+    await page.mouse.move(5, 5);
+    await page.mouse.move(rect.x + rect.width / 2 - 1, rect.y + rect.height / 2);
+    await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.waitForTimeout(400);
+    return tipText(page);
+  };
+
+  await load(page);
+  await pick(page, FILE);
+  const shownIds = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`.react-flow__node[data-id="${id}#face"] .node-label`) !== null), functions.map((n) => n.id));
+  const [a, b, c] = shownIds;
+  const before = await stateOf();
+
+  // 여는 것만으로는 아무것도 바뀌지 않는다.
+  await clickNode(page, a, 1, "right");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  const opened = await listOf(page);
+  t.check(
+    '요약이 없는 함수 노드를 우클릭하면 브라우저의 메뉴 대신 "LLM 요약 요청" 항목의 메뉴가 뜬다',
+    (await blocked()) === true && opened?.role === "menu" && same(opened.roles, ["menuitem"]) && same(await labels(), ["LLM 요약 요청"]) && opened.inside,
+    `${(await labels())?.join(", ")}, 브라우저 메뉴 막음 ${await blocked()}`,
+  );
+  t.check("메뉴는 말풍선·선 목록과 같은 칸 바탕색, 경계선, 본문 잉크를 쓴다", same(opened?.style, await menuTokens(page)), JSON.stringify(opened?.style));
+  t.check("우클릭은 노드를 고르지 않고 화면과 탐색 이력을 그대로 둔다", same(await stateOf(), before) && posts.length === 0, JSON.stringify(await stateOf()));
+  await page.screenshot({ path: HF3("menu-open") });
+  await page.keyboard.press("Escape");
+  t.check("Esc는 메뉴만 닫고 선택을 그대로 둔다", (await count(page, ".menu")) === 0 && same(await stateOf(), before), `선택 ${(await stateOf()).selected}`);
+
+  // 상태별 항목 이름
+  await clickNode(page, FUNCTION, 1, "right");
+  const kept = await labels();
+  await page.click(".explorer-header");
+  const outside = (await count(page, ".menu")) === 0;
+  t.check('요약이 있는 함수 노드의 항목은 "요약 다시 만들기"이고 메뉴 밖을 누르면 닫힌다', same(kept, ["요약 다시 만들기"]) && outside, `${kept?.join(", ")}, 밖을 눌러 닫힘 ${outside}`);
+  await clickNode(page, FILE, 1, "right");
+  const onFile = await labels();
+  const bare = defined.length - 1;
+  t.check(
+    `파일 노드에는 요약이 없는 정의의 수(${bare})를 적은 "안에 든 정의 N개 모두 요약"이 더해진다`,
+    same(onFile, ["LLM 요약 요청", `안에 든 정의 ${bare}개 모두 요약`]),
+    onFile?.join(", "),
+  );
+  await page.screenshot({ path: HF3("menu-file") });
+  await page.keyboard.press("Escape");
+  const folder = graph.nodes.find((n) => n.kind === "package" && !n.test && n.parent !== null) ?? graph.nodes.find((n) => n.kind === "package" && !n.test);
+  await rightClick(`.tree-row.tree-dir[data-node="${folder.id}"] .tree-label`);
+  const onDir = { menu: await count(page, ".menu"), blocked: await blocked() };
+  t.check("폴더는 우클릭해도 메뉴가 뜨지 않는다", onDir.menu === 0 && onDir.blocked === false && same(await stateOf(), before), `${JSON.stringify(onDir)}, 선택 ${(await stateOf()).selected}`);
+
+  // 연달아 세 개를 요청한다. 서버로는 둘만 보내고 하나는 차례를 기다린다.
+  for (const id of [a, b, c]) {
+    await clickNode(page, id, 1, "right");
+    await page.click('.menu-item[data-key="one"]');
+  }
+  await page.waitForTimeout(300);
+  const asked = { busy: await busyOn([a, b, c]), posts: posts.map((post) => post.node), menu: await count(page, ".menu") };
+  t.check(
+    "세 노드에 연달아 요청하면 세 노드에 도는 표시가 뜨고, 서버로는 요청 두 개만 가고, 선택과 화면과 탐색 이력이 그대로다",
+    asked.busy === 3 && same(asked.posts, [a, b]) && posts.every((post) => !post.refresh) && asked.menu === 0 && same(await stateOf(), before),
+    `도는 표시 ${asked.busy}개, POST ${asked.posts.join(", ")}`,
+  );
+  await clickNode(page, c, 1, "right");
+  const waiting = await labels();
+  await page.click('.menu-item[data-key="one"]', { force: true });
+  await page.waitForTimeout(200);
+  t.check('만드는 중이거나 차례를 기다리는 노드의 항목은 누를 수 없는 "요약 만드는 중"이다', same(waiting, ["요약 만드는 중(비활성)"]) && posts.length === 2, waiting?.join(", "));
+  await page.screenshot({ path: HF3("menu-busy") });
+  await page.keyboard.press("Escape");
+  await answerAll();
+  const made = [];
+  for (const id of [a, b, c]) {
+    made.push(await tip(`${face(id)} .node-label`));
+  }
+  t.check(
+    "요청이 끝나면 기다리던 셋째 요청까지 가고, 도는 표시가 사라지며 세 노드의 말풍선이 새 요지를 적는다",
+    same(posts.map((post) => post.node), [a, b, c]) && (await busyOn([a, b, c])) === 0 && same(made, [a, b, c].map(leadOf)),
+    made.join(" / "),
+  );
+  await page.mouse.move(5, 5);
+  await clickNode(page, a, 1, "right");
+  t.check('요약을 만든 노드의 항목이 "요약 다시 만들기"로 바뀐다', same(await labels(), ["요약 다시 만들기"]), (await labels())?.join(", "));
+  await page.click('.menu-item[data-key="one"]');
+  await page.waitForTimeout(200);
+  t.check("다시 만들기는 캐시에 있어도 새로 만드는 요청을 보낸다", posts.at(-1).node === a && posts.at(-1).refresh, `POST ${posts.at(-1).node} refresh=${posts.at(-1).refresh}`);
+  await answerAll();
+
+  // 파일의 모두 요약
+  const rest3 = bare - 3;
+  await clickNode(page, FILE, 1, "right");
+  const fewer = await labels();
+  await page.click('.menu-item[data-key="all"]');
+  await page.waitForTimeout(300);
+  const sentNow = posts.filter((post) => !post.done).length;
+  const boxBusy = await page.evaluate((sel) => document.querySelectorAll(`${sel} .badge-busy`).length, ".react-flow__viewport");
+  await clickNode(page, FILE, 1, "right");
+  const drained = await labels();
+  await page.keyboard.press("Escape");
+  t.check(
+    `파일의 "모두 요약"은 요약이 없는 정의 ${rest3}개만 요청하고, 서버로는 둘씩 보내며, 요청한 뒤에는 0개가 되어 누를 수 없다`,
+    same(fewer, ["LLM 요약 요청", `안에 든 정의 ${rest3}개 모두 요약`]) && sentNow === 2 && boxBusy > 0 && same(drained, ["LLM 요약 요청", "안에 든 정의 0개 모두 요약(비활성)"]),
+    `${fewer?.join(", ")} → ${drained?.join(", ")}, 보낸 요청 ${sentNow}개, 도는 표시 ${boxBusy}개`,
+  );
+  await answerAll();
+  await page.waitForFunction(() => document.querySelector(".badge-busy") === null, null, { timeout: 15_000 }).catch(() => {});
+  const all = posts.map((post) => post.node);
+  const wanted = defined.filter((n) => n.id !== FUNCTION).map((n) => n.id);
+  t.check(
+    "모두 요약이 끝나면 파일 자신과 이미 요약이 있던 정의를 뺀 나머지 정의마다 요청이 한 번씩 갔다",
+    wanted.every((id) => all.filter((each) => each === id).length === (id === a ? 2 : 1)) && !all.includes(FILE) && !all.includes(FUNCTION) && same(await stateOf(), before),
+    `POST ${all.length}번, 정의 ${wanted.length}개`,
+  );
+
+  // 실패한 요청
+  /** 이름표의 가운데 점이 눌리는 접힌 파일 상자. skip은 고르지 않을 상자를 정한다. */
+  const foldedBox = (skip) =>
+    page.evaluate((selector) => {
+      for (const wrapper of document.querySelectorAll('.react-flow__node[data-id$="#face"]')) {
+        const rect = wrapper.querySelector(`:scope > ${selector} .node-module-name .node-label`)?.getBoundingClientRect();
+        if (rect !== undefined && wrapper.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))) {
+          return { id: wrapper.dataset.id.replace(/#face$/, ""), x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        }
+      }
+      return null;
+    }, skip);
+  const other = graph.nodes.find((n) => n.kind === "module" && !n.test && n.id !== FILE && n.entry);
+  t.expected.push("503");
+  await rightClick(`.tree-row.tree-file[data-node="${other.id}"] .tree-label`);
+  await page.click('.menu-item[data-key="one"]');
+  await page.waitForTimeout(200);
+  posts.at(-1).done = true;
+  await posts.at(-1).fail("Claude Code에 로그인돼 있지 않다");
+  await page.waitForSelector(".summary-notice", { timeout: 5_000 }).catch(() => {});
+  const notice = await page.evaluate(() => document.querySelector(".summary-notice")?.textContent ?? "");
+  t.check(
+    "파일트리의 파일 행에서 요청한 요약을 만들지 못하면 그래프 영역 위쪽에 그 노드의 이름과 까닭을 적는다",
+    notice === `LLM 요약을 만들지 못했다 · ${other.id.replaceAll(".", "/")}.py: Claude Code에 로그인돼 있지 않다` && same(await stateOf(), before),
+    notice,
+  );
+  await page.screenshot({ path: HF3("menu-failed") });
+  await page.click(".summary-notice");
+  t.check("알림을 누르면 닫힌다", (await count(page, ".summary-notice")) === 0);
+
+  // 파일트리
+  const row = (id) => `.tree-row.tree-symbol[data-node="${id}"]`;
+  await rightClick(`${row(b)} .tree-label`);
+  const inTree = await labels();
+  t.check("파일트리의 함수 행을 우클릭해도 같은 메뉴가 뜨고 선택이 그대로다", (await blocked()) === true && same(inTree, ["요약 다시 만들기"]) && same(await stateOf(), before), inTree?.join(", "));
+  await page.screenshot({ path: HF3("menu-tree") });
+  await page.keyboard.press("Escape");
+  await page.focus(".tree");
+  await page.keyboard.press("Shift+F10");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  const byKey = await listOf(page);
+  await page.keyboard.press("ArrowDown");
+  const moved = await listOf(page);
+  await page.keyboard.press("Escape");
+  const back = await page.evaluate(() => document.activeElement?.className ?? "");
+  t.check(
+    "파일트리에서 Shift+F10을 누르면 활성 행(고른 파일)의 메뉴가 첫 항목을 활성 항목으로 두고 뜨고, Esc에 닫히며 초점이 파일트리로 돌아간다",
+    byKey?.focused === true && byKey.active === "one" && same(byKey.items.map((item) => item.node), [FILE, FILE]) && moved?.active === "one" && back === "tree",
+    `항목 ${byKey?.items.map((item) => item.text).join(", ")}, 활성 ${byKey?.active}, 닫은 뒤 초점 ${back}`,
+  );
+  await page.keyboard.press("ContextMenu");
+  await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(200);
+  t.check("메뉴 키로 열어 Enter를 누르면 활성 항목인 파일의 요약을 요청한다", posts.at(-1).node === FILE && !posts.at(-1).refresh && (await count(page, ".menu")) === 0 && same(await stateOf(), before), `POST ${posts.at(-1).node}`);
+  await answerAll();
+
+  // 어두운 화면
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  await clickNode(page, FILE, 1, "right");
+  const dark = await listOf(page);
+  t.check("어두운 화면의 메뉴는 어두운 칸 바탕색에 밝은 글자다", same(dark?.style, await menuTokens(page)) && dark.style.backgroundColor !== opened.style.backgroundColor, JSON.stringify(dark?.style));
+  t.check("메뉴를 연 화면에 title 속성과 SVG title이 없다", (await nativeTips(page)).length === 0, (await nativeTips(page)).join(", "));
+  await page.screenshot({ path: HF3("menu-dark") });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "밝은 화면" }).click();
+
+  // 경로 고정 중에도 경로 밖 노드의 요약을 요청한다.
+  await page.keyboard.press("Escape");
+  await rest(page);
+  await pin(page);
+  const off = await foldedBox(".node-module:not([data-route])");
+  if (off === null) {
+    t.skip("경로 고정 중에 경로 밖 노드를 우클릭하면 메뉴가 뜬다", "화면에 보이는 경로 밖 파일 상자가 없다");
+    return;
+  }
+  const pinned = await stateOf();
+  const flashes = () => page.evaluate(() => document.querySelector(".finder-pinned[data-flash]") !== null);
+  await page.mouse.click(off.x, off.y, { button: "right" });
+  const pinnedMenu = await labels();
+  await page.click('.menu-item[data-key="one"]');
+  await page.waitForTimeout(200);
+  t.check(
+    "경로 고정 중에 경로 밖 파일 상자를 우클릭해 요약을 요청해도 고정과 선택이 그대로고 막힌 조작의 알림이 뜨지 않는다",
+    pinnedMenu !== null && posts.at(-1).node === off.id && (await count(page, ".graph[data-pinned]")) === 1 && same(await stateOf(), pinned) && !(await flashes()),
+    `${off.id}: ${pinnedMenu?.join(", ")}`,
+  );
+  await page.screenshot({ path: HF3("menu-pinned") });
+  await answerAll();
+}
+
 /**
  * 화면 이동. 파일트리의 파일 행을 눌러 먼 노드와 가까운 노드로 가며 프레임마다의 화면을 읽는다. 먼 이동의 프레임은
  * `s4-motion-{0~5}.png`에 남긴다.
@@ -8529,6 +9211,9 @@ const SCENARIOS = [
   ["hover", hover],
   ["edge", edge],
   ["badge-tip", badgeTip],
+  ["entry-mark", entryMark],
+  ["entry", entry],
+  ["menu", menu],
   ["tips", tips],
   ["minimap", minimap],
   ["region", region],

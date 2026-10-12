@@ -1,8 +1,6 @@
 // 상단 줄의 필터 버튼과 그 아래에 열리는 필터 창. 창은 보기 설정(흐름 단계, 분석 덮개, 토글 세 개)과
-// 레포 정보(통계, 브랜치, 진입점 목록) 두 구역이다. 버튼은 기본값과 다른 보기 설정의 수를 적는다.
-import { useMemo, useRef, useState } from "react";
-import { titleOf } from "../graph/layout";
-import { hidden } from "../graph/visible";
+// 레포 정보(통계, 브랜치) 두 구역이다. 버튼은 기본값과 다른 보기 설정의 수를 적는다.
+import { useRef, useState } from "react";
 import { useBranch } from "../state/changes";
 import { useCycles } from "../state/cycles";
 import { useOverlay, type OverlayKind } from "../state/overlay";
@@ -36,44 +34,6 @@ function OverlayOptions() {
           {option !== null && <span className="overlay-option-count">{counts[option]}</span>}
         </button>
       ))}
-    </div>
-  );
-}
-
-/** 진입점 노드 이름. 이름을 고르면 구조 뷰에서 그 노드를 고르고 onPick을 부른다. */
-function Entries({ onPick }: { onPick: () => void }) {
-  const graph = useAtlas((s) => s.graph);
-  const showTests = useAtlas((s) => s.showTests);
-  const showExternal = useAtlas((s) => s.showExternal);
-  const show = useAtlas((s) => s.show);
-  const entries = useMemo(() => {
-    if (graph === null) {
-      return [];
-    }
-    const off = hidden(graph, { showTests, showExternal });
-    return graph.nodes.filter((n) => n.entry && !off.has(n.id));
-  }, [graph, showTests, showExternal]);
-  return (
-    <div className="filter-entries">
-      <span className="filter-label">진입점 {entries.length}</span>
-      <ul className="filter-entry-list">
-        {entries.map((node) => (
-          <li key={node.id}>
-            <button
-              className="filter-entry"
-              data-node={node.id}
-              data-full={titleOf(node)}
-              data-tip={node.kind === "module" || node.path === null ? undefined : node.path}
-              onClick={() => {
-                show(node.id);
-                onPick();
-              }}
-            >
-              ▶ {titleOf(node)}
-            </button>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }
@@ -157,7 +117,6 @@ export function Filters() {
                 브랜치 {branch}
               </span>
             )}
-            <Entries onPick={() => setOpen(false)} />
           </section>
         </div>
       )}

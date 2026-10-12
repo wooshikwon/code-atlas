@@ -5,7 +5,7 @@ import {
   arrangeOptions,
   CIRCLE,
   CIRCLE_GAP,
-  ENTRY_MARK,
+  ENTRY_MARK_WIDTH,
   inPort,
   joined,
   labelOf,
@@ -148,7 +148,7 @@ export function counted(node: AtlasNode): boolean {
 /** 노드 크기. 원과 그 오른쪽의 이름표 줄·파일 경로 줄이고, 더 펼 선이 남은 노드는 + 버튼의 폭을 더한다. */
 export function callSize(calls: Calls, nodes: Map<string, AtlasNode>, node: AtlasNode, measure: Measure): Size {
   const side = calls.side.get(node.id)!;
-  const label = measure((node.entry ? ENTRY_MARK : "") + callLabel(nodes, node), side === "center");
+  const label = (node.entry ? ENTRY_MARK_WIDTH : 0) + measure(callLabel(nodes, node), side === "center");
   const name = counted(node) ? label + LOC_GAP + measure(String(node.loc)) : label;
   const file = fileLabel(nodes, node);
   const text = Math.max(name, file === null ? 0 : measure(file));

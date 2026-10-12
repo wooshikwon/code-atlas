@@ -6,9 +6,11 @@ import { useFlight } from "./graph/flight";
 import { GraphView } from "./graph/GraphView";
 import { Progress } from "./graph/Progress";
 import { Tooltip } from "./graph/Tooltip";
+import { Entries } from "./nav/Entries";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
 import { bind } from "./nav/keys";
+import { NodeMenu, SummaryNotice } from "./nav/NodeMenu";
 import { Trail } from "./nav/Trail";
 import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
@@ -53,6 +55,7 @@ function Toolbar() {
         <button className="toolbar-button" onClick={forward} disabled={!canForward || pin} data-tip="앞으로" aria-label="앞으로">
           →
         </button>
+        <Entries />
         <Trail />
       </div>
       <div className="toolbar-tools">
@@ -119,12 +122,14 @@ export function App() {
               <div className="stage">
                 {opened ? <GraphView key={epoch} /> : <Progress />}
                 {opened && <InfoPanel />}
+                <SummaryNotice />
               </div>
               <Palette />
             </div>
           </ReactFlowProvider>
         </Panel>
       </Group>
+      <NodeMenu />
       <Tooltip />
     </>
   );

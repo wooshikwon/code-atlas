@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useNodeMenu } from "../nav/NodeMenu";
 import { useOpened } from "../panel/opened";
 import { useChanges } from "../state/changes";
 import { running, useStatus } from "../state/status";
@@ -82,9 +83,35 @@ export function FileTree() {
     search.current?.focus();
   };
 
+  /**
+   * index번째 행의 노드 메뉴를 열고, 열었으면 참을 돌려준다. at은 누른 화면 좌표이고, 키보드로 열어 null이면 그 행의 이름 아래에 연다.
+   * 폴더 행과 노드가 없는 행은 메뉴가 없다.
+   */
+  const menuAt = (index: number, at: { x: number; y: number } | null): boolean => {
+    const node = list[index]?.node ?? null;
+    const label = document.getElementById(rowId(index))?.querySelector(".tree-label")?.getBoundingClientRect();
+    const point = at ?? (label === undefined ? null : { x: label.left, y: label.bottom });
+    return node !== null && point !== null && useNodeMenu.getState().show(node, point.x, point.y, at === null);
+  };
+
+  /** 행을 우클릭하면 그 행의 메뉴를, 키보드의 메뉴 키로 부르면 활성 행의 메뉴를 연다. 활성 행과 선택은 그대로 둔다. */
+  const onContextMenu = (event: MouseEvent) => {
+    const element = (event.target as Element).closest(".tree-row");
+    const index = element === null ? active : list.findIndex((_, i) => rowId(i) === element.id);
+    if (menuAt(index, element === null ? null : { x: event.clientX, y: event.clientY })) {
+      event.preventDefault();
+    }
+  };
+
   const onKeyDown = (event: KeyboardEvent) => {
     const row = list[active];
     if (row === undefined || event.altKey || event.ctrlKey || event.metaKey) {
+      return;
+    }
+    if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+      if (menuAt(active, null)) {
+        event.preventDefault();
+      }
       return;
     }
     const move = (index: number) => setCursor(list[Math.min(Math.max(index, 0), list.length - 1)].key);
@@ -152,6 +179,7 @@ export function FileTree() {
             tabIndex={0}
             aria-activedescendant={activeKey === undefined ? undefined : rowId(active)}
             onKeyDown={onKeyDown}
+            onContextMenu={onContextMenu}
           >
             {list.map((row, index) => (
               <TreeNode key={row.key} row={row} id={rowId(index)} cursor={index === active} onPick={pick} />
