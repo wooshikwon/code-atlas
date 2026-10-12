@@ -1,4 +1,4 @@
-// 항목을 세로로 늘어놓은 메뉴. 상단 줄의 진입점 목록과 노드의 우클릭 메뉴가 함께 쓴다. 문서 최상위에 화면 좌표로 그리고,
+// 항목을 세로로 늘어놓은 메뉴. 상단 줄의 진입점 목록과 레포 메뉴, 노드의 우클릭 메뉴가 함께 쓴다. 문서 최상위에 화면 좌표로 그리고,
 // 화면 끝을 넘으면 안으로 당기며 길면 메뉴 안에서 스크롤한다. 화살표·Home·End로 항목을 옮기고 Enter·Space로 고르며,
 // Esc, Tab, 메뉴 밖 클릭, 창 크기 변화에 닫힌다. 닫히면 열기 전에 초점이 있던 요소로 초점을 돌려준다.
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
@@ -14,6 +14,8 @@ export interface MenuItem {
   /** 항목의 글자가 잘렸을 때 말풍선이 적는 줄이지 않은 이름 */
   full?: string;
   tip?: string;
+  /** 이 항목 위에 가로선을 그어 앞 항목과 묶음을 가른다. */
+  rule?: boolean;
   run(): void;
 }
 
@@ -139,6 +141,7 @@ export function MenuList({ label, id, items, at, first, anchor, onClose }: MenuL
           data-node={item.node}
           data-full={item.full}
           data-tip={item.tip}
+          data-rule={item.rule === true ? "" : undefined}
           onMouseMove={() => item.disabled !== true && index !== active && setActive(index)}
           onClick={() => choose(item)}
         >

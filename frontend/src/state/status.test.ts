@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getGraph, getRepo, getStatus, getTree, getUnused } from "../api/client";
 import type { Status } from "../api/types";
+import { reread } from "./opening";
 import { comparingText, phaseText, progressOf, running, staleLines, useStatus } from "./status";
 
 const atlas = vi.hoisted(() => ({ repo: null as object | null, load: vi.fn(), refresh: vi.fn() }));
@@ -22,6 +23,7 @@ vi.mock("./compare", () => ({
     },
   },
 }));
+vi.mock("./opening", () => ({ reread: vi.fn() }));
 vi.mock("./explanations", () => ({ useExplanations: { getState: () => ({ forget: vi.fn(), list: vi.fn() }) } }));
 vi.mock("./overlay", () => ({ useOverlay: { getState: () => overlay } }));
 vi.mock("./store", () => ({ useAtlas: { getState: () => atlas } }));
@@ -39,6 +41,7 @@ const status = (extra: Partial<Status> = {}): Status => ({
   error: null,
   stale: { count: 0, paths: [] },
   compare: null,
+  session: 1,
   ...extra,
 });
 
@@ -47,7 +50,7 @@ const resolving = status({ phase: "resolve", done: 12_000, total: 19_292, revisi
 const store = () => useStatus.getState();
 
 beforeEach(() => {
-  useStatus.setState({ status: null, shown: 0 });
+  useStatus.setState({ status: null, shown: 0, session: null });
   vi.clearAllMocks();
   atlas.repo = null;
   atlas.load.mockImplementation(async () => {
@@ -97,6 +100,31 @@ describe("load", () => {
     expect(overlay.mark).toHaveBeenCalledWith({ candidates: [], definitions: 0 });
     expect(changes.load).toHaveBeenCalledTimes(1);
     expect(store().shown).toBe(2);
+  });
+
+  it("session이 처음 받은 값과 달라지면 그리지 않고 페이지를 다시 읽는다", async () => {
+    received.mockResolvedValue(status({ session: 3 }));
+    await store().load();
+    await store().load();
+    expect(store().session).toBe(3);
+    expect(reread).not.toHaveBeenCalled();
+
+    const other = status({ session: 4, revision: 2 });
+    received.mockResolvedValue(other);
+    await store().load();
+    expect(reread).toHaveBeenCalledTimes(1);
+    expect(store().status).not.toEqual(other);
+    expect(atlas.refresh).not.toHaveBeenCalled();
+    expect(store().shown).toBe(1);
+  });
+
+  it("연 레포가 없으면 분석 결과를 받지 않는다", async () => {
+    const idle = status({ phase: "idle", revision: 0, lsp: "starting" });
+    received.mockResolvedValue(idle);
+    await store().load();
+    expect(store().status).toEqual(idle);
+    expect(atlas.load).not.toHaveBeenCalled();
+    expect(running(idle)).toBe(false);
   });
 
   it("상태를 받지 못하면 직전 값을 그대로 두고 다음에 다시 받는다", async () => {

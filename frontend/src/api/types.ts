@@ -250,9 +250,10 @@ export interface Unused {
   candidates: string[];
 }
 
-export type Phase = "collect" | "extract" | "resolve" | "build" | "ready" | "failed";
+/** 분석의 단계. 연 레포가 없으면 idle이다. */
+export type Phase = "collect" | "extract" | "resolve" | "build" | "ready" | "failed" | "idle";
 
-/** 분석의 단계와 진행 수, 결과의 판 번호, 언어 서버의 상태 */
+/** 분석의 단계와 진행 수, 결과의 판 번호, 언어 서버의 상태, 서버가 레포를 열고 닫은 횟수 */
 export interface Status {
   phase: Phase;
   /** extract에서 추출한 파일 수와 전체 파일 수, resolve에서 보낸 정의 요청 수와 보낼 전체 수. 나머지 단계에서는 0이다. total은 resolve 도중에 커진다. */
@@ -269,6 +270,65 @@ export interface Status {
   stale: { count: number; paths: string[] };
   /** 비교할 시점을 분석하는 단계와 진행 수. 비교를 분석하는 중이 아니면 null이다. */
   compare: { phase: Phase; done: number; total: number } | null;
+  /** 서버가 뜰 때 1이고 레포를 열거나 닫을 때마다 1씩 는다. */
+  session: number;
+}
+
+/** 도구의 후보 하나를 실행해 본 결과 */
+export interface Attempt {
+  /** 후보의 출처: 저장한 경로(saved), 환경(env), 알려진 위치(known) */
+  source: string;
+  path: string | null;
+  ok: boolean;
+  /** 판 번호나 통과하지 못한 까닭 */
+  detail: string;
+}
+
+/** 도구 하나를 찾은 결과 */
+export interface Found {
+  /** claude, git, python */
+  tool: string;
+  /** 확인을 통과한 경로. 없으면 null이다. */
+  path: string | null;
+  version: string | null;
+  /** 통과한 후보의 출처 */
+  source: string | null;
+  attempts: Attempt[];
+  /** 경로는 통과했지만 쓰지 못하는 까닭 */
+  note: string | null;
+  /** claude만: CLI가 알려 준 로그인 방법 */
+  auth: string | null;
+  /** python만: `sys.prefix` */
+  prefix: string | null;
+  /** python만: 가상환경인지 */
+  venv: boolean | null;
+}
+
+/** 고른 폴더를 레포로 열기 전의 판정 */
+export interface Probe {
+  /** 디스크에 적힌 대소문자로 맞춘 절대 경로 */
+  path: string;
+  exists: boolean;
+  python_files: boolean;
+  /** 조상 가운데 `.git`이나 `pyproject.toml`이 있는 가장 가까운 폴더 */
+  project: string | null;
+  /** 바로 아래 폴더 가운데 `.git`이 있는 폴더의 이름 */
+  nested: string[];
+  git: boolean;
+  /** 레포의 인터프리터. 열 수 없는 폴더는 찾지 않아 시도 목록이 비어 있다. */
+  python: Found;
+}
+
+/** 연 적이 있는 레포 */
+export interface RecentRepo {
+  root: string;
+  name: string;
+  /** 인터프리터를 고르는 화면에서 고른 경로 */
+  python: string | null;
+  /** 마지막으로 연 시각(epoch 초) */
+  opened: number;
+  /** 폴더가 지금도 있는지 */
+  exists: boolean;
 }
 
 /** 비교할 시점의 이름. 커밋은 40자 해시, 작업 중인 상태는 `worktree`다. */

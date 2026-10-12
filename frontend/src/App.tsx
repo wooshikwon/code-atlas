@@ -7,18 +7,23 @@ import { GraphView } from "./graph/GraphView";
 import { Progress } from "./graph/Progress";
 import { SummaryQueue } from "./graph/SummaryQueue";
 import { Tooltip } from "./graph/Tooltip";
+import { host } from "./host";
 import { Entries } from "./nav/Entries";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
 import { bind, dismiss } from "./nav/keys";
 import { NodeMenu, SummaryNotice } from "./nav/NodeMenu";
 import { Trail } from "./nav/Trail";
+import { Asks } from "./open/Asks";
+import { Starting, useBackend, Welcome } from "./open/Welcome";
 import { InfoPanel } from "./panel/InfoPanel";
 import { useOpened } from "./panel/opened";
 import { Palette } from "./search/Palette";
 import { watch } from "./state/changes";
 import { useCompare } from "./state/compare";
+import { asking, useOpening } from "./state/opening";
 import { busy, reload } from "./state/reload";
+import { useStatus } from "./state/status";
 import { litOf, pinned, useAtlas } from "./state/store";
 import { FileTree } from "./tree/FileTree";
 
@@ -83,10 +88,14 @@ export function App() {
   const main = useDefaultLayout({ id: "main-v2", storage: localStorage });
   const opened = useAtlas((s) => s.repo !== null);
   const epoch = useAtlas((s) => s.epoch);
+  const backend = useBackend();
+  /** 서버의 상태를 받았는지와, 받았으면 연 레포가 없는지 */
+  const known = useStatus((s) => s.status !== null);
+  const idle = useStatus((s) => s.status?.phase === "idle");
 
   useEffect(() => (opened ? watch() : undefined), [opened]);
 
-  // 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 비교 창이 펴져 있으면 그 창만 접는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
+  // 레포를 여는 동안 뜬 창이 있으면 Esc는 그 창만 닫는다. 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 비교 창이 펴져 있으면 그 창만 접는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
   // 정보 패널에 연 파일이 있으면 그 파일만 닫는다. 함수 시점 뷰에서는 구조 뷰로 돌아가고, 구조 뷰에서는 선택을 푼다.
   // 새로고침 단축키는 새로고침 버튼을 누른 것과 같다. 팔레트와 펼친 메뉴, 필터 창, 고정한 선의 말풍선을 닫고 새로고침한다.
   useEffect(
@@ -96,6 +105,10 @@ export function App() {
         forward: () => useAtlas.getState().forward(),
         escape: () => {
           const state = useAtlas.getState();
+          if (asking(useOpening.getState())) {
+            useOpening.getState().cancel();
+            return;
+          }
           if (state.paletteOpen) {
             return;
           }
@@ -128,6 +141,20 @@ export function App() {
     [],
   );
 
+  // 앱은 백엔드가 떠서 첫 상태를 줄 때까지 칸 묶음을 그리지 않는다. 연 레포가 없으면 칸 묶음 대신 레포 열기 화면을 그린다.
+  if (host.app && (backend.phase !== "ready" || !known)) {
+    return <Starting backend={backend} />;
+  }
+  if (idle) {
+    return (
+      <>
+        <Welcome />
+        <Asks />
+        <Tooltip />
+      </>
+    );
+  }
+
   return (
     <>
       <Group
@@ -157,6 +184,7 @@ export function App() {
         </Panel>
       </Group>
       <NodeMenu />
+      <Asks />
       <Tooltip />
     </>
   );

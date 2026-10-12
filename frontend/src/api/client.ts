@@ -1,4 +1,5 @@
-// 백엔드 호출은 모두 이 파일을 거친다. 화면 컴포넌트는 fetch를 직접 부르지 않는다.
+// 백엔드 호출은 모두 이 파일을 거친다. 화면 컴포넌트는 fetch를 직접 부르지 않는다. 주소의 앞부분은 `host`가 준다.
+import { host } from "../host";
 import type {
   ApiErrorBody,
   Changes,
@@ -7,12 +8,15 @@ import type {
   Explanation,
   Explanations,
   FileText,
+  Found,
   Graph,
   History,
   Hover,
   MadeSummary,
   MarkedCode,
   OldSpan,
+  Probe,
+  RecentRepo,
   Repo,
   Stat,
   Status,
@@ -34,11 +38,11 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, signal?: AbortSignal, method = "GET", body?: unknown): Promise<T> {
   const sent = body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
-  const response = await fetch(path, { signal, method, ...sent });
+  const response = await fetch(`${await host.base()}${path}`, { signal, method, ...sent });
   if (response.ok) {
     return (await response.json()) as T;
   }
-  if (response.status === 404 || response.status === 500 || response.status === 503) {
+  if ([400, 404, 409, 500, 503].includes(response.status)) {
     const body = (await response.json()) as ApiErrorBody;
     throw new ApiError(body.error, response.status);
   }
@@ -48,6 +52,37 @@ async function request<T>(path: string, signal?: AbortSignal, method = "GET", bo
 /** 분석 결과가 없는 동안에도 응답한다. */
 export function getStatus(): Promise<Status> {
   return request("/api/status");
+}
+
+/** 고른 폴더를 레포로 열기 전의 판정. 폴더를 읽지 못하면 까닭을 적은 400이다. */
+export function postProbe(path: string): Promise<Probe> {
+  return request("/api/probe", undefined, "POST", { path });
+}
+
+/**
+ * 폴더를 레포로 연다. 서버는 앞의 레포를 닫고 첫 분석을 띄운 뒤 분석을 기다리지 않고 응답한다. python은 인터프리터를 고르는 화면에서
+ * 고른 경로이고 서버가 그 레포의 인터프리터로 기억한다. 열지 못하면 까닭을 적은 400이고 앞의 레포는 그대로다.
+ */
+export function postOpen(path: string, python?: string): Promise<{ session: number }> {
+  return request("/api/open", undefined, "POST", { path, ...(python === undefined ? {} : { python }) });
+}
+
+export function postClose(): Promise<{ session: number }> {
+  return request("/api/close", undefined, "POST");
+}
+
+/** 연 적이 있는 레포. 마지막으로 연 레포가 앞이다. */
+export function getRepos(): Promise<{ repos: RecentRepo[] }> {
+  return request("/api/repos");
+}
+
+export function deleteRepo(root: string): Promise<unknown> {
+  return request(`/api/repos?root=${encodeURIComponent(root)}`, undefined, "DELETE");
+}
+
+/** 인터프리터를 고르는 화면의 후보. 실행해 확인한 것만 온다. */
+export function getInterpreters(): Promise<{ found: Found[] }> {
+  return request("/api/interpreters");
 }
 
 export function getRepo(): Promise<Repo> {

@@ -3825,3 +3825,309 @@ ol.summary-list {
   content: "+";
   color: var(--loc);
 }
+
+/* 레포 열기 */
+
+/* 레포 열기 화면. 연 레포가 없을 때 창 전체에 그리고, 폴더를 여는 입구와 최근에 연 레포 목록을 가운데 한 단에 둔다. 목록이 길면 화면 안에서 스크롤한다. */
+.welcome {
+  display: flex;
+  justify-content: center;
+  height: 100%;
+  padding: 16vh 16px 16px;
+  overflow: auto;
+}
+
+.welcome-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(560px, 100%);
+}
+
+.welcome-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.welcome-pick {
+  padding: 4px 14px;
+}
+
+.welcome-hint {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* 경로 입력 칸과 그 옆의 버튼. 레포 열기 화면과 경로 입력 창, 인터프리터를 고르는 화면이 함께 쓴다. */
+.open-path {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.open-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  outline: none;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: none;
+}
+
+.open-input:focus {
+  border-color: var(--muted);
+}
+
+/* 최근에 연 레포. 행은 이름, 경로, 마지막으로 연 날 세 칸과 지우는 버튼이다. 경로는 넘치면 앞에서부터 줄여 끝의 폴더 이름을 보인다.
+   경로의 글자는 bdi로 감싸 맨 앞의 `/`가 뒤로 가지 않게 한다. */
+.recent {
+  width: 100%;
+  margin-top: 18px;
+}
+
+.recent-title {
+  margin: 0 0 4px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.recent-row {
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.recent-row:hover {
+  background: var(--hover-bg);
+}
+
+.recent-open {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 3px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.recent-open:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.recent-name {
+  flex: none;
+  font-weight: 600;
+}
+
+.recent-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: left;
+}
+
+.recent-day {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.recent-forget {
+  flex: none;
+  padding: 0 8px;
+  color: var(--muted);
+}
+
+.recent-forget:hover {
+  color: var(--ink);
+}
+
+/* 레포를 여는 동안 띄우는 창. 화면 전체를 옅게 덮고 가운데에 검색 팔레트와 같은 테두리와 그림자의 상자를 그린다. */
+.ask-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-palette);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16vh 16px 16px;
+  background: var(--active-bg);
+}
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(440px, 100%);
+  max-height: 100%;
+  padding: 14px 16px;
+  overflow: auto;
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+  outline: none;
+  background: var(--surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.ask-wide {
+  width: min(640px, 100%);
+}
+
+.ask-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ask-note,
+.ask-error {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 열지 못한 까닭. critical에 본문 잉크를 섞어 화면 바탕 위에서 대비 4.5:1을 넘긴다. */
+.ask-error {
+  color: color-mix(in srgb, var(--ink) 25%, var(--critical));
+  white-space: pre-wrap;
+}
+
+.ask-label {
+  margin: 4px 0 -6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.ask-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ask-buttons .toolbar-button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ask-buttons .toolbar-button:focus-visible,
+.ask-option:focus-visible {
+  border-color: var(--ink);
+  outline: none;
+}
+
+/* 고를 항목의 목록. 품은 프로젝트와 찾은 인터프리터를 한 줄에 하나씩 그린다. */
+.ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ask-option {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ask-option:hover {
+  background: var(--hover-bg);
+}
+
+.ask-option-name {
+  flex: none;
+  font-weight: 600;
+}
+
+.ask-option-path,
+.ask-attempt-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: left;
+}
+
+.ask-option-aside {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* 시도한 경로. 출처, 경로, 통과하지 못한 까닭 세 칸이다. */
+.ask-attempt {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 1px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ask-attempt-source {
+  flex: none;
+}
+
+.ask-attempt-detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 레포 메뉴의 화살표. 탐색 경로 표시의 레포 이름 옆에 진입점 버튼의 화살표와 같은 모양으로 그린다. */
+.trail-repo {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: 4px 2px;
+  border-radius: 3px;
+  color: var(--muted);
+}
+
+.trail-repo:hover,
+.trail-repo[aria-expanded="true"] {
+  color: var(--ink);
+  background: var(--hover-bg);
+}
+
+/* 메뉴의 묶음을 가르는 가로선 */
+.menu-item[data-rule] {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid var(--line);
+}

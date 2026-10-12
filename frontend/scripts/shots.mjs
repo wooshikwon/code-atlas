@@ -1,5 +1,5 @@
 // 화면을 시나리오마다 조작해 확인 항목의 통과 여부를 한 줄씩 출력하고 스크린샷을 남긴다.
-// 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wide-url 주소] [--compare-url 주소] [--only 이름,이름] [--with-summary]
+// 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wide-url 주소] [--compare-url 주소] [--open-url 주소] [--only 이름,이름] [--with-summary]
 // 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름은 sync-engine을 연 서버가 기준이고 노드 수·선 수·줄 범위,
 // 경로와 미사용 후보는 서버 응답에서 읽는다. 순환 시나리오(cycles, cycles-change, cycles-pin)는 tests/fixtures/cycle_repo를 연 서버의 주소를
 // --cycle-url로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다. 새로고침 시나리오(reload, reload-key, stale)는 대상 레포의 파일을 고쳤다가 되돌리므로
@@ -7,6 +7,9 @@
 // lanes 시나리오는 폴더가 여러 겹인 레포(modern-deeplearning-pipeline)를 연 서버의 주소를 --wide-url로 받으면 그 화면도 본다.
 // 시점 비교 시나리오(compare-*)는 `python -m tests.history <임시 폴더>`로 만든 이력 고정 레포를 연 서버의 주소를 --compare-url로 받았을 때만 돌고,
 // changes 시나리오는 그 주소를 받으면 그 레포의 변경 표시도 본다.
+// 레포 열기 시나리오(open-*)는 레포 없이 띄운 서버(`code-atlas --no-open --port …`, 설정 파일은 임시 폴더)의 주소를 --open-url로 받았을 때만 돈다.
+// 그 서버가 보는 홈 폴더 아래에 고정 폴더를 만들어 열고 닫으며, 끝나면 폴더를 지우고 서버의 레포를 닫고 연 레포 목록을 비운다.
+// 고정 폴더의 가상환경은 PATH의 python3으로 만든다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
 // 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 "건너뜀"으로 출력하고 실패로 세지 않는다.
 // summary 시나리오는 Claude Code 구독 사용량을 쓰므로 --only로 지정하거나 --with-summary를 줬을 때만 돈다.
@@ -14,9 +17,10 @@
 // changes 시나리오는 /api/repo의 root에서 git status와 git diff를 읽기 전용으로 부르므로 서버와 같은 기계에서 돌린다.
 // 수정한 .py 파일이 없는 레포에서는 changes의 확인 항목을 건너뛴다.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const VIEW = { width: 1700, height: 1000 };
@@ -55,6 +59,8 @@ let reloadUrl = null;
 let wideUrl = null;
 /** 이력 고정 레포(tests/history.py)를 연 서버의 주소. 주지 않으면 시점 비교 시나리오를 건너뛴다. */
 let compareUrl = null;
+/** 레포 없이 띄운 서버의 주소. 주지 않으면 레포 열기 시나리오를 건너뛴다. */
+let openUrl = null;
 let only = null;
 let withSummary = false;
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -69,6 +75,8 @@ for (let i = 2; i < process.argv.length; i += 1) {
     reloadUrl = process.argv[++i] ?? null;
   } else if (arg === "--compare-url") {
     compareUrl = process.argv[++i] ?? null;
+  } else if (arg === "--open-url") {
+    openUrl = process.argv[++i] ?? null;
   } else if (arg === "--with-summary") {
     withSummary = true;
   } else {
@@ -13473,6 +13481,368 @@ async function compareReadonly(t) {
   );
 }
 
+// ── 레포 열기 ────────────────────────────────────────────────────
+// 레포 없이 띄운 서버(--open-url)에서 돈다. 서버의 홈 폴더 아래에 만든 고정 폴더를 화면으로 열고, 기대값은 그 서버의 /api/repo, /api/repos,
+// /api/status에서 읽는다. 사진은 `s6-open-*.png`로 남긴다.
+
+/** 레포 열기 시나리오가 쓰는 고정 폴더. 처음 쓸 때 만든다. */
+let openDirs = null;
+
+/**
+ * 레포 없이 띄운 서버에 POST를 보낸다. 서버가 쉬는 연결을 닫은 직후에 보내면 요청이 서버에 닿기 전에 실패하므로 한 번 다시 보낸다.
+ * 이 시나리오가 보내는 판정과 닫기는 두 번 보내도 결과가 같다.
+ */
+async function post(path, body) {
+  const send = () => fetch(new URL(path, openUrl), { method: "POST", ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
+  return send().catch(send);
+}
+
+/**
+ * 서버의 홈 폴더 아래에 고정 폴더를 만든다. 서버는 홈 폴더 아래의 조상만 프로젝트 루트로 보므로 그 안에 둔다.
+ * empty(파이썬 파일 없음), proj와 proj/pkg(프로젝트의 하위 폴더), many와 many/a·many/b(프로젝트 둘을 품은 폴더), bare(가상환경 없음),
+ * shop·loop·gone(가상환경이 있는 레포)이다.
+ */
+async function openFixtures() {
+  if (openDirs !== null) {
+    return openDirs;
+  }
+  const home = (await (await post("/api/probe", { path: "~" })).json()).path;
+  const root = mkdtempSync(join(home, "atlas-open-"));
+  const fixtures = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "tests", "fixtures");
+  const write = (path, text) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, text);
+  };
+  const venv = (dir) => execFileSync("python3", ["-m", "venv", "--without-pip", join(dir, ".venv")]);
+  const dirs = Object.fromEntries(["empty", "proj", "many", "bare", "shop", "loop", "gone"].map((name) => [name, join(root, name)]));
+  write(join(dirs.empty, "README.md"), "# empty\n");
+  write(join(dirs.proj, "pyproject.toml"), '[project]\nname = "proj"\nversion = "0.1.0"\n');
+  write(join(dirs.proj, "main.py"), "from pkg.mod import run\n\n\ndef main():\n    return run()\n");
+  write(join(dirs.proj, "pkg", "__init__.py"), "");
+  write(join(dirs.proj, "pkg", "mod.py"), "def run():\n    return helper()\n\n\ndef helper():\n    return 1\n");
+  for (const name of ["a", "b"]) {
+    mkdirSync(join(dirs.many, name, ".git"), { recursive: true });
+    write(join(dirs.many, name, `${name}.py`), `def ${name}():\n    return "${name}"\n`);
+  }
+  write(join(dirs.bare, "tool.py"), "def tool():\n    return part()\n\n\ndef part():\n    return 1\n");
+  cpSync(join(fixtures, "sample_repo"), dirs.shop, { recursive: true });
+  cpSync(join(fixtures, "cycle_repo"), dirs.loop, { recursive: true });
+  write(join(dirs.gone, "gone.py"), "def gone():\n    return 1\n");
+  for (const dir of [dirs.proj, join(dirs.proj, "pkg"), dirs.many, join(dirs.many, "a"), dirs.shop, dirs.loop, dirs.gone]) {
+    venv(dir);
+  }
+  openDirs = { root, ...dirs };
+  return openDirs;
+}
+
+/** 서버의 레포를 닫고 연 레포 목록을 비운다. */
+async function openReset() {
+  await post("/api/close");
+  for (const repo of (await api("/api/repos", openUrl)).repos) {
+    await fetch(new URL(`/api/repos?root=${encodeURIComponent(repo.root)}`, openUrl), { method: "DELETE" });
+  }
+}
+
+/** 고정 폴더를 지우고 서버를 처음 상태로 돌린다. */
+async function openCleanup() {
+  if (openDirs !== null) {
+    await openReset();
+    rmSync(openDirs.root, { recursive: true, force: true });
+    openDirs = null;
+  }
+}
+
+/** 서버를 처음 상태로 돌리고 레포 열기 화면을 띄운다. */
+async function welcome(page) {
+  await openReset();
+  await page.goto(openUrl);
+  await page.waitForSelector(".welcome", { timeout: 30_000 });
+}
+
+/** 레포 열기 화면의 경로 입력 칸에 경로를 적고 연다. */
+async function typePath(page, path) {
+  await page.fill(".welcome .open-input", path);
+  await page.keyboard.press("Enter");
+}
+
+/** 페이지를 다시 읽은 화면이 root 레포의 그래프를 그릴 때까지 기다리고 서버가 연 레포의 루트를 돌려준다. */
+async function waitRepo(page, root) {
+  await page.waitForFunction((name) => document.querySelector(".trail-root")?.textContent.trim() === name && document.querySelector(".react-flow__node") !== null, basename(root), {
+    timeout: 180_000,
+  });
+  await settle(page);
+  return (await api("/api/repo", openUrl)).root;
+}
+
+/** 뜬 창의 제목과 본문, 버튼의 글. 창이 없으면 null이다. */
+const askOf = (page) =>
+  page.evaluate(() => {
+    const ask = document.querySelector(".ask");
+    const texts = (selector) => [...ask.querySelectorAll(selector)].map((element) => element.textContent.trim());
+    return ask === null
+      ? null
+      : {
+          title: ask.querySelector(".ask-title")?.textContent.trim() ?? "",
+          notes: texts(".ask-note, .ask-error"),
+          options: texts(".ask-option-name"),
+          buttons: texts(".ask-buttons button"),
+          focused: document.activeElement?.textContent.trim() ?? "",
+          modal: ask.getAttribute("role") === "dialog" && ask.getAttribute("aria-modal") === "true",
+        };
+  });
+
+/** 레포 메뉴를 펴고 항목의 글을 돌려준다. */
+async function repoMenu(page) {
+  await page.click(".trail-repo");
+  await page.waitForSelector("#trail-repo");
+  return page.evaluate(() => [...document.querySelectorAll("#trail-repo .menu-item")].map((item) => ({ text: item.textContent.trim(), disabled: item.getAttribute("aria-disabled") === "true" })));
+}
+
+async function openWelcome(t, page) {
+  await welcome(page);
+  const seen = await page.evaluate(() => ({
+    panels: document.querySelectorAll(".app, .toolbar, .explorer").length,
+    title: document.querySelector(".welcome-title")?.textContent ?? "",
+    input: document.querySelector(".welcome .open-input")?.getAttribute("placeholder") ?? null,
+    focused: document.activeElement === document.querySelector(".welcome .open-input"),
+    buttons: [...document.querySelectorAll(".welcome button")].map((button) => ({ text: button.textContent.trim(), disabled: button.disabled })),
+    recent: document.querySelectorAll(".recent, .recent-row").length,
+    text: document.body.innerText,
+  }));
+  const status = await api("/api/status", openUrl);
+  t.check("연 레포가 없으면 칸 묶음 대신 레포 열기 화면을 그린다", status.phase === "idle" && seen.panels === 0 && seen.title === "레포 열기", `phase ${status.phase}, 칸 ${seen.panels}개`);
+  t.check(
+    "브라우저는 포커스가 든 경로 입력 칸과 열기 버튼을 그리고, 경로가 비어 있으면 열기를 누를 수 없다",
+    seen.input === "레포 폴더의 경로" && seen.focused && same(seen.buttons, [{ text: "열기", disabled: true }]),
+    JSON.stringify(seen.buttons),
+  );
+  t.check("연 적이 있는 레포가 없으면 목록을 그리지 않는다", seen.recent === 0);
+  t.check("화면 문구에 서버라는 말이 없다", !/서버|백엔드/.test(seen.text), seen.text.replace(/\s+/g, " "));
+}
+
+async function openBlocked(t, page) {
+  const dirs = await openFixtures();
+  await welcome(page);
+  await typePath(page, dirs.empty);
+  await page.waitForSelector(".ask");
+  const blocked = await askOf(page);
+  t.check(
+    "파이썬 파일이 없는 폴더를 고르면 열지 못한다는 창이 뜬다",
+    blocked.modal && blocked.title === `파이썬 파일이 없는 폴더는 열지 못한다: ${dirs.empty}` && same(blocked.buttons, ["닫기"]) && blocked.focused === "닫기",
+    blocked.title,
+  );
+  await t.shot();
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".ask", { state: "detached" });
+  t.check("Esc가 창을 닫고 레포 열기 화면이 남는다", (await count(page, ".welcome")) === 1 && (await api("/api/status", openUrl)).phase === "idle");
+  const missing = join(dirs.root, "nowhere");
+  await typePath(page, missing);
+  await page.waitForSelector(".ask");
+  const none = await askOf(page);
+  t.check("없는 폴더를 고르면 찾지 못했다는 창이 뜬다", none.title === `폴더를 찾지 못했다: ${missing}`, none.title);
+  await page.mouse.click(10, 10);
+  await page.waitForSelector(".ask", { state: "detached" });
+  t.check("창 밖을 누르면 창이 닫힌다", (await count(page, ".ask")) === 0);
+}
+
+async function openProject(t, page) {
+  const dirs = await openFixtures();
+  const pkg = join(dirs.proj, "pkg");
+  await welcome(page);
+  await typePath(page, pkg);
+  await page.waitForSelector(".ask");
+  const asked = await askOf(page);
+  t.check(
+    "프로젝트의 하위 폴더를 고르면 조상 폴더의 이름을 적고 어느 쪽을 열지 묻는다",
+    asked.title === "pkg는 프로젝트 proj의 하위 폴더다" &&
+      same(asked.notes, ["하위 폴더만 열면 폴더 밖의 코드를 부르는 지점이 미확인으로 남는다."]) &&
+      same(asked.buttons, ["proj 열기", "이 폴더만 열기", "취소"]) &&
+      asked.focused === "proj 열기",
+    `${asked.title} — ${asked.buttons.join(", ")}`,
+  );
+  await t.shot();
+  await page.getByRole("button", { name: "proj 열기" }).click();
+  const whole = await waitRepo(page, dirs.proj);
+  t.check("프로젝트 루트를 고르면 그 폴더가 열린다", whole === dirs.proj, whole);
+
+  await welcome(page);
+  await typePath(page, pkg);
+  await page.waitForSelector(".ask");
+  await page.getByRole("button", { name: "이 폴더만 열기" }).click();
+  const part = await waitRepo(page, pkg);
+  t.check("이 폴더만 열기를 고르면 묻지 않고 고른 폴더가 열린다", part === pkg, part);
+}
+
+async function openNested(t, page) {
+  const dirs = await openFixtures();
+  await welcome(page);
+  await typePath(page, dirs.many);
+  await page.waitForSelector(".ask");
+  const asked = await askOf(page);
+  t.check(
+    "프로젝트 둘을 품은 폴더를 고르면 하위 폴더 가운데 하나를 고르게 한다",
+    asked.title === "many는 프로젝트 2개를 품고 있다. 하나를 고른다" && same(asked.options, ["a", "b"]) && same(asked.buttons, ["이 폴더 그대로 열기", "취소"]),
+    `${asked.title} — ${asked.options.join(", ")} — ${asked.buttons.join(", ")}`,
+  );
+  await t.shot();
+  await page.click(".ask-option >> nth=0");
+  const one = await waitRepo(page, join(dirs.many, "a"));
+  t.check("하위 폴더를 고르면 그 폴더가 열린다", one === join(dirs.many, "a"), one);
+
+  await welcome(page);
+  await typePath(page, dirs.many);
+  await page.waitForSelector(".ask");
+  await page.getByRole("button", { name: "이 폴더 그대로 열기" }).click();
+  const all = await waitRepo(page, dirs.many);
+  t.check("이 폴더 그대로 열기를 고르면 다시 묻지 않고 고른 폴더가 열린다", all === dirs.many, all);
+}
+
+async function openPython(t, page) {
+  const dirs = await openFixtures();
+  await welcome(page);
+  await typePath(page, dirs.bare);
+  await page.waitForSelector(".ask");
+  const asked = await askOf(page);
+  const candidates = await page.evaluate(() => [...document.querySelectorAll(".ask-option")].map((option) => option.dataset.python));
+  t.check(
+    "가상환경이 없는 레포를 고르면 인터프리터를 고르는 화면이 뜬다",
+    asked.title === "bare의 Python 인터프리터를 찾지 못했다. 이 레포의 패키지가 설치된 인터프리터를 고른다" && asked.buttons.includes("이 경로로 열기") && asked.buttons.includes("취소"),
+    asked.title,
+  );
+  t.check("이 기기에서 찾은 인터프리터를 판과 경로로 나열한다", candidates.length > 0 && asked.options.every((name) => /^Python \d+\.\d+/.test(name)), asked.options.join(", "));
+  await t.shot();
+  if (candidates.length === 0) {
+    return;
+  }
+  t.expected.push("400");
+  await page.fill(".ask .open-input", join(dirs.bare, "tool.py"));
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(".ask-error");
+  const refused = await askOf(page);
+  t.check("인터프리터가 아닌 파일을 고르면 같은 화면에 까닭을 적는다", refused.notes.some((note) => note.startsWith(`Python 인터프리터가 아니다: ${join(dirs.bare, "tool.py")}`)), refused.notes.join(" / "));
+  await page.click(".ask-option >> nth=0");
+  const root = await waitRepo(page, dirs.bare);
+  const saved = (await api("/api/repos", openUrl)).repos.find((repo) => repo.root === dirs.bare)?.python;
+  t.check("인터프리터를 고르면 레포가 열리고 고른 경로가 그 레포의 설정으로 남는다", root === dirs.bare && saved === candidates[0], `연 레포 ${root}, 저장한 인터프리터 ${saved}`);
+
+  await repoMenu(page);
+  await page.click('#trail-repo [data-key="close"]');
+  await page.waitForSelector(".welcome", { timeout: 30_000 });
+  await page.click(".recent-open");
+  const again = await waitRepo(page, dirs.bare);
+  t.check("닫았다가 다시 열면 묻지 않고 기억한 인터프리터로 열린다", again === dirs.bare && (await count(page, ".ask")) === 0 && (await api("/api/repo", openUrl)).python === candidates[0], (await api("/api/repo", openUrl)).python);
+}
+
+async function openRecent(t, page) {
+  const dirs = await openFixtures();
+  await welcome(page);
+  await typePath(page, dirs.gone);
+  await waitRepo(page, dirs.gone);
+  await post("/api/close");
+  await page.waitForSelector(".welcome", { timeout: 30_000 });
+  await typePath(page, dirs.shop);
+  await waitRepo(page, dirs.shop);
+  await repoMenu(page);
+  await page.click('#trail-repo [data-key="close"]');
+  await page.waitForSelector(".recent-row", { timeout: 30_000 });
+  const rowsOf = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll(".recent-row")].map((row) => ({
+        name: row.querySelector(".recent-name").textContent,
+        path: row.querySelector(".recent-path").textContent.trim(),
+        day: row.querySelector(".recent-day").textContent,
+        disabled: row.querySelector(".recent-open").disabled,
+        missing: row.hasAttribute("data-missing"),
+      })),
+    );
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const listed = await rowsOf();
+  t.check(
+    "레포를 닫으면 레포 열기 화면의 목록에 마지막으로 연 순서로 이름, 경로, 연 날이 있다",
+    same(listed, [
+      { name: "shop", path: dirs.shop, day: today, disabled: false, missing: false },
+      { name: "gone", path: dirs.gone, day: today, disabled: false, missing: false },
+    ]),
+    JSON.stringify(listed),
+  );
+  rmSync(dirs.gone, { recursive: true, force: true });
+  await page.reload();
+  await page.waitForSelector(".recent-row");
+  const gone = (await rowsOf())[1];
+  const faded = await page.evaluate(() => getComputedStyle(document.querySelectorAll(".recent-open")[1]).color === getComputedStyle(document.querySelector(".recent-title")).color);
+  t.check("폴더가 없어진 레포는 흐리게 그리고 폴더가 없다고 적으며 누를 수 없다", gone.missing && gone.disabled && gone.day === "폴더가 없다" && faded, JSON.stringify(gone));
+  await page.hover(".recent-forget >> nth=1");
+  await page.waitForSelector(".tooltip");
+  t.check("지우기 버튼의 말풍선이 목록에서 지우기를 적는다", (await page.textContent(".tooltip")) === "목록에서 지우기", await page.textContent(".tooltip"));
+  await t.shot();
+  await page.click(".recent-forget >> nth=1");
+  await page.waitForFunction(() => document.querySelectorAll(".recent-row").length === 1);
+  const kept = (await api("/api/repos", openUrl)).repos.map((repo) => repo.root);
+  t.check("지우기 버튼을 누르면 그 레포만 목록에서 빠진다", same(kept, [dirs.shop]), kept.join(", "));
+  await page.click(".recent-open");
+  const root = await waitRepo(page, dirs.shop);
+  t.check("목록의 레포를 누르면 묻지 않고 다시 열린다", root === dirs.shop && (await count(page, ".ask")) === 0, root);
+}
+
+async function openSwitch(t, page) {
+  const dirs = await openFixtures();
+  await welcome(page);
+  await typePath(page, dirs.loop);
+  await waitRepo(page, dirs.loop);
+  await post("/api/close");
+  await page.waitForSelector(".welcome", { timeout: 30_000 });
+  await typePath(page, dirs.shop);
+  await waitRepo(page, dirs.shop);
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  const settings = await page.evaluate(() => localStorage.getItem("code-atlas:ui:v3"));
+  const before = (await boxes(page)).map((box) => box.id).sort();
+
+  const arrow = await page.evaluate(() => {
+    const [name, repo, entries] = [".trail-root", ".trail-repo", ".toolbar-entries-arrow"].map((selector) => document.querySelector(selector).getBoundingClientRect());
+    const mine = document.querySelector(".trail-repo svg").getBoundingClientRect();
+    return { beside: repo.left >= name.right && repo.left - name.right <= 8, same: mine.width === entries.width && mine.height === entries.height };
+  });
+  t.check("레포 이름 바로 옆에 진입점 버튼과 같은 크기의 아래 화살표가 있다", arrow.beside && arrow.same, JSON.stringify(arrow));
+  await page.hover(".trail-repo");
+  await page.waitForSelector(".tooltip");
+  const tip = await page.textContent(".tooltip");
+  const items = await repoMenu(page);
+  t.check(
+    "화살표를 누르면 최근에 연 다른 레포와 폴더 열기…, 레포 닫기가 든 메뉴가 내려온다",
+    tip === "다른 레포 열기" && same(items, [{ text: "loop", disabled: false }, { text: "폴더 열기…", disabled: false }, { text: "레포 닫기", disabled: false }]),
+    `말풍선 "${tip}", ${items.map((item) => item.text).join(", ")}`,
+  );
+  await t.shot();
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#trail-repo", { state: "detached" });
+  t.check("Esc가 메뉴만 닫는다", (await count(page, ".react-flow__node")) > 0 && (await count(page, ".ask")) === 0);
+
+  await repoMenu(page);
+  await page.click('#trail-repo [data-key="open"]');
+  await page.waitForSelector(".ask .open-input");
+  const typing = await askOf(page);
+  t.check("폴더 열기…를 고르면 브라우저는 경로 입력 창을 띄운다", typing.title === "열 레포 폴더의 경로를 적는다" && (await page.evaluate(() => document.activeElement === document.querySelector(".ask .open-input"))), typing.title);
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".ask", { state: "detached" });
+  t.check("Esc가 경로 입력 창만 닫고 연 레포의 화면은 그대로다", same((await boxes(page)).map((box) => box.id).sort(), before) && (await api("/api/repo", openUrl)).root === dirs.shop);
+
+  const session = (await api("/api/status", openUrl)).session;
+  await repoMenu(page);
+  await page.click(`#trail-repo [data-key="${dirs.loop}"]`);
+  const root = await waitRepo(page, dirs.loop);
+  const after = (await boxes(page)).map((box) => box.id).sort();
+  const known = new Set((await api("/api/graph", openUrl)).nodes.map((n) => n.id));
+  t.check(
+    "메뉴에서 다른 레포를 고르면 그 레포가 열리고 그래프가 그 레포의 것으로 바뀐다",
+    root === dirs.loop && after.length > 0 && after.every((id) => known.has(id)) && before.some((id) => !known.has(id)) && (await api("/api/status", openUrl)).session === session + 1,
+    `연 레포 ${root}, 파일 상자 ${after.join(", ")}`,
+  );
+  const kept = await page.evaluate(() => ({ theme: document.documentElement.dataset.theme, settings: localStorage.getItem("code-atlas:ui:v3") }));
+  t.check("레포를 바꿔도 화면 설정이 그대로다", kept.theme === "dark" && kept.settings === settings, `화면 색 ${kept.theme}`);
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -13597,6 +13967,13 @@ const SCENARIOS = [
   ["compare-off", compareOff],
   ["compare-commits", compareCommits],
   ["compare-readonly", compareReadonly],
+  ["open-welcome", openWelcome],
+  ["open-blocked", openBlocked],
+  ["open-project", openProject],
+  ["open-nested", openNested],
+  ["open-python", openPython],
+  ["open-recent", openRecent],
+  ["open-switch", openSwitch],
 ];
 
 /** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
@@ -13643,6 +14020,8 @@ const STAGE4 = new Set([
 const VARIABLES = new Set(SCENARIOS.filter(([name]) => name.startsWith("var-")).map(([name]) => name));
 /** 시점 비교 시나리오. 이력 고정 레포를 연 서버에서 돌고 스크린샷 이름이 s5-로 시작한다. */
 const COMPARE = new Set(SCENARIOS.filter(([name]) => name.startsWith("compare-")).map(([name]) => name));
+/** 레포 열기 시나리오. 레포 없이 띄운 서버에서 돌고 스크린샷 이름이 s6-로 시작한다. */
+const OPEN = new Set(SCENARIOS.filter(([name]) => name.startsWith("open-")).map(([name]) => name));
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 
@@ -13661,6 +14040,10 @@ async function run(browser, name, scenario) {
     console.log(`[${name}]\n  건너뜀  이력 고정 레포로 연 화면 — --compare-url을 주지 않았다`);
     return [{ label: name, ok: null, actual: "" }];
   }
+  if (OPEN.has(name) && openUrl === null) {
+    console.log(`[${name}]\n  건너뜀  레포 없이 띄운 서버의 화면 — --open-url을 주지 않았다`);
+    return [{ label: name, ok: null, actual: "" }];
+  }
   const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 2, colorScheme: "light" });
   // 화면의 단축키 처리(window의 capture 단계)가 끝난 뒤에 keydown의 defaultPrevented를 적어 둔다.
   await context.addInitScript(() => {
@@ -13671,7 +14054,7 @@ async function run(browser, name, scenario) {
   });
   const results = [];
   const errors = [];
-  const path = join(OUT, `${COMPARE.has(name) ? "s5" : VARIABLES.has(name) ? "mv" : STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
+  const path = join(OUT, `${OPEN.has(name) ? "s6" : COMPARE.has(name) ? "s5" : VARIABLES.has(name) ? "mv" : STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
   const page = await context.newPage();
   let shot = false;
   const t = {
@@ -13745,6 +14128,7 @@ const all = [];
 for (const [name, scenario] of chosen) {
   all.push(...(await run(browser, name, scenario)));
 }
+await openCleanup();
 await browser.close();
 
 const failed = all.filter((result) => result.ok === false).length;
