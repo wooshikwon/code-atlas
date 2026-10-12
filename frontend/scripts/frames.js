@@ -188,7 +188,10 @@
       kinds[kind] = (kinds[kind] ?? 0) + 1;
     });
     const shades = {};
-    $$(".react-flow__edge > .edge").forEach((edge) => (shades[edge.style.opacity || "1"] = (shades[edge.style.opacity || "1"] ?? 0) + 1));
+    $$(".react-flow__edge > .edge").forEach((edge) => {
+      const shade = edge.style.getPropertyValue("--shade") || edge.style.opacity || "1";
+      shades[shade] = (shades[shade] ?? 0) + 1;
+    });
     return {
       nodes: nodes.length,
       kinds,
@@ -197,6 +200,9 @@
       trunks: document.querySelectorAll(".edge-trunk").length,
       edges_out: edges.filter((edge) => !inView(edge)).length,
       edge_svgs: document.querySelectorAll(".react-flow__edges > svg").length,
+      // 묶음 전체에 불투명도가 걸려 묶음을 덮는 크기의 버퍼를 따로 만드는 선 묶음의 수와, 장식만 든 작은 묶음의 수
+      shade_layers: $$(".react-flow__edge > .edge").filter((edge) => Number(getComputedStyle(edge).opacity) < 1).length,
+      shade_parts: document.querySelectorAll(".edge-part").length,
       paths: document.querySelectorAll(".react-flow__edges path").length,
       edge_texts: document.querySelectorAll(".react-flow__edges text").length,
       edge_shades: shades,
@@ -291,9 +297,8 @@
   const EXPERIMENTS = [
     ["baseline", ""],
     ["no-transition", ".react-flow__node,.edge,.react-flow__node *{transition:none!important;animation:none!important}"],
-    ["edge-opacity-1", ".react-flow__edge>.edge{opacity:1!important}"],
+    ["shade-1", ".react-flow__edge>.edge{--shade:1!important}"],
     ["node-opacity-1", ".react-flow__node{opacity:1!important}"],
-    ["all-opacity-1", ".react-flow__edge>.edge,.react-flow__node{opacity:1!important}"],
     ["no-markers", ".edge-line{marker-end:none!important}"],
     ["no-edge-text", ".react-flow__edges text{display:none!important}"],
     ["no-edge-hit", ".edge-hit{display:none!important}"],
@@ -306,11 +311,6 @@
     ["edges-one-layer", ".react-flow__edges{will-change:transform}"],
     ["viewport-layer", ".react-flow__viewport{will-change:transform}"],
     ["edges-contain", ".react-flow__edges>svg{contain:strict}"],
-    ["svg-small", ".react-flow__edges>svg{width:1px!important;height:1px!important}"],
-    ["svg-no-z", ".react-flow__edges>svg{z-index:auto!important;position:static!important}"],
-    ["stroke-opacity", ".react-flow__edge>.edge{opacity:1!important}.edge-line{stroke-opacity:.55}.react-flow__edges :is(text,circle){opacity:.55}"],
-    ["stroke-opacity-no-hit", ".react-flow__edge>.edge{opacity:1!important}.edge-line{stroke-opacity:.55}.react-flow__edges :is(text,circle){opacity:.55}.edge-hit{display:none!important}"],
-    ["stroke-opacity-bare", ".react-flow__edge>.edge{opacity:1!important}.edge-line{stroke-opacity:.55;marker-end:none!important}.react-flow__edges :is(text,circle),.edge-hit{display:none!important}"],
   ];
 
   const experiments = async () => {
@@ -430,24 +430,6 @@
     }
 
     if (plan.experiments) await experiments();
-
-    // 선마다 따로인 <svg>를 한 장으로 합친 DOM에서 잰다. React가 관리하는 DOM을 옮기므로 이 뒤로는 시나리오를 잇지 않는다.
-    if (plan.oneSvg) {
-      const [first, ...others] = $$(".react-flow__edges > svg");
-      await report({ step: "svg", count: others.length + 1, size: [first.clientWidth, first.clientHeight, getComputedStyle(first).width, getComputedStyle(first).height] });
-      others.forEach((svg) => {
-        first.append(...svg.children);
-        svg.remove();
-      });
-      await sleep(300);
-      const entry = { step: "experiment", name: "one-svg", idle: await frames(600), pan: await pan(1200) };
-      await settle(200);
-      entry.wheel = await wheel(1200);
-      await settle(200);
-      entry.zoom = await wheel(2400, plan.zoomStep ?? 40);
-      await report(entry);
-      return finish(0);
-    }
 
     // 접기와 다시 펼치기
     const last = (plan.folders ?? []).at(-1);
