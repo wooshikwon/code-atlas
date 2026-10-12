@@ -602,7 +602,7 @@ def test_explanation_is_made_listed_and_deleted(client, generated):
     assert client.get("/api/explanations", params={"path": path}).json() == {"explanations": []}
 
     made = client.post("/api/explanation", params=span).json()
-    assert made == {"start": 32, "end": 33, "text": "src/app/core.py 32~33줄 설명 1", "stale": False, "usage": USAGE}
+    assert made == {"start": 32, "end": 33, "question": "", "text": "src/app/core.py 32~33줄 설명 1", "stale": False, "usage": USAGE}
     system, prompt = generated[0]
     assert system == summary.system_prompt_of(None, "range")
     assert "범위가 든 정의: app/core.py::run_engine (함수, 31~35줄)" in prompt
@@ -638,6 +638,46 @@ def test_explanation_is_stale_after_the_range_code_changes(client, generated):
     finally:
         texts[path] = before
     assert listed["stale"] is True and listed["text"] == "src/app/core.py 32~33줄 설명 1"
+
+
+def test_explanation_with_a_question_is_kept_beside_the_others_of_the_same_range(client, generated):
+    path = "src/app/core.py"
+    span = {"path": path, "start": 32, "end": 33}
+    plain = client.post("/api/explanation", params=span).json()
+    assert plain["question"] == "" and "[질문]" not in generated[0][1]
+
+    asked = client.post("/api/explanation", params=span, json={"question": "  config가 None이면?  "}).json()
+    assert (asked["question"], asked["usage"]) == ("config가 None이면?", USAGE)
+    assert generated[1][0] == summary.system_prompt_of(None, "range")
+    assert "[질문]\nconfig가 None이면?\n\n[내기 전에 확인]" in generated[1][1]
+    assert "[고른 범위의 코드]\n    engine = Engine(config)\n    engine.start(config)\n" in generated[1][1]
+    client.post("/api/explanation", params=span, json={"question": "왜 start를 부르나?"})
+
+    listed = client.get("/api/explanations", params={"path": path}).json()["explanations"]
+    assert [(e["start"], e["end"], e["question"]) for e in listed] == [
+        (32, 33, ""),
+        (32, 33, "config가 None이면?"),
+        (32, 33, "왜 start를 부르나?"),
+    ]
+    assert len({e["text"] for e in listed}) == 3
+
+    again = client.post("/api/explanation", params=span, json={"question": "config가 None이면?"}).json()
+    assert again["text"] == asked["text"] and again["usage"] is None and len(generated) == 3
+    remade = client.post("/api/explanation", params={**span, "refresh": "true"}, json={"question": "config가 None이면?"}).json()
+    assert remade["text"] != asked["text"] and len(generated) == 4
+
+    assert client.delete("/api/explanation", params={**span, "question": "config가 None이면?"}).json() == {"deleted": True}
+    left = client.get("/api/explanations", params={"path": path}).json()["explanations"]
+    assert [e["question"] for e in left] == ["", "왜 start를 부르나?"]
+
+    between = {"base": "a" * 40, "target": "worktree", "old_start": 40, "old_end": 40}
+    client.post("/api/explanation", params={**span, **between}, json={"code": "-x\n+y", "question": "왜 바꿨나?"})
+    client.post("/api/explanation", params={**span, **between}, json={"code": "-x\n+y"})
+    compared = client.get("/api/explanations", params={"path": path, "base": "a" * 40, "target": "worktree"}).json()["compared"]
+    assert [e["question"] for e in compared] == ["왜 바꿨나?", ""]
+    client.delete("/api/explanation", params={**span, **between, "question": "왜 바꿨나?"})
+    compared = client.get("/api/explanations", params={"path": path, "base": "a" * 40, "target": "worktree"}).json()["compared"]
+    assert [e["question"] for e in compared] == [""]
 
 
 def test_explanation_of_marked_code_keeps_added_ranges_on_the_file_and_deleted_ranges_on_the_comparison(client, generated):

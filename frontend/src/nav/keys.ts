@@ -40,11 +40,12 @@ function typing(): boolean {
 
 /**
  * Esc를 직접 쓰는 요소가 있는지. 포커스가 든 파일트리 검색 칸은 질의를 비우고, 포커스가 든 경로 탐색 창의 검색 칸은 입력을 닫고,
- * 포커스가 든 코드 뷰어는 hover 상자를 닫고, 상단 줄의 펼친 필터 창은 창을 닫고, 펼친 메뉴(`MenuList`)는 메뉴를 닫는다.
+ * 포커스가 든 코드 뷰어는 hover 상자를 닫고, 포커스가 든 코드 분석의 질문 입력 창은 창을 닫고, 상단 줄의 펼친 필터 창은 창을 닫고,
+ * 펼친 메뉴(`MenuList`)는 메뉴를 닫는다.
  */
 function escaping(): boolean {
   return (
-    document.activeElement?.closest(".tree-search-input, .finder-input, .monaco-editor") != null ||
+    document.activeElement?.closest(".tree-search-input, .finder-input, .monaco-editor, .code-ask") != null ||
     document.querySelector('.toolbar [aria-expanded="true"], .menu') !== null
   );
 }

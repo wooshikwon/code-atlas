@@ -712,7 +712,7 @@ ul {
   color: var(--muted) !important;
 }
 
-/* 코드 범위 설명. 고른 끝의 "요약 생성" 버튼, 범위 아래에 뜨는 창, 범위 시작 줄 왼쪽의 말풍선 표지다. */
+/* 코드 분석. 고른 끝의 "코드 분석" 버튼과 질문 입력 창, 범위 아래에 뜨는 창, 범위 시작 줄 왼쪽의 말풍선 표지다. */
 .code-notes {
   position: absolute;
   z-index: var(--z-menu);
@@ -777,7 +777,74 @@ ul {
   margin-bottom: 0;
 }
 
-/* 대상이 바뀌기 전에 만든 설명. 문구를 위에 적고 본문을 흐리게 그린다. LLM 요약 칸과 코드 범위 설명 창이 함께 쓴다. */
+/* 창에 쌓는 코드 분석 하나. 질문과 조작 버튼이 한 줄이고 그 아래에 답, 끝에 토큰 수를 적는다. */
+.code-note-item + .code-note-item {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.code-note-asked {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.code-note-question {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-note-usage {
+  display: block;
+  margin-top: 4px;
+  text-align: right;
+}
+
+/* 코드 분석의 질문 입력 창. "코드 분석" 버튼이 있던 곳에 뜬다. */
+.code-ask {
+  position: absolute;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 6px;
+  border: 1px solid var(--muted);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.code-ask-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  outline: none;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--surface);
+  resize: none;
+}
+
+.code-ask-input:focus {
+  border-color: var(--muted);
+}
+
+.code-ask-input::placeholder {
+  color: var(--muted);
+}
+
+.code-ask-send {
+  flex: none;
+}
+
+/* 대상이 바뀌기 전에 만든 설명. 문구를 위에 적고 본문을 흐리게 그린다. LLM 요약 칸과 코드 분석 창이 함께 쓴다. */
 .stale-note {
   margin: 0 0 4px;
   color: var(--muted);

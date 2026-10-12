@@ -28,10 +28,12 @@ from .model import Analysis, Node, to_dict
 from .resolve import EXTERNAL_PREFIX, external_of
 from .runner import Runner
 from .summary import (
+    MAX_QUESTION,
     Made,
     Subject,
     Summaries,
     SummaryError,
+    asked_name,
     compared_name,
     compared_spans,
     digest_of,
@@ -360,24 +362,31 @@ def create_app(
         base: str | None = None,
         target: str | None = None,
         old: tuple[int, int] | None = None,
+        question: str = "",
     ) -> tuple[str, Subject]:
-        """파일의 줄 범위를 설명을 만들 프롬프트와, 그 설명을 남길 대상으로 바꾼다.
+        """파일의 줄 범위를 설명을 만들 프롬프트와, 그 설명을 남길 대상으로 바꾼다. `question`은 그 범위를 두고 적은 질문이고 없으면 빈 글이다.
 
         `code`는 두 시점을 엮은 문서에서 고른 범위의 표시 붙은 본문이다. `old`가 있으면 삭제된 줄이 든 범위이고 설명을 그 두
         시점의 비교에 묶는다. 없으면 대상 시점의 파일과 줄 범위에 묶는다.
         """
         analyzed: Analyzed = app.state.analyzed
-        prompt = range_prompt_of(app.state.nodes, analyzed.analysis.edges, analyzed.texts, path, start, end, code, old)
+        prompt = range_prompt_of(
+            app.state.nodes, analyzed.analysis.edges, analyzed.texts, path, start, end, code, old, question or None
+        )
         if prompt is None:
             raise HTTPException(status_code=404, detail=f"설명할 코드 범위가 아니다: {path} {start}~{end}줄")
         root = app.state.repo["root"]
         if old is not None:
-            return prompt, Subject(root, "compared", compared_name(base, target, path, old, (start, end)), digest_of(code))
-        return prompt, Subject(root, "range", f"{path}:{start}-{end}", digest_of(range_code(analyzed.texts, path, start, end)))
+            name = asked_name(compared_name(base, target, path, old, (start, end)), question)
+            return prompt, Subject(root, "compared", name, digest_of(code), question)
+        digest = digest_of(range_code(analyzed.texts, path, start, end))
+        return prompt, Subject(root, "range", asked_name(f"{path}:{start}-{end}", question), digest, question)
 
     @app.get("/api/explanations", dependencies=ready)
     def get_explanations(path: str, base: str | None = None, target: str | None = None) -> dict:
         """파일에 남겨 둔 코드 범위 설명. 설명을 만든 뒤 그 줄 범위의 코드가 달라졌으면 `stale`이 참이다.
+
+        같은 줄 범위에 질문이 다른 설명이 여럿이면 만든 순서로 담고, `question`은 그 설명의 질문(없으면 빈 글)이다.
 
         `base`와 `target`을 넘기면 그 두 시점의 비교에 묶어 둔 설명을 `compared`에 함께 담는다. 그 설명의 `digest`는 설명을
         만든 때의 표시 붙은 본문의 지문이고, 지금 본문과 같은지는 그 본문을 가진 화면이 가린다. 두 시점을 넘기면 대상 시점에 없는
@@ -390,22 +399,23 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아니다: {path}")
         found = []
         for kept in latest.listed(root, "range") if path in analyzed.texts else []:
-            file, _, span = kept.name.rpartition(":")
+            file, _, span = kept.name.partition("?")[0].rpartition(":")
             if file != path:
                 continue
             start, end = (int(n) for n in span.split("-"))
             code = range_code(analyzed.texts, path, start, end)
             stale = code is None or digest_of(code) != kept.digest
-            found.append({"start": start, "end": end, "text": kept.text, "stale": stale, "created": kept.created})
+            lines = {"start": start, "end": end, "question": kept.question}
+            found.append({**lines, "text": kept.text, "stale": stale, "created": kept.created})
         listed = {"explanations": sorted(found, key=lambda e: (e["start"], e["end"]))}
         if base is None or target is None:
             return listed
         compared = []
         for kept in latest.listed(root, "compared"):
-            spans = compared_spans(kept.name, base, target, path)
+            spans = compared_spans(kept.name.partition("?")[0], base, target, path)
             if spans is not None:
                 (old_start, old_end), (start, end) = spans
-                lines = {"start": start, "end": end, "old_start": old_start, "old_end": old_end}
+                lines = {"start": start, "end": end, "old_start": old_start, "old_end": old_end, "question": kept.question}
                 compared.append({**lines, "text": kept.text, "digest": kept.digest, "created": kept.created})
         return {**listed, "compared": sorted(compared, key=lambda e: (e["old_start"], e["old_end"], e["start"]))}
 
@@ -421,8 +431,11 @@ def create_app(
         old_start: int | None = Query(None, ge=1),
         old_end: int | None = Query(None, ge=1),
         code: str | None = Body(None, embed=True),
+        question: str | None = Body(None, embed=True),
     ) -> dict:
         """코드 범위의 설명을 만든다. 두 시점을 엮은 문서에서 고른 범위에 바뀐 줄이 있으면 본문 `code`에 표시 붙은 본문이 온다.
+
+        본문 `question`에 그 범위를 두고 적은 질문이 오면 설명 대신 그 질문의 답을 만들고, 같은 범위의 다른 질문과 따로 남긴다.
 
         삭제된 줄이 든 범위는 두 시점과 기준 시점의 줄(`old_start`, `old_end`)이 함께 오고, `start`와 `end`는 대상 시점의
         줄이며 그 범위에 대상 시점의 줄이 없으면 둘 다 0이다.
@@ -430,9 +443,11 @@ def create_app(
         old = between(base, target, old_start, old_end)
         if old is not None and code is None:
             raise HTTPException(status_code=422, detail="두 시점의 비교에 묶는 범위는 표시 붙은 본문 code를 넘긴다")
-        prompt, subject = explained(path, start, end, code, base, target, old)
+        asked = (question or "").strip()[:MAX_QUESTION]
+        prompt, subject = explained(path, start, end, code, base, target, old, asked)
         explanation = await made(request, app.state.summaries.make(prompt, refresh, "range", subject))
-        return {"start": start, "end": end, "text": explanation.text, "stale": False, "usage": explanation.usage and asdict(explanation.usage)}
+        lines = {"start": start, "end": end, "question": asked}
+        return {**lines, "text": explanation.text, "stale": False, "usage": explanation.usage and asdict(explanation.usage)}
 
     @app.delete("/api/explanation", dependencies=ready)
     def delete_explanation(
@@ -443,13 +458,15 @@ def create_app(
         target: str | None = None,
         old_start: int | None = Query(None, ge=1),
         old_end: int | None = Query(None, ge=1),
+        question: str = "",
     ) -> dict:
         old = between(base, target, old_start, old_end)
         latest = app.state.summaries.latest
         if old is None:
-            latest.delete(app.state.repo["root"], "range", f"{path}:{start}-{end}")
+            latest.delete(app.state.repo["root"], "range", asked_name(f"{path}:{start}-{end}", question))
         else:
-            latest.delete(app.state.repo["root"], "compared", compared_name(base, target, path, old, (start, end)))
+            name = asked_name(compared_name(base, target, path, old, (start, end)), question)
+            latest.delete(app.state.repo["root"], "compared", name)
         return {"deleted": True}
 
     @app.get("/api/changes", dependencies=ready)

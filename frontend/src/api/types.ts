@@ -159,14 +159,18 @@ export interface Summaries {
   summaries: { node: string; lead: string }[];
 }
 
-/** 코드 범위 하나의 설명. start와 end는 1부터 세는 파일 줄 번호다. */
+/** 코드 범위 하나의 코드 분석. start와 end는 1부터 세는 파일 줄 번호다. 같은 범위에 질문이 다른 분석이 여럿 있을 수 있다. */
 export interface Explanation {
   start: number;
   end: number;
+  /** 그 범위를 두고 적은 질문. 질문 없이 범위를 설명하게 했으면 빈 글이다. */
+  question: string;
   /** 문단마다 한 줄 */
   text: string;
-  /** 설명을 만든 뒤 그 줄 범위의 코드가 바뀌었다 */
+  /** 분석을 만든 뒤 그 줄 범위의 코드가 바뀌었다 */
   stale: boolean;
+  /** 분석을 만든 `claude` 호출의 사용량. 만든 응답에만 있고, 캐시에서 읽은 분석은 null이다. */
+  usage?: Usage | null;
 }
 
 /** 두 시점을 엮은 문서에서 고른, 삭제된 줄이 든 범위가 기준 시점에서 차지하는 줄. base와 target은 견준 두 시점의 이름이다. */
@@ -184,7 +188,7 @@ export interface MarkedCode {
 }
 
 /**
- * 두 시점의 비교에 묶어 둔 코드 범위 설명. 삭제된 줄이 든 범위의 설명이다. start와 end는 대상 시점의 줄이고 그 범위에 대상 시점의 줄이
+ * 두 시점의 비교에 묶어 둔 코드 분석. 삭제된 줄이 든 범위의 분석이다. start와 end는 대상 시점의 줄이고 그 범위에 대상 시점의 줄이
  * 없으면 둘 다 0이다. digest는 설명을 만든 때의 표시 붙은 본문의 SHA-256이다.
  */
 export interface ComparedExplanation {
@@ -192,6 +196,7 @@ export interface ComparedExplanation {
   end: number;
   old_start: number;
   old_end: number;
+  question: string;
   text: string;
   digest: string;
 }

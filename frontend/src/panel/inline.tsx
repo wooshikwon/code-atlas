@@ -1,4 +1,4 @@
-// 설명의 문단·목록·코드 블록과 그 안의 백틱 식별자, 정의 표기, 굵은 글씨를 그린다. LLM 요약 칸과 코드 범위 설명 창이 함께 쓴다.
+// 설명의 문단·목록·코드 블록과 그 안의 백틱 식별자, 정의 표기, 굵은 글씨를 그린다. LLM 요약 칸과 코드 분석 창이 함께 쓴다.
 import { useMemo, type ReactNode } from "react";
 import { nodeIndex } from "../graph/visible";
 import { useAtlas } from "../state/store";

@@ -3132,18 +3132,19 @@ async function summaryBusy(t, page) {
 }
 
 /**
- * 코드 범위 설명의 세 엔드포인트에 서버 대신 답한다. 만든 설명은 saved에 두어 페이지를 새로 열어도 남고,
- * POST는 held에 붙잡아 두었다가 answer를 부르면 답한다.
+ * 코드 분석의 세 엔드포인트에 서버 대신 답한다. 만든 분석은 saved에 두어 페이지를 새로 열어도 남고,
+ * POST는 held에 붙잡아 두었다가 answer를 부르면 답한다. 같은 줄 범위에 질문이 다르면 다른 분석이다.
  */
 async function answerExplanations(page) {
   const state = { saved: [], held: [] };
-  const same = (a, b) => a.path === b.path && a.start === b.start && a.end === b.end;
+  const same = (a, b) => a.path === b.path && a.start === b.start && a.end === b.end && a.question === b.question;
   await page.route(
     (at) => at.pathname === "/api/explanations" || at.pathname === "/api/explanation",
     (route) => {
       const request = route.request();
       const query = new URL(request.url()).searchParams;
-      const span = { path: query.get("path"), start: Number(query.get("start")), end: Number(query.get("end")) };
+      const question = (request.method() === "POST" ? request.postDataJSON()?.question : query.get("question")) ?? "";
+      const span = { path: query.get("path"), start: Number(query.get("start")), end: Number(query.get("end")), question };
       if (request.method() === "GET") {
         return route.fulfill({ json: { explanations: state.saved.filter((e) => e.path === span.path).map(({ path, ...rest }) => rest) } });
       }
@@ -3155,7 +3156,7 @@ async function answerExplanations(page) {
         ...span,
         answer: (text) => {
           state.saved = [...state.saved.filter((e) => !same(e, span)), { ...span, text, stale: false }];
-          return route.fulfill({ json: { start: span.start, end: span.end, text, stale: false } });
+          return route.fulfill({ json: { start: span.start, end: span.end, question, text, stale: false, usage: null } });
         },
       });
     },
@@ -3174,7 +3175,7 @@ const codeLine = (page, n) =>
     return rect === undefined ? null : { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
   }, n);
 
-/** 설명을 만들지 않고 서버 대신 답해, 고른 코드 범위의 설명 창과 말풍선 표지를 본다. */
+/** 분석을 만들지 않고 서버 대신 답해, 고른 코드 범위의 질문 입력 창과 코드 분석 창, 말풍선 표지를 본다. */
 async function explain(t, page) {
   const notes = await answerExplanations(page);
   const text = "오늘 날짜의 할 일을 `note_common.py::extract_today_items`로 모은다.\n모은 항목을 줄마다 하나씩 적는다.";
@@ -3205,21 +3206,32 @@ async function explain(t, page) {
   await page.waitForSelector(".code-explain", { timeout: 5_000 }).catch(() => {});
   const button = await rectOf(page, ".code-explain");
   t.check(
-    '범위를 끌어 고르면 고른 끝 아래에 "요약 생성" 버튼이 뜬다',
-    button !== null && (await page.textContent(".code-explain")) === "요약 생성" && button.y >= fifth.y + fifth.height - 2 && button.y < fifth.y + 3 * fifth.height,
+    '범위를 끌어 고르면 고른 끝 아래에 "코드 분석" 버튼이 뜬다',
+    button !== null && (await page.textContent(".code-explain")) === "코드 분석" && button.y >= fifth.y + fifth.height - 2 && button.y < fifth.y + 3 * fifth.height,
     button === null ? "버튼 없음" : `버튼 위 ${button.y.toFixed(0)}, 5번째 줄 아래 ${(fifth.y + fifth.height).toFixed(0)}`,
   );
   await page.click(".code-explain");
+  await page.waitForSelector(".code-ask", { timeout: 5_000 }).catch(() => {});
+  const question = "어떤 항목을 모으나?";
+  t.check(
+    "버튼을 누르면 그 자리에 질문 입력 창이 뜨고 입력 칸이 포커스를 받으며 아직 POST를 보내지 않는다",
+    (await count(page, ".code-ask")) === 1 && (await count(page, ".code-explain")) === 0 && notes.held.length === 0 &&
+      (await page.evaluate(() => document.activeElement?.classList.contains("code-ask-input") === true)),
+    `POST ${notes.held.length}번`,
+  );
+  await page.keyboard.type(question);
+  await page.keyboard.press("Enter");
   await page.waitForSelector(".code-note-window", { timeout: 5_000 }).catch(() => {});
   await page.waitForSelector(".code-note-glyph", { timeout: 5_000 }).catch(() => {});
   const asked = notes.held[0];
   t.check(
-    `버튼을 누르면 ${from + 2}~${from + 4}줄의 POST를 한 번 보내고 범위 아래 창에 "설명을 만드는 중"을 보이며 버튼은 사라진다`,
-    notes.held.length === 1 && asked.start === from + 2 && asked.end === from + 4 &&
-      (await page.textContent(".code-note-window .info-panel-hint")) === "설명을 만드는 중" &&
-      (await page.textContent(".code-note-window .info-panel-label")).replace(/\s/g, "") === `${from + 2}~${from + 4}줄설명` &&
-      (await count(page, ".code-explain")) === 0 && (await count(page, ".code-note-glyph.code-note-making")) === 1,
-    `POST ${notes.held.map((h) => `${h.start}~${h.end}`).join(", ")}`,
+    `Enter로 보내면 ${from + 2}~${from + 4}줄과 질문의 POST를 한 번 보내고 범위 아래 창에 질문과 "코드를 분석하는 중"을 보이며 입력 창은 사라진다`,
+    notes.held.length === 1 && asked.start === from + 2 && asked.end === from + 4 && asked.question === question &&
+      (await page.textContent(".code-note-window .info-panel-hint")) === "코드를 분석하는 중" &&
+      (await page.textContent(".code-note-window .code-note-question")) === question &&
+      (await page.textContent(".code-note-window .info-panel-label")).replace(/\s/g, "") === `${from + 2}~${from + 4}줄코드분석` &&
+      (await count(page, ".code-explain, .code-ask")) === 0 && (await count(page, ".code-note-glyph.code-note-making")) === 1,
+    `POST ${notes.held.map((h) => `${h.start}~${h.end} "${h.question}"`).join(", ")}`,
   );
   const [box, code] = [await rectOf(page, ".code-note-window"), await rectOf(page, ".info-panel .code")];
   t.check(
@@ -3244,8 +3256,9 @@ async function explain(t, page) {
   await page.waitForSelector(".code-note-window .summary-text", { timeout: 5_000 }).catch(() => {});
   const shownText = await page.evaluate(() => [...document.querySelectorAll(".code-note-window .summary-text p")].map((p) => p.textContent).join("\n"));
   t.check(
-    "표지가 범위 시작 줄에 있고, 누르면 만든 설명이 문단 둘로 뜨며 정의 표기는 누를 수 있다",
+    "표지가 범위 시작 줄에 있고, 누르면 질문 아래에 만든 답이 문단 둘로 뜨며 정의 표기는 누를 수 있다",
     near(glyph.y + glyph.height / 2, startLine.y + startLine.height / 2, 3) && shownText === text.replaceAll("`", "") &&
+      (await page.textContent(".code-note-window .code-note-question")) === question &&
       (await count(page, '.code-note-window .summary-ref[data-node="note_common:extract_today_items"]')) === 1,
     shownText.replaceAll("\n", " / "),
   );
@@ -3275,12 +3288,12 @@ async function explain(t, page) {
   }));
   t.check(
     "페이지를 새로 열어도 표지가 남고, 코드가 바뀐 범위는 표지와 본문을 흐리게 그리고 그 사실을 적는다",
-    kept !== null && dim < 1 && stale.note === "코드가 바뀌기 전에 만든 설명" && stale.opacity < 1 && notes.held.length === 1,
+    kept !== null && dim < 1 && stale.note === "코드가 바뀌기 전에 만든 분석" && stale.opacity < 1 && notes.held.length === 1,
     `표지 불투명도 ${dim}, 문구 "${stale.note}", 본문 불투명도 ${stale.opacity}`,
   );
   await page.click(".code-note-window .summary-action:text('지우기')");
   await page.waitForFunction(() => document.querySelector(".code-note-glyph") === null, null, { timeout: 5_000 }).catch(() => {});
-  t.check("지우기를 누르면 창과 표지가 사라지고 저장한 설명도 지워진다", (await count(page, ".code-note-window, .code-note-glyph")) === 0 && notes.saved.length === 0, `저장된 설명 ${notes.saved.length}개`);
+  t.check("지우기를 누르면 창과 표지가 사라지고 저장한 분석도 지워진다", (await count(page, ".code-note-window, .code-note-glyph")) === 0 && notes.saved.length === 0, `저장된 분석 ${notes.saved.length}개`);
 }
 
 /** 요약을 만들지 않고 서버 대신 답해, 코드가 바뀌기 전에 만든 요약을 흐리게 보이고 다시 만드는지 본다. */
