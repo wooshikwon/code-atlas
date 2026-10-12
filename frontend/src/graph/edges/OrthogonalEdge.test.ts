@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture } from "../fixture";
+import { HALF } from "../flow";
 import type { Layout } from "../layout";
 import { drawn } from "../scope";
 import { edgeViews } from "../view";
@@ -30,7 +31,7 @@ describe("flowEdges", () => {
   it("마우스를 올린 선은 그 선의 진하기에서 한 단계만 올려 그린다", () => {
     const view = lines.views[0];
     const drawnLine = flowEdges(lines, new Set([view.key]), new Set()).find((edge) => edge.id === view.key)!;
-    expect(view).toMatchObject({ tone: "muted", opacity: 0.5 });
+    expect(view).toMatchObject({ tone: "muted", opacity: HALF });
     expect(drawnLine.data).toMatchObject({ pointed: true, tone: "muted", opacity: 1 });
   });
 });

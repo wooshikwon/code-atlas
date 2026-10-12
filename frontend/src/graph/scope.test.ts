@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { repoFixture, routeFixture, variableFixture } from "./fixture";
-import { DIM, flow } from "./flow";
+import { DIM, HALF, flow } from "./flow";
 import { lit, route } from "./route";
 import { along, arriving, drawn, endsOf, followed, lifted, picked, trunkTarget, type DrawnEdge } from "./scope";
 import { hidden, nodeIndex, shown, unitOf } from "./visible";
@@ -18,14 +18,14 @@ function draw(selection: string | null, collapsed: string[] = [], hover: string 
 
 describe("lifted", () => {
   it("마우스를 올린 진하기는 한 단계만 오르고 가장 진한 단계는 그대로다", () => {
-    expect(lifted({ tone: "muted", opacity: DIM })).toEqual({ tone: "muted", opacity: 0.5 });
-    expect(lifted({ tone: "muted", opacity: 0.5 })).toEqual({ tone: "muted", opacity: 1 });
+    expect(lifted({ tone: "muted", opacity: DIM })).toEqual({ tone: "muted", opacity: HALF });
+    expect(lifted({ tone: "muted", opacity: HALF })).toEqual({ tone: "muted", opacity: 1 });
     expect(lifted({ tone: "muted", opacity: 1 })).toEqual({ tone: "strong", opacity: 1 });
     expect(lifted({ tone: "strong", opacity: 1 })).toEqual({ tone: "strong", opacity: 1 });
   });
 
   it("단계 사이의 불투명도는 바로 위 단계로 오른다", () => {
-    expect(lifted({ tone: "muted", opacity: 0.4 })).toEqual({ tone: "muted", opacity: 0.5 });
+    expect(lifted({ tone: "muted", opacity: 0.5 })).toEqual({ tone: "muted", opacity: HALF });
   });
 });
 
@@ -52,7 +52,7 @@ describe("drawn", () => {
       group: "run",
       kinds: { import: 1, call: 3 },
       tone: "muted",
-      opacity: 0.5,
+      opacity: HALF,
       deferred: false,
     });
     expect(edges.get("pkg.mod|pkg.util|import")?.deferred).toBe(true);
@@ -348,7 +348,7 @@ describe("along, followed", () => {
     const marked = opened.filter((e) => e.via);
     expect(marked.map((e) => e.key)).toEqual(["agg|main|pkg.mod"]);
     expect(marked.every((e) => e.tone === "strong" && e.opacity === 1)).toBe(true);
-    expect(opened.filter((e) => !e.via).every((e) => e.tone === "muted" && e.opacity === 0.5)).toBe(true);
+    expect(opened.filter((e) => !e.via).every((e) => e.tone === "muted" && e.opacity === HALF)).toBe(true);
   });
 });
 

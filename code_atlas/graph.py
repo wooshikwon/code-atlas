@@ -104,12 +104,14 @@ def _overrides(nodes: dict[str, Node], parents: dict[str, list[str]], facts: lis
 
 
 def _mark_entries(repo: RepoFiles, facts: list[FileFacts], nodes: dict[str, Node]) -> None:
+    """실행 스크립트의 대상과 진입점 데코레이터가 붙은 함수를 진입점으로 표시한다. 대상이 변수이면 그 변수를 둔 모듈이 진입점이다."""
     prefix = repo.source_root.replace("/", ".") + "." if repo.source_root else ""
     for script in repo.scripts:
         target = script.split("[", 1)[0].strip()
         for nid in (target, target[len(prefix) :] if prefix and target.startswith(prefix) else None):
             if nid and nid in nodes:
-                nodes[nid].entry = True
+                node = nodes[nid]
+                (nodes[node.parent] if node.kind == "variable" else node).entry = True
                 break
     for f in facts:
         for info in f.defs.values():

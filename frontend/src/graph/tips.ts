@@ -12,9 +12,16 @@ export const CHANGE_TIPS: Record<Change, string> = {
   added: "추가: 마지막 커밋에 없음",
 };
 
-/** 접힌 상자의 오른쪽 위 배지. 파일 상자는 안에 든 함수·클래스·변수 수, 폴더 상자는 안에 든 파일 수다. */
-export function insideTip(node: AtlasNode, count: number): string {
-  return node.kind === "package" ? `안에 든 파일 ${count}개 · 펼치면 보인다` : `안에 든 함수·클래스·변수 ${count}개 · 고르면 보인다`;
+/**
+ * 상자의 오른쪽 위 배지. 줄이지 않은 줄 수 loc 뒤에 안에 든 것의 수 inside를 적는다. 파일 상자는 안에 든 함수·클래스·변수 수,
+ * 폴더는 안에 든 파일 수이고, 안에 든 것이 없는 상자와 클래스는 줄 수만 적는다.
+ */
+export function sizeTip(node: AtlasNode, loc: number, inside: number): string {
+  const lines = `줄 수 ${loc}줄 · 빈 줄을 뺀 수`;
+  if (inside === 0) {
+    return lines;
+  }
+  return node.kind === "package" ? `${lines} · 안에 든 파일 ${inside}개` : `${lines} · 안에 든 함수·클래스·변수 ${inside}개`;
 }
 
 /** 모듈 변수 변경 배지 `g`. names는 그 함수에서 나가는 바꿈 선의 도착 변수 이름이다. */
@@ -34,11 +41,6 @@ export function busyTip(node: AtlasNode, count: number): string {
 export function valueTip(node: AtlasNode): string {
   const aside = valueAside(node);
   return node.value === null || node.value.text === "" ? aside : `${aside} · ${node.value.text}`;
-}
-
-/** 이름표 옆 줄 수 숫자 */
-export function locTip(node: AtlasNode): string {
-  return `줄 수 ${node.loc}줄 · 빈 줄을 뺀 수`;
 }
 
 const NAMES_MAX = 5;

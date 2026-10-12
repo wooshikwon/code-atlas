@@ -13,7 +13,6 @@ import {
   CIRCLE_GAP,
   elkGraphs,
   labelOf,
-  LOC_GAP,
   packLabel,
   ASIDE_GAP,
   boxCaption,
@@ -219,15 +218,15 @@ describe("elkGraphs", () => {
     expect(kidsOf(find(mod, "pkg.mod:Store"))?.map((c) => c.id)).toEqual(["pkg.mod:Store.load", "pkg.mod:Store.save"]);
   });
 
-  it("함수·메서드는 원, 배지가 나오는 폭과 그 뒤에 남기는 폭, 이름표, 줄 수 숫자를 담는 폭에 높이 18이다", () => {
+  it("함수·메서드는 원, 배지가 나오는 폭과 그 뒤에 남기는 폭, 이름표를 담는 폭에 높이 18이다", () => {
     const load = find(opened.components[0], "pkg.mod:Store.load")!;
     expect(CIRCLE_GAP).toBe(BADGE_OVERHANG + BADGE_GAP);
-    expect(load).toMatchObject({ width: 16 + BADGE_OVERHANG + BADGE_GAP + measure("load()") + 5 + measure("9"), height: 18 });
+    expect(load).toMatchObject({ width: 16 + BADGE_OVERHANG + BADGE_GAP + measure("load()"), height: 18 });
   });
 
-  it("데이터 클래스는 머리 칸에 줄 수 숫자 폭을 더한 표 크기다", () => {
+  it("데이터 클래스는 머리 칸의 이름표와 필드 줄 가운데 넓은 폭의 표 크기다", () => {
     const row = find(opened.components[0], "pkg.mod:Row")!;
-    const head = measure("Row") + 5 + measure("9");
+    const head = measure("Row");
     expect(row).toMatchObject({ width: Math.max(head, measure("a: int")) + 16, height: 24 + 6 * 18 + 4 });
   });
 
@@ -521,8 +520,8 @@ describe("변수 노드의 배치", () => {
     const input = elkGraphs(variableFixture, at("conf", ["conf"]), variableCols, measure, new Map());
     const presets = find(input.components[0], "conf:PRESETS")!;
     const clamp = find(input.components[0], "conf:clamp")!;
-    expect(presets.width).toBe(16 + CIRCLE_GAP + measure("PRESETS") + LOC_GAP + measure("6") + ASIDE_GAP + measure("dict · 2개"));
-    expect(clamp.width).toBe(16 + CIRCLE_GAP + measure("clamp()") + LOC_GAP + measure("9"));
+    expect(presets.width).toBe(16 + CIRCLE_GAP + measure("PRESETS") + ASIDE_GAP + measure("dict · 2개"));
+    expect(clamp.width).toBe(16 + CIRCLE_GAP + measure("clamp()"));
     expect(presets.height).toBe(clamp.height);
   });
 

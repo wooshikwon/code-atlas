@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cycles } from "./cycles";
 import { node, routeFixture } from "./fixture";
-import { DIM, flow } from "./flow";
+import { DIM, HALF, flow } from "./flow";
 import { cycleLines, cycleMarks, unusedCounts } from "./overlay";
 import { lit, route } from "./route";
 import { drawn } from "./scope";
@@ -64,7 +64,7 @@ describe("cycleLines", () => {
     expect(lines.keys.has("lazy.one|lazy.two|import")).toBe(false);
     expect(lines.keys.has("ring.a|lazy.two|import")).toBe(false);
     expect(lines.edges.filter((e) => lines.keys.has(e.key)).every((e) => e.opacity === 1)).toBe(true);
-    expect(lines.edges.find((e) => e.key === "ring.a|lazy.two|import")?.opacity).toBe(0.5);
+    expect(lines.edges.find((e) => e.key === "ring.a|lazy.two|import")?.opacity).toBe(HALF);
   });
 
   it("접힌 폴더로 올라간 집계 선은 순환 선이 아니다", () => {

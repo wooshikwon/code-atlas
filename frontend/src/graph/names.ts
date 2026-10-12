@@ -110,3 +110,12 @@ export function nameOf(nodes: Map<string, AtlasNode>, node: AtlasNode): string {
       return node.name;
   }
 }
+
+/** 큰 수를 줄여 적는 글. 1,000 미만은 그대로 적고, 그 이상은 k 단위로 10k 미만은 소수 한 자리까지, 10k부터는 정수로 반올림해 적는다. */
+export function kilo(count: number): string {
+  if (count < 1000) {
+    return String(count);
+  }
+  const k = count / 1000;
+  return `${k < 9.95 ? k.toFixed(1) : Math.round(k)}k`;
+}

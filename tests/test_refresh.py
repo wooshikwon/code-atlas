@@ -238,6 +238,24 @@ async def test_variable_nodes_and_edges_equal_a_full_analysis(sample_repo, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_script_naming_a_variable_marks_its_module_as_the_entry(sample_repo, tmp_path):
+    store = Cache(sample_repo, tmp_path / "cache")
+    async with started() as live, started() as reopened, started() as full:
+        first = await refresh(sample_repo, sys.executable, live, cache=store)
+        swap(sample_repo, "pyproject.toml", "app.cli:main", "app.tables:LIMITS")
+        from_cache = await refresh(sample_repo, sys.executable, reopened, cache=store)
+        from_previous = await refresh(sample_repo, sys.executable, live, previous=first)
+        expected = await refresh(sample_repo, sys.executable, full)
+    store.close()
+    assert {n.id for n in first.analysis.nodes if n.entry} == {"app.cli", "app.cli:main"}
+    assert {n.id: n.kind for n in expected.analysis.nodes if n.entry} == {"app.cli": "module", "app.tables": "module"}
+    assert "app.tables:LIMITS" in {n.id for n in expected.analysis.nodes if n.kind == "variable"}
+    assert judged(from_cache) == judged(expected)
+    assert judged(from_previous) == judged(expected)
+    assert reopened.asked == []
+
+
+@pytest.mark.asyncio
 async def test_variable_added_elsewhere_extracts_the_files_that_name_it_again(sample_repo):
     session = FakeSession()
     first = await refresh(sample_repo, sys.executable, session)

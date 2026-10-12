@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture, variableFixture } from "./fixture";
-import { busyTip, cycleTip, globalTip, insideTip, locTip, nodeTip, packCount, packTip, valueTip } from "./tips";
+import { busyTip, cycleTip, globalTip, nodeTip, packCount, packTip, sizeTip, valueTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
 const [file, folder, fn] = [nodes.get("main")!, nodes.get("pkg")!, nodes.get("main:run")!];
 
 describe("배지 말풍선", () => {
-  it("접힌 상자의 배지는 파일 상자면 안에 든 함수·클래스·변수 수, 폴더 상자면 안에 든 파일 수를 적는다", () => {
-    expect(insideTip(file, 9)).toBe("안에 든 함수·클래스·변수 9개 · 고르면 보인다");
-    expect(insideTip(folder, 30)).toBe("안에 든 파일 30개 · 펼치면 보인다");
+  it("상자의 배지는 줄이지 않은 줄 수 뒤에 파일 상자면 안에 든 함수·클래스·변수 수, 폴더면 안에 든 파일 수를 적는다", () => {
+    expect(sizeTip(file, 221, 9)).toBe("줄 수 221줄 · 빈 줄을 뺀 수 · 안에 든 함수·클래스·변수 9개");
+    expect(sizeTip(folder, 48213, 30)).toBe("줄 수 48213줄 · 빈 줄을 뺀 수 · 안에 든 파일 30개");
+    expect(sizeTip(file, 3, 0)).toBe("줄 수 3줄 · 빈 줄을 뺀 수");
+    expect(sizeTip({ ...fn, kind: "class" }, 40, 0)).toBe("줄 수 40줄 · 빈 줄을 뺀 수");
   });
 
   it("손잡이는 안에서만 쓰이는 자식의 수와 이름을 적고 여섯 개부터는 줄인다", () => {
@@ -39,11 +41,10 @@ describe("배지 말풍선", () => {
     expect(valueTip(fn)).toBe("");
   });
 
-  it("도는 원, 줄 수는 수를 함께 적는다", () => {
+  it("도는 원은 수를 함께 적는다", () => {
     expect(busyTip(fn, 1)).toBe("LLM 요약을 만드는 중 1개");
     expect(busyTip(file, 2)).toBe("LLM 요약을 만드는 중 2개 · 이 상자와 안에 든 노드");
     expect(busyTip(folder, 12)).toBe("LLM 요약을 만드는 중 · 안에 든 노드 남은 12개");
-    expect(locTip({ ...fn, loc: 131 })).toBe("줄 수 131줄 · 빈 줄을 뺀 수");
   });
 
   it("순환 아이콘은 묶음의 파일 수와 이름을 적고 여섯 개부터는 줄인다", () => {

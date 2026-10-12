@@ -11,7 +11,6 @@ import {
   labelOf,
   laneOf,
   LEAF_HEIGHT,
-  LOC_GAP,
   NODE_GAP,
   ordered,
   outPort,
@@ -140,18 +139,12 @@ export function fileLabel(nodes: Map<string, AtlasNode>, node: AtlasNode): strin
   return unit === undefined || unit.id === node.id ? null : labelOf(unit);
 }
 
-/** 클래스를 뺀 노드는 이름표 오른쪽에 줄 수를 적는다. */
-export function counted(node: AtlasNode): boolean {
-  return node.kind !== "class";
-}
-
 /** 노드 크기. 원과 그 오른쪽의 이름표 줄·파일 경로 줄이고, 더 펼 선이 남은 노드는 + 버튼의 폭을 더한다. */
 export function callSize(calls: Calls, nodes: Map<string, AtlasNode>, node: AtlasNode, measure: Measure): Size {
   const side = calls.side.get(node.id)!;
   const label = (node.entry ? ENTRY_MARK_WIDTH : 0) + measure(callLabel(nodes, node), side === "center");
-  const name = counted(node) ? label + LOC_GAP + measure(String(node.loc)) : label;
   const file = fileLabel(nodes, node);
-  const text = Math.max(name, file === null ? 0 : measure(file));
+  const text = Math.max(label, file === null ? 0 : measure(file));
   return {
     width: Math.ceil(CIRCLE + CIRCLE_GAP + text + (calls.more.has(node.id) ? MORE_GAP[side] + MORE : 0)),
     height: LEAF_HEIGHT + FILE_HEIGHT,
