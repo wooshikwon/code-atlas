@@ -13,6 +13,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
 from typing import TypeVar
 
@@ -26,7 +27,7 @@ from .lsp import Location, Session, to_utf8
 from .model import Analysis, Node, to_dict
 from .resolve import EXTERNAL_PREFIX, external_of
 from .runner import Runner
-from .summary import Subject, Summaries, SummaryError, digest_of, lead_of, prompt_of, range_code, range_prompt_of
+from .summary import Made, Subject, Summaries, SummaryError, digest_of, lead_of, prompt_of, range_code, range_prompt_of
 
 HOST = "127.0.0.1"
 PORT = 8766
@@ -308,7 +309,7 @@ def create_app(
         found = [{"node": k.name, "lead": lead_of(k.text)} for k in kept if k.name in app.state.nodes]
         return {"summaries": sorted(found, key=lambda s: s["node"])}
 
-    async def made(request: Request, making: Awaitable[str]) -> str:
+    async def made(request: Request, making: Awaitable[Made]) -> Made:
         """설명을 다 만들 때까지 기다린다. 호출자가 먼저 연결을 끊으면 기다리기를 그만둔다."""
         task = asyncio.ensure_future(making)
         gone = asyncio.ensure_future(_disconnected(request))
@@ -327,7 +328,8 @@ def create_app(
     @app.post("/api/summary", dependencies=ready)
     async def make_summary(request: Request, node: str, refresh: bool = False) -> dict:
         subject = Subject(app.state.repo["root"], "node", node)
-        return {"summary": await made(request, app.state.summaries.make(summarized(node), refresh, "node", subject))}
+        summary = await made(request, app.state.summaries.make(summarized(node), refresh, "node", subject))
+        return {"summary": summary.text, "usage": summary.usage and asdict(summary.usage)}
 
     def explained(path: str, start: int, end: int) -> tuple[str, Subject]:
         """파일의 줄 범위를 설명을 만들 프롬프트와, 그 설명을 남길 대상으로 바꾼다."""
@@ -360,8 +362,8 @@ def create_app(
         request: Request, path: str, start: int = Query(ge=1), end: int = Query(ge=1), refresh: bool = False
     ) -> dict:
         prompt, subject = explained(path, start, end)
-        text = await made(request, app.state.summaries.make(prompt, refresh, "range", subject))
-        return {"start": start, "end": end, "text": text, "stale": False}
+        explanation = await made(request, app.state.summaries.make(prompt, refresh, "range", subject))
+        return {"start": start, "end": end, "text": explanation.text, "stale": False, "usage": explanation.usage and asdict(explanation.usage)}
 
     @app.delete("/api/explanation", dependencies=ready)
     def delete_explanation(path: str, start: int = Query(ge=1), end: int = Query(ge=1)) -> dict:

@@ -81,7 +81,7 @@ export function App() {
   useEffect(() => (opened ? watch() : undefined), [opened]);
 
   // 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
-  // 정보 패널에 연 파일이 있으면 그 파일만 닫는다.
+  // 정보 패널에 연 파일이 있으면 그 파일만 닫는다. 함수 시점 뷰에서는 구조 뷰로 돌아가고, 구조 뷰에서는 선택을 푼다.
   useEffect(
     () =>
       bind({
@@ -94,6 +94,8 @@ export function App() {
           }
           if (useOpened.getState().path !== null) {
             useOpened.getState().close();
+          } else if (state.view.kind === "function") {
+            state.leaveFunction();
           } else {
             state.select(null);
           }

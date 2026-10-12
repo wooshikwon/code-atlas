@@ -340,6 +340,62 @@ describe("show", () => {
     expect(store().selection).toEqual(node("pkg.mod:Store.save"));
     expect(store().history.entries).toHaveLength(3);
   });
+
+  it("null이면 함수 시점 뷰에서 구조 뷰로 돌아가 선택을 풀고, 구조 뷰에서는 선택만 푼다", () => {
+    store().enterFunction(a);
+    store().show(null);
+    expect(store().view).toEqual({ kind: "structure" });
+    expect(store().selection).toBeNull();
+    expect(store().history).toMatchObject({ index: 2, entries: { length: 3 } });
+    store().back();
+    expect(store().view).toEqual({ kind: "function", center: a, expanded: [] });
+    store().forward();
+    store().select(b);
+    store().show(null);
+    expect(store().selection).toBeNull();
+    expect(selected()).toEqual([null, node(a), null, node(b), null]);
+  });
+});
+
+describe("leaveFunction", () => {
+  it("가운데 함수를 고른 구조 뷰로 돌아가고 뒤로·앞으로가 두 뷰를 오간다", () => {
+    store().enterFunction(a);
+    store().leaveFunction();
+    expect(store().view).toEqual({ kind: "structure" });
+    expect(store().selection).toEqual(node(a));
+    expect(store().history).toMatchObject({ index: 2, entries: { length: 3 } });
+    store().back();
+    expect(store().view).toEqual({ kind: "function", center: a, expanded: [] });
+    expect(store().selection).toEqual(node(a));
+    store().forward();
+    expect(store().view).toEqual({ kind: "structure" });
+    expect(store().selection).toEqual(node(a));
+  });
+
+  it("함수 시점 뷰에서 다른 함수를 골랐으면 그 함수를 고른 구조 뷰로 돌아간다", () => {
+    store().enterFunction(a);
+    store().select(b);
+    store().leaveFunction();
+    expect(store().view).toEqual({ kind: "structure" });
+    expect(store().selection).toEqual(node(b));
+  });
+
+  it("선택을 푼 함수 시점 뷰에서는 가운데 함수를 고르고, 접은 폴더 안의 함수면 그 폴더를 펼친다", () => {
+    store().enterFunction("pkg.mod:Store.save");
+    store().select(null);
+    useAtlas.setState({ collapsed: new Set([folder]) });
+    store().leaveFunction();
+    expect(store().selection).toEqual(node("pkg.mod:Store.save"));
+    expect(store().collapsed).toEqual(new Set());
+  });
+
+  it("구조 뷰에서는 선택과 이력을 바꾸지 않는다", () => {
+    store().select(a);
+    const before = store();
+    store().leaveFunction();
+    expect(store().selection).toEqual(node(a));
+    expect(store().history).toBe(before.history);
+  });
 });
 
 describe("접은 폴더와 선택", () => {

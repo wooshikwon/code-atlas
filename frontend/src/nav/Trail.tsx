@@ -1,6 +1,7 @@
 // 상단 줄의 탐색 경로 표시. 고른 노드(함수 시점 뷰에서는 가운데 함수, 경로 고정 중에는 정보 패널이 보이는 경로 위 노드)까지의
 // 폴더·파일·클래스·함수를 단계로 그린다. 맨 앞에는 늘 레포 이름을 적고 소스 루트가 따로 있으면 그 폴더 이름을 이어 적는다.
-// 두 이름을 누르면 선택을 푼다. 줄 폭이 모자라면 앞 이름부터 `…`로 줄이고 마지막 이름은 늘 남긴다.
+// 두 이름을 누르면 구조 뷰로 돌아가 선택을 푼다. 줄 폭이 모자라면 앞 이름부터 `…`로 줄이고 마지막 이름은 늘 남긴다.
+// 함수 시점 뷰에서는 경로 뒤에 뷰 이름과 구조 뷰로 돌아가는 버튼을 그린다.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AtlasNode } from "../api/types";
 import { labelOf, titleOf } from "../graph/layout";
@@ -26,7 +27,7 @@ export function Trail() {
   const selection = useAtlas((s) => s.selection);
   const finder = useAtlas((s) => s.finder);
   const show = useAtlas((s) => s.show);
-  const select = useAtlas((s) => s.select);
+  const leaveFunction = useAtlas((s) => s.leaveFunction);
   const nodes = useMemo(() => (graph === null ? null : nodeIndex(graph)), [graph]);
 
   const target = view.kind === "function" ? view.center : chosenOf({ finder, selection });
@@ -83,7 +84,7 @@ export function Trail() {
                   &gt;
                 </span>
               )}
-              <button className={index === names.length - 1 ? "trail-root trail-last" : "trail-root"} data-tip="선택 풀기" data-full={name} onClick={() => select(null)}>
+              <button className={index === names.length - 1 ? "trail-root trail-last" : "trail-root"} data-tip="선택 풀기" data-full={name} onClick={() => show(null)}>
                 {name}
               </button>
             </Fragment>
@@ -109,7 +110,17 @@ export function Trail() {
             </Fragment>
           ),
       )}
-      {view.kind === "function" && <span className="trail-view">함수 시점</span>}
+      {view.kind === "function" && (
+        <>
+          <span className="trail-view">리니지 뷰</span>
+          <button className="toolbar-button trail-leave" data-tip="그래프 뷰로 돌아가기 · Esc" aria-label="그래프 뷰로" onClick={leaveFunction}>
+            <span className="trail-leave-name">그래프 뷰로</span>
+            <span className="trail-leave-mark" aria-hidden>
+              ×
+            </span>
+          </button>
+        </>
+      )}
     </nav>
   );
 }
