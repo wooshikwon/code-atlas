@@ -2484,10 +2484,13 @@ async function answerExplanations(page) {
   return state;
 }
 
-/** 코드 뷰어의 n번째 줄(1부터)의 화면 사각형 */
+/** 코드 뷰어에 보이는 n번째 줄(1부터)의 화면 사각형. Monaco가 뷰어 위쪽 밖에 미리 그려 둔 줄은 세지 않는다. */
 const codeLine = (page, n) =>
   page.evaluate((index) => {
-    const lines = [...document.querySelectorAll(".info-panel .monaco-editor .view-line")].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+    const top = document.querySelector(".info-panel .monaco-editor").getBoundingClientRect().top;
+    const lines = [...document.querySelectorAll(".info-panel .monaco-editor .view-line")]
+      .filter((line) => line.getBoundingClientRect().top >= top - 1)
+      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
     const rect = lines[index - 1]?.getBoundingClientRect();
     return rect === undefined ? null : { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
   }, n);
@@ -2500,6 +2503,13 @@ async function explain(t, page) {
     await pickInTree(page, { id: FUNCTION, owner: FILE });
     await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 });
     await page.waitForFunction(() => document.querySelectorAll(".info-panel .monaco-editor .view-line").length > 8);
+    // 요약 칸이 요약의 상태를 받아 높이가 정해진 뒤에 코드 줄의 위치를 잰다.
+    await page.waitForFunction(() => {
+      const summary = document.querySelector(".info-panel-summary");
+      const hints = [...(summary?.querySelectorAll(".info-panel-hint") ?? [])];
+      return summary !== null && (summary.querySelector(".summary-action, .summary-text") !== null || hints.some((hint) => hint.textContent.trim() !== ""));
+    });
+    await page.waitForTimeout(200);
   };
   await load(page);
   await open();
