@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clamp, divide, initial, MIN_CODE, MIN_HEIGHT, MIN_SUMMARY, MIN_WIDTH, move, resize, type Dir } from "./rect";
+import { clamp, divide, initial, MIN_CODE, MIN_HEIGHT, MIN_SUMMARY, MIN_WIDTH, move, resize, scale, share, type Dir } from "./rect";
 
 const area = { width: 1000, height: 800 };
 const rect = { x: 400, y: 100, width: 480, height: 420 };
@@ -88,6 +88,25 @@ describe("clamp", () => {
       width: MIN_WIDTH,
       height: MIN_HEIGHT,
     });
+  });
+});
+
+describe("share와 scale", () => {
+  it("x·width는 영역의 폭으로, y·height는 영역의 높이로 나눈다", () => {
+    expect(share(rect, area)).toEqual({ x: 0.4, y: 0.125, width: 0.48, height: 0.525 });
+  });
+
+  it("같은 영역에서는 처음 사각형으로 돌아온다", () => {
+    expect(scale(share(rect, area), area)).toEqual(rect);
+  });
+
+  it("영역의 크기가 바뀌면 위치와 크기가 같은 비율로 바뀐다", () => {
+    expect(scale(share(rect, area), { width: 2000, height: 1200 })).toEqual({ x: 800, y: 150, width: 960, height: 630 });
+    expect(scale(share(rect, area), { width: 1500, height: 600 })).toEqual({ x: 600, y: 75, width: 720, height: 315 });
+  });
+
+  it("비율로 구한 크기가 최소 크기보다 작으면 최소 크기로 그린다", () => {
+    expect(scale(share(rect, area), { width: 500, height: 100 })).toEqual({ x: 200, y: 13, width: MIN_WIDTH, height: MIN_HEIGHT });
   });
 });
 

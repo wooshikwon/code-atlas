@@ -71,7 +71,10 @@ export interface AtlasStore {
   theme: Theme;
   history: History;
   finder: Finder;
-  /** 사용자가 옮기거나 크기를 바꾼 정보 패널의 사각형. null이면 기본 사각형(`panel/rect.ts`의 `initial`)이다. */
+  /**
+   * 사용자가 옮기거나 크기를 바꾼 정보 패널의 사각형을 관계 그래프 영역의 크기로 나눈 값(`panel/rect.ts`의 `share`). x·width는 영역의 폭으로,
+   * y·height는 영역의 높이로 나눈다. null이면 기본 사각형(`panel/rect.ts`의 `initial`)이다.
+   */
   panel: Rect | null;
   /** 코드 뷰어와 함께 보이는 LLM 요약 칸의 높이를 정보 패널 높이로 나눈 값. null이면 요약 칸이 내용만큼, 패널 높이의 4분의 1까지 쓴다. */
   split: number | null;
@@ -192,7 +195,7 @@ export interface AtlasStore {
 
 type Ui = Pick<AtlasStore, "panel" | "split" | "factsOpen" | "summaryOpen" | "legendOpen" | "minimapOpen" | "theme" | "depth" | "autoSummary">;
 
-const UI_KEY = "code-atlas:ui:v2";
+const UI_KEY = "code-atlas:ui:v3";
 
 function isRect(value: unknown): value is Rect {
   if (typeof value !== "object" || value === null) {

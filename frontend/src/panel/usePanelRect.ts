@@ -1,10 +1,10 @@
-// 정보 패널의 사각형을 저장소에서 읽어 관계 그래프 영역에 맞추고, 머리 줄과 손잡이를 끄는 동작을 사각형으로 바꾼다.
-// 저장한 사각형이 없으면 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운 기본 사각형을 쓴다.
-// 기본 사각형은 영역의 크기가 바뀔 때마다 다시 계산한다.
+// 정보 패널의 비율 사각형을 저장소에서 읽어 관계 그래프 영역의 픽셀 사각형으로 바꾸고, 머리 줄과 손잡이를 끄는 동작을 사각형으로 바꾼다.
+// 저장한 비율 사각형이 없으면 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운 기본 사각형을 쓴다.
+// 두 사각형 모두 영역의 크기가 바뀔 때마다 다시 계산한다.
 import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { useAtlas, type Rect } from "../state/store";
 import { drag } from "./drag";
-import { clamp, initial, move, resize, type Area, type Dir } from "./rect";
+import { initial, move, resize, scale, share, type Area, type Dir } from "./rect";
 
 export type Grip = "move" | Dir;
 
@@ -14,7 +14,7 @@ interface PanelRect {
   rect: Rect | null;
   /** 머리 줄("move")이나 손잡이의 pointerdown에 넣는 처리기 */
   grip: (kind: Grip) => (event: ReactPointerEvent<HTMLElement>) => void;
-  /** 저장한 사각형을 지워 기본 사각형으로 돌아간다. */
+  /** 저장한 비율 사각형을 지워 기본 사각형으로 돌아간다. */
   reset: () => void;
 }
 
@@ -43,7 +43,7 @@ export function usePanelRect(): PanelRect {
     return () => observer.disconnect();
   }, []);
 
-  const rect = area === null ? null : saved === null ? initial(area) : clamp(saved, area);
+  const rect = area === null ? null : saved === null ? initial(area) : scale(saved, area);
 
   const grip = (kind: Grip) => (event: ReactPointerEvent<HTMLElement>) => {
     const panel = ref.current;
@@ -60,7 +60,7 @@ export function usePanelRect(): PanelRect {
       },
       () => {
         if (last !== null) {
-          setPanel(last);
+          setPanel(share(last, area));
         }
       },
     );

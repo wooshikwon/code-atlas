@@ -1,4 +1,4 @@
-// 정보 패널 사각형의 이동·크기 조절·자르기와 LLM 요약 칸의 높이 조절. 좌표는 관계 그래프 영역의 왼쪽 위에서 잰다.
+// 정보 패널 사각형의 이동·크기 조절·자르기·비율 변환과 LLM 요약 칸의 높이 조절. 좌표는 관계 그래프 영역의 왼쪽 위에서 잰다.
 import type { Rect } from "../state/store";
 
 export type Dir = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -42,6 +42,24 @@ export function initial(area: Area): Rect {
   const height = area.height - 2 * gap;
   const { width } = clamp({ x: 0, y: 0, width: Math.round(area.width * DEFAULT_SHARE), height }, area);
   return clamp({ x: area.width - gap - width, y: gap, width, height }, area);
+}
+
+/** 사각형의 x·width를 영역의 폭으로, y·height를 영역의 높이로 나눈 비율 사각형. 저장소에는 이 값을 담는다. */
+export function share(rect: Rect, area: Area): Rect {
+  return { x: rect.x / area.width, y: rect.y / area.height, width: rect.width / area.width, height: rect.height / area.height };
+}
+
+/** 비율 사각형 shares를 영역 area의 픽셀 사각형으로 바꾸고 `clamp`로 자른다. */
+export function scale(shares: Rect, area: Area): Rect {
+  return clamp(
+    {
+      x: Math.round(shares.x * area.width),
+      y: Math.round(shares.y * area.height),
+      width: Math.round(shares.width * area.width),
+      height: Math.round(shares.height * area.height),
+    },
+    area,
+  );
 }
 
 export function move(rect: Rect, dx: number, dy: number, area: Area): Rect {
