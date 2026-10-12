@@ -444,13 +444,13 @@ async function load(page, at = url, unfold = true) {
 }
 
 /**
- * 정보 패널을 관계 그래프 영역의 오른쪽 끝으로 밀어 둔 채로 화면이 열리게 한다. 저장한 사각형이 영역을 벗어나면 화면이 머리 줄 60px만
- * 영역 안에 남기므로, 기본 패널이 덮는 그래프의 오른쪽 열(줄기의 도착 노드 앞)을 마우스로 가리킬 수 있다. load보다 먼저 부른다.
+ * 정보 패널을 관계 그래프 영역의 오른쪽 끝으로 밀어 둔 채로 화면이 열리게 한다. 저장한 비율 사각형이 영역을 벗어나면 화면이 최소 폭의
+ * 패널을 머리 줄 60px만 영역 안에 남겨 그리므로, 기본 패널이 덮는 그래프의 오른쪽 열(줄기의 도착 노드 앞)을 마우스로 가리킬 수 있다. load보다 먼저 부른다.
  */
 async function asidePanel(page) {
   await page.addInitScript(() => {
-    if (localStorage.getItem("code-atlas:ui:v2") === null) {
-      localStorage.setItem("code-atlas:ui:v2", JSON.stringify({ panel: { x: 100_000, y: 0, width: 260, height: 100_000 } }));
+    if (localStorage.getItem("code-atlas:ui:v3") === null) {
+      localStorage.setItem("code-atlas:ui:v3", JSON.stringify({ panel: { x: 1, y: 0, width: 0, height: 1 } }));
     }
   });
 }
@@ -1023,6 +1023,36 @@ async function body(t, page) {
   t.check("선택이 바뀌지 않는다", before.selected === FUNCTION && same(after, before), `누른 곳 (${spot.x}, ${spot.y}), 선택 ${after.selected}`);
 }
 
+/** 기본 사각형이 지금의 관계 그래프 영역에서 폭의 40%(최소 폭보다 좁으면 최소 폭)를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄우는지 */
+async function docked(page) {
+  const { area, panel: box } = await stageOf(page);
+  const width = Math.max(PANEL_MIN, Math.round(area.width * PANEL_SHARE));
+  const gap = Math.round(area.width * PANEL_GAP);
+  const ok =
+    near(box.width, width) && near(box.x + box.width, area.x + area.width - gap) && near(box.y, area.y + gap) && near(box.height, area.height - 2 * gap);
+  return { ok, text: `영역 ${Math.round(area.width)}×${Math.round(area.height)}, 패널 ${rectText(box)}, 기대 폭 ${width}, 기대 여백 ${gap}` };
+}
+
+/** 창 크기를 바꾼 뒤 기본 패널이 새 영역에 다시 놓일 때까지 기다린다. */
+async function redocked(page) {
+  await page
+    .waitForFunction(
+      ([share, least, margin]) => {
+        const [box, stage] = [document.querySelector(".info-panel").getBoundingClientRect(), document.querySelector(".stage").getBoundingClientRect()];
+        const gap = Math.round(stage.width * margin);
+        return (
+          Math.abs(box.width - Math.max(least, Math.round(stage.width * share))) <= 1 &&
+          Math.abs(box.right - (stage.right - gap)) <= 1 &&
+          Math.abs(box.height - (stage.height - 2 * gap)) <= 1
+        );
+      },
+      [PANEL_SHARE, PANEL_MIN, PANEL_GAP],
+      { timeout: 5_000 },
+    )
+    .catch(() => {});
+  await settle(page);
+}
+
 async function panel(t, page) {
   await load(page);
   const start = await rectOf(page, ".info-panel");
@@ -1035,43 +1065,15 @@ async function panel(t, page) {
     sameRect(short, { ...start, height: start.height - 200 }),
     `${rectText(start)} → ${rectText(short)}`,
   );
-  /** 기본 사각형이 지금의 관계 그래프 영역에서 폭의 40%(최소 폭보다 좁으면 최소 폭)를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄우는지 */
-  const docked = async () => {
-    const { area, panel: box } = await stageOf(page);
-    const width = Math.max(PANEL_MIN, Math.round(area.width * PANEL_SHARE));
-    const gap = Math.round(area.width * PANEL_GAP);
-    const ok =
-      near(box.width, width) && near(box.x + box.width, area.x + area.width - gap) && near(box.y, area.y + gap) && near(box.height, area.height - 2 * gap);
-    return { ok, text: `영역 ${Math.round(area.width)}×${Math.round(area.height)}, 패널 ${rectText(box)}, 기대 폭 ${width}, 기대 여백 ${gap}` };
-  };
-  /** 창 크기를 바꾼 뒤 기본 패널이 새 영역에 다시 놓일 때까지 기다린다. */
-  const redocked = async () => {
-    await page
-      .waitForFunction(
-        ([share, least, margin]) => {
-          const [box, stage] = [document.querySelector(".info-panel").getBoundingClientRect(), document.querySelector(".stage").getBoundingClientRect()];
-          const gap = Math.round(stage.width * margin);
-          return (
-            Math.abs(box.width - Math.max(least, Math.round(stage.width * share))) <= 1 &&
-            Math.abs(box.right - (stage.right - gap)) <= 1 &&
-            Math.abs(box.height - (stage.height - 2 * gap)) <= 1
-          );
-        },
-        [PANEL_SHARE, PANEL_MIN, PANEL_GAP],
-        { timeout: 5_000 },
-      )
-      .catch(() => {});
-    await settle(page);
-  };
   for (const width of [1280, 720]) {
     await page.setViewportSize({ width, height: VIEW.height });
-    await redocked();
-    const narrow = await docked();
+    await redocked(page);
+    const narrow = await docked(page);
     t.check(`창 폭을 ${width}px로 바꾸면 기본 패널이 영역 폭의 40%와 1% 여백을 따라 다시 놓인다`, narrow.ok, narrow.text);
   }
   await page.setViewportSize(VIEW);
-  await redocked();
-  const wide = await docked();
+  await redocked(page);
+  const wide = await docked(page);
   t.check("기본 패널은 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운다", wide.ok && sameRect(await rectOf(page, ".info-panel"), start), wide.text);
   await drag(page, center(await rectOf(page, ".info-panel-head")), -300, 40);
   await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="nw"]')), -60, 80);
@@ -1095,6 +1097,103 @@ async function panel(t, page) {
   await settle(page);
   const again = await rectOf(page, ".info-panel");
   t.check("새로고침 뒤에도 기본 사각형이다", sameRect(again, start), rectText(again));
+}
+
+const HF11 = (width) => join(OUT, `hf11-panel-${width}.png`);
+
+/**
+ * 창 크기 세 개에서 기본 패널과 사용자가 옮기고 크기를 바꾼 패널이 관계 그래프 영역의 크기에 대한 비율을 따르는지 본다.
+ * 창 크기마다 처음 연 화면을 `hf11-panel-{1440,1920,2560}.png`로 남긴다.
+ */
+async function panelRatio(t, page) {
+  const SIZES = [
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+    { width: 2560, height: 1440 },
+  ];
+  /** 패널의 사각형을 관계 그래프 영역의 폭과 높이로 나눈 값 */
+  const shares = async () => {
+    const { area, panel: box } = await stageOf(page);
+    return { x: (box.x - area.x) / area.width, y: (box.y - area.y) / area.height, width: box.width / area.width, height: box.height / area.height };
+  };
+  /** 패널이 지금의 영역에서 비율 want를 1px 안에서 따르는지 */
+  const follows = async (want) => {
+    const { area } = await stageOf(page);
+    const now = await shares();
+    const ok = near(now.x * area.width, want.x * area.width) && near(now.y * area.height, want.y * area.height) && near(now.width * area.width, want.width * area.width) && near(now.height * area.height, want.height * area.height);
+    const text = (r) => `(${(r.x * 100).toFixed(1)}%, ${(r.y * 100).toFixed(1)}%) ${(r.width * 100).toFixed(1)}%×${(r.height * 100).toFixed(1)}%`;
+    return { ok, text: `영역 ${Math.round(area.width)}×${Math.round(area.height)}, 패널 ${text(now)}, 기대 ${text(want)}` };
+  };
+  /** 창 크기를 바꾸고 패널의 폭이 영역 폭의 want배가 될 때까지 기다린다. */
+  const sized = async (size, want) => {
+    await page.setViewportSize(size);
+    await page
+      .waitForFunction(
+        (share) => {
+          const [box, stage] = [document.querySelector(".info-panel").getBoundingClientRect(), document.querySelector(".stage").getBoundingClientRect()];
+          return Math.abs(box.width - stage.width * share) <= 1;
+        },
+        want,
+        { timeout: 5_000 },
+      )
+      .catch(() => {});
+    await settle(page);
+  };
+  for (const size of SIZES) {
+    await page.setViewportSize(size);
+    await load(page);
+    const first = await docked(page);
+    t.check(`창 ${size.width}×${size.height}에서 처음 연 패널이 영역 폭의 40%를 차지하고 위·오른쪽·아래 끝에서 영역 폭의 1%씩 띄운다`, first.ok, first.text);
+    await page.screenshot({ path: HF11(size.width) });
+  }
+  const [small, middle, large] = SIZES;
+  await page.setViewportSize(middle);
+  await redocked(page);
+  await drag(page, center(await rectOf(page, ".info-panel-head")), -300, 40);
+  await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="nw"]')), -60, 80);
+  await drag(page, center(await rectOf(page, '.info-panel-resize[data-dir="s"]')), 0, -200);
+  const want = await shares();
+  const base = await docked(page);
+  t.check("머리 줄과 손잡이를 끈 패널은 기본 사각형이 아니다", !base.ok, base.text);
+  for (const size of [small, large]) {
+    await sized(size, want.width);
+    const kept = await follows(want);
+    t.check(`창을 ${size.width}×${size.height}로 바꾸면 사용자가 정한 패널의 위치와 크기가 영역에 대한 비율을 유지한다`, kept.ok, kept.text);
+  }
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("code-atlas:ui:v3")).panel);
+  t.check(
+    "저장소에는 패널의 사각형을 영역의 크기로 나눈 값을 담는다",
+    near(stored.x, want.x, 0.002) && near(stored.y, want.y, 0.002) && near(stored.width, want.width, 0.002) && near(stored.height, want.height, 0.002),
+    JSON.stringify(stored),
+  );
+  await page.reload();
+  await page.waitForSelector(".react-flow__node", { timeout: 180_000 });
+  await settle(page);
+  const reloaded = await follows(want);
+  t.check(`창 ${large.width}×${large.height}에서 새로 읽어도 비율이 유지된다`, reloaded.ok, reloaded.text);
+  await pick(page, FILE);
+  await pick(page, FUNCTION);
+  const seen = await reachable(page, FUNCTION);
+  t.check("창 크기를 바꾼 뒤 고른 노드는 새 패널과 왼쪽 아래 칸이 가리지 않는 영역 안으로 와서 눌린다", seen.ok, `이름표 ${seen.at}`);
+  await sized(small, want.width);
+  await page.getByRole("button", { name: "화면 맞춤" }).click();
+  await settle(page);
+  const { free } = await stageOf(page);
+  const out = (
+    await page.evaluate(() =>
+      [...document.querySelectorAll(".react-flow__node")].map((wrapper) => {
+        const r = wrapper.getBoundingClientRect();
+        return { x: r.left, y: r.top, width: r.width, height: r.height };
+      }),
+    )
+  ).filter((rect) => !within(rect, free)).length;
+  t.check('창 크기를 바꾼 뒤 "화면 맞춤"을 누르면 모든 상자가 새 패널이 가리지 않는 영역 안에 들어온다', out === 0, `영역을 벗어난 상자 ${out}개, 가리지 않는 영역 ${rectText(free)}`);
+  await page.dblclick(".info-panel-head");
+  await redocked(page);
+  const reset = await docked(page);
+  t.check("머리 줄을 더블클릭하면 지금 창 크기의 기본 사각형으로 돌아간다", reset.ok, reset.text);
+  await page.setViewportSize(VIEW);
+  await redocked(page);
 }
 
 /** 코드 뷰어에 보이는 줄마다 줄 번호와 흐린 글자가 있는지, 코드 뷰어 위 끝에서 잰 높이. 위에서 아래 순서다. */
@@ -13176,6 +13275,7 @@ const SCENARIOS = [
   ["trail-root", trailRoot],
   ["body", body],
   ["panel", panel],
+  ["panel-ratio", panelRatio],
   ["code-scope", codeScope],
   ["hover", hover],
   ["edge", edge],
