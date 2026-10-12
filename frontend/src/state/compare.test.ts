@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getGraph, getHistory, getRepo, getStat, getTree, getUnused, postCompare } from "../api/client";
+import { forgetFiles, getGraph, getHistory, getRepo, getStat, getSummaries, getTree, getUnused, postCompare } from "../api/client";
 import { WORKTREE, type Commit, type Comparison, type History, type Stat } from "../api/types";
 import { compareFixture, repoFixture } from "../graph/fixture";
 import { firstPicks, parseSize, useCompare } from "./compare";
@@ -7,6 +7,8 @@ import { useOverlay } from "./overlay";
 import { useAtlas, type AtlasStore } from "./store";
 
 vi.mock("../api/client", () => ({
+  forgetFiles: vi.fn(),
+  getSummaries: vi.fn(),
   getGraph: vi.fn(),
   getHistory: vi.fn(),
   getRepo: vi.fn(),
@@ -58,6 +60,7 @@ beforeEach(() => {
   vi.mocked(getGraph).mockResolvedValue(repoFixture);
   vi.mocked(getTree).mockResolvedValue(tree);
   vi.mocked(getUnused).mockResolvedValue({ definitions: 12, candidates: [] });
+  vi.mocked(getSummaries).mockResolvedValue({ summaries: [] });
 });
 
 afterEach(async () => {
@@ -309,7 +312,15 @@ describe("confirm과 clear", () => {
     expect([store().result, store().error, store().running]).toEqual([later, null, false]);
   });
 
-  it("분석하는 중에 끄면 도착한 결과를 그리지 않는다", async () => {
+  it("비교를 켜고 끌 때마다 받아 둔 파일 본문을 버리고 요지 목록을 다시 받는다", async () => {
+    await pin();
+    await store().confirm();
+    expect([vi.mocked(forgetFiles).mock.calls.length, vi.mocked(getSummaries).mock.calls.length]).toEqual([1, 1]);
+    await store().clear();
+    expect([vi.mocked(forgetFiles).mock.calls.length, vi.mocked(getSummaries).mock.calls.length]).toEqual([2, 2]);
+  });
+
+  it("분석하는 중에 끄면 도착한 결과를 그리지 않고 서버가 기억한 시점을 작업 중인 상태로 되돌린다", async () => {
     await pin();
     const answer = held<Comparison>();
     vi.mocked(postCompare).mockReturnValue(answer.promise);
@@ -320,7 +331,7 @@ describe("confirm과 clear", () => {
     await done;
     expect(store().result).toBeNull();
     expect(atlas().graph).toBe(repoFixture);
-    expect(getGraph).not.toHaveBeenCalled();
+    expect(getGraph).toHaveBeenCalledTimes(1);
   });
 
   it("끌 때 그래프를 받지 못하면 비교를 그대로 두고 까닭을 적는다", async () => {

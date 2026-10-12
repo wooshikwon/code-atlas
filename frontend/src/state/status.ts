@@ -87,6 +87,7 @@ export const useStatus = create<StatusStore>()((set, get) => {
   /**
    * 판 번호가 revision인 분석 결과를 받아 그린다. 처음에는 저장해 둔 보기 설정대로 레포를 열고, 그 뒤에는 보던 화면을 새 그래프에 맞춘다.
    * 시점 비교가 켜져 있으면 그래프를 받지 않는다. 대상이 작업 중인 상태인 비교는 그 판으로 다시 받고, 대상이 커밋인 비교는 그대로 둔다.
+   * 비교할 시점을 분석하는 동안과, 그래프를 받는 사이에 비교가 켜지거나 꺼졌을 때는 그리지 않고 다음 주기에 다시 본다.
    * 그리지 못했거나 그리지 않았으면 거짓을 돌려준다.
    */
   const draw = async (first: boolean, revision: number): Promise<boolean> => {
@@ -100,11 +101,14 @@ export const useStatus = create<StatusStore>()((set, get) => {
       return true;
     }
     const compared = useCompare.getState().result;
-    if (compared !== null && compared.target !== WORKTREE) {
+    if (useCompare.getState().running || (compared !== null && compared.target !== WORKTREE)) {
       return false;
     }
     // 그래프와 미사용 후보를 함께 받아 한 번에 담는다. 그래프가 새 분석 결과의 배치를 한 번만 계산한다.
     const received = compared === null ? await Promise.all([getRepo(), getGraph(), getTree(), getUnused().catch(() => null)]) : null;
+    if (useCompare.getState().result !== compared || useCompare.getState().running) {
+      return false;
+    }
     forgetFiles();
     useSummaries.getState().forget();
     useSummaries.getState().list();

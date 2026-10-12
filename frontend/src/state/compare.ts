@@ -2,10 +2,12 @@
 // 비교를 켜면 비교 결과의 그래프와 파일트리로 화면을 바꾸고 보던 화면은 그대로 둔다(`useAtlas`의 `refresh`). 끄면 작업 중인 상태의
 // 그래프를 다시 받아 같은 방법으로 되돌린다. 탐색 이력과 무관하므로 화면 상태 저장소와 따로 두고, 창의 크기만 localStorage에 쓴다.
 import { create } from "zustand";
-import { getGraph, getHistory, getRepo, getStat, getTree, getUnused, postCompare } from "../api/client";
+import { forgetFiles, getGraph, getHistory, getRepo, getStat, getTree, getUnused, postCompare } from "../api/client";
 import { WORKTREE, type Comparison, type History, type Stat } from "../api/types";
+import { useExplanations } from "./explanations";
 import { useOverlay } from "./overlay";
 import { useAtlas } from "./store";
+import { useSummaries } from "./summaries";
 
 /** 커밋 그래프를 한 번에 받는 줄 수 */
 export const PAGE = 200;
@@ -105,6 +107,25 @@ export const useCompare = create<CompareStore>()((set, get) => {
     );
   };
 
+  /** 보이는 시점이 바뀌었으므로 받아 둔 파일 본문과 요약, 코드 분석을 버리고 그 시점의 요지 목록을 다시 받는다. */
+  const moved = () => {
+    forgetFiles();
+    useSummaries.getState().forget();
+    useSummaries.getState().list();
+    useExplanations.getState().forget();
+  };
+
+  /**
+   * 화면이 그리지 않은 비교에 서버가 응답했을 때 부른다. 서버는 마지막으로 응답한 비교의 대상을 요약이 읽는 시점으로 기억하므로,
+   * 화면에 대상이 커밋인 비교가 켜져 있지 않으면 `/api/graph`를 받아 서버의 시점을 작업 중인 상태로 되돌린다.
+   */
+  const settle = () => {
+    const { result, running } = get();
+    if (!running && (result === null || result.target === WORKTREE)) {
+      getGraph().catch(() => undefined);
+    }
+  };
+
   /** 받은 비교로 그래프와 파일트리를 바꾼다. fork는 그 비교의 갈라진 지점이고 chosen은 `기준`으로 고른 줄이다. */
   const draw = (result: Comparison, fork: string | null, chosen: string) => {
     const atlas = useAtlas.getState();
@@ -117,6 +138,7 @@ export const useCompare = create<CompareStore>()((set, get) => {
     atlas.refresh(atlas.repo, result.graph, result.tree);
     useOverlay.getState().mark(result.unused);
     useOverlay.getState().set("compare");
+    moved();
   };
 
   const restore = async () => {
@@ -130,6 +152,7 @@ export const useCompare = create<CompareStore>()((set, get) => {
       if (useOverlay.getState().kind === "compare") {
         useOverlay.getState().set(null);
       }
+      moved();
     } catch (caught) {
       set({ error: reason(caught) });
     }
@@ -208,6 +231,8 @@ export const useCompare = create<CompareStore>()((set, get) => {
         const result = await postCompare(stat.base, stat.target);
         if (turn === asked) {
           draw(result, stat.fork, chosen);
+        } else {
+          settle();
         }
       } catch (caught) {
         if (turn === asked) {
