@@ -6520,6 +6520,19 @@ function ancestry(graph) {
   return { nodes, within, unitOf, edges, origins, title };
 }
 
+/** 경로 path에서 경로 from과 앞에서부터 같은 폴더를 뺀 나머지(`graph/rows.ts`의 `apartFrom`과 같은 규칙) */
+const apartFrom = (path, from) => {
+  const [parts, others] = [path.split("/"), from.replace(/\/$/, "").split("/")];
+  const last = parts.length - (path.endsWith("/") ? 2 : 1);
+  let k = 0;
+  while (k < last && k < others.length - 1 && parts[k] === others[k]) {
+    k += 1;
+  }
+  return parts.slice(k).join("/");
+};
+/** 클래스·함수·메서드 id를 기준 파일 base에서 갈라지는 곳부터 적은 글(`graph/rows.ts`의 `definedName`과 같은 규칙). 파일과 폴더는 이름만 적는다. 선의 말풍선과 정보 패널의 코드 줄 묶음이 쓴다. */
+const nameFrom = (g, tr, base, id) => `${tr.unitOf(id) === id || tr.unitOf(id) === base ? "" : `${apartFrom(tr.title(tr.unitOf(id)), tr.title(base))}::`}${shortName(g, id)}`;
+
 /** 선의 말풍선이 관계 칸에 적는 글(`graph/names.ts`의 `relationsOf`와 같은 규칙) */
 function relationWords(kinds) {
   const counted = Object.keys(KIND_NAMES).filter((kind) => kinds[kind] !== undefined && COUNTED.includes(kind));
@@ -6541,18 +6554,6 @@ async function lineBubble(t, page) {
   };
   /** from에서 to로 가는 그린 선과 누를 점 */
   const lineBetween = async (from, to) => hittable(page, (await linesOf(page)).filter((line) => same(endsOfKey(line.key), [from, to])));
-  /** 경로 path에서 경로 from과 앞에서부터 같은 폴더를 뺀 나머지(`graph/rows.ts`의 `apartFrom`과 같은 규칙) */
-  const apartFrom = (path, from) => {
-    const [parts, others] = [path.split("/"), from.replace(/\/$/, "").split("/")];
-    const last = parts.length - (path.endsWith("/") ? 2 : 1);
-    let k = 0;
-    while (k < last && k < others.length - 1 && parts[k] === others[k]) {
-      k += 1;
-    }
-    return parts.slice(k).join("/");
-  };
-  /** 클래스·함수·메서드 id를 기준 파일 base에서 갈라지는 곳부터 적은 글(`graph/rows.ts`의 `definedName`과 같은 규칙) */
-  const nameFrom = (g, tr, base, id) => `${tr.unitOf(id) === base ? "" : `${apartFrom(tr.title(tr.unitOf(id)), tr.title(base))}::`}${shortName(g, id)}`;
   /**
    * 화면의 선에 차례로 마우스를 올려 말풍선의 줄을 모으고, 줄의 끝이 정의인 칸마다 기준 파일에서 갈라지는 곳부터 적었는지 본다.
    * 기준 파일은 줄의 한 끝만 고른 노드 focus나 그 안의 노드이면 focus가 든 파일이고, 그 밖에는 줄의 다른 쪽 끝이 든 파일이나 폴더다.
@@ -9313,7 +9314,10 @@ async function factsList(t, page) {
   await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 10_000 });
   const links = crossing(graph, LINKED);
   const counted = (edges) => edges.filter((e) => COUNTED.includes(e.kind));
-  const peers = (edges, end) => [...new Set(counted(edges).map((e) => e[end]))].map((id) => shortName(graph, id));
+  const tree = ancestry(graph);
+  /** 묶음 줄의 이름: 고른 노드가 든 파일에서 갈라지는 곳부터 적은 상대 노드의 이름 */
+  const peerName = (id) => nameFrom(graph, tree, tree.unitOf(LINKED), id);
+  const peers = (edges, end) => [...new Set(counted(edges).map((e) => e[end]))].map(peerName);
   const shut = await sitesOf(page);
 
   await page.click('.info-row[data-row="out"] .info-link');
@@ -9428,12 +9432,12 @@ async function factsList(t, page) {
 
   // 묶음 줄의 이름을 눌러 그 노드로 간다
   const first = (await sitesOf(page)).heads[0].name;
-  const target = counted(links.out).map((e) => e.target).find((id) => shortName(graph, id) === first);
+  const target = counted(links.out).map((e) => e.target).find((id) => peerName(id) === first);
   await page.click(".info-panel-sites-name >> nth=0");
   await waitSelected(page, target);
   t.check(
     "묶음 줄의 이름을 누르면 그 노드를 고르고, 노드가 바뀌면 열린 목록이 닫힌다",
-    (await selectedOf(page)) === target && (await factsOf(page)).name === first && (await count(page, ".info-panel-sites")) === 0 && (await sitesOf(page)).pressed.length === 0,
+    (await selectedOf(page)) === target && (await factsOf(page)).name === shortName(graph, target) && (await count(page, ".info-panel-sites")) === 0 && (await sitesOf(page)).pressed.length === 0,
     `선택 ${await selectedOf(page)}, 이름 줄 ${(await factsOf(page)).name}`,
   );
 

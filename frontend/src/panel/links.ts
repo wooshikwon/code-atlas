@@ -1,6 +1,7 @@
 // 정보 패널의 "정보" 구역에 적는 값. 노드의 크기와 안에 든 정의 수, 나가는 연결과 들어오는 연결, 선을 눌러 온 상태의 지나온 선을 계산한다.
 import type { AtlasEdge, AtlasNode, EdgeKind, Graph, SiteRef } from "../api/types";
 import { COUNTED_KINDS, countedOf, kindsOf, nameOf, relationOf, relationsOf } from "../graph/names";
+import { definedName } from "../graph/rows";
 import { along, endsOf, type EdgeKey } from "../graph/scope";
 import { unitOf, within } from "../graph/visible";
 
@@ -31,23 +32,33 @@ export interface Split {
   rest: Links;
 }
 
-/** "정보" 구역의 `연결` 줄과 코드 줄 묶음에 적는 노드 id의 이름. 그래프에 없는 id는 id를 그대로 적는다. */
-export function labelOf(nodes: Map<string, AtlasNode>, id: string): string {
+/**
+ * "정보" 구역의 `연결` 줄과 코드 줄 묶음에 적는 노드 id의 이름. 기준 파일 base를 주면 클래스·함수·메서드를 선의 말풍선과 같이
+ * base에서 갈라지는 곳부터의 경로와 함께 적는다(`graph/rows.ts`의 `definedName`). 그래프에 없는 id는 id를 그대로 적는다.
+ */
+export function labelOf(nodes: Map<string, AtlasNode>, id: string, base: string | null = null): string {
   const node = nodes.get(id);
-  return node === undefined ? id : nameOf(nodes, node);
+  if (node === undefined) {
+    return id;
+  }
+  if (base === null || BOXES.has(node.kind)) {
+    return nameOf(nodes, node);
+  }
+  const { path, name } = definedName(nodes, base, node);
+  return path + name;
 }
 
-/** 원래 선 edges를 노드 id의 코드 줄 묶음 하나로 합친다. */
-export function groupOf(nodes: Map<string, AtlasNode>, id: string, edges: AtlasEdge[]): SiteGroup {
+/** 원래 선 edges를 노드 id의 코드 줄 묶음 하나로 합친다. 묶음의 이름은 기준 파일 base에서 적는다. */
+export function groupOf(nodes: Map<string, AtlasNode>, id: string, edges: AtlasEdge[], base: string | null): SiteGroup {
   const kinds: SiteGroup["kinds"] = {};
   for (const edge of edges) {
     kinds[edge.kind] = (kinds[edge.kind] ?? 0) + edge.sites.length;
   }
-  return { id, name: labelOf(nodes, id), kinds, sites: edges.flatMap((edge) => edge.sites) };
+  return { id, name: labelOf(nodes, id, base), kinds, sites: edges.flatMap((edge) => edge.sites) };
 }
 
-/** 원래 선 edges를 관계 묶음 하나로 합친다. peer는 선마다 코드 줄을 묶을 상대 노드의 id다. */
-function linked(nodes: Map<string, AtlasNode>, edges: AtlasEdge[], peer: (edge: AtlasEdge) => string): Links {
+/** 원래 선 edges를 관계 묶음 하나로 합친다. peer는 선마다 코드 줄을 묶을 상대 노드의 id이고 base는 묶음의 이름을 적는 기준 파일이다. */
+function linked(nodes: Map<string, AtlasNode>, edges: AtlasEdge[], peer: (edge: AtlasEdge) => string, base: string | null): Links {
   const kinds: Links["kinds"] = {};
   const groups = new Map<string, AtlasEdge[]>();
   let total = 0;
@@ -57,13 +68,13 @@ function linked(nodes: Map<string, AtlasNode>, edges: AtlasEdge[], peer: (edge: 
     const id = peer(edge);
     groups.set(id, [...(groups.get(id) ?? []), edge]);
   }
-  return { total, kinds, groups: [...groups].map(([id, among]) => groupOf(nodes, id, among)) };
+  return { total, kinds, groups: [...groups].map(([id, among]) => groupOf(nodes, id, among, base)) };
 }
 
 /**
  * 노드 id에서 나가는 연결(out)과 그 노드로 들어오는 연결(into). 노드와 그 안에 든 노드의 경계를 넘는 선을 세는 관계와 그 밖의 관계로 나눠 담고,
  * off에 든 노드(토글로 숨긴 테스트 코드와 외부 노드)와의 선은 담지 않는다. 코드 줄은 상대 노드마다 묶고, 파일 상자와 폴더 상자를 골랐으면
- * 상대 노드가 든 파일 상자마다 묶는다.
+ * 상대 노드가 든 파일 상자마다 묶는다. 묶음의 이름은 노드 id가 든 파일에서 갈라지는 곳부터 적는다.
  */
 export function linksOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<string>, id: string): { out: Split; into: Split } {
   const boxed = BOXES.has(nodes.get(id)?.kind ?? "function");
@@ -82,8 +93,8 @@ export function linksOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<st
     }
   }
   const split = (edges: AtlasEdge[], other: (edge: AtlasEdge) => string): Split => ({
-    counted: linked(nodes, edges.filter((edge) => COUNTED_KINDS.includes(edge.kind)), other),
-    rest: linked(nodes, edges.filter((edge) => !COUNTED_KINDS.includes(edge.kind)), other),
+    counted: linked(nodes, edges.filter((edge) => COUNTED_KINDS.includes(edge.kind)), other, unitOf(nodes, id)),
+    rest: linked(nodes, edges.filter((edge) => !COUNTED_KINDS.includes(edge.kind)), other, unitOf(nodes, id)),
   });
   return { out: split(out, (edge) => peer(edge.target)), into: split(into, (edge) => peer(edge.source)) };
 }
@@ -95,8 +106,11 @@ export interface Followed {
   links: Links;
 }
 
-/** 선 키 keys가 가리키는 선. off에 든 노드와의 선은 세지 않는다. 키가 가리키는 선이 그래프에 없으면 null이다. */
-export function followedOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<string>, keys: EdgeKey[]): Followed | null {
+/**
+ * 선 키 keys가 가리키는 선. off에 든 노드와의 선은 세지 않는다. 키가 가리키는 선이 그래프에 없으면 null이다.
+ * 출발 노드마다의 묶음은 이름을 기준 파일 base에서 적는다.
+ */
+export function followedOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set<string>, keys: EdgeKey[], base: string | null): Followed | null {
   const ends = keys.map(endsOf);
   const edges = graph.edges.filter((edge) => !off.has(edge.source) && !off.has(edge.target) && along(nodes, keys, edge));
   if (ends.length === 0 || edges.length === 0) {
@@ -104,7 +118,7 @@ export function followedOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set
   }
   const sources = [...new Set(ends.map((end) => end.source))];
   const source = (edge: AtlasEdge) => sources.find((id) => within(nodes, edge.source, id)) ?? edge.source;
-  return { sources, target: ends[0].target, links: linked(nodes, edges, source) };
+  return { sources, target: ends[0].target, links: linked(nodes, edges, source, base) };
 }
 
 /** 안에 든 정의의 수. 파일 상자는 함수와 클래스, 클래스는 메서드, 폴더 상자는 파일을 센다. 그 밖의 노드와 안에 든 것이 없는 노드는 빈 배열이다. */

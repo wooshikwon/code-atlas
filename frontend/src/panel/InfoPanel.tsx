@@ -6,7 +6,7 @@ import type { AtlasNode, Graph, SiteRef } from "../api/types";
 import { CodeView } from "../code/CodeView";
 import { flow } from "../graph/flow";
 import { arriving, picked, trunkTarget } from "../graph/scope";
-import { hidden, nodeIndex, shown, unresolvedWithin } from "../graph/visible";
+import { hidden, nodeIndex, shown, unitOf, unresolvedWithin } from "../graph/visible";
 import { focusOf } from "../state/history";
 import { useOverlay } from "../state/overlay";
 import { chosenOf, litOf, useAtlas, type Selection } from "../state/store";
@@ -115,14 +115,16 @@ export function InfoPanel() {
 
   const chosen = chosenOf({ finder, selection });
   const node = file === null && chosen !== null ? index?.nodes.get(chosen) : undefined;
+  /** 코드 줄 묶음의 이름을 적는 기준 파일: 고른 노드가 든 파일. 고른 노드가 없으면 null이다. */
+  const base = index === null || index === undefined || node === undefined ? null : unitOf(index.nodes, node.id);
 
   /** 선을 눌러 온 상태에서 지나온 선. 경로 고정 중이거나 연 파일을 보이는 동안, 선을 고른 동안에는 보이지 않는다. */
   const arrived = useMemo(
     () =>
       graph === null || index === null || off === null || via === null || lit !== null || file !== null || selection?.type === "edge"
         ? null
-        : followedOf(graph, index.nodes, off, via),
-    [graph, index, off, via, lit, file, selection],
+        : followedOf(graph, index.nodes, off, via, base),
+    [graph, index, off, via, lit, file, selection, base],
   );
 
   /** 고른 노드의 연결과 안에 든 정의 수, 미확인 호출 수. 파일 상자와 폴더 상자는 안에 든 노드의 미확인 호출 수를 합친다. */
@@ -206,10 +208,10 @@ export function InfoPanel() {
       return null;
     }
     if (edge !== null) {
-      return [{ ...groupOf(index.nodes, edge.source, edge.edges), id: null, name: null }];
+      return [{ ...groupOf(index.nodes, edge.source, edge.edges, base), id: null, name: null }];
     }
     if (trunk !== null) {
-      return trunk.edges.map((e) => groupOf(index.nodes, e.source, e.edges));
+      return trunk.edges.map((e) => groupOf(index.nodes, e.source, e.edges, base));
     }
     if (listed === "via" && arrived !== null) {
       const { groups: found } = arrived.links;

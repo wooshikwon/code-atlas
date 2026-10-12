@@ -26,12 +26,22 @@ describe("linksOf", () => {
     const incoming = counted(repoFixture.edges.filter((e) => e.target === "main:helper" && !off.has(e.source)));
     for (const group of into.counted.groups) {
       const among = incoming.filter((e) => e.source === group.id);
-      expect(group).toEqual(groupOf(nodes, group.id!, among));
-      expect(group.name).toBe(labelOf(nodes, group.id!));
+      expect(group).toEqual(groupOf(nodes, group.id!, among, "main"));
+      expect(group.name).toBe(labelOf(nodes, group.id!, "main"));
       expect(Object.values(group.kinds).reduce((sum, n) => sum + n, 0)).toBe(sites(among));
     }
     expect(labelOf(nodes, "pkg.mod:Store.save")).toBe("Store.save()");
     expect(labelOf(nodes, "없는 노드")).toBe("없는 노드");
+  });
+
+  it("기준 파일을 주면 묶음의 이름을 그 파일에서 갈라지는 곳부터 적고 파일과 폴더는 이름만 적는다", () => {
+    expect(labelOf(nodes, "pkg.mod:Store.save", "pkg.mod")).toBe("Store.save()");
+    expect(labelOf(nodes, "pkg.mod:Store.save", "pkg.util")).toBe("mod.py::Store.save()");
+    expect(labelOf(nodes, "pkg.mod:Store.save", "main")).toBe("pkg/mod.py::Store.save()");
+    expect(labelOf(nodes, "pkg.mod", "main")).toBe("mod.py");
+    expect(labelOf(nodes, "없는 노드", "main")).toBe("없는 노드");
+    const { out } = linksOf(repoFixture, nodes, off, "main:run");
+    expect(out.counted.groups.map((group) => group.name)).toContain("pkg/mod.py::Store.load()");
   });
 
   it("파일 상자는 경계를 넘는 선만 세고 상대 노드가 든 파일 상자마다 묶는다", () => {
@@ -59,7 +69,7 @@ describe("linksOf", () => {
 
 describe("followedOf", () => {
   it("집계 선 키가 가리키는 선을 모아 출발 노드와 도착 노드, 종류마다의 수를 낸다", () => {
-    const found = followedOf(repoFixture, nodes, off, ["agg|main|pkg"])!;
+    const found = followedOf(repoFixture, nodes, off, ["agg|main|pkg"], null)!;
     const edges = repoFixture.edges.filter((e) => e.source.split(":")[0] === "main" && e.target.startsWith("pkg."));
     expect(found.sources).toEqual(["main"]);
     expect(found.target).toBe("pkg");
@@ -69,10 +79,11 @@ describe("followedOf", () => {
 
   it("도착 노드가 같은 선 여러 개는 출발 노드마다 묶고, 그래프에 없는 키는 null이다", () => {
     const into = repoFixture.edges.filter((e) => e.target === "main:helper" && !off.has(e.source));
-    const found = followedOf(repoFixture, nodes, off, into.map((e) => `${e.source}|${e.target}|${e.kind}`))!;
+    const found = followedOf(repoFixture, nodes, off, into.map((e) => `${e.source}|${e.target}|${e.kind}`), "main")!;
     expect(found.sources).toEqual([...new Set(into.map((e) => e.source))]);
     expect(found.links.groups).toHaveLength(found.sources.length);
-    expect(followedOf(repoFixture, nodes, off, ["없는|선|call"])).toBeNull();
+    expect(found.links.groups.map((group) => group.name)).toEqual(found.sources.map((id) => labelOf(nodes, id, "main")));
+    expect(followedOf(repoFixture, nodes, off, ["없는|선|call"], null)).toBeNull();
   });
 });
 
