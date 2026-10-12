@@ -1,12 +1,14 @@
 // 분석 상태. 서버의 `/api/status`를 주기마다 받아 분석의 단계와 진행 수, 분석 뒤 바뀐 파일을 담고, 서버의 판 번호가 화면이 그린
 // 판 번호와 달라지면 분석 결과를 받아 그린다. 시점 비교가 켜져 있는 동안에는 그래프를 바꾸지 않고, 대상이 작업 중인 상태인 비교만
-// 다시 받는다. 분석 단계가 무엇을 하는지는 모르고 단계의 이름과 수만 적는다.
+// 다시 받는다. 서버가 레포를 열거나 닫아 `session`이 처음 받은 값과 달라지면 페이지를 다시 읽는다. 분석 단계가 무엇을 하는지는
+// 모르고 단계의 이름과 수만 적는다.
 import { create } from "zustand";
 import { forgetFiles, getGraph, getRepo, getStatus, getTree, getUnused } from "../api/client";
 import { WORKTREE, type Phase, type Status } from "../api/types";
 import { useChanges } from "./changes";
 import { useCompare } from "./compare";
 import { useExplanations } from "./explanations";
+import { reread } from "./opening";
 import { useOverlay } from "./overlay";
 import { useAtlas } from "./store";
 import { useSummaries } from "./summaries";
@@ -26,11 +28,12 @@ const PHASE_NAMES: Record<Phase, string> = {
   build: "그래프 조립",
   ready: "분석 끝",
   failed: "분석하지 못했다",
+  idle: "연 레포가 없다",
 };
 
-/** 서버가 분석하는 중이다. 상태를 아직 받지 못했으면 거짓이다. */
+/** 서버가 분석하는 중이다. 상태를 아직 받지 못했거나 연 레포가 없으면 거짓이다. */
 export function running(status: Status | null): boolean {
-  return status !== null && status.phase !== "ready" && status.phase !== "failed";
+  return status !== null && status.phase !== "ready" && status.phase !== "failed" && status.phase !== "idle";
 }
 
 /** 단계의 이름. */
@@ -69,9 +72,11 @@ export interface StatusStore {
   status: Status | null;
   /** 화면이 그린 분석 결과의 판 번호. 아직 그리지 않았으면 0이다. */
   shown: number;
+  /** 처음 받은 상태의 `session`. 아직 받지 못했으면 null이다. */
+  session: number | null;
   /**
    * 상태를 받고, 서버의 판 번호가 shown과 다르면 분석 결과를 받아 그린 뒤에 끝난다. 받는 중에 다시 부르면 앞의 일이 끝난 뒤에
-   * 한 번 더 받는다. 받지 못하면 직전 값을 그대로 둔다.
+   * 한 번 더 받는다. 받지 못하면 직전 값을 그대로 둔다. `session`이 처음 받은 값과 다르면 아무것도 그리지 않고 페이지를 다시 읽는다.
    */
   load(): Promise<void>;
   /**
@@ -131,6 +136,12 @@ export const useStatus = create<StatusStore>()((set, get) => {
   const follow = async (): Promise<void> => {
     try {
       const status = await getStatus();
+      if (get().session === null) {
+        set({ session: status.session });
+      } else if (status.session !== get().session) {
+        reread();
+        return;
+      }
       if (JSON.stringify(status) !== JSON.stringify(get().status)) {
         set({ status });
       }
@@ -145,6 +156,7 @@ export const useStatus = create<StatusStore>()((set, get) => {
   return {
     status: null,
     shown: 0,
+    session: null,
     load: () => (last = last.then(follow)),
     watch: () => {
       let timer: number | null = null;

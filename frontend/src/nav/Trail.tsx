@@ -1,12 +1,13 @@
 // 상단 줄의 탐색 경로 표시. 고른 노드(함수 시점 뷰에서는 가운데 함수, 경로 고정 중에는 정보 패널이 보이는 경로 위 노드)까지의
 // 폴더·파일·클래스·함수를 단계로 그린다. 맨 앞에는 늘 레포 이름을 적고 소스 루트가 따로 있으면 그 폴더 이름을 이어 적는다.
-// 두 이름을 누르면 구조 뷰로 돌아가 선택을 푼다. 줄 폭이 모자라면 앞 이름부터 `…`로 줄이고 마지막 이름은 늘 남긴다.
+// 두 이름을 누르면 구조 뷰로 돌아가 선택을 푼다. 레포 이름 옆에는 레포 메뉴의 화살표를 그리고, 레포 이름이 `…`로 줄면 `…` 옆에 그린다. 줄 폭이 모자라면 앞 이름부터 `…`로 줄이고 마지막 이름은 늘 남긴다.
 // 함수 시점 뷰에서는 경로 뒤에 뷰 이름과 구조 뷰로 돌아가는 버튼을 그린다.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AtlasNode } from "../api/types";
 import { labelOf, titleOf } from "../graph/layout";
 import { nodeIndex } from "../graph/visible";
 import { chosenOf, useAtlas } from "../state/store";
+import { RepoMenu } from "./RepoMenu";
 
 /** 한 단계의 이름. 폴더와 파일은 경로의 마지막 마디만 적는다. */
 function stepName(node: AtlasNode): string {
@@ -75,6 +76,7 @@ export function Trail() {
           …
         </span>
       )}
+      {hidden > 0 && <RepoMenu />}
       {roots.map(
         (name, index) =>
           index >= hidden && (
@@ -87,6 +89,7 @@ export function Trail() {
               <button className={index === names.length - 1 ? "trail-root trail-last" : "trail-root"} data-tip="선택 풀기" data-full={name} onClick={() => show(null)}>
                 {name}
               </button>
+              {index === 0 && <RepoMenu />}
             </Fragment>
           ),
       )}
