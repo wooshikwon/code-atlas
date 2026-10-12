@@ -1,10 +1,12 @@
 // 화면을 시나리오마다 조작해 확인 항목의 통과 여부를 한 줄씩 출력하고 스크린샷을 남긴다.
-// 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wide-url 주소] [--only 이름,이름] [--with-summary]
+// 사용: node scripts/shots.mjs [주소] [--cycle-url 주소] [--reload-url 주소] [--wide-url 주소] [--compare-url 주소] [--only 이름,이름] [--with-summary]
 // 떠 있는 서버의 주소를 받고(기본 http://127.0.0.1:8766) 서버를 띄우지 않는다. 노드 이름은 sync-engine을 연 서버가 기준이고 노드 수·선 수·줄 범위,
 // 경로와 미사용 후보는 서버 응답에서 읽는다. 순환 시나리오(cycles, cycles-change, cycles-pin)는 tests/fixtures/cycle_repo를 연 서버의 주소를
 // --cycle-url로 받았을 때만 돌고, 받지 않으면 건너뜀으로 출력한다. 새로고침 시나리오(reload, reload-key, stale)는 대상 레포의 파일을 고쳤다가 되돌리므로
 // tests/fixtures/sample_repo를 임시 폴더로 복사해 연 서버의 주소를 --reload-url로 받았을 때만 돈다.
 // lanes 시나리오는 폴더가 여러 겹인 레포(modern-deeplearning-pipeline)를 연 서버의 주소를 --wide-url로 받으면 그 화면도 본다.
+// 시점 비교 시나리오(compare-*)는 `python -m tests.history <임시 폴더>`로 만든 이력 고정 레포를 연 서버의 주소를 --compare-url로 받았을 때만 돌고,
+// changes 시나리오는 그 주소를 받으면 그 레포의 변경 표시도 본다.
 // 시나리오마다 localStorage가 빈 새 브라우저 컨텍스트에서 시작한다. 실패한 확인 항목이 있으면 종료 코드 1로 끝난다.
 // 대상 레포에 입력이 없어 볼 수 없는 확인 항목은 "건너뜀"으로 출력하고 실패로 세지 않는다.
 // summary 시나리오는 Claude Code 구독 사용량을 쓰므로 --only로 지정하거나 --with-summary를 줬을 때만 돈다.
@@ -51,6 +53,8 @@ let cycleUrl = null;
 let reloadUrl = null;
 /** 폴더가 여러 겹인 레포를 연 서버의 주소. 주지 않으면 그 화면의 확인 항목을 건너뛴다. */
 let wideUrl = null;
+/** 이력 고정 레포(tests/history.py)를 연 서버의 주소. 주지 않으면 시점 비교 시나리오를 건너뛴다. */
+let compareUrl = null;
 let only = null;
 let withSummary = false;
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -63,6 +67,8 @@ for (let i = 2; i < process.argv.length; i += 1) {
     wideUrl = process.argv[++i] ?? null;
   } else if (arg === "--reload-url") {
     reloadUrl = process.argv[++i] ?? null;
+  } else if (arg === "--compare-url") {
+    compareUrl = process.argv[++i] ?? null;
   } else if (arg === "--with-summary") {
     withSummary = true;
   } else {
@@ -2523,8 +2529,9 @@ function stateOf(index, worktree) {
   return index === "A" || index === "?" ? "added" : "modified";
 }
 
-async function changes(t, page) {
-  const [repo, reply, graph] = [await api("/api/repo"), await api("/api/changes"), await api("/api/graph")];
+/** at의 서버가 연 레포에서 변경 표시를 본다. name은 확인 항목 앞에 적는 레포의 이름이다. */
+async function changesAt(t, page, at, name) {
+  const [repo, reply, graph] = [await api("/api/repo", at), await api("/api/changes", at), await api("/api/graph", at)];
   // 대상 레포의 인덱스를 다시 쓰지 않는 읽기 전용 호출만 한다.
   const git = (...args) =>
     execFileSync("git", ["-C", repo.root, "-c", "core.quotepath=false", "-c", "diff.autoRefreshIndex=false", ...args], {
@@ -2543,24 +2550,24 @@ async function changes(t, page) {
       "/api/changes의 수정 파일이 git status --porcelain의 수정 .py 파일과 같다",
       'git이 수정으로 내는 .py 파일과 같은 수의 파일 상자에 [data-change="modified"]와 M이 있다',
       "파일트리의 같은 행에 수정 색 점과 M이 있다",
-      "수정 파일을 펼치면 git diff -U0 HEAD의 바뀐 줄과 겹치는 함수만 표시된다",
+      "수정 파일을 펼치면 /api/changes가 낸 정의만 표시되고 모두 git diff -U0 HEAD의 바뀐 줄과 겹친다",
     ]) {
-      t.skip(label, "대상 레포에 수정한 .py 파일이 없다");
+      t.skip(`${name}: ${label}`, "대상 레포에 수정한 .py 파일이 없다");
     }
-    t.check("수정 파일이 없으면 /api/changes도 수정 파일을 내지 않는다", served.length === 0, `서버 ${served.length}개`);
-    return;
+    t.check(`${name}: 수정 파일이 없으면 /api/changes도 수정 파일을 내지 않는다`, served.length === 0, `서버 ${served.length}개`);
+    return null;
   }
   t.check(
-    "/api/changes의 수정 파일이 git status --porcelain의 수정 .py 파일과 같다",
+    `${name}: /api/changes의 수정 파일이 git status --porcelain의 수정 .py 파일과 같다`,
     same(served, modified),
     `git ${modified.length}개, 서버 ${served.length}개`,
   );
 
-  await load(page);
+  await load(page, at);
   const pathOf = new Map(graph.nodes.map((n) => [n.id, n.path]));
   const boxed = (await boxes(page)).filter((b) => b.change === "modified");
   t.check(
-    `git이 수정으로 내는 .py 파일과 같은 수(${modified.length}개)의 파일 상자에 [data-change="modified"]와 M이 있다`,
+    `${name}: git이 수정으로 내는 .py 파일과 같은 수(${modified.length}개)의 파일 상자에 [data-change="modified"]와 M이 있다`,
     same(boxed.map((b) => pathOf.get(b.id)).sort(), modified) && boxed.every((b) => b.mark === "M"),
     boxed.map((b) => b.label).join(", "),
   );
@@ -2573,32 +2580,34 @@ async function changes(t, page) {
   );
   const changed = (await colorOf(page, "--changed")).rgb;
   t.check(
-    "파일트리의 같은 행에 수정 색 점과 M이 있다",
+    `${name}: 파일트리의 같은 행에 수정 색 점과 M이 있다`,
     same(rows.map((row) => pathOf.get(row.node)).sort(), modified) && rows.every((row) => row.letter === "M" && row.dot === changed),
     `${rows.length}행, 점 색 ${[...new Set(rows.map((row) => row.dot))].join("·")}`,
   );
 
-  // 수정 파일 가운데 바뀐 줄이 함수·클래스의 줄 범위와 겹치는 파일을 펼쳐 그 노드만 표시되는지 본다.
+  // 수정 파일 가운데 서버가 정의를 표시한 파일을 펼쳐, 표시된 정의가 서버의 판정과 같고 모두 바뀐 줄과 겹치는지 본다. 줄만 밀린 정의는
+  // 바뀐 줄과 겹치지 않으므로 표시가 없다.
   let target = null;
   for (const box of boxed) {
     const path = pathOf.get(box.id);
     const hunks = [...git("diff", "-U0", "--relative", "--no-renames", "HEAD", "--", path).matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)].map(
       ([, start, length]) => [Number(start), Number(start) + Math.max(Number(length ?? 1), 1) - 1],
     );
-    const want = graph.nodes
-      .filter((n) => n.path === path && ["function", "method", "class", "dataclass"].includes(n.kind) && n.range !== null)
-      .filter((n) => hunks.some(([from, to]) => n.range[0] <= to && from <= n.range[1]))
-      .map((n) => n.id)
-      .sort();
+    const inFile = graph.nodes.filter((n) => n.path === path && n.id !== box.id && n.range !== null);
+    const want = inFile.filter((n) => reply.nodes[n.id] !== undefined).map((n) => n.id).sort();
+    const touched = inFile.filter((n) => hunks.some(([from, to]) => n.range[0] <= to && from <= n.range[1])).map((n) => n.id);
     if (want.length > 0 && (target === null || box.id === FILE)) {
-      target = { id: box.id, path, hunks, want };
+      target = { id: box.id, path, hunks, want, touched, states: want.map((id) => reply.nodes[id]) };
     }
   }
   if (target === null) {
-    t.check("바뀐 줄이 함수·클래스와 겹치는 수정 파일이 있다", false, `수정 파일 ${boxed.length}개`);
-    return;
+    t.check(`${name}: 서버가 정의를 표시한 수정 파일이 있다`, false, `수정 파일 ${boxed.length}개`);
+    return null;
   }
   await pick(page, target.id);
+  if ((await count(page, `.node-pack[data-box="${target.id}"]`)) > 0) {
+    await clickPack(page, target.id);
+  }
   const marked = await page.evaluate(
     (file) =>
       [...document.querySelectorAll(".react-flow__node > .node-body[data-change]")]
@@ -2608,11 +2617,51 @@ async function changes(t, page) {
     target.id,
   );
   t.check(
-    `${target.path} 상자를 펼치면 git diff -U0 HEAD의 바뀐 줄과 겹치는 함수만 표시된다`,
-    same(marked, target.want),
+    `${name}: ${target.path} 상자를 펼치면 /api/changes가 낸 정의만 표시되고 모두 git diff -U0 HEAD의 바뀐 줄과 겹친다`,
+    same(marked, target.want) && target.want.every((id) => target.touched.includes(id)),
     `바뀐 줄 ${target.hunks.map(([from, to]) => `${from}~${to}`).join(", ")}, 표시 ${marked.join(", ") || "없음"}`,
   );
+  return { graph, reply, target };
 }
+
+/**
+ * 변경 표시. 정의의 판정은 서버가 `HEAD`와 작업 중인 상태를 견준 것이다. 이력 고정 레포를 연 서버가 있으면 그 레포에서 `HEAD`에 없던
+ * 함수가 A로, 줄만 밀린 함수가 표시 없이 그려지는지도 본다.
+ */
+async function changes(t, page) {
+  await changesAt(t, page, url, "대상 레포");
+  if (compareUrl === null) {
+    t.skip("이력 고정 레포: HEAD에 없던 함수는 A로, 줄만 밀린 함수는 표시 없이 그려진다", "--compare-url을 주지 않았다");
+    return;
+  }
+  const found = await changesAt(t, page, compareUrl, "이력 고정 레포");
+  if (found === null) {
+    return;
+  }
+  const { graph, reply, target } = found;
+  const shifted = graph.nodes.filter((n) => n.path === target.path && ["function", "method", "class"].includes(n.kind) && reply.nodes[n.id] === undefined).map((n) => n.id);
+  /** 그린 노드마다 변경 표시의 종류. 표시가 없으면 null이고 그리지 않은 노드는 undefined다. */
+  const statesOf = (ids) =>
+    page.evaluate((list) => Object.fromEntries(list.map((id) => [id, document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"] > .node-body`)?.dataset.change ?? (document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"]`) === null ? undefined : null)])), ids);
+  const states = await statesOf([...target.want, ...shifted]);
+  t.check(
+    `이력 고정 레포: ${target.path}에서 본문이 바뀐 정의는 수정(M) 표시를 받고 그 아래로 줄만 밀린 정의 ${shifted.length}개에는 표시가 없다`,
+    shifted.length > 0 && target.want.every((id) => states[id] === "modified") && shifted.every((id) => states[id] === null),
+    Object.entries(states).map(([id, state]) => `${id} ${state ?? "없음"}`).join(", "),
+  );
+  const added = graph.nodes.find((n) => reply.nodes[n.id] === "added" && n.kind === "function");
+  const owner = graph.nodes.find((n) => n.kind === "module" && n.path === added?.path);
+  if (added === undefined || owner === undefined) {
+    t.check("이력 고정 레포: HEAD에 없던 함수가 있다", false, "추가로 판정된 함수가 없다");
+    return;
+  }
+  await pick(page, owner.id);
+  const state = (await statesOf([added.id]))[added.id];
+  const letter = await page.evaluate((id) => document.querySelector(`.react-flow__node[data-id="${CSS.escape(`${id}#face`)}"] .change-mark`)?.textContent ?? null, owner.id);
+  t.check(`이력 고정 레포: HEAD에 없던 함수 ${added.id}는 추가(A) 표시를 받고 그 파일 상자가 A를 적는다`, state === "added" && letter === "A", `${state}, 파일 상자 ${letter}`);
+}
+
+
 
 async function zoomKeep(t, page) {
   await load(page);
@@ -12276,6 +12325,911 @@ async function varJump(t, page) {
   t.check("정보 패널이 그 변수를 보인다", facts.name === name && same(facts.chips, ["변수"]), `${facts.path}${facts.name} [${facts.chips.join(", ")}]`);
 }
 
+// ── 5단계 시나리오: 시점 비교 ─────────────────────────────────────
+// tests/history.py가 만든 이력 고정 레포를 연 서버(--compare-url)에서 돈다. 기대값은 그 서버의 /api/history, /api/compare/stat,
+// /api/compare 응답에서 읽는다. 스크립트가 직접 부른 POST /api/compare 뒤에는 /api/graph를 받아 서버가 기억한 시점을 되돌린다.
+
+/** 이력 고정 레포의 커밋. 이름표로 찾고, 이름표가 없는 두 커밋은 부모 관계로 찾는다. */
+async function historyOf() {
+  const history = await api("/api/history", compareUrl);
+  const at = (name) => history.commits.find((c) => c.refs.some((ref) => ref.name === name)).hash;
+  const merge = at("main");
+  return { ...history, merge, topic: at("topic"), feature: at("feature"), edit: at("v0.1"), move: history.commits.find((c) => c.hash === merge).parents[0], base: history.commits.at(-1).hash };
+}
+
+const statOf = (a, b) => api(`/api/compare/stat?a=${a}&b=${b}`, compareUrl);
+
+async function comparisonOf(base, target) {
+  const response = await fetch(new URL("/api/compare", compareUrl), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ base, target }) });
+  const body = await response.json();
+  await api("/api/graph", compareUrl);
+  return body;
+}
+
+/** 고정 레포의 git 상태: 작업 폴더의 상태, 브랜치와 태그, `.git` 아래 파일 목록 */
+async function repoState() {
+  const { root } = await api("/api/repo", compareUrl);
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }, encoding: "utf8" });
+  return { status: git("status", "--porcelain"), refs: git("for-each-ref"), files: execFileSync("find", [join(root, ".git"), "-type", "f"], { encoding: "utf8" }).split("\n").sort().join("\n") };
+}
+/** 비교 시나리오를 돌기 전의 고정 레포 상태. 첫 비교 시나리오가 적어 두고 compare-readonly가 견준다. */
+let repoBefore = null;
+
+async function loadCompare(page, unfold = true) {
+  repoBefore ??= await repoState();
+  await load(page, compareUrl, unfold);
+  await page.waitForSelector(".compare-button", { timeout: 10_000 });
+}
+
+const buttonText = (page) => page.evaluate(() => document.querySelector(".compare-button")?.innerText.replace(/\s+/g, " ").trim() ?? null);
+
+async function openWindow(page) {
+  if ((await page.getAttribute(".compare-button", "aria-expanded")) !== "true") {
+    await page.click(".compare-button");
+  }
+  await page.waitForSelector(".compare-row", { timeout: 10_000 });
+  await page.waitForFunction(() => document.querySelector(".compare-bar .compare-lines, .compare-bar .compare-hint, .compare-bar .compare-failed") !== null, null, { timeout: 5_000 });
+}
+
+const rowOf = (id) => `.compare-row[data-id="${id}"]`;
+/** 창의 줄마다 id, 제목, 이름표, 표시, 해시, 고른 줄인지 */
+const windowRows = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".compare-row")].map((row) => ({
+      id: row.dataset.id,
+      subject: row.querySelector(".compare-subject")?.textContent ?? "",
+      refs: [...row.querySelectorAll(".compare-ref")].map((ref) => `${ref.dataset.kind}:${ref.textContent}`),
+      mark: row.querySelector(".compare-mark")?.textContent ?? null,
+      hash: row.querySelector(".compare-hash")?.textContent ?? null,
+      picked: row.getAttribute("aria-selected") === "true",
+    })),
+  );
+const marksOf = async (page) => Object.fromEntries((await windowRows(page)).filter((row) => row.mark !== null).map((row) => [row.id, row.mark]));
+/** 창 아래 줄에 적힌 줄 수. 적혀 있지 않으면 null이다. */
+const barLines = (page) =>
+  page.evaluate(() => {
+    const lines = document.querySelector(".compare-bar .compare-lines");
+    const number = (selector) => Number(lines.querySelector(selector).textContent.replace(/[^\d]/g, ""));
+    return lines === null ? null : { added: number(".compare-added"), deleted: number(".compare-deleted") };
+  });
+
+/** 고른 줄을 모두 풀고 ids의 줄을 차례로 누른다. 두 줄이면 아래 줄에 줄 수가 적힐 때까지 기다린다. */
+async function pickRows(page, ids) {
+  while ((await count(page, '.compare-row[aria-selected="true"]')) > 0) {
+    await page.locator('.compare-row[aria-selected="true"]').first().click();
+  }
+  for (const id of ids) {
+    await page.click(rowOf(id));
+  }
+  if (ids.length === 2) {
+    await page.waitForSelector(".compare-bar .compare-lines", { timeout: 5_000 });
+    await page.waitForFunction(() => document.querySelectorAll(".compare-mark").length >= 2, null, { timeout: 5_000 });
+  }
+}
+
+/** 받은 비교가 그려질 때까지 기다린다. 비교의 그래프는 새 배치가 올 때 그려지고, 이름 옆 줄 수가 보이면 그 배치다. */
+async function compared(page) {
+  await page.waitForFunction(() => document.querySelector(".graph")?.dataset.overlay === "compare" && document.querySelector(".compare-button").textContent.includes("→"), null, { timeout: 120_000 });
+  await page.waitForSelector(".react-flow .node-diff", { state: "attached", timeout: 30_000 });
+  await rest(page);
+}
+
+/** 비교 창에서 두 줄을 골라 `확인`을 누르고 비교가 그려질 때까지 기다린다. */
+async function turnOn(page, a, b) {
+  await openWindow(page);
+  await pickRows(page, [a, b]);
+  await page.click(".compare-confirm");
+  await compared(page);
+}
+
+async function turnOff(page) {
+  await openWindow(page);
+  await page.click(".compare-off");
+  await page.waitForFunction(() => document.querySelector(".compare-button").innerText.trim() === "비교" && document.querySelector(".graph")?.dataset.overlay !== "compare", null, { timeout: 30_000 });
+  await rest(page);
+}
+
+/** `+N −N` 글에서 읽은 추가·삭제 줄 수. 적히지 않은 쪽은 0이다. */
+function linesIn(text) {
+  return { added: Number(/\+([\d,]+)/.exec(text)?.[1].replaceAll(",", "") ?? 0), deleted: Number(/−([\d,]+)/.exec(text)?.[1].replaceAll(",", "") ?? 0) };
+}
+/** 그래프의 노드마다 이름 옆에 적힌 줄 수. 수가 없는 노드는 담지 않는다. */
+const diffsOf = (page) =>
+  page.evaluate(() =>
+    Object.fromEntries([...document.querySelectorAll(".react-flow__node .node-diff")].map((diff) => [diff.closest(".react-flow__node").dataset.id.replace(/#face$/, ""), diff.textContent])),
+  );
+/** 비교 응답의 files를 파일 노드에서 조상 폴더로 더한 줄 수(`graph/compare.ts`의 lineTotals) */
+function totalsOf(result) {
+  const byId = new Map(result.graph.nodes.map((n) => [n.id, n]));
+  const boxes = new Map(result.graph.nodes.filter((n) => (n.kind === "module" || n.kind === "package") && n.path !== null).map((n) => [`${n.kind}:${n.path}`, n]));
+  const totals = {};
+  for (const file of result.files) {
+    const folder = file.path.slice(0, Math.max(file.path.lastIndexOf("/"), 0));
+    for (let at = boxes.get(`module:${file.path}`) ?? boxes.get(`package:${file.path}`) ?? boxes.get(`package:${folder}`); at !== undefined; at = byId.get(at.parent)) {
+      totals[at.id] ??= { added: 0, deleted: 0 };
+      totals[at.id].added += file.added;
+      totals[at.id].deleted += file.deleted;
+    }
+  }
+  return totals;
+}
+const edgeKeyOf = (edge) => `${edge.source}|${edge.target}|${edge.kind}`;
+const goneEdge = (result, edge) => result.edges[edgeKeyOf(edge)]?.change === "deleted";
+/** 노드가 든 파일 노드의 id */
+function fileOf(result, id) {
+  const byId = new Map(result.graph.nodes.map((n) => [n.id, n]));
+  let at = byId.get(id);
+  while (at !== undefined && at.kind !== "module" && at.kind !== "package") {
+    at = byId.get(at.parent);
+  }
+  return at?.id ?? null;
+}
+/** 그린 노드마다 삭제된 노드인지와 바탕·글자 요소의 불투명도 */
+const fadesOf = (page) =>
+  page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll(".react-flow__node")].map((wrapper) => [
+        wrapper.dataset.id,
+        { gone: wrapper.hasAttribute("data-gone") || wrapper.querySelector("[data-gone]") !== null, opacity: Number(getComputedStyle(wrapper).opacity) * Number(getComputedStyle(wrapper.firstElementChild).opacity) },
+      ]),
+    ),
+  );
+/** 그린 선과 줄기마다 삭제된 관계만 들었는지, 숫자, 빨강 점의 수와 색과 좌표(그래프 좌표), 불투명도 */
+const goneLines = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].map((edge) => {
+      const line = edge.querySelector(".edge-line");
+      const end = line.getPointAtLength(line.getTotalLength());
+      const dots = [...edge.querySelectorAll(".edge-gone")];
+      return {
+        key: edge.dataset.key,
+        trunk: edge.classList.contains("edge-trunk"),
+        into: edge.dataset.trunkIn ?? null,
+        gone: edge.hasAttribute("data-gone"),
+        numbers: [...edge.querySelectorAll(".edge-weight, .edge-sum, .edge-trunk-count")].map((n) => n.textContent),
+        dots: dots.map((dot) => ({ x: Number(dot.getAttribute("cx")), y: Number(dot.getAttribute("cy")), fill: getComputedStyle(dot).fill, opacity: Number(getComputedStyle(dot).opacity) })),
+        end: { x: end.x, y: end.y },
+        opacity: Number(getComputedStyle(edge).opacity),
+      };
+    }),
+  );
+
+/** 코드 뷰어에 그린 삭제된 줄과 추가된 줄의 수, 줄 번호 칸의 글(빈칸은 `_`), 편집기의 수 */
+const wovenOf = (page) =>
+  page.evaluate(() => ({
+    deleted: document.querySelectorAll(".info-panel .code .view-overlays .code-deleted").length,
+    added: document.querySelectorAll(".info-panel .code .view-overlays .code-added").length,
+    editors: document.querySelectorAll(".info-panel .code .monaco-editor").length,
+    split: document.querySelectorAll(".info-panel .monaco-diff-editor").length,
+    labels: [...document.querySelectorAll(".info-panel .code .line-numbers")]
+      .filter((label) => label.getBoundingClientRect().top >= document.querySelector(".info-panel .monaco-editor").getBoundingClientRect().top - 1)
+      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+      .map((label) => label.textContent.replaceAll(" ", "_").replaceAll(" ", "_")),
+    text: [...document.querySelectorAll(".info-panel .code .view-line")].map((line) => line.textContent.replaceAll(" ", " ")).join("\n"),
+  }));
+
+async function waitCode(page) {
+  await page.waitForSelector(".info-panel .monaco-editor .view-line", { timeout: 30_000 });
+  await page.waitForTimeout(600);
+}
+
+async function compareWindow(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const before = await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform);
+  const [button, area] = [await rectOf(page, ".compare-button"), await rectOf(page, ".graph")];
+  await openWindow(page);
+  const [box, rows] = [await rectOf(page, ".compare-window"), await windowRows(page)];
+  t.check(
+    "창이 비교 버튼 아래에 폭 700px, 높이 400px 안으로 관계 그래프 영역 안에 뜬다",
+    box.y >= button.y + button.height && near(box.x, button.x) && box.width <= 700 && box.height <= 400 && box.x >= area.x && box.x + box.width <= area.x + area.width && box.y + box.height <= area.y + area.height,
+    `버튼 ${rectText(button)}, 창 ${rectText(box)}`,
+  );
+  const commits = rows.filter((row) => row.id !== "worktree");
+  t.check(
+    `작업 중인 상태의 줄 아래에 커밋 ${history.commits.length}줄이 제목, 짧은 해시, 이름표와 함께 보인다`,
+    rows[0].id === "worktree" && same(commits.map((row) => [row.id, row.subject, row.hash, row.refs.map((ref) => ref.split(":")[1])]), history.commits.map((c) => [c.hash, c.subject, c.hash.slice(0, 7), c.refs.map((ref) => ref.name)])),
+    commits.map((row) => `${row.hash} ${row.refs.join(",")}`).join(" / "),
+  );
+  const tag = await page.evaluate(() => {
+    const style = (kind) => getComputedStyle(document.querySelector(`.compare-ref[data-kind="${kind}"]`));
+    return { tag: style("tag").borderTopStyle, branch: style("branch").borderTopStyle };
+  });
+  t.check("태그의 이름표는 점선 테두리이고 브랜치의 이름표는 실선 테두리다", tag.tag === "dashed" && tag.branch === "solid", `태그 ${tag.tag}, 브랜치 ${tag.branch}`);
+  const stat = await statOf(history.head, "worktree");
+  t.check(
+    "커밋하지 않은 변경이 있으면 지금 커밋에 기준, 작업 중인 상태에 대상이 붙고 아래 줄의 수가 /api/compare/stat과 같다",
+    history.dirty && same(await marksOf(page), { worktree: "대상", [history.head]: "기준" }) && same(await barLines(page), { added: stat.added, deleted: stat.deleted }),
+    `표시 ${JSON.stringify(await marksOf(page))}, 아래 줄 ${JSON.stringify(await barLines(page))}, stat +${stat.added} −${stat.deleted}`,
+  );
+  t.check("창을 펴도 관계 그래프의 화면 좌표와 확대 비율이 그대로다", (await page.evaluate(() => document.querySelector(".react-flow__viewport").style.transform)) === before);
+  t.check(
+    "창에는 커밋 그래프와 아래쪽 한 줄뿐이고 입력 칸, 고르는 칸, 토글이 없으며 끄기 버튼은 비교가 켜져 있을 때만 있다",
+    (await count(page, ".compare-window :is(input, select, textarea, [role=switch], [role=checkbox], [role=combobox])")) === 0 && (await count(page, ".compare-off")) === 0 && (await count(page, ".compare-confirm")) === 1,
+  );
+  await t.shot();
+  await page.mouse.click(area.x + area.width / 2, area.y + area.height - 40);
+  const outside = await count(page, ".compare-window");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.querySelector(".compare-window") === null, null, { timeout: 3_000 }).catch(() => {});
+  t.check("창 밖을 눌러도 창은 닫히지 않고 Esc가 창을 닫는다", outside === 1 && (await count(page, ".compare-window")) === 0);
+}
+
+async function comparePick(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  await openWindow(page);
+  await page.click(rowOf(history.head));
+  await page.waitForFunction(() => document.querySelectorAll(".compare-mark").length === 0, null, { timeout: 3_000 }).catch(() => {});
+  t.check(
+    "고른 줄을 다시 누르면 표시가 풀리고 확인이 눌리지 않는다",
+    same(await marksOf(page), {}) && (await page.isDisabled(".compare-confirm")) && same((await windowRows(page)).filter((row) => row.picked).map((row) => row.id), ["worktree"]),
+    JSON.stringify(await marksOf(page)),
+  );
+  await pickRows(page, [history.move, history.edit]);
+  t.check("두 줄을 고르면 누른 순서와 무관하게 오래된 쪽이 기준, 새 쪽이 대상이다", same(await marksOf(page), { [history.move]: "대상", [history.edit]: "기준" }), JSON.stringify(await marksOf(page)));
+  await page.click(rowOf(history.base));
+  await page.waitForFunction((id) => document.querySelector(`.compare-row[data-id="${id}"] .compare-mark`) !== null, history.base, { timeout: 5_000 }).catch(() => {});
+  const stat = await statOf(history.base, history.edit);
+  t.check(
+    "셋째 줄을 누르면 먼저 고른 줄이 바뀌고 아래 줄의 수가 새 두 줄의 수다",
+    same(await marksOf(page), { [history.edit]: "대상", [history.base]: "기준" }) && same(await barLines(page), { added: stat.added, deleted: stat.deleted }),
+    `${JSON.stringify(await marksOf(page))}, 아래 줄 ${JSON.stringify(await barLines(page))}`,
+  );
+}
+
+async function compareFork(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  await openWindow(page);
+  await pickRows(page, [history.feature, history.topic]);
+  await page.waitForFunction(() => document.querySelectorAll(".compare-mark").length === 3, null, { timeout: 5_000 }).catch(() => {});
+  const stat = await statOf(history.feature, history.topic);
+  const direct = await statOf(stat.fork, stat.target);
+  t.check(
+    "합쳐지지 않은 두 브랜치의 줄을 고르면 갈라진 커밋에 갈라진 지점이 붙는다",
+    stat.fork === history.edit && same(await marksOf(page), { [stat.target]: "대상", [stat.target === history.topic ? history.feature : history.topic]: "기준", [history.edit]: "갈라진 지점" }),
+    JSON.stringify(await marksOf(page)),
+  );
+  t.check(
+    "아래 줄의 수는 갈라진 커밋과 대상 사이의 수다",
+    same(await barLines(page), { added: direct.added, deleted: direct.deleted }) && same([stat.added, stat.deleted], [direct.added, direct.deleted]),
+    `아래 줄 ${JSON.stringify(await barLines(page))}, 갈라진 커밋부터 +${direct.added} −${direct.deleted}`,
+  );
+  await t.shot();
+  await page.click(".compare-confirm");
+  await compared(page);
+  t.check("비교 버튼은 고른 두 줄의 이름을 적는다", (await buttonText(page)).startsWith("비교 feature → topic"), await buttonText(page));
+}
+
+async function compareOn(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const result = await comparisonOf(history.base, "worktree");
+  const trunks = Object.fromEntries((await trunksOf(page)).map((trunk) => [trunk.key, trunk.sum]));
+  const [marked, nodes] = [await count(page, ".react-flow [data-change], .tree-change"), await count(page, ".react-flow__node")];
+  // 분석하는 동안의 화면을 보려고 비교 응답을 0.6초 늦춘다.
+  await page.route((at) => at.pathname === "/api/compare", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.continue();
+  });
+  await openWindow(page);
+  await pickRows(page, [history.base, "worktree"]);
+  await page.click(".compare-confirm");
+  await page.waitForFunction(() => document.querySelector(".compare-button").textContent.includes("분석 중"), null, { timeout: 3_000 }).catch(() => {});
+  t.check(
+    "확인을 누르면 창이 닫히고 비교 버튼이 분석 중을 적으며 그래프는 그대로다",
+    (await count(page, ".compare-window")) === 0 && (await buttonText(page)).startsWith("비교 분석 중") && (await count(page, ".react-flow__node")) === nodes && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay ?? null)) !== "compare",
+    await buttonText(page),
+  );
+  await compared(page);
+  const sum = (side) => result.files.reduce((total, file) => total + file[side], 0);
+  t.check(
+    "분석이 끝나면 버튼이 두 시점과 줄 수를 적는다",
+    (await buttonText(page)) === `비교 ${history.base.slice(0, 7)} → 작업 중 · +${sum("added")} −${sum("deleted")}`,
+    await buttonText(page),
+  );
+  const [diffs, totals] = [await diffsOf(page), totalsOf(result)];
+  const drawn = (await boxes(page)).map((box) => box.id);
+  const files = drawn.filter((id) => result.nodes[id]?.change !== undefined || totals[id] !== undefined);
+  t.check(
+    `바뀐 파일 상자 ${files.length}개의 이름 옆 수가 응답의 줄 수와 같고 바뀌지 않은 상자에는 수가 없다`,
+    files.length > 0 && drawn.every((id) => (totals[id] === undefined ? diffs[id] === undefined : same(linesIn(diffs[id] ?? ""), totals[id]))) && drawn.some((id) => totals[id] === undefined),
+    drawn.map((id) => `${id} ${diffs[id] ?? "없음"}`).join(", "),
+  );
+  const folder = result.graph.nodes.find((n) => n.kind === "package" && n.parent === null);
+  const inside = result.files.reduce((total, file) => ({ added: total.added + file.added, deleted: total.deleted + file.deleted }), { added: 0, deleted: 0 });
+  t.check("폴더 상자의 수가 아래 파일의 합이다", same(linesIn(diffs[folder.id] ?? ""), inside), `${folder.id} ${diffs[folder.id]}, 파일 합 +${inside.added} −${inside.deleted}`);
+  const after = await trunksOf(page);
+  const incoming = (id) => countedSites(result.graph.edges.filter((edge) => !goneEdge(result, edge) && fileOf(result, edge.target) === id && fileOf(result, edge.source) !== id));
+  t.check(
+    "들어오는 줄기의 합계가 응답에서 삭제된 선을 뺀 지점 수이고, 켜기 전에 있던 줄기는 합계가 같다",
+    after.length > 0 && after.every((trunk) => trunk.sum === incoming(trunk.target)) && after.filter((trunk) => trunks[trunk.key] !== undefined).every((trunk) => trunk.sum === trunks[trunk.key]),
+    after.map((trunk) => `${trunk.target} ${trunk.sum}(켜기 전 ${trunks[trunk.key] ?? "없음"}, 응답 ${incoming(trunk.target)})`).join(", "),
+  );
+  t.check(
+    `비교가 켜지면 그래프와 파일트리의 변경 표시(켜기 전 ${marked}개)를 그리지 않는다`,
+    marked > 0 && (await count(page, ".react-flow [data-change], .tree-change, .change-mark")) === 0,
+    `${await count(page, ".react-flow [data-change], .tree-change, .change-mark")}개`,
+  );
+  await page.click(".legend-button");
+  await page.waitForSelector(".legend", { timeout: 5_000 });
+  const legend = await page.evaluate(() => [...document.querySelectorAll('.legend-overlay[data-kind="compare"]')].map((row) => row.textContent.trim()));
+  t.check(
+    "범례 끝에 이름 옆 수, 삭제된 연결, 삭제된 정의와 파일 세 줄이 붙는다",
+    legend.length === 3 && legend[0].includes("이름 옆 수") && legend[1].startsWith("삭제된 연결") && legend[2].startsWith("삭제된 정의와 파일"),
+    legend.join(" / "),
+  );
+}
+
+async function compareMarks(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const result = await comparisonOf(history.base, "worktree");
+  await turnOn(page, history.base, "worktree");
+  const critical = (await colorOf(page, "--critical")).rgb;
+  const check = async (stage) => {
+    const lines = await goneLines(page);
+    const gone = lines.filter((line) => line.gone);
+    const dots = lines.flatMap((line) => line.dots);
+    // 든 선이 모두 삭제된 줄기는 줄기가 점 하나를 그리고 그 가지는 그리지 않는다.
+    const dotted = gone.filter((line) => line.trunk || line.into === null || !gone.some((trunk) => trunk.trunk && trunk.key === line.into));
+    t.check(
+      `${stage}: 빨강 점 ${dots.length}개가 삭제된 관계만 든 선(모두 삭제된 줄기는 줄기 하나)마다 하나씩 있고 색이 critical이다`,
+      gone.length > 0 && dots.length === dotted.length && dotted.every((line) => line.dots.length === 1) && dots.every((dot) => dot.fill === critical),
+      `삭제된 관계만 든 선 ${gone.map((line) => line.key).join(", ")}, 점 ${dots.length}개`,
+    );
+    t.check(
+      `${stage}: 점이 있는 선에는 숫자가 없고, 지금 있는 관계가 든 선에는 점이 없다`,
+      gone.every((line) => line.numbers.length === 0) && lines.filter((line) => !line.gone).every((line) => line.dots.length === 0),
+      lines.filter((line) => line.numbers.length > 0 && line.dots.length > 0).map((line) => line.key).join(", "),
+    );
+    const alone = gone.filter((line) => !line.trunk && line.into === null && line.dots.length === 1);
+    t.check(
+      `${stage}: 따로 들어가는 선의 점은 선의 도착 쪽 끝에서 화살촉 길이 안쪽에 있다`,
+      alone.length > 0 && alone.every((line) => Math.hypot(line.dots[0].x - line.end.x, line.dots[0].y - line.end.y) <= 24),
+      alone.map((line) => `${line.key} ${Math.hypot(line.dots[0].x - line.end.x, line.dots[0].y - line.end.y).toFixed(1)}px`).join(", "),
+    );
+    return lines;
+  };
+  const folded = await check("파일 단계");
+  const wanted = (keys) => keys.filter((key) => key.startsWith("agg|")).every((key) => {
+    const [source, target] = endsOfKey(key);
+    return result.graph.edges.filter((edge) => fileOf(result, edge.source) === source && fileOf(result, edge.target) === target).every((edge) => goneEdge(result, edge));
+  });
+  t.check("파일 단계에서 삭제된 관계만 든 선은 응답에서 두 파일 사이의 선이 모두 삭제된 쌍이다", wanted(folded.filter((line) => line.gone && !line.trunk).map((line) => line.key)));
+  const refund = "shop.orders:refund";
+  await pickInTree(page, { id: refund, owner: "shop.orders" });
+  await rest(page);
+  const lines = await check("함수를 고른 단계");
+  const added = result.graph.edges.filter((edge) => result.edges[edgeKeyOf(edge)]?.change === "added" && edge.source === refund).map(edgeKeyOf);
+  const recount = lines.filter((line) => added.includes(line.key));
+  t.check(
+    `추가된 관계의 선 ${added.join(", ")}에는 점이 없고 삭제된 선 ${refund} → legacy_total에 점이 있다`,
+    recount.length === added.length && recount.every((line) => line.dots.length === 0 && !line.gone) && lines.some((line) => line.key === `${refund}|shop.pricing:legacy_total|call` && line.gone && line.dots.length === 1),
+    lines.filter((line) => line.key.startsWith(refund)).map((line) => `${line.key} 점 ${line.dots.length}`).join(", "),
+  );
+  const merged = lines.filter((line) => line.gone && !line.trunk && line.into !== null && line.dots.length === 1);
+  if (merged.length === 0) {
+    t.skip("지금 있는 선과 한 줄기로 합류하는 삭제된 선의 점은 합류점 앞 가지 위에 있다", "고정 레포의 이 화면에는 합류하는 삭제된 선이 없다");
+  } else {
+    const joints = await page.evaluate(() => [...document.querySelectorAll(".edge-trunk .edge-joint-in")].map((joint) => ({ x: Number(joint.getAttribute("cx")), y: Number(joint.getAttribute("cy")) })));
+    t.check(
+      "지금 있는 선과 한 줄기로 합류하는 삭제된 선의 점은 합류점에서 9px 앞 가지 위에 있다",
+      merged.every((line) => joints.some((joint) => near(Math.hypot(joint.x - line.dots[0].x, joint.y - line.dots[0].y), 9, 1.5))),
+      merged.map((line) => line.key).join(", "),
+    );
+  }
+}
+
+async function compareGone(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const result = await comparisonOf(history.base, "worktree");
+  const [file, deleted] = ["shop.pricing", "shop.pricing:legacy_total"];
+  await turnOn(page, history.base, "worktree");
+  await pick(page, file);
+  await rest(page);
+  const fade = async (id) => [(await fadesOf(page))[id], (await fadesOf(page))[`${id}#face`]];
+  const placed = await flowBoxes(page);
+  const inFile = result.graph.nodes.filter((n) => n.parent === file && placed[n.id] !== undefined);
+  const column = inFile.filter((n) => near(placed[n.id].x, placed[deleted]?.x ?? NaN));
+  const slotOf = (n) => result.nodes[n.id]?.slot ?? n.range[0];
+  const byPlace = [...column].sort((a, b) => placed[a.id].y - placed[b.id].y).map((n) => n.id);
+  const bySource = [...column].sort((a, b) => slotOf(a) - slotOf(b) || (result.nodes[a.id]?.slot === undefined ? -1 : 1)).map((n) => n.id);
+  t.check(
+    "삭제된 함수가 그 파일 상자 안에 흐린 단계로 보이고 같은 열에서 소스 정의 순서의 위치에 있다",
+    placed[deleted] !== undefined && (await fade(deleted)).every((each) => each.gone && near(each.opacity, DIM, 0.01)) && same(byPlace, bySource),
+    `열 ${byPlace.join(", ")} / 정의 순서 ${bySource.join(", ")}`,
+  );
+  await clickNode(page, deleted);
+  await waitSelected(page, deleted);
+  await rest(page);
+  const picked = await fade(deleted);
+  const ring = await count(page, `${node(deleted)} .node-selected, ${face(deleted)} .node-selected`);
+  const at = await rectOf(page, face(deleted));
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  await page.waitForTimeout(400);
+  const hovered = await fade(deleted);
+  t.check(
+    "삭제된 함수를 고르면 선택 고리를 그리고, 고르거나 마우스를 올려도 불투명도는 흐린 단계 그대로다",
+    ring > 0 && [...picked, ...hovered].every((each) => near(each.opacity, DIM, 0.01)),
+    `고른 뒤 ${picked.map((each) => each.opacity)}, 올린 뒤 ${hovered.map((each) => each.opacity)}`,
+  );
+  await page.mouse.move(1, 1);
+  await rest(page);
+  const lines = (await goneLines(page)).filter((line) => line.gone && endsOfKey(line.key).includes(deleted));
+  t.check(
+    "삭제된 함수를 고른 화면에서 그 함수에 닿는 삭제된 관계만 든 선과 빨강 점이 흐린 단계이고 이름 옆 수가 노드와 함께 흐려진다",
+    lines.length > 0 && lines.every((line) => near(line.opacity, DIM, 0.01) && line.dots.every((dot) => dot.opacity === 1)) && (await diffsOf(page))[deleted] === `−${result.nodes[deleted].deleted}`,
+    `${lines.map((line) => `${line.key} ${line.opacity} 점 ${line.dots.map((dot) => dot.opacity)}`).join(", ")} / 이름 옆 수 "${(await diffsOf(page))[deleted]}"`,
+  );
+  await waitCode(page);
+  const code = await wovenOf(page);
+  const head = await page.evaluate(() => document.querySelector(".info-panel-compared")?.textContent ?? "");
+  t.check(
+    "정보 패널이 삭제와 줄 수를 적고 코드 뷰어가 기준 시점의 본문을 삭제된 줄로 보인다",
+    head === `삭제−${result.nodes[deleted].deleted}` && code.text.includes("def legacy_total(") && code.deleted >= result.nodes[deleted].deleted && (await count(page, ".info-panel-summary .summary-action")) === 0,
+    `머리 줄 "${head}", 삭제된 줄 ${code.deleted}개`,
+  );
+}
+
+async function compareOrder(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const file = "shop.orders";
+  await pick(page, file);
+  await rest(page);
+  const before = await flowBoxes(page);
+  const ids = Object.keys(before);
+  const arranged = (placed) => columnsOf(ids.filter((id) => placed[id] !== undefined).map((id) => ({ id, ...placed[id] })));
+  await turnOn(page, history.base, "worktree");
+  const after = await flowBoxes(page);
+  t.check(
+    `${file}을 고른 화면에서 비교를 켜도 켜기 전에 있던 노드 ${ids.length}개의 열과 위아래 순서가 같다`,
+    (await selectedOf(page)) === file && ids.every((id) => after[id] !== undefined) && Object.keys(after).length > ids.length && same(arranged(after), arranged(before)),
+    `켠 뒤 ${Object.keys(after).length}개 — ${JSON.stringify(arranged(after))}`,
+  );
+}
+
+/** 떠 있는 선의 말풍선에서 칸 이름과 줄마다 관계 칸의 글, 변경 칸의 글과 종류 */
+const changeRows = (page) =>
+  page.evaluate(() => ({
+    head: [...document.querySelectorAll(".line-bubble th")].map((th) => th.textContent),
+    rows: [...document.querySelectorAll(".line-bubble tbody tr")].map((row) => ({
+      nodes: [...row.querySelectorAll("td")].slice(0, 2).map((cell) => cell.dataset.node),
+      relation: row.querySelector('td[data-cell="relation"]')?.textContent ?? "",
+      change: row.querySelector('td[data-cell="change"]')?.textContent ?? null,
+      kinds: [...row.querySelectorAll('td[data-cell="change"] .line-change')].map((part) => part.dataset.kind),
+    })),
+  }));
+
+async function overLine(page, from, to) {
+  const found = await hittable(page, (await linesOf(page)).filter((line) => same(endsOfKey(line.key), [from, to])));
+  if (found === null) {
+    return null;
+  }
+  await bubbleOver(page, found.at);
+  const bubble = await changeRows(page);
+  return { ...bubble, at: found.at, row: bubble.rows.find((row) => same(row.nodes, [from, to])) ?? null };
+}
+
+async function compareBubble(t, page) {
+  await asidePanel(page);
+  await loadCompare(page);
+  const history = await historyOf();
+  await turnOn(page, history.base, "worktree");
+  const [refund, total] = ["shop.orders:refund", "shop.pricing:total"];
+  await pickInTree(page, { id: refund, owner: "shop.orders" });
+  await rest(page);
+  const added = await overLine(page, refund, total);
+  await page.mouse.move(1, 1);
+  const deleted = await overLine(page, refund, "shop.pricing:legacy_total");
+  t.check(
+    "비교가 켜진 말풍선은 출발, 도착, 관계, 변경 네 칸이다",
+    same(added?.head, ["출발", "도착", "관계", "변경"]),
+    (added?.head ?? []).join(", "),
+  );
+  t.check(
+    "추가된 관계의 줄은 변경 칸이 신규, 삭제된 관계의 줄은 삭제다",
+    added?.row?.change === "신규" && same(added.row.kinds, ["added"]) && deleted?.row?.change === "삭제" && same(deleted.row.kinds, ["deleted"]),
+    `${added?.row?.change} / ${deleted?.row?.change}`,
+  );
+  await t.shot();
+  const followed = deleted !== null && (await followLine(page, deleted.at, { to: "shop.pricing:legacy_total" }));
+  if (followed) {
+    await waitSelected(page, "shop.pricing:legacy_total").catch(() => {});
+  }
+  t.check("삭제된 줄의 도착 이름을 누르면 삭제된 노드가 선택된다", followed && (await selectedOf(page)) === "shop.pricing:legacy_total", `${await selectedOf(page)}`);
+
+  await pickInTree(page, { id: total, owner: "shop.pricing" });
+  await rest(page);
+  const recounted = await overLine(page, total, "shop.pricing:tax");
+  await page.mouse.move(1, 1);
+  const kept = await overLine(page, total, "shop.pricing:discount");
+  await page.mouse.move(1, 1);
+  t.check(
+    "지점 수만 달라진 줄은 관계 칸이 호출 1곳 → 2곳이고 변경 칸이 유지다",
+    recounted?.row?.relation === "호출 1곳 → 2곳" && recounted.row.change === "유지" && same(recounted.row.kinds, ["kept"]) && kept?.row?.change === "유지" && kept.row.relation === "호출 1곳",
+    `${recounted?.row?.relation} · ${recounted?.row?.change} / ${kept?.row?.relation} · ${kept?.row?.change}`,
+  );
+
+  await pick(page, "shop.orders");
+  await rest(page);
+  const file = await overLine(page, "shop.orders", "shop.pricing");
+  await page.mouse.move(1, 1);
+  t.check(
+    "파일 단계의 줄은 든 관계의 변경을 수와 함께 신규 1 · 삭제 1로 적는다",
+    file?.row?.change === "신규 1 · 삭제 1" && same(file.row.kinds, ["added", "deleted"]),
+    `${file?.row?.relation} · ${file?.row?.change}`,
+  );
+}
+
+/** 파일트리의 행마다 노드, 이름, 옛 이름, 줄 수, 흐린 행인지, 이름의 색과 불투명도 */
+const treeRows = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".tree .tree-row")].map((row) => ({
+      node: row.dataset.node ?? null,
+      label: row.querySelector(".tree-label").textContent,
+      from: row.querySelector(".tree-from")?.textContent ?? null,
+      lines: row.querySelector(".line-counts")?.textContent ?? "",
+      gone: row.hasAttribute("data-gone"),
+      color: getComputedStyle(row.querySelector(".tree-label")).color,
+      opacity: Number(getComputedStyle(row.querySelector(".tree-label")).opacity),
+      marks: row.querySelectorAll(".tree-change").length,
+    })),
+  );
+
+async function compareTree(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const result = await comparisonOf(history.base, "worktree");
+  await turnOn(page, history.base, "worktree");
+  const [rows, diffs, totals] = [await treeRows(page), await diffsOf(page), totalsOf(result)];
+  const files = rows.filter((row) => row.node !== null && totals[row.node] !== undefined);
+  t.check(
+    `파일트리의 행 ${files.length}개에 적힌 줄 수가 응답의 합과 같고 그래프의 이름 옆 수와 같다`,
+    files.length >= result.files.length && files.every((row) => same(linesIn(row.lines), totals[row.node]) && (diffs[row.node] === undefined || same(linesIn(diffs[row.node]), linesIn(row.lines)))) &&
+      rows.filter((row) => row.node !== null && totals[row.node] === undefined).every((row) => row.lines === ""),
+    files.map((row) => `${row.label} ${row.lines}`).join(", "),
+  );
+  const [audit, live] = [rows.find((row) => row.node === "shop.audit"), rows.find((row) => row.node === "shop.orders")];
+  t.check(
+    "삭제된 파일의 행은 이름의 색이 다른 행과 같고 불투명도만 흐린 단계이며 삭제된 줄 수만 붙는다",
+    audit?.gone === true && audit.color === live.color && near(audit.opacity, DIM, 0.01) && live.opacity === 1 && audit.lines === `−${result.nodes["shop.audit"].deleted}`,
+    `${audit?.label} ${audit?.lines} 색 ${audit?.color} 불투명도 ${audit?.opacity}`,
+  );
+  const renamed = rows.find((row) => row.node === "shop.inventory");
+  t.check("이름이 바뀐 파일의 행에 옛 이름이 보인다", renamed?.from === "← stock.py", `${renamed?.label} ${renamed?.from}`);
+  await page.click('.tree-row.tree-file[data-node="shop.pricing"]');
+  await page.waitForSelector('.tree-row.tree-symbol[data-node="shop.pricing:legacy_total"]', { timeout: 10_000 });
+  await rest(page);
+  const symbols = (await treeRows(page)).filter((row) => row.node?.startsWith("shop.pricing:"));
+  const defined = result.graph.nodes.filter((n) => n.parent === "shop.pricing").sort((a, b) => (result.nodes[a.id]?.slot ?? a.range[0]) - (result.nodes[b.id]?.slot ?? b.range[0]) || (result.nodes[a.id]?.slot === undefined ? -1 : 1));
+  const gone = symbols.find((row) => row.node === "shop.pricing:legacy_total");
+  t.check(
+    "파일을 펼치면 삭제된 정의가 소스 정의 순서의 위치에 흐린 단계로 있고 정의마다 줄 수가 응답과 같다",
+    same(symbols.map((row) => row.node), defined.map((n) => n.id)) && gone.gone && near(gone.opacity, DIM, 0.01) &&
+      symbols.every((row) => same(linesIn(row.lines), { added: result.nodes[row.node]?.added ?? 0, deleted: result.nodes[row.node]?.deleted ?? 0 })),
+    symbols.map((row) => `${row.label} ${row.lines}`).join(", "),
+  );
+  t.check("비교가 켜진 동안 파일트리에 M·A 표시가 없다", (await treeRows(page)).every((row) => row.marks === 0));
+}
+
+async function compareList(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const result = await comparisonOf(history.base, "worktree");
+  await turnOn(page, history.base, "worktree");
+  const kinds = new Map(result.graph.nodes.map((n) => [n.id, n.kind]));
+  const defined = Object.entries(result.nodes).filter(([id, change]) => change.change !== null && !["module", "package"].includes(kinds.get(id)));
+  const list = await page.evaluate(() => ({
+    children: [...document.querySelector(".overview").children].map((child) => `${child.tagName.toLowerCase()}.${child.className}`),
+    count: document.querySelector(".overview-count").textContent.replace(/\s+/g, " ").trim(),
+    hint: document.querySelector(".overview-hint").textContent,
+    files: [...document.querySelectorAll(".overview-file")].map((head) => ({ path: head.querySelector(".overview-path").textContent, from: head.querySelector(".overview-from")?.textContent ?? null, lines: head.querySelector(".line-counts").textContent, gone: head.hasAttribute("data-gone") })),
+    rows: [...document.querySelectorAll(".overview-row")].map((row) => ({ node: row.dataset.node, lines: row.querySelector(".line-counts").textContent, gone: row.hasAttribute("data-gone"), tag: row.tagName })),
+  }));
+  t.check(
+    "선택이 없으면 정보 패널이 변경 목록을 미사용 후보 요약과 같은 요소 구조(수를 적은 줄, 설명 한 줄, 파일별 묶음)로 보인다",
+    same(list.children.slice(0, 2), ["p.overview-count", "p.overview-hint"]) && list.children.slice(2).every((child) => child === "section.") && list.rows.every((row) => row.tag === "BUTTON"),
+    list.children.join(", "),
+  );
+  t.check(
+    `첫 줄이 바뀐 정의 ${defined.length}개 · 파일 ${result.files.length}개이고 설명이 기준과 대상을 적는다`,
+    list.count === `바뀐 정의 ${defined.length}개 · 파일 ${result.files.length}개` && list.hint.startsWith(`기준 ${history.base.slice(0, 7)} · 대상 작업 중인 상태.`),
+    `${list.count} / ${list.hint}`,
+  );
+  t.check(
+    "묶음 머리의 경로·옛 이름·줄 수와 행마다의 줄 수가 응답과 같고 삭제된 파일과 정의는 흐린 단계다",
+    same(list.files.map((file) => [file.path, file.from, linesIn(file.lines), file.gone]), result.files.map((file) => [file.path, file.old === null ? null : `← ${file.old}`, { added: file.added, deleted: file.deleted }, file.status === "deleted"])) &&
+      same(list.rows.map((row) => row.node).sort(), defined.map(([id]) => id).sort()) &&
+      list.rows.every((row) => same(linesIn(row.lines), { added: result.nodes[row.node].added, deleted: result.nodes[row.node].deleted }) && row.gone === (result.nodes[row.node].change === "deleted")),
+    list.rows.map((row) => `${row.node} ${row.lines}`).join(", "),
+  );
+  await t.shot();
+  const target = "shop.pricing:total";
+  await page.click(`.overview-row[data-node="${target}"]`);
+  await waitSelected(page, target);
+  t.check("행을 누르면 그 노드가 선택된다", (await selectedOf(page)) === target, `${await selectedOf(page)}`);
+}
+
+async function compareCode(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const result = await comparisonOf(history.base, "worktree");
+  await turnOn(page, history.base, "worktree");
+  const target = "shop.pricing:total";
+  const file = result.files.find((each) => each.path === "src/shop/pricing.py");
+  await page.click(`.overview-row[data-node="${target}"]`);
+  await waitSelected(page, target);
+  await waitCode(page);
+  const code = await wovenOf(page);
+  const kinds = code.labels.map((label) => (/^_*\d+_+\d+$/.test(label) ? "same" : /\d_+$/.test(label) ? "deleted" : "added"));
+  const mixed = kinds.some((kind, i) => kind === "deleted" && kinds[i + 1] === "added");
+  t.check(
+    "코드 뷰어가 편집기 하나에 두 시점을 엮어 보이고 삭제된 줄 바로 아래에 추가된 줄이 이어진다",
+    code.editors === 1 && code.split === 0 && mixed,
+    kinds.join(" "),
+  );
+  t.check(
+    `파일 전체가 보이는 ${file.path}에서 엮은 문서의 삭제된 줄 ${code.deleted}개, 추가된 줄 ${code.added}개가 그 파일의 줄 수 +${file.added} −${file.deleted}와 같다`,
+    code.deleted === file.deleted && code.added === file.added && kinds.filter((kind) => kind === "deleted").length === file.deleted && kinds.filter((kind) => kind === "added").length === file.added,
+    `줄 번호 칸 ${code.labels.length}줄`,
+  );
+  const head = await page.evaluate(() => document.querySelector(".info-panel-compared")?.textContent ?? "");
+  t.check("정보 패널의 머리 줄이 수정과 그 정의의 줄 수를 적는다", head === `수정+${result.nodes[target].added}−${result.nodes[target].deleted}`, head);
+  const deletedFile = result.files.find((each) => each.status === "deleted");
+  const old = await (await fetch(new URL(`/api/file?path=${encodeURIComponent(deletedFile.path)}&at=${history.base}`, compareUrl))).json();
+  const renamedFile = result.files.find((each) => each.status === "renamed");
+  const past = await fetch(new URL(`/api/file?path=${encodeURIComponent(renamedFile.old)}&at=${history.base}`, compareUrl));
+  t.check(
+    "/api/file의 at이 삭제된 파일과 이름이 바뀌기 전 경로의 기준 시점 본문을 낸다",
+    old.text.split("\n").filter((line, i, all) => i < all.length - 1 || line !== "").length === deletedFile.deleted && past.status === 200,
+    `${deletedFile.path} ${old.text.split("\n").length - 1}줄, ${renamedFile.old} ${past.status}`,
+  );
+  await t.shot();
+  // 패널의 왼쪽 변을 끌어 폭을 넓힌다.
+  const panel = await rectOf(page, ".info-panel");
+  await page.mouse.move(panel.x + 1, panel.y + panel.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(panel.x - 380, panel.y + panel.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  const wide = await wovenOf(page);
+  t.check(
+    "패널의 폭을 넓혀도 비교는 한 칸이다",
+    (await rectOf(page, ".info-panel")).width > panel.width + 200 && wide.editors === 1 && wide.split === 0 && wide.deleted === code.deleted && wide.added === code.added,
+    `폭 ${panel.width.toFixed(0)} → ${(await rectOf(page, ".info-panel")).width.toFixed(0)}`,
+  );
+}
+
+/** 엮은 문서에서 삭제된 줄을 끌어 고르고, 복사한 글과 코드 분석 요청이 줄 머리의 표시를 싣는지 본다. 분석은 서버 대신 답한다. */
+async function compareRange(t, page) {
+  const asked = [];
+  const saved = [];
+  await page.route(
+    (at) => at.pathname === "/api/explanations" || at.pathname === "/api/explanation",
+    (route) => {
+      const request = route.request();
+      const query = Object.fromEntries(new URL(request.url()).searchParams);
+      if (request.method() === "GET") {
+        return route.fulfill({ json: { explanations: [], compared: query.base === undefined ? [] : saved.filter((each) => each.path === query.path).map(({ path, ...rest }) => rest) } });
+      }
+      if (request.method() !== "POST") {
+        return route.fulfill({ json: { deleted: true } });
+      }
+      const body = request.postDataJSON() ?? {};
+      asked.push({ query, body });
+      const text = "합계를 반올림해 돌려주게 바뀌었다.";
+      saved.push({ path: query.path, start: Number(query.start), end: Number(query.end), old_start: Number(query.old_start), old_end: Number(query.old_end), question: body.question ?? "", text, digest: "", created: "2026-10-12T00:00:00+0900" });
+      return route.fulfill({ json: { start: Number(query.start), end: Number(query.end), question: body.question ?? "", text, stale: false, usage: null } });
+    },
+  );
+  // 화면의 복사 처리가 이벤트를 멈추므로 클립보드에 넣는 글을 넣는 함수에서 적어 둔다.
+  await page.addInitScript(() => {
+    window.__shotsCopied = null;
+    const setData = DataTransfer.prototype.setData;
+    DataTransfer.prototype.setData = function (type, data) {
+      if (type === "text/plain") {
+        window.__shotsCopied = data;
+      }
+      return setData.call(this, type, data);
+    };
+  });
+  await loadCompare(page);
+  const history = await historyOf();
+  await turnOn(page, history.base, "worktree");
+  const target = "shop.pricing:total";
+  await page.click(`.overview-row[data-node="${target}"]`);
+  await waitSelected(page, target);
+  await waitCode(page);
+  const code = await wovenOf(page);
+  const kinds = code.labels.map((label) => (/^_*\d+_+\d+$/.test(label) ? "same" : /\d_+$/.test(label) ? "deleted" : "added"));
+  // 삭제된 줄에서 시작해 바로 아래 추가된 줄까지 끈다.
+  const first = kinds.findIndex((kind, i) => kind === "deleted" && kinds.slice(i).includes("added") && kinds[i - 1] === "same");
+  const last = first + kinds.slice(first).findIndex((kind, i, rest) => kind === "added" && rest[i + 1] !== "added");
+  const [from, to] = [await codeLine(page, first + 1), await codeLine(page, last + 1)];
+  await page.mouse.move(from.x + 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + 320, to.y + to.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForSelector(".code-explain", { timeout: 5_000 }).catch(() => {});
+  const picked = kinds.slice(first, last + 1);
+  t.check(
+    `삭제된 줄에서 끌기 시작해 추가된 줄까지 ${picked.length}줄을 고르면 코드 분석 버튼이 뜬다`,
+    first > 0 && picked.includes("deleted") && picked.includes("added") && (await count(page, ".code-explain")) === 1,
+    picked.join(" "),
+  );
+  await page.keyboard.press(`${MOD}+C`);
+  await page.waitForFunction(() => window.__shotsCopied !== null, null, { timeout: 3_000 }).catch(() => {});
+  const copied = ((await page.evaluate(() => window.__shotsCopied)) ?? "").split("\n").filter((line) => line !== "");
+  const signs = picked.map((kind) => ({ same: " ", deleted: "-", added: "+" })[kind]);
+  t.check(
+    "고른 범위를 복사하면 줄 머리에 삭제된 줄은 -, 추가된 줄은 +를 붙인 글이 클립보드에 들어간다",
+    copied.length === picked.length && copied.every((line, i) => line[0] === signs[i]),
+    `${copied.length}줄: ${copied.join(" ⏎ ")}`,
+  );
+  await page.click(".code-explain");
+  await page.waitForSelector(".code-ask", { timeout: 5_000 });
+  await page.keyboard.type("무엇이 바뀌었나?");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(".code-note-glyph:not(.code-note-making)", { timeout: 5_000 }).catch(() => {});
+  const sent = asked[0];
+  const marks = (sent?.body.code ?? "").split("\n").filter((line) => line !== "");
+  t.check(
+    "코드 분석 요청이 두 시점과 기준 시점의 줄 범위, 줄 머리에 표시를 붙인 본문, 질문을 싣는다",
+    asked.length === 1 && sent.query.base === history.base && sent.query.target === "worktree" && Number(sent.query.old_start) >= 1 && Number(sent.query.old_end) >= Number(sent.query.old_start) &&
+      Number(sent.query.end) >= Number(sent.query.start) && marks.length === picked.length && marks.every((line, i) => line[0] === signs[i]) && sent.body.question === "무엇이 바뀌었나?",
+    sent === undefined ? "요청 없음" : `${JSON.stringify(sent.query)} / ${marks.join(" ⏎ ")}`,
+  );
+  const glyph = await rectOf(page, ".code-note-glyph");
+  const line = await codeLine(page, first + 1);
+  t.check(
+    "분석의 표지가 고른 범위의 첫 줄(삭제된 줄)에 달리고 창이 질문과 답을 보인다",
+    glyph !== null && near(glyph.y + glyph.height / 2, line.y + line.height / 2, 3) && (await page.textContent(".code-note-window .code-note-question").catch(() => "")) === "무엇이 바뀌었나?" &&
+      (await page.textContent(".code-note-window .summary-text").catch(() => "")).includes("반올림"),
+    glyph === null ? "표지 없음" : `표지 ${glyph.y.toFixed(0)}, 줄 ${line.y.toFixed(0)}`,
+  );
+  await t.shot();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await turnOff(page);
+  await page.waitForTimeout(500);
+  t.check("비교를 끄면 두 시점의 비교에 묶인 분석의 표지는 보이지 않는다", (await count(page, ".code-note-glyph")) === 0, `표지 ${await count(page, ".code-note-glyph")}개`);
+}
+
+async function compareRoute(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  await turnOn(page, history.base, "worktree");
+  await openFinder(page);
+  const field = '.finder-field[data-end="to"]';
+  if ((await count(page, `${field} .finder-input`)) === 0) {
+    await page.click(`${field} .finder-value`);
+  }
+  await page.click(`${field} .finder-input`);
+  await page.keyboard.type("legacy_total");
+  await page.waitForTimeout(500);
+  const none = await count(page, '.finder-hit[data-node="shop.pricing:legacy_total"]');
+  await page.keyboard.press(`${MOD}+A`);
+  await page.keyboard.type("total");
+  await page.waitForSelector('.finder-hit[data-node="shop.pricing:total"]', { timeout: 5_000 }).catch(() => {});
+  t.check(
+    "삭제된 함수는 경로 찾기의 후보에 없고 대상 시점의 함수는 있다",
+    none === 0 && (await count(page, '.finder-hit[data-node="shop.pricing:total"]')) === 1,
+    `legacy_total ${none}개`,
+  );
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  const refund = "shop.orders:refund";
+  await pickInTree(page, { id: refund, owner: "shop.orders" });
+  await rest(page);
+  await clickNode(page, refund, 2);
+  await page.waitForSelector(".node-call", { timeout: 30_000 });
+  await settle(page);
+  const calls = await page.evaluate(() => [...document.querySelectorAll(".react-flow__node")].filter((wrapper) => wrapper.querySelector(".node-call") !== null).map((wrapper) => wrapper.dataset.id.replace(/#face$/, "")));
+  t.check(
+    "리니지 뷰에는 삭제된 관계가 없다",
+    calls.some((id) => id.includes("shop.pricing:total")) && calls.every((id) => !id.includes("legacy_total")) && (await count(page, ".edge-gone")) === 0,
+    [...new Set(calls)].join(", "),
+  );
+}
+
+/** 그래프의 노드와 선, 선 위의 숫자, 파일트리의 행을 적은 글. 비교를 켜기 전과 끈 뒤를 견준다. */
+const drawnOf = (page) =>
+  page.evaluate(() =>
+    JSON.stringify({
+      nodes: [...document.querySelectorAll(".react-flow__node")].map((wrapper) => `${wrapper.dataset.id} ${wrapper.style.transform} ${wrapper.style.width}×${wrapper.style.height} ${wrapper.textContent}`),
+      edges: [...document.querySelectorAll(".react-flow__edge .edge[data-key]")].map((edge) => `${edge.dataset.key} ${edge.querySelector(".edge-line").getAttribute("d")} ${[...edge.querySelectorAll("text")].map((text) => `${text.textContent}@${text.getAttribute("x")},${text.getAttribute("y")}`).join(" ")}`),
+      tree: [...document.querySelectorAll(".tree .tree-row")].map((row) => `${row.className} ${row.textContent}`),
+      marks: document.querySelectorAll(".react-flow [data-change], .tree-change").length,
+    }),
+  );
+
+async function compareOff(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const before = await drawnOf(page);
+  await turnOn(page, history.base, "worktree");
+  const on = await drawnOf(page);
+  await openWindow(page);
+  t.check("비교가 켜진 채 창을 다시 펴면 끄기가 있다", (await count(page, ".compare-off")) === 1 && on !== before);
+  await t.shot();
+  await turnOff(page);
+  const off = await drawnOf(page);
+  t.check(
+    "끄면 창이 닫히고 그래프의 노드와 선, 숫자와 그 위치, 파일트리, 변경 표시가 켜기 전과 글자 그대로 같다",
+    (await count(page, ".compare-window")) === 0 && off === before && JSON.parse(off).marks > 0,
+    off === before ? `노드 ${JSON.parse(off).nodes.length}개, 선 ${JSON.parse(off).edges.length}개` : "다르다",
+  );
+  await turnOn(page, history.base, "worktree");
+  await setOverlay(page, "unused");
+  await page.waitForFunction(() => document.querySelector(".compare-button").innerText.trim() === "비교", null, { timeout: 30_000 }).catch(() => {});
+  await rest(page);
+  t.check(
+    "비교가 켜진 채 필터 창에서 미사용 후보를 켜면 비교가 꺼진다",
+    (await buttonText(page)) === "비교" && (await count(page, ".react-flow [data-gone], .react-flow .node-diff, .edge-gone")) === 0 && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "unused",
+    await buttonText(page),
+  );
+}
+
+async function compareCommits(t, page) {
+  await loadCompare(page);
+  const history = await historyOf();
+  const result = await comparisonOf(history.edit, history.move);
+  const worktree = await api("/api/graph", compareUrl);
+  const listed = [];
+  page.on("request", (request) => new URL(request.url()).pathname === "/api/summaries" && listed.push(request.url()));
+  const drawnFiles = async () => (await boxes(page)).map((box) => box.id).sort();
+  const wanted = (graph, gone = new Set()) => graph.nodes.filter((n) => n.kind === "module" && !n.test && !gone.has(n.id)).map((n) => n.id).sort();
+  await turnOn(page, history.edit, history.move);
+  const only = wanted(worktree).filter((id) => !result.graph.nodes.some((n) => n.id === id));
+  t.check(
+    `대상을 커밋으로 고르면 그래프가 그 커밋의 그래프로 바뀐다(작업 중인 상태에만 있는 ${only.join(", ")}가 없다)`,
+    only.length > 0 && same(await drawnFiles(), wanted(result.graph)) && (await buttonText(page)).startsWith(`비교 v0.1 → ${history.move.slice(0, 7)}`),
+    `${(await drawnFiles()).join(", ")} — ${await buttonText(page)}`,
+  );
+  const status = async (path) => (await fetch(new URL(path, compareUrl))).status;
+  const during = [await status(`/api/summary?node=${only[0]}`), await status("/api/summary?node=shop.audit")];
+  t.check(
+    "비교를 그리면 요지 목록을 다시 받고, 요약은 대상 커밋의 노드만 받는다(작업 중인 상태에만 있는 노드와 삭제된 파일은 404)",
+    listed.length >= 1 && same(during, [404, 404]) && (await status("/api/summary?node=shop.inventory")) === 200,
+    `/api/summaries ${listed.length}번, 상태 ${during.join(", ")}`,
+  );
+  await page.click(`.tree-row.tree-file[data-node="shop.inventory"]`);
+  await waitSelected(page, "shop.inventory");
+  await waitCode(page);
+  const code = await wovenOf(page);
+  const text = await (await fetch(new URL(`/api/file?path=src/shop/inventory.py&at=${history.move}`, compareUrl))).json();
+  t.check(
+    "코드 뷰어가 대상 커밋의 본문을 기준 커밋과 엮어 보인다",
+    code.text.includes("def available(") && code.deleted === 1 && code.added === 1 && text.text.includes("def available("),
+    `삭제된 줄 ${code.deleted}개, 추가된 줄 ${code.added}개`,
+  );
+  await t.shot();
+  const before = listed.length;
+  await turnOff(page);
+  t.check(
+    "끄면 작업 중인 상태의 그래프로 돌아오고 요약이 다시 작업 중인 상태의 노드를 받는다",
+    same(await drawnFiles(), wanted(worktree)) && listed.length > before && (await status(`/api/summary?node=${only[0]}`)) === 200,
+    (await drawnFiles()).join(", "),
+  );
+}
+
+async function compareReadonly(t) {
+  if (repoBefore === null) {
+    t.skip("고정 레포의 git status, for-each-ref, .git 아래 파일 목록이 비교 시나리오를 돌기 전과 같다", "이 실행에서 다른 비교 시나리오를 돌지 않았다");
+    return;
+  }
+  const now = await repoState();
+  t.check(
+    "고정 레포의 git status --porcelain, git for-each-ref, .git 아래 파일 목록이 비교 시나리오를 돌기 전과 같다",
+    same(now, repoBefore),
+    `상태 ${now.status === repoBefore.status ? "같음" : "다름"}, 브랜치와 태그 ${now.refs === repoBefore.refs ? "같음" : "다름"}, .git 파일 ${now.files.split("\n").length}개 ${now.files === repoBefore.files ? "같음" : "다름"}`,
+  );
+}
+
 const SCENARIOS = [
   ["open", open],
   ["file", file],
@@ -12382,6 +13336,22 @@ const SCENARIOS = [
   ["var-tip", varTip],
   ["var-finder", varFinder],
   ["var-jump", varJump],
+  ["compare-window", compareWindow],
+  ["compare-pick", comparePick],
+  ["compare-fork", compareFork],
+  ["compare-on", compareOn],
+  ["compare-marks", compareMarks],
+  ["compare-gone", compareGone],
+  ["compare-order", compareOrder],
+  ["compare-bubble", compareBubble],
+  ["compare-tree", compareTree],
+  ["compare-list", compareList],
+  ["compare-code", compareCode],
+  ["compare-range", compareRange],
+  ["compare-route", compareRoute],
+  ["compare-off", compareOff],
+  ["compare-commits", compareCommits],
+  ["compare-readonly", compareReadonly],
 ];
 
 /** 3단계 시나리오. 스크린샷 이름이 s3-로 시작한다. */
@@ -12426,6 +13396,8 @@ const STAGE4 = new Set([
 ]);
 /** 모듈 변수 노드의 시나리오. 스크린샷 이름이 mv-로 시작한다. */
 const VARIABLES = new Set(SCENARIOS.filter(([name]) => name.startsWith("var-")).map(([name]) => name));
+/** 시점 비교 시나리오. 이력 고정 레포를 연 서버에서 돌고 스크린샷 이름이 s5-로 시작한다. */
+const COMPARE = new Set(SCENARIOS.filter(([name]) => name.startsWith("compare-")).map(([name]) => name));
 /** 순환이 있는 고정 레포를 연 서버에서 도는 시나리오 */
 const CYCLE = new Set(["cycles", "cycles-change", "cycles-pin"]);
 
@@ -12440,6 +13412,10 @@ async function run(browser, name, scenario) {
     console.log(`[${name}]\n  건너뜀  고정 레포의 임시 복사본으로 연 화면 — --reload-url을 주지 않았다`);
     return [{ label: name, ok: null, actual: "" }];
   }
+  if (COMPARE.has(name) && compareUrl === null) {
+    console.log(`[${name}]\n  건너뜀  이력 고정 레포로 연 화면 — --compare-url을 주지 않았다`);
+    return [{ label: name, ok: null, actual: "" }];
+  }
   const context = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 2, colorScheme: "light" });
   // 화면의 단축키 처리(window의 capture 단계)가 끝난 뒤에 keydown의 defaultPrevented를 적어 둔다.
   await context.addInitScript(() => {
@@ -12450,7 +13426,7 @@ async function run(browser, name, scenario) {
   });
   const results = [];
   const errors = [];
-  const path = join(OUT, `${VARIABLES.has(name) ? "mv" : STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
+  const path = join(OUT, `${COMPARE.has(name) ? "s5" : VARIABLES.has(name) ? "mv" : STAGE4.has(name) ? "s4" : STAGE3.has(name) ? "s3" : "s2"}-${name}.png`);
   const page = await context.newPage();
   let shot = false;
   const t = {
