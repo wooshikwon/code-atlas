@@ -98,6 +98,21 @@ export function insideCounts(graph: Graph, off: Set<string>): Map<string, number
   return result;
 }
 
+/** 폴더마다 오른쪽 위 배지에 적는 줄 수. 하위 폴더까지 그 폴더 아래에 든 파일의 줄 수 합이고, off에 든 파일은 세지 않는다. */
+export function folderLines(graph: Graph, off: Set<string>): Map<string, number> {
+  const nodes = nodeIndex(graph);
+  const result = new Map<string, number>(graph.nodes.filter((n) => n.kind === "package").map((n) => [n.id, 0]));
+  for (const node of graph.nodes) {
+    if (node.kind !== "module" || off.has(node.id) || node.parent === null) {
+      continue;
+    }
+    for (let at = nodes.get(node.parent); at !== undefined; at = at.parent === null ? undefined : nodes.get(at.parent)) {
+      result.set(at.id, (result.get(at.id) ?? 0) + node.loc);
+    }
+  }
+  return result;
+}
+
 /** 함수·메서드마다 그 노드에서 나가는 바꿈 선의 도착 변수 이름. 선이 그래프에 나오는 순서이고 같은 이름은 한 번만 담는다. */
 export function writtenBy(graph: Graph): Map<string, string[]> {
   const nodes = nodeIndex(graph);

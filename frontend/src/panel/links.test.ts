@@ -156,15 +156,15 @@ describe("글", () => {
   });
 
   it("정의는 줄 수와 줄 범위를, 파일과 폴더는 줄 수만 적고 외부 노드는 적지 않는다", () => {
-    expect(sizeText(nodes.get("main:run")!)).toBe("9줄 (5~15)");
-    expect(sizeText(nodes.get("main")!)).toBe("40줄");
-    expect(sizeText(nodes.get("ext:json")!)).toBeNull();
+    expect(sizeText(nodes.get("main:run")!, nodes.get("main:run")!.loc)).toBe("9줄 (5~15)");
+    expect(sizeText(nodes.get("main")!, nodes.get("main")!.loc)).toBe("40줄");
+    expect(sizeText(nodes.get("ext:json")!, nodes.get("ext:json")!.loc)).toBeNull();
   });
 
   it("변수는 값의 종류와 원소 수를 줄 수 앞에 적는다", () => {
     const variables = nodeIndex(variableFixture);
-    expect(sizeText(variables.get("conf:PRESETS")!)).toBe("dict · 2개 · 6줄 (7~12)");
-    expect(sizeText(variables.get("conf:LIMIT")!)).toBe("int · 1줄 (14~14)");
+    expect(sizeText(variables.get("conf:PRESETS")!, variables.get("conf:PRESETS")!.loc)).toBe("dict · 2개 · 6줄 (7~12)");
+    expect(sizeText(variables.get("conf:LIMIT")!, variables.get("conf:LIMIT")!.loc)).toBe("int · 1줄 (14~14)");
     expect(pathOf(variables, variables.get("conf:PRESETS")!)).toEqual({ path: "conf.py::", name: "PRESETS" });
   });
 

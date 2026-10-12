@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture, routeFixture, variableFixture } from "./fixture";
-import { DIM, flow, opacities, opacity } from "./flow";
+import { DIM, HALF, flow, opacities, opacity } from "./flow";
 import { lit, route } from "./route";
 import { hidden } from "./visible";
 
@@ -58,12 +58,12 @@ describe("opacity", () => {
     expect(opacity(null, "scratch")).toBe(1);
   });
 
-  it("마지막 단계는 0.5, 그보다 앞 단계는 1, 흐름 밖은 흐린 단계다", () => {
+  it("마지막 단계는 중간 단계, 그보다 앞 단계는 1, 흐름 밖은 흐린 단계다", () => {
     const three = flow(repoFixture, "app.web:render", 2, off);
     expect(opacity(three, "app.web:render")).toBe(1);
     expect(opacity(three, "app.web:index")).toBe(1);
     expect(opacity(three, "app.text:wrap")).toBe(1);
-    expect(opacity(three, "app.text:pad")).toBe(0.5);
+    expect(opacity(three, "app.text:pad")).toBe(HALF);
     expect(opacity(three, "scratch:todo")).toBe(DIM);
   });
 
@@ -82,7 +82,7 @@ describe("opacities", () => {
     expect(result.get("main")).toBe(1);
     expect(result.get("main:helper")).toBe(1);
     expect(result.get("cli")).toBe(1);
-    expect(result.get("pkg.mod:Store.save")).toBe(0.5);
+    expect(result.get("pkg.mod:Store.save")).toBe(HALF);
     expect(result.get("pkg.mod:Store")).toBe(1);
     expect(result.get("pkg")).toBe(1);
     expect(result.get("pkg.util")).toBe(DIM);
@@ -92,7 +92,7 @@ describe("opacities", () => {
   it("파일 상자를 고르면 파일 상자와 그 폴더가 값을 받는다", () => {
     const result = opacities(repoFixture, flow(repoFixture, "pkg.mod", 2, off), null);
     expect(result.get("main")).toBe(1);
-    expect(result.get("cli")).toBe(0.5);
+    expect(result.get("cli")).toBe(HALF);
     expect(result.get("pkg.util")).toBe(1);
     expect(result.get("app.web")).toBe(DIM);
   });
@@ -101,7 +101,7 @@ describe("opacities", () => {
     const result = opacities(repoFixture, flow(repoFixture, "pkg", 2, off), null);
     expect(result.get("pkg")).toBe(1);
     expect(result.get("main")).toBe(1);
-    expect(result.get("cli")).toBe(0.5);
+    expect(result.get("cli")).toBe(HALF);
     expect(result.get("app")).toBe(DIM);
   });
 

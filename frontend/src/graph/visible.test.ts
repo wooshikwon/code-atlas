@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { node as made, repoFixture, routeFixture, variableFixture } from "./fixture";
 import { flow } from "./flow";
 import { lit, route } from "./route";
-import { drawnOut, hidden, insideCounts, inward, lift, nodeIndex, outward, packedIn, shown, unresolvedWithin, writtenBy } from "./visible";
+import { drawnOut, folderLines, hidden, insideCounts, inward, lift, nodeIndex, outward, packedIn, shown, unresolvedWithin, writtenBy } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
 const toggles = { showTests: false, showExternal: false };
@@ -179,6 +179,31 @@ describe("outward, insideCounts", () => {
     expect(counts.get("pkg")).toBe(2);
     expect(counts.get("app")).toBe(3);
     expect(insideCounts(repoFixture, hidden(repoFixture, { showTests: true, showExternal: false })).get("pkg")).toBe(3);
+  });
+
+  it("폴더의 줄 수는 하위 폴더까지 안에 든 파일의 줄 수 합이고 토글로 숨긴 파일은 세지 않는다", () => {
+    const lines = folderLines(repoFixture, off);
+    expect(lines.get("pkg")).toBe(60 + 5);
+    expect(lines.get("app")).toBe(3 + 30 + 20);
+    expect(lines.has("pkg.mod")).toBe(false);
+    expect(folderLines(repoFixture, hidden(repoFixture, { showTests: true, showExternal: false })).get("pkg")).toBe(60 + 5 + 9);
+    const nested = {
+      nodes: [
+        made("a", "package", null),
+        made("a.x", "module", "a", { loc: 7 }),
+        made("a.x:f", "function", "a.x", { loc: 4 }),
+        made("a.b", "package", "a"),
+        made("a.b.y", "module", "a.b", { loc: 11 }),
+        made("a.b.test_y", "module", "a.b", { loc: 100, test: true }),
+        made("a.c", "package", "a", { test: true }),
+        made("a.c.test_z", "module", "a.c", { loc: 50, test: true }),
+      ],
+      edges: [],
+    };
+    const shownOnly = folderLines(nested, hidden(nested, { showTests: false, showExternal: false }));
+    expect([shownOnly.get("a"), shownOnly.get("a.b"), shownOnly.get("a.c")]).toEqual([18, 11, 0]);
+    const all = folderLines(nested, new Set());
+    expect([all.get("a"), all.get("a.b"), all.get("a.c")]).toEqual([168, 111, 50]);
   });
 });
 

@@ -45,11 +45,13 @@ import { clipped, nodeTip, packTip, tipOf, valueTip } from "./tips";
 import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
 import { anchorOn, autoView, boundsOf, centerOn, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, nearest, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
-import { hidden, insideCounts, lift, local, nodeIndex, shown, unitOf, writtenBy, type Shown } from "./visible";
+import { folderLines, hidden, insideCounts, lift, local, nodeIndex, shown, unitOf, writtenBy, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
 const NO_BOXES = new Map<string, Box>();
 const SHELF_NAME_HEIGHT = 22;
+/** 오른쪽 위 배지에 줄 수를 적는 노드 종류 */
+const SIZED = new Set<AtlasNode["kind"]>(["package", "module", "class", "dataclass"]);
 
 /** 배치 한 번과 그 배치를 만든 입력. 노드와 선은 늘 같은 Scene에서 만든다. */
 interface Scene {
@@ -103,6 +105,7 @@ function itemsOf(
   const dim = opacities(scene.graph, scene.flow, scene.lit);
   const ends = endsOf(scene.lit);
   const inside = insideCounts(scene.graph, scene.shown.hidden);
+  const lines = folderLines(scene.graph, scene.shown.hidden);
   const writes = writtenBy(scene.graph);
   /** 화면에 보이는 노드마다, 그 노드로 올린 노드 가운데 요약을 만드는 중인 노드 수. 펼친 폴더는 안에 든 노드를 모두 센다. */
   const busy = new Map<string, number>();
@@ -125,7 +128,8 @@ function itemsOf(
       selected: node.id === selected,
       flow: (scene.flow !== null || scene.lit !== null) && opacity > DIM,
       local: scene.flow !== null && node.id !== scene.flow.file && local(nodes, scene.flow, node.id),
-      inside: expanded ? 0 : (inside.get(node.id) ?? 0),
+      inside: inside.get(node.id) ?? 0,
+      loc: SIZED.has(node.kind) ? (lines.get(node.id) ?? node.loc) : null,
       writes: writes.get(node.id) ?? [],
       busy: busy.get(node.id) ?? 0,
       route,
