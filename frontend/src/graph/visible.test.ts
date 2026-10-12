@@ -245,7 +245,7 @@ describe("shown: 세 단계 펼침", () => {
     expect(folded.nodes.has("flow.walk")).toBe(false);
   });
 
-  it("덮개가 표시하는 노드는 펼침 단계에서 그리고, 미사용 후보 수는 손잡이에 든 자식에서 센다", () => {
+  it("분석 표시가 표시하는 노드는 펼침 단계에서 그리고, 미사용 후보 수는 손잡이에 든 자식에서 센다", () => {
     const candidates = new Set(["pkg.mod:parse", "pkg.mod:Row"]);
     const off = at("pkg.mod", { candidates });
     expect(off.packs.get("pkg.mod")).toEqual({ ids: ["pkg.mod:Row", "pkg.mod:parse"], open: false, unused: 2 });

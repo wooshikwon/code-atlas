@@ -15,11 +15,11 @@ export interface ViewSettings {
   autoSummary: boolean;
 }
 
-/** 기본값(흐름 단계 2, 덮개 없음, 토글 세 개 꺼짐)과 다른 보기 설정의 이름. 필터 창에 그리는 순서다. */
+/** 기본값(흐름 단계 2, 분석 표시 없음, 토글 세 개 꺼짐)과 다른 보기 설정의 이름. 필터 창에 그리는 순서다. */
 export function changed(settings: ViewSettings): string[] {
   return [
     ...(settings.depth !== DEPTH ? [`흐름 단계 ${settings.depth}`] : []),
-    ...(settings.overlay !== null ? [`덮개 ${OVERLAY_NAMES[settings.overlay]}`] : []),
+    ...(settings.overlay !== null ? [`${OVERLAY_NAMES[settings.overlay]} 표시`] : []),
     ...(settings.showTests ? ["테스트 코드"] : []),
     ...(settings.showExternal ? ["외부 노드"] : []),
     ...(settings.autoSummary ? ["자동 요약"] : []),

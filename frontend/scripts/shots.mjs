@@ -2616,6 +2616,44 @@ const busyAt = (page, id, shape) =>
 const atCorner = (at) => at !== null && near(at.left, 6, 0.5) && near(at.above, 7, 0.5) && !at.covers;
 const cornerText = (at) => (at === null ? "도는 원 없음" : `왼쪽으로 ${at.left.toFixed(1)}px, 위로 ${at.above.toFixed(1)}px${at.covers ? ", 이름표와 겹침" : ""}`);
 
+/** hotfix 4의 사진. `hf4-{이름}.png`로 남긴다. */
+const HF4 = (name) => join(OUT, `hf4-${name}.png`);
+/** LLM 요약을 만드는 중인 노드의 도는 표시. 원이 있는 노드는 원 위의 고리, 상자는 왼쪽 위 모서리의 도는 원이다. */
+const BUSY = ".badge-busy, .busy-ring";
+
+/**
+ * id 노드의 원 위에서 도는 고리. 원과 같은 사각형인지(돌면서 화면 사각형이 바뀌므로 돌리기 전의 위치로 잰다), 도는지, 지금 돈 각도,
+ * 진한 구간과 나머지 테두리의 색, 그 노드가 따로 단 도는 원의 수, 접근성 이름과 말풍선 글. 고리가 없으면 null이다.
+ */
+const ringOf = (page, id) =>
+  page.evaluate((faceSel) => {
+    const ring = document.querySelector(`${faceSel} .node-circle > .busy-ring`);
+    if (ring === null) {
+      return null;
+    }
+    const circle = ring.parentElement;
+    const style = getComputedStyle(ring);
+    const [cos, sin] = style.transform === "none" ? [1, 0] : style.transform.slice(7).split(",").map(Number);
+    return {
+      fits: ring.offsetLeft === 0 && ring.offsetTop === 0 && ring.offsetWidth === circle.offsetWidth && ring.offsetHeight === circle.offsetHeight,
+      size: circle.offsetWidth,
+      animated: style.animationName !== "none",
+      angle: Math.round((Math.atan2(sin, cos) * 180) / Math.PI),
+      arc: style.borderTopColor,
+      rest: style.borderRightColor,
+      corner: document.querySelectorAll(`${faceSel} .badge-busy`).length,
+      label: ring.getAttribute("aria-label"),
+      tip: ring.dataset.tip ?? "",
+      title: ring.hasAttribute("title"),
+      opacity: Number(getComputedStyle(ring.closest(".react-flow__node")).opacity),
+    };
+  }, face(id));
+/** id 노드의 원과 이름표 둘레만 잘라 찍는다. */
+const shootRing = async (page, id, path) => {
+  const rect = await rectOf(page, `${face(id)} .node-circle`);
+  await page.screenshot({ path, clip: { x: rect.x - 40, y: rect.y - 24, width: 260, height: 64 }, scale: "device" });
+};
+
 async function summaryBusy(t, page) {
   // 폴더 안에 있는 파일의 함수 하나와 미확인 호출이 있는 파일의 함수 하나를 고른다.
   const graph = await api("/api/graph");
@@ -2632,27 +2670,109 @@ async function summaryBusy(t, page) {
   const held = await holdSummaryPosts(page);
   const aborted = summaryAborts(page);
   const busy = (id) => count(page, `${face(id)} .badge-busy`);
+  const ringText = (ring) => (ring === null ? "고리 없음" : `원 ${ring.size}px, 고리가 원과 겹침 ${ring.fits}, 도는 중 ${ring.animated}, 따로 그린 도는 원 ${ring.corner}개, 진한 구간 ${ring.arc}, 나머지 ${ring.rest}`);
   await load(page);
   await pickInTree(page, target);
   await page.waitForSelector(".info-panel-summary .summary-make", { timeout: 10_000 });
   await page.click(".info-panel-summary .summary-make");
-  await page.waitForSelector(`${face(target.id)} .badge-busy`, { timeout: 5_000 }).catch(() => {});
-  const spinning = await busyAt(page, target.id, `${face(target.id)} .node-circle`);
+  await page.waitForSelector(`${face(target.id)} .busy-ring`, { timeout: 5_000 }).catch(() => {});
+  await settle(page);
+  const spinning = await ringOf(page, target.id);
+  const ink = await page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement("span"));
+    probe.style.color = "var(--ink)";
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
   t.check(
-    '"요약 생성"을 누르면 그 함수의 원 왼쪽 위 모서리에 도는 원이 붙는다',
-    held.length === 1 && (await busy(target.id)) === 1 && spinning?.animated === true && atCorner(spinning),
-    `POST ${held.length}번, ${cornerText(spinning)}`,
+    '"요약 생성"을 누르면 그 함수의 지름 16px 원 위에서 고리가 돌고, 왼쪽 위 모서리에 따로 그린 도는 원은 없다',
+    held.length === 1 && spinning !== null && spinning.fits && spinning.size === 16 && spinning.animated && spinning.corner === 0 && (await count(page, BUSY)) === 1,
+    `POST ${held.length}번, ${ringText(spinning)}`,
   );
+  t.check(
+    "고리는 한 구간만 본문 잉크이고 나머지는 원의 테두리가 비치는 반투명 색이다",
+    spinning !== null && spinning.arc === ink && spinning.rest !== ink && /rgba|\/ 0\.|color\(srgb .* \/ /.test(spinning.rest),
+    ringText(spinning),
+  );
+  t.check(
+    '고리는 접근성 이름 "요약을 만드는 중"과 말풍선 글을 담고 title 속성이 없다',
+    spinning?.label === "요약을 만드는 중" && spinning.tip === "LLM 요약을 만드는 중 1개" && !spinning.title,
+    `${spinning?.label} / ${spinning?.tip}`,
+  );
+  await shootRing(page, target.id, HF4("spin-light"));
+  await page.waitForTimeout(240);
+  const later = await ringOf(page, target.id);
+  await shootRing(page, target.id, HF4("spin-light-2"));
+  t.check("0.24초 뒤에는 진한 구간이 다른 각도에 있다", later !== null && later.angle !== spinning?.angle, `${spinning?.angle}° → ${later?.angle}°`);
   await t.shot();
 
-  // 함수 시점 뷰에서도 그 함수의 원이 같은 곳에 도는 원을 단다.
-  await clickNode(page, target.id, 2);
-  await page.waitForSelector(`${face(target.id)} .node-call .badge-busy`, { timeout: 30_000 }).catch(() => {});
+  // 원 위에 커서를 올리면 고리의 말풍선이 뜬다.
+  const circle = await rectOf(page, `${face(target.id)} .node-circle`);
+  await page.mouse.move(5, 5);
+  await page.mouse.move(circle.x + circle.width / 2 - 1, circle.y + circle.height / 2);
+  await page.mouse.move(circle.x + circle.width / 2, circle.y + circle.height / 2);
+  await page.waitForTimeout(500);
+  const ringTip = await tipText(page);
+  await shootRing(page, target.id, HF4("spin-hover"));
+  t.check("도는 원에 커서를 올리면 고리의 말풍선이 뜬다", ringTip === "LLM 요약을 만드는 중 1개", `"${ringTip}"`);
+  await page.mouse.move(5, 5);
+
+  // 어두운 화면
+  await page.getByRole("button", { name: "어두운 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  const darkRing = await ringOf(page, target.id);
+  t.check("어두운 화면의 고리는 진한 구간이 밝은 본문 잉크다", darkRing !== null && darkRing.arc !== spinning?.arc && darkRing.corner === 0, ringText(darkRing));
+  await shootRing(page, target.id, HF4("spin-dark"));
+  await page.getByRole("button", { name: "밝은 화면" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme !== "dark");
+
+  // 움직임을 줄이는 설정에서는 돌지 않고 진한 구간만 보인다.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const still = await ringOf(page, target.id);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  t.check("움직임을 줄이는 설정에서는 고리가 돌지 않고 진한 구간이 위쪽에 남는다", still !== null && !still.animated && still.angle === 0 && still.arc === ink, ringText(still));
+
+  // 같은 파일의 다른 함수를 골라 요약을 만드는 중인 함수가 흐려져도 고리가 돈다.
+  const siblings = functions.filter((n) => ownerOf(n).id === target.owner && n.id !== target.id).slice(0, 8);
+  let dim = null;
+  for (const sibling of siblings) {
+    await pickInTree(page, { id: sibling.id, owner: target.owner });
+    await settle(page);
+    const ring = await ringOf(page, target.id);
+    if (ring !== null && near(ring.opacity, DIM, 0.01)) {
+      dim = ring;
+      break;
+    }
+  }
+  if (dim === null) {
+    t.skip("흐린 함수 노드의 원 위에서도 고리가 돈다", `${target.owner}에서 고른 함수의 흐름 밖에 놓이는 경우를 찾지 못했다`);
+  } else {
+    await shootRing(page, target.id, HF4("spin-dim"));
+    const label = await rectOf(page, `${face(target.id)} .node-label`);
+    await page.mouse.move(label.x + label.width / 2 - 1, label.y + label.height / 2);
+    await page.mouse.move(label.x + label.width / 2, label.y + label.height / 2);
+    await page.waitForTimeout(300);
+    const lifted = await ringOf(page, target.id);
+    await shootRing(page, target.id, HF4("spin-dim-hover"));
+    await page.mouse.move(5, 5);
+    t.check(
+      `흐린 함수 노드(불투명도 ${DIM})의 원 위에서도 고리가 돌고, 커서를 올려 진하기가 한 단계 오른 동안에도 돈다`,
+      dim.animated && dim.fits && dim.corner === 0 && lifted !== null && lifted.animated && lifted.opacity > DIM,
+      `불투명도 ${dim.opacity} → 커서를 올리면 ${lifted?.opacity}`,
+    );
+  }
+  await pickInTree(page, target);
   await settle(page);
-  const called = await busyAt(page, target.id, `${face(target.id)} .node-circle`);
-  t.check("함수 시점 뷰에서도 그 함수의 원 왼쪽 위 모서리에 도는 원이 붙는다", (await count(page, ".node-call .badge-busy")) === 1 && atCorner(called), cornerText(called));
+
+  // 함수 시점 뷰에서도 그 함수의 원 위에서 고리가 돈다.
+  await clickNode(page, target.id, 2);
+  await page.waitForSelector(`${face(target.id)} .node-call .busy-ring`, { timeout: 30_000 }).catch(() => {});
+  await settle(page);
+  const called = await ringOf(page, target.id);
+  t.check("함수 시점 뷰에서도 그 함수의 원 위에서 고리가 돌고 따로 그린 도는 원은 없다", called !== null && called.fits && called.animated && (await count(page, ".node-call .badge-busy")) === 0, ringText(called));
   await page.keyboard.press("Alt+ArrowLeft");
-  await page.waitForSelector(`${face(target.id)} .node-function .badge-busy`, { timeout: 30_000 }).catch(() => {});
+  await page.waitForSelector(`${face(target.id)} .node-function .busy-ring`, { timeout: 30_000 }).catch(() => {});
   await settle(page);
 
   // 다른 파일의 함수를 고르면 요약을 만들던 함수가 화면에서 사라지고 그 함수가 든 파일 상자가 배지를 단다.
@@ -2694,7 +2814,7 @@ async function summaryBusy(t, page) {
     cornerText(entry),
   );
   held[1].answer(longSummary(1));
-  await page.waitForFunction(() => document.querySelectorAll(".badge-busy").length === 1, null, { timeout: 5_000 }).catch(() => {});
+  await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 1, BUSY, { timeout: 5_000 }).catch(() => {});
 
   if (extra === null) {
     t.skip("배지가 있는 접힌 상자는 도는 원을 왼쪽 위에, 안에 든 것의 수 배지를 오른쪽 위에 단다", "미확인 호출이 있는 파일이 없다");
@@ -2719,8 +2839,8 @@ async function summaryBusy(t, page) {
     held[2].answer(longSummary(1));
   }
   held[0].answer(longSummary(1));
-  await page.waitForFunction(() => document.querySelector(".badge-busy") === null, null, { timeout: 5_000 }).catch(() => {});
-  t.check("요약이 다 만들어지면 도는 원이 사라진다", (await count(page, ".badge-busy")) === 0);
+  await page.waitForFunction((sel) => document.querySelector(sel) === null, BUSY, { timeout: 5_000 }).catch(() => {});
+  t.check("요약이 다 만들어지면 도는 원과 고리가 사라진다", (await count(page, BUSY)) === 0);
   await pickInTree(page, target);
   await page.waitForSelector(".info-panel-summary .summary-text", { timeout: 5_000 }).catch(() => {});
   t.check(
@@ -3276,8 +3396,8 @@ async function toolbar(t, page) {
     };
   });
   t.check(
-    "필터 버튼을 누르면 보기 설정 구역에 흐름 단계, 분석 덮개, 토글 세 개가 있는 창이 열린다",
-    same(panel.titles, ["보기 설정", "레포 정보"]) && same(panel.view, ["흐름 단계2", "분석 덮개", "테스트 코드", "외부 노드", "자동 요약"]) && same(panel.options, ["none", "cycles", "unused"]),
+    "필터 버튼을 누르면 보기 설정 구역에 흐름 단계, 분석 표시, 토글 세 개가 있는 창이 열린다",
+    same(panel.titles, ["보기 설정", "레포 정보"]) && same(panel.view, ["흐름 단계2", "분석 표시", "테스트 코드", "외부 노드", "자동 요약"]) && same(panel.options, ["none", "cycles", "unused"]),
     `${panel.titles.join(" / ")}: ${panel.view.join(", ")}`,
   );
   const { stats } = repo;
@@ -3299,7 +3419,7 @@ async function toolbar(t, page) {
   await filters.locator('input[type="range"]').fill("3");
   await page.click('.overlay-option[data-kind="unused"]');
   await rest(page);
-  const changed = ["흐름 단계 3", "덮개 미사용 후보", "테스트 코드", "자동 요약"];
+  const changed = ["흐름 단계 3", "미사용 후보 표시", "테스트 코드", "자동 요약"];
   t.check(
     "보기 설정 네 개를 바꿔도 창이 열려 있고 필터 버튼이 4를 적는다",
     (await count(page, ".filter-panel")) === 1 && (await page.evaluate(() => document.querySelector(".filter-count")?.textContent)) === "4" && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "unused",
@@ -3530,7 +3650,7 @@ async function reloadScenario(t, page) {
     );
     const groups = cyclesOf(await api("/api/graph", reloadUrl), hiddenOf(await api("/api/graph", reloadUrl))).groups.length;
     t.check(
-      "보기 설정이 기본값으로 돌아온다. 흐름 단계 2, 테스트 코드와 자동 요약 꺼짐, 덮개는 레포를 처음 열 때의 규칙이다",
+      "보기 설정이 기본값으로 돌아온다. 흐름 단계 2, 테스트 코드와 자동 요약 꺼짐, 분석 표시는 레포를 처음 열 때의 규칙이다",
       !state.tests && !state.auto && state.depth === "2" && state.overlay === (groups > 0 ? "cycles" : "none") && (await count(page, ".filter-count")) === (groups > 0 ? 1 : 0),
       JSON.stringify(state),
     );
@@ -3912,7 +4032,7 @@ const STEP_HEIGHT = 24;
 const LOW_HEIGHT = 560;
 /** 경로의 걸음과 그 밖의 선의 굵기(px), 마우스를 올린 걸음의 굵기 */
 const LINE = { step: 3, rest: 1.5, pointed: 4 };
-/** 미사용 덮개가 표시하는 후보의 불투명도 상한 */
+/** 미사용 후보 표시가 표시하는 후보의 불투명도 상한 */
 const UNUSED_OPACITY = 0.4;
 
 const byId = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -4238,7 +4358,7 @@ const watchFlashes = (page) =>
 
 const flashesOf = (page) => page.evaluate(() => window.__shotsFlashes);
 
-/** 필터 창에서 덮개 kind("none"·"cycles"·"unused")를 고른다. */
+/** 필터 창에서 분석 표시 kind("none"·"cycles"·"unused")를 고른다. */
 async function setOverlay(page, kind) {
   await inFilters(page, () => page.click(`.overlay-option[data-kind="${kind}"]`));
   await page.waitForFunction((want) => (document.querySelector(".graph").dataset.overlay ?? "none") === want, kind, { timeout: 5_000 });
@@ -5075,9 +5195,9 @@ async function finderEnds(t, page) {
   t.check("창을 접으면 출발로·도착으로 버튼이 없어진다", (await count(page, ".info-panel-end")) === 0);
 }
 
-// ── 3단계 시나리오: 분석 덮개 ─────────────────────────────────────
+// ── 3단계 시나리오: 분석 표시 ─────────────────────────────────────
 
-/** 필터 창의 덮개 행마다 종류, 글자, 고른 상태 */
+/** 필터 창의 분석 표시 행마다 종류, 글자, 고른 상태 */
 const overlayOptions = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll(".filter-panel .overlay-option")].map((option) => ({
@@ -5107,7 +5227,7 @@ async function overlayMenu(t, page) {
     await settle(page);
     if (width === 1700) {
       t.check(
-        groups === 0 ? "순환 묶음이 없는 레포는 덮개 없이 열린다" : "순환 묶음이 있는 레포는 순환 덮개를 켠 채로 열린다",
+        groups === 0 ? "순환 묶음이 없는 레포는 분석 표시 없이 열린다" : "순환 묶음이 있는 레포는 순환 의존 표시를 켠 채로 열린다",
         (await page.evaluate(() => document.querySelector(".graph").dataset.overlay ?? "none")) === (groups === 0 ? "none" : "cycles"),
         `필터 버튼의 수 ${await page.evaluate(() => document.querySelector(".filter-count")?.textContent ?? "없음")}`,
       );
@@ -5117,28 +5237,41 @@ async function overlayMenu(t, page) {
     await page.waitForSelector(".filter-panel .overlay-option", { timeout: 5_000 }).catch(() => {});
     const options = await overlayOptions(page);
     t.check(
-      `창 폭 ${width}px: 필터 창의 덮개 행이 없음, 순환 의존 묶음 ${groups}, 미사용 후보 ${candidates.length}개를 적고 창 안에 있다`,
+      `창 폭 ${width}px: 필터 창의 분석 표시 행이 없음, 순환 의존 묶음 ${groups}, 미사용 후보 ${candidates.length}개를 적고 창 안에 있다`,
       same(options.map((o) => o.text), ["없음", `순환 의존 묶음 ${groups}`, `미사용 후보 ${candidates.length}개`]) && options.every((o) => o.inside),
       options.map((o) => o.text).join(" / "),
     );
     await page.screenshot({ path: join(OUT, `s3-overlay-menu-${width}.png`) });
+    if (width === 1700) {
+      const named = await page.evaluate(() => ({
+        label: document.querySelector(".filter-overlays .filter-label")?.textContent ?? "",
+        group: document.querySelector('.filter-overlays[role="radiogroup"]')?.getAttribute("aria-label") ?? "",
+        old: document.body.innerText.includes("덮개") || [...document.querySelectorAll("[aria-label], [data-tip]")].some((el) => `${el.getAttribute("aria-label")} ${el.dataset.tip}`.includes("덮개")),
+      }));
+      t.check('필터 창의 구역 이름과 접근성 이름이 "분석 표시"이고 화면의 글과 말풍선에 "덮개"가 없다', named.label === "분석 표시" && named.group === "분석 표시" && !named.old, JSON.stringify(named));
+      await page.screenshot({ path: HF4("filter-names") });
+    }
     await page.click('.overlay-option[data-kind="unused"]');
     await rest(page);
     const picked = (await overlayOptions(page)).find((o) => o.checked)?.kind;
     await page.click(".filter-button");
+    if (width === 1700) {
+      const tip = await page.evaluate(() => document.querySelector(".filter-button").dataset.tip ?? "");
+      t.check('미사용 후보를 고른 뒤 필터 버튼의 말풍선이 "미사용 후보 표시"를 적는다', tip.includes("미사용 후보 표시") && !tip.includes("덮개"), tip);
+    }
     const after = await flowBoxes(page);
     t.check(
-      `창 폭 ${width}px: 미사용 후보를 고르면 덮개가 켜지고 그 행이 고른 행이 되며 상자의 위치와 크기가 그대로다`,
+      `창 폭 ${width}px: 미사용 후보를 고르면 분석 표시가 켜지고 그 행이 고른 행이 되며 상자의 위치와 크기가 그대로다`,
       (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "unused" &&
         picked === "unused" &&
         (await count(page, ".filter-panel")) === 0 &&
         Object.keys(before).every((id) => after[id] !== undefined && sameRect(after[id], before[id])),
-      `덮개 ${await page.evaluate(() => document.querySelector(".graph").dataset.overlay)}`,
+      `분석 표시 ${await page.evaluate(() => document.querySelector(".graph").dataset.overlay)}`,
     );
   }
 }
 
-/** 미사용 덮개가 표시한 노드마다 id, 테두리가 점선인지, 불투명도 */
+/** 미사용 후보 표시가 표시한 노드마다 id, 테두리가 점선인지, 불투명도 */
 const unusedShown = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll(".react-flow__node > .node-body[data-unused]")].map((body) => {
@@ -5169,7 +5302,7 @@ async function unusedScenario(t, page) {
   await setOverlay(page, "unused");
   const caption = await belowOf(page, file);
   t.check(
-    `미사용 덮개를 켜면 접힌 date_engine.py 아래 글자가 "미사용 후보 ${inFile.length}"을 담고, 후보가 없는 arbiter.py 아래 글자는 그대로다`,
+    `미사용 후보 표시를 켜면 접힌 date_engine.py 아래 글자가 "미사용 후보 ${inFile.length}"을 담고, 후보가 없는 arbiter.py 아래 글자는 그대로다`,
     plain === "" && caption === `미사용 후보 ${inFile.length}` && (await belowOf(page, FILE)) === "",
     `${plain} → ${caption}, arbiter.py "${await belowOf(page, FILE)}"`,
   );
@@ -5234,10 +5367,10 @@ async function unusedScenario(t, page) {
   await rest(page);
 
   await setOverlay(page, "none");
-  t.check("덮개를 끄면 data-unused 노드와 아래 글자의 후보 수가 없다", (await count(page, "[data-unused]")) === 0 && !(await page.evaluate(() => [...document.querySelectorAll(".node-below")].some((below) => below.textContent.includes("미사용")))));
+  t.check("분석 표시를 끄면 data-unused 노드와 아래 글자의 후보 수가 없다", (await count(page, "[data-unused]")) === 0 && !(await page.evaluate(() => [...document.querySelectorAll(".node-below")].some((below) => below.textContent.includes("미사용")))));
 }
 
-/** 경로 고정과 미사용 덮개가 함께 켜졌을 때 경로가 먼저 읽히는지 본다. */
+/** 경로 고정과 미사용 후보 표시가 함께 켜졌을 때 경로가 먼저 읽히는지 본다. */
 async function finderOverlay(t, page) {
   const [graph, unused] = [await api("/api/graph"), await api("/api/unused")];
   const ends = { from: { id: "date_engine:tomorrow", text: "tomorrow" }, to: { id: "date_engine:today", text: "today" } };
@@ -5257,7 +5390,7 @@ async function finderOverlay(t, page) {
   const lines = await routeLinesOf(page);
   const ink = await colorOf(page, "--ink");
   t.check(
-    "미사용 덮개를 켠 채 후보에서 출발하는 경로를 고정하면 출발 노드가 점선 테두리에 불투명도 1이고 걸음은 본문 잉크 3px다",
+    "미사용 후보 표시를 켠 채 후보에서 출발하는 경로를 고정하면 출발 노드가 점선 테두리에 불투명도 1이고 걸음은 본문 잉크 3px다",
     start !== undefined && start.dashed && start.opacity === 1 && lines.length === route.paths[0].length - 1 && lines.every((line) => near(line.width, LINE.step, 0.01) && line.stroke === ink.rgb),
     `출발 ${start?.dashed ? "점선" : "실선"} ${start?.opacity}, 걸음 ${lines.length}개`,
   );
@@ -5271,13 +5404,13 @@ async function finderOverlay(t, page) {
   const off = { pinned: await pinnedOf(page), lines: (await routeLinesOf(page)).length, unused: await count(page, "[data-unused]") };
   await setOverlay(page, "unused");
   t.check(
-    "고정 중에 덮개를 껐다 켜도 고정과 걸음이 그대로이고 안내 줄이 뒤집히지 않는다",
+    "고정 중에 분석 표시를 껐다 켜도 고정과 걸음이 그대로이고 안내 줄이 뒤집히지 않는다",
     off.pinned && off.lines === lines.length && off.unused === 0 && (await pinnedOf(page)) && (await count(page, ".react-flow__node > .node-body[data-unused]")) === shown.length && (await flashesOf(page)) === 0,
     `끈 동안 걸음 ${off.lines}개·표시 ${off.unused}개, 뒤집힘 ${await flashesOf(page)}번`,
   );
   await page.click(".finder-clear");
   await rest(page);
-  t.check("끄기를 누르면 덮개만 남는다", !(await pinnedOf(page)) && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "unused");
+  t.check("끄기를 누르면 분석 표시만 남는다", !(await pinnedOf(page)) && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "unused");
 }
 
 async function overlayDark(t, page) {
@@ -5351,7 +5484,7 @@ async function cyclesScenario(t, page) {
   await load(page, cycleUrl);
   const critical = await colorOf(page, "--critical");
   t.check(
-    `순환 묶음 ${found.groups.length}개가 있는 레포는 순환 덮개를 켠 채로 열린다`,
+    `순환 묶음 ${found.groups.length}개가 있는 레포는 순환 의존 표시를 켠 채로 열린다`,
     found.groups.length === 2 && (await page.evaluate(() => document.querySelector(".graph").dataset.overlay)) === "cycles" && (await page.evaluate(() => document.querySelector(".filter-count")?.textContent)) === "1",
     `필터 버튼의 수 ${await page.evaluate(() => document.querySelector(".filter-count")?.textContent ?? "없음")}`,
   );
@@ -5391,12 +5524,12 @@ async function cyclesScenario(t, page) {
   t.check("범례 끝에 순환 의존 줄이 붙는다", legend.includes("순환"), legend);
   await t.shot();
 
-  // 덮개를 껐다 켜도 상자가 움직이지 않고, 끈 동안에는 critical 색이 없고 아이콘은 남는다.
+  // 분석 표시를 껐다 켜도 상자가 움직이지 않고, 끈 동안에는 critical 색이 없고 아이콘은 남는다.
   await setOverlay(page, "none");
   const off = await cycleLinesOf(page);
   const offBoxes = await flowBoxes(page);
   t.check(
-    "덮개를 끄면 critical 색 선이 없고 순환 아이콘은 남으며 모든 상자의 위치가 같다",
+    "분석 표시를 끄면 critical 색 선이 없고 순환 아이콘은 남으며 모든 상자의 위치가 같다",
     off.every((line) => !line.cycle && line.stroke !== critical.rgb) && same(await cycleMarksOf(page), members) && Object.keys(placed).every((id) => offBoxes[id] !== undefined && sameRect(offBoxes[id], placed[id])),
     `선 ${off.length}개, 아이콘 ${(await cycleMarksOf(page)).length}개`,
   );
@@ -5443,7 +5576,7 @@ async function cyclesChange(t, page) {
   const [changedColor, muted, critical] = [await colorOf(page, "--changed"), await colorOf(page, "--muted"), await colorOf(page, "--critical")];
   const on = await read();
   t.check(
-    "순환 덮개를 켠 동안 수정한 파일 상자는 색 막대와 테두리 색이 없고 M 글자는 있다",
+    "순환 의존 표시를 켠 동안 수정한 파일 상자는 색 막대와 테두리 색이 없고 M 글자는 있다",
     on.mark === "M" && on.bar === "none" && on.border === muted.rgb && (await cycleLinesOf(page)).some((line) => line.stroke === critical.rgb),
     `글자 ${on.mark}, 막대 ${on.bar}, 왼쪽 테두리 ${on.border}`,
   );
@@ -5451,13 +5584,13 @@ async function cyclesChange(t, page) {
   await setOverlay(page, "none");
   const off = await read();
   t.check(
-    "덮개를 끄면 수정 표시의 색 막대와 테두리 색이 돌아온다",
+    "분석 표시를 끄면 수정 표시의 색 막대와 테두리 색이 돌아온다",
     off.mark === "M" && off.bar !== "none" && off.border !== muted.rgb && off.border !== on.border,
     `글자 ${off.mark}, 막대 ${off.bar}, 왼쪽 테두리 ${off.border} (--changed ${changedColor.value})`,
   );
 }
 
-/** 순환 덮개와 경로 고정이 함께 켜졌을 때와, 접힌 폴더 상자 아래의 미사용 후보 수를 본다. */
+/** 순환 의존 표시와 경로 고정이 함께 켜졌을 때와, 접힌 폴더 상자 아래의 미사용 후보 수를 본다. */
 async function cyclesPin(t, page) {
   const [graph, unused] = [await api("/api/graph", cycleUrl), await api("/api/unused", cycleUrl)];
   const ends = { from: { id: "main:run", text: "run" }, to: { id: "a.three:third", text: "third" } };
@@ -5470,7 +5603,7 @@ async function cyclesPin(t, page) {
   const lines = await cycleLinesOf(page);
   const marked = lines.filter((line) => line.cycle);
   t.check(
-    `순환 덮개를 켠 채 경로를 고정하면 걸음 ${route.paths[0].length - 1}개가 본문 잉크 3px, 불투명도 1이다`,
+    `순환 의존 표시를 켠 채 경로를 고정하면 걸음 ${route.paths[0].length - 1}개가 본문 잉크 3px, 불투명도 1이다`,
     steps.length === route.paths[0].length - 1 && steps.every((line) => line.stroke === ink.rgb && near(line.width, LINE.step, 0.01) && line.opacity === 1),
     steps.map((line) => line.key).join(", "),
   );
@@ -5483,7 +5616,7 @@ async function cyclesPin(t, page) {
   await setOverlay(page, "none");
   const off = await cycleLinesOf(page);
   t.check(
-    "고정 중에 덮개를 끄면 critical 색이 없고 걸음과 고정은 그대로이며 안내 줄이 뒤집히지 않는다",
+    "고정 중에 분석 표시를 끄면 critical 색이 없고 걸음과 고정은 그대로이며 안내 줄이 뒤집히지 않는다",
     off.every((line) => line.stroke !== critical.rgb) && (await routeLinesOf(page)).length === steps.length && (await pinnedOf(page)) && (await flashesOf(page)) === 0,
     `걸음 ${(await routeLinesOf(page)).length}개, 뒤집힘 ${await flashesOf(page)}번`,
   );
@@ -5505,7 +5638,7 @@ async function cyclesPin(t, page) {
   await rest(page);
   const caption = await belowOf(page, "a");
   t.check(
-    `미사용 덮개를 켜면 접힌 a/two.py 아래 글자와 접힌 a/ 폴더 상자 아래 글자가 안에 든 후보 수 ${inFolder.length}을 적는다`,
+    `미사용 후보 표시를 켜면 접힌 a/two.py 아래 글자와 접힌 a/ 폴더 상자 아래 글자가 안에 든 후보 수 ${inFolder.length}을 적는다`,
     fileCaption.endsWith(`미사용 후보 ${inFolder.length}`) && caption === `미사용 후보 ${inFolder.length}` && (await belowOf(page, "b")) === "",
     `a/two.py "${fileCaption}", a/ "${caption}"`,
   );
@@ -5516,7 +5649,7 @@ async function cyclesPin(t, page) {
   await page.screenshot({ path: join(OUT, "s3-cycles-pin-folder-unused.png") });
   await page.mouse.move(5, 5);
   await setOverlay(page, "none");
-  t.check("덮개를 끄면 폴더 상자 아래 글자가 없다", (await belowOf(page, "a")) === "");
+  t.check("분석 표시를 끄면 폴더 상자 아래 글자가 없다", (await belowOf(page, "a")) === "");
 }
 
 /** 화면에 그린 파일 상자와 폴더 상자(접힌 상자와 펼친 영역)의 노드 id를 정렬한 목록 */
@@ -5844,7 +5977,7 @@ async function nodeHover(t, page) {
 
 /**
  * 마우스를 올린 선의 진하기가 그 선의 단계에서 한 단계만 오르는지 본다. 고른 노드가 없는 처음 화면, 파일을 고른 화면(고른 노드에 닿는 선,
- * 흐름에 든 노드 사이의 선, 그 밖의 선), 어두운 화면, 미사용 덮개의 후보 노드를 차례로 본다. 사진은 `hf3-hover-{이름}.png`로 남긴다.
+ * 흐름에 든 노드 사이의 선, 그 밖의 선), 어두운 화면, 미사용 후보 표시의 후보 노드를 차례로 본다. 사진은 `hf3-hover-{이름}.png`로 남긴다.
  */
 async function hoverStep(t, page) {
   /** 마우스를 올린 점 at의 둘레 640×420px를 남긴다. 화면에 맞춘 그래프는 선이 가늘어 전체 화면으로는 진하기가 읽히지 않는다. */
@@ -5921,7 +6054,7 @@ async function hoverStep(t, page) {
   await step("어두운 화면에서 그 밖의 선", SHADES[0], "rest-dark");
   await step("어두운 화면에서 고른 노드에 닿는 선", SHADES[3], "strong-dark");
 
-  // 미사용 덮개의 후보 노드는 단계 사이의 불투명도 40%에서 바로 위 단계 50%로 오른다.
+  // 미사용 후보 표시의 후보 노드는 단계 사이의 불투명도 40%에서 바로 위 단계 50%로 오른다.
   await theme("light");
   await setOverlay(page, "unused");
   const [graph, unused] = [await api("/api/graph"), await api("/api/unused")];
@@ -6879,7 +7012,7 @@ async function mergeSelect(t, page) {
   );
 }
 
-/** 경로 고정과 순환 덮개가 줄기 위에서 그리는 선을 본다. */
+/** 경로 고정과 순환 의존 표시가 줄기 위에서 그리는 선을 본다. */
 async function mergePin(t, page) {
   await asidePanel(page);
   await load(page);
@@ -7301,14 +7434,14 @@ async function packPin(t, page) {
   );
 }
 
-/** 미사용 덮개가 손잡이에 든 후보를 꺼내는지 본다. */
+/** 미사용 후보 표시가 손잡이에 든 후보를 꺼내는지 본다. */
 async function packOverlay(t, page) {
   const [graph, unused] = [await api("/api/graph"), await api("/api/unused")];
   const candidates = new Set(unused.candidates);
   const held = (file) => file.inner.filter((id) => candidates.has(id) || graph.nodes.some((n) => n.parent === id && candidates.has(n.id)));
   const file = packedFile(graph, (each) => held(each).length > 0);
   if (file === undefined) {
-    t.skip("미사용 덮개를 켜면 손잡이에 든 후보가 그려진다", "손잡이에 미사용 후보가 든 파일이 없다");
+    t.skip("미사용 후보 표시를 켜면 손잡이에 든 후보가 그려진다", "손잡이에 미사용 후보가 든 파일이 없다");
     return;
   }
   const inside = graph.nodes.filter((n) => candidates.has(n.id) && (file.inner.includes(n.id) || file.inner.includes(n.parent))).length;
@@ -7317,7 +7450,7 @@ async function packOverlay(t, page) {
   await pickFile(page, file.id);
   const off = await packOf(page, file.id);
   t.check(
-    `덮개가 꺼져 있으면 ${file.id}의 손잡이가 "내부 함수 ${file.inner.length}개 · 미사용 후보 ${inside}"다`,
+    `분석 표시가 꺼져 있으면 ${file.id}의 손잡이가 "내부 함수 ${file.inner.length}개 · 미사용 후보 ${inside}"다`,
     off?.text === `내부 함수 ${file.inner.length}개 · 미사용 후보 ${inside}`,
     `"${off?.text}"`,
   );
@@ -7327,7 +7460,7 @@ async function packOverlay(t, page) {
   const drawnNow = await drawnIn(page, graph, file.id);
   const left = file.inner.length - held(file).length;
   t.check(
-    `미사용 덮개를 켜면 후보가 든 자식 ${held(file).length}개가 그려지고 손잡이에 미사용 후보가 없다`,
+    `미사용 후보 표시를 켜면 후보가 든 자식 ${held(file).length}개가 그려지고 손잡이에 미사용 후보가 없다`,
     held(file).every((id) => drawnNow.includes(id)) && (left <= 1 ? on === null : on.text === `내부 함수 ${left}개`),
     `그린 정의 ${drawnNow.length}개, 손잡이 "${on?.text ?? "없음"}"`,
   );
@@ -7335,7 +7468,7 @@ async function packOverlay(t, page) {
   await setOverlay(page, "none");
   const again = await packOf(page, file.id);
   const sizeAgain = await rectOf(page, node(file.id));
-  t.check("덮개를 끄면 후보가 손잡이로 돌아가고 상자의 크기가 켜기 전과 같다", same(again, off) && near(size.width, sizeAgain.width) && near(size.height, sizeAgain.height), `"${again?.text}"`);
+  t.check("분석 표시를 끄면 후보가 손잡이로 돌아가고 상자의 크기가 켜기 전과 같다", same(again, off) && near(size.width, sizeAgain.width) && near(size.height, sizeAgain.height), `"${again?.text}"`);
 }
 
 /** 전부 펼침이 탐색 이력에 들어가는지 본다. */
@@ -8768,11 +8901,11 @@ async function entryMark(t, page) {
   t.check("화면의 글에 세모(▶)와 체크(✔) 글자가 없다", (await glyphs()) === 0, `${await glyphs()}개`);
   await page.screenshot({ path: HF3("entry-mark-light") });
 
-  // 미사용 덮개와 순환 아이콘 옆에서도 체크가 진입점 표지에만 쓰인다.
+  // 미사용 후보 표시와 순환 아이콘 옆에서도 체크가 진입점 표지에만 쓰인다.
   await setOverlay(page, "unused");
   await settle(page);
   const checks = await page.evaluate(() => document.querySelectorAll(".graph svg.entry-icon").length);
-  t.check("미사용 덮개를 켜도 그래프의 체크 아이콘은 진입점 표지뿐이다", checks === light.length, `체크 ${checks}개, 표지 ${light.length}개`);
+  t.check("미사용 후보 표시를 켜도 그래프의 체크 아이콘은 진입점 표지뿐이다", checks === light.length, `체크 ${checks}개, 표지 ${light.length}개`);
   await page.screenshot({ path: HF3("entry-mark-unused") });
   await setOverlay(page, "none");
 
@@ -9038,7 +9171,7 @@ async function entry(t, page) {
 
 /**
  * 노드의 우클릭 메뉴. 그래프의 노드와 파일트리의 행에서 LLM 요약을 요청하고, 선택과 화면, 탐색 이력이 그대로인지 본다.
- * 요지 목록과 요약은 서버 대신 답하고 LLM을 부르지 않는다. 사진은 `hf3-menu-{이름}.png`로 남긴다.
+ * 요지 목록과 요약은 서버 대신 답하고 LLM을 부르지 않는다. 사진은 `hf3-menu-{이름}.png`와 `hf4-menu-all.png`로 남긴다.
  */
 async function menu(t, page) {
   const graph = await api("/api/graph");
@@ -9096,7 +9229,9 @@ async function menu(t, page) {
       trail: document.querySelector(".toolbar-trail").textContent,
       nodes: document.querySelectorAll(".react-flow__node").length,
     }));
-  const busyOn = (ids) => page.evaluate((sels) => sels.filter((sel) => document.querySelector(`${sel} .badge-busy`) !== null).length, ids.map(face));
+  /** 원 위에서 고리가 돌고 따로 그린 도는 원은 없는 함수 노드의 수 */
+  const busyOn = (ids) =>
+    page.evaluate((sels) => sels.filter((sel) => document.querySelector(`${sel} .node-circle > .busy-ring`) !== null && document.querySelector(`${sel} .badge-busy`) === null).length, ids.map(face));
   const labels = async () => (await listOf(page))?.items.map((item) => `${item.text}${item.disabled ? "(비활성)" : ""}`) ?? null;
   const rightClick = async (selector) => {
     await page.locator(selector).scrollIntoViewIfNeeded();
@@ -9141,13 +9276,16 @@ async function menu(t, page) {
   t.check('요약이 있는 함수 노드의 항목은 "요약 다시 만들기"이고 메뉴 밖을 누르면 닫힌다', same(kept, ["요약 다시 만들기"]) && outside, `${kept?.join(", ")}, 밖을 눌러 닫힘 ${outside}`);
   await clickNode(page, FILE, 1, "right");
   const onFile = await labels();
-  const bare = defined.length - 1;
+  const allLabel = (count) => `이 파일과 안에 든 정의 모두 요약 (${count}개)`;
+  // 요약이 있는 정의 하나를 빼고 파일 자신을 더한 수다.
+  const bare = defined.length;
   t.check(
-    `파일 노드에는 요약이 없는 정의의 수(${bare})를 적은 "안에 든 정의 N개 모두 요약"이 더해진다`,
-    same(onFile, ["LLM 요약 요청", `안에 든 정의 ${bare}개 모두 요약`]),
+    `파일 노드에는 그 파일과 안에 든 정의 가운데 요약이 없는 것의 수(${bare})를 적은 "이 파일과 안에 든 정의 모두 요약 (N개)"가 더해진다`,
+    same(onFile, ["LLM 요약 요청", allLabel(bare)]),
     onFile?.join(", "),
   );
   await page.screenshot({ path: HF3("menu-file") });
+  await page.screenshot({ path: HF4("menu-all") });
   await page.keyboard.press("Escape");
   const folder = graph.nodes.find((n) => n.kind === "package" && !n.test && n.parent !== null) ?? graph.nodes.find((n) => n.kind === "package" && !n.test);
   await rightClick(`.tree-row.tree-dir[data-node="${folder.id}"] .tree-label`);
@@ -9198,24 +9336,34 @@ async function menu(t, page) {
   await page.click('.menu-item[data-key="all"]');
   await page.waitForTimeout(300);
   const sentNow = posts.filter((post) => !post.done).length;
-  const boxBusy = await page.evaluate((sel) => document.querySelectorAll(`${sel} .badge-busy`).length, ".react-flow__viewport");
+  const boxBusy = await page.evaluate((sel) => ({ corner: document.querySelectorAll(`${sel} > .node-module .badge-busy`).length, ring: document.querySelectorAll(`${sel} .busy-ring`).length }), face(FILE));
+  const fileBusy = await busyAt(page, FILE, node(FILE));
   await clickNode(page, FILE, 1, "right");
   const drained = await labels();
   await page.keyboard.press("Escape");
   t.check(
-    `파일의 "모두 요약"은 요약이 없는 정의 ${rest3}개만 요청하고, 서버로는 둘씩 보내며, 요청한 뒤에는 0개가 되어 누를 수 없다`,
-    same(fewer, ["LLM 요약 요청", `안에 든 정의 ${rest3}개 모두 요약`]) && sentNow === 2 && boxBusy > 0 && same(drained, ["LLM 요약 요청", "안에 든 정의 0개 모두 요약(비활성)"]),
-    `${fewer?.join(", ")} → ${drained?.join(", ")}, 보낸 요청 ${sentNow}개, 도는 표시 ${boxBusy}개`,
+    `파일의 "모두 요약"은 그 파일과 요약이 없는 정의 ${rest3 - 1}개를 요청하고, 서버로는 둘씩 보내며, 요청한 뒤에는 0개가 되어 누를 수 없다`,
+    same(fewer, ["LLM 요약 요청", allLabel(rest3)]) && sentNow === 2 && same(drained, ["요약 만드는 중(비활성)", `${allLabel(0)}(비활성)`]),
+    `${fewer?.join(", ")} → ${drained?.join(", ")}, 보낸 요청 ${sentNow}개`,
+  );
+  t.check(
+    "요약을 만드는 중인 파일 상자는 왼쪽 위 모서리에 도는 원을 달고 원 위의 고리는 없다",
+    boxBusy.corner === 1 && boxBusy.ring === 0 && atCorner(fileBusy),
+    `도는 원 ${boxBusy.corner}개, 고리 ${boxBusy.ring}개, ${cornerText(fileBusy)}`,
   );
   await answerAll();
-  await page.waitForFunction(() => document.querySelector(".badge-busy") === null, null, { timeout: 15_000 }).catch(() => {});
+  await page.waitForFunction((sel) => document.querySelector(sel) === null, BUSY, { timeout: 15_000 }).catch(() => {});
   const all = posts.map((post) => post.node);
-  const wanted = defined.filter((n) => n.id !== FUNCTION).map((n) => n.id);
+  const wanted = [FILE, ...defined.filter((n) => n.id !== FUNCTION).map((n) => n.id)];
   t.check(
-    "모두 요약이 끝나면 파일 자신과 이미 요약이 있던 정의를 뺀 나머지 정의마다 요청이 한 번씩 갔다",
-    wanted.every((id) => all.filter((each) => each === id).length === (id === a ? 2 : 1)) && !all.includes(FILE) && !all.includes(FUNCTION) && same(await stateOf(), before),
-    `POST ${all.length}번, 정의 ${wanted.length}개`,
+    "모두 요약이 끝나면 그 파일과, 이미 요약이 있던 정의를 뺀 나머지 정의마다 요청이 한 번씩 갔고 도는 표시가 모두 사라졌다",
+    wanted.every((id) => all.filter((each) => each === id).length === (id === a ? 2 : 1)) && !all.includes(FUNCTION) && (await count(page, BUSY)) === 0 && same(await stateOf(), before),
+    `POST ${all.length}번, 파일과 정의 ${wanted.length}개`,
   );
+  await clickNode(page, FILE, 1, "right");
+  const filled = await labels();
+  await page.keyboard.press("Escape");
+  t.check('모두 요약한 파일의 항목은 "요약 다시 만들기"와 누를 수 없는 0개다', same(filled, ["요약 다시 만들기", `${allLabel(0)}(비활성)`]), filled?.join(", "));
 
   // 실패한 요청
   /** 이름표의 가운데 점이 눌리는 접힌 파일 상자. skip은 고르지 않을 상자를 정한다. */
@@ -9271,7 +9419,7 @@ async function menu(t, page) {
   await page.waitForSelector(".menu", { timeout: 5_000 }).catch(() => {});
   await page.keyboard.press("Enter");
   await page.waitForTimeout(200);
-  t.check("메뉴 키로 열어 Enter를 누르면 활성 항목인 파일의 요약을 요청한다", posts.at(-1).node === FILE && !posts.at(-1).refresh && (await count(page, ".menu")) === 0 && same(await stateOf(), before), `POST ${posts.at(-1).node}`);
+  t.check("메뉴 키로 열어 Enter를 누르면 활성 항목인 파일의 요약을 다시 만드는 요청을 보낸다", posts.at(-1).node === FILE && posts.at(-1).refresh && (await count(page, ".menu")) === 0 && same(await stateOf(), before), `POST ${posts.at(-1).node} refresh=${posts.at(-1).refresh}`);
   await answerAll();
 
   // 어두운 화면

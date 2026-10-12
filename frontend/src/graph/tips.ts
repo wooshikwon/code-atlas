@@ -67,7 +67,7 @@ export function candidatesTip(node: AtlasNode, count: number): string {
 
 /**
  * 노드의 말풍선. 이름표가 말줄임으로 잘린 노드는 줄이지 않은 이름 full을, LLM 요약이 있는 노드는 그 요지 lead를,
- * 미사용 덮개가 표시한 후보는 그 뜻을 줄마다 적는다. 적을 줄이 없으면 null이다.
+ * 미사용 후보 표시가 표시한 후보는 그 뜻을 줄마다 적는다. 적을 줄이 없으면 null이다.
  */
 export function nodeTip(full: string | null, lead: string | null, unused: boolean): string | null {
   const lines = [full, lead, unused ? UNUSED_TIP : null].filter((line) => line !== null);

@@ -21,20 +21,30 @@ describe("asksOf", () => {
     expect(asksOf(graph, { states: { [id]: { phase: "failed", error: "실패", refresh: false } }, leads: {} }, id)[0].label).toBe("LLM 요약 요청");
   });
 
-  it("파일은 안에 든 정의 가운데 요약이 없고 만드는 중도 아닌 것을 모두 요청하는 항목이 더해지고, 파일 자신은 넣지 않는다", () => {
+  it("파일은 그 파일과 안에 든 정의 가운데 요약이 없고 만드는 중도 아닌 것을 모두 요청하는 항목이 더해진다", () => {
     const all = inside("pkg.mod");
     expect(all.length).toBeGreaterThan(2);
-    const asks = asksOf(graph, { states: { "pkg.mod": done }, leads: {} }, "pkg.mod");
-    expect(asks.map((ask) => ask.key)).toEqual(["one", "all"]);
-    expect(asks[0].label).toBe("요약 다시 만들기");
-    expect(asks[1]).toEqual({ key: "all", label: `안에 든 정의 ${all.length}개 모두 요약`, disabled: false, nodes: all, refresh: false });
+    const label = (count: number) => `이 파일과 안에 든 정의 모두 요약 (${count}개)`;
+    const sorted = (ids: string[]) => [...ids].sort();
+    const whole = asksOf(graph, empty, "pkg.mod");
+    expect(whole.map((ask) => ask.key)).toEqual(["one", "all"]);
+    expect(whole[0]).toEqual({ key: "one", label: "LLM 요약 요청", disabled: false, nodes: ["pkg.mod"], refresh: false });
+    expect({ ...whole[1], nodes: sorted(whole[1].nodes) }).toEqual({ key: "all", label: label(all.length + 1), disabled: false, nodes: sorted(["pkg.mod", ...all]), refresh: false });
+
+    const defs = asksOf(graph, { states: { "pkg.mod": done }, leads: {} }, "pkg.mod");
+    expect(defs[0].label).toBe("요약 다시 만들기");
+    expect(defs[1]).toEqual({ key: "all", label: label(all.length), disabled: false, nodes: all, refresh: false });
+
+    const file = asksOf(graph, { states: {}, leads: Object.fromEntries(all.map((id) => [id, "요지"])) }, "pkg.mod")[1];
+    expect(file).toEqual({ key: "all", label: label(1), disabled: false, nodes: ["pkg.mod"], refresh: false });
 
     const [kept, busy, ...rest] = all;
-    const some = asksOf(graph, { states: { [busy]: { phase: "making" } }, leads: { [kept]: "요지" } }, "pkg.mod")[1];
-    expect(some).toEqual({ key: "all", label: `안에 든 정의 ${rest.length}개 모두 요약`, disabled: false, nodes: rest, refresh: false });
+    const some = asksOf(graph, { states: { "pkg.mod": { phase: "making" }, [busy]: { phase: "making" } }, leads: { [kept]: "요지" } }, "pkg.mod");
+    expect(some[0].label).toBe("요약 만드는 중");
+    expect(some[1]).toEqual({ key: "all", label: label(rest.length), disabled: false, nodes: rest, refresh: false });
 
-    const none = asksOf(graph, { states: {}, leads: Object.fromEntries(all.map((id) => [id, "요지"])) }, "pkg.mod")[1];
-    expect(none).toEqual({ key: "all", label: "안에 든 정의 0개 모두 요약", disabled: true, nodes: [], refresh: false });
+    const none = asksOf(graph, { states: { "pkg.mod": done }, leads: Object.fromEntries(all.map((id) => [id, "요지"])) }, "pkg.mod")[1];
+    expect(none).toEqual({ key: "all", label: label(0), disabled: true, nodes: [], refresh: false });
   });
 
   it("폴더와 외부 노드, 그래프에 없는 id는 항목이 없다", () => {

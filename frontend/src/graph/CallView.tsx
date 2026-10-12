@@ -45,7 +45,7 @@ interface Scene {
   layout: Layout;
 }
 
-/** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. unused는 미사용 덮개가 표시할 후보다. */
+/** 노드마다 움직이는 동안 바뀌지 않는 값. data의 참조를 유지해 노드 본문을 다시 그리지 않게 한다. unused는 미사용 후보 표시가 표시할 후보다. */
 function itemsOf(
   scene: Scene,
   nodes: Map<string, AtlasNode>,

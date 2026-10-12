@@ -294,7 +294,7 @@ export function moduleHeader(node: AtlasNode, functions: number): string {
   return node.kind === "module" ? `함수 ${functions}개` : "";
 }
 
-/** 접힌 파일 상자와 접힌 폴더 상자 아래에 잡아 두는 줄의 글자. 미사용 덮개를 켜고 꺼도 배치가 같도록 후보 수와 관계없이 이 폭을 잡는다. */
+/** 접힌 파일 상자와 접힌 폴더 상자 아래에 잡아 두는 줄의 글자. 미사용 후보 표시를 켜고 꺼도 배치가 같도록 후보 수와 관계없이 이 폭을 잡는다. */
 const BOX_CAPTION = "미사용 후보 999";
 
 /** 접힌 파일 상자와 접힌 폴더 상자 아래에 적는 글자. 안에 든 미사용 후보 수 unused가 0이면 적지 않는다. 상자 크기에 들지 않는다. */
@@ -309,7 +309,7 @@ export function packId(box: string): string {
 
 /**
  * 손잡이의 글. 펼침 단계에서는 그리지 않은 안쪽 자식 수를 `내부 함수 k개`로, 전부 펼침 단계에서는 같은 수와 "접기"를 적는다.
- * 미사용 덮개가 꺼져 있고(covered가 거짓) 그리지 않은 자식에 미사용 후보가 있으면 그 수를 뒤에 붙인다.
+ * 미사용 후보 표시가 꺼져 있고(covered가 거짓) 그리지 않은 자식에 미사용 후보가 있으면 그 수를 뒤에 붙인다.
  */
 export function packLabel(pack: Pack, covered: boolean): string {
   if (pack.open) {
@@ -321,7 +321,7 @@ export function packLabel(pack: Pack, covered: boolean): string {
 /** 손잡이의 좌우 안쪽 여백 */
 export const PACK_PAD = 6;
 
-/** 손잡이의 크기. 글자 폭에 여백을 더한 폭과 함수 노드의 한 줄 높이다. 덮개를 켜고 꺼도 배치가 같도록 미사용 후보 수를 적은 글의 폭을 잡는다. */
+/** 손잡이의 크기. 글자 폭에 여백을 더한 폭과 함수 노드의 한 줄 높이다. 분석 표시를 켜고 꺼도 배치가 같도록 미사용 후보 수를 적은 글의 폭을 잡는다. */
 function packSize(pack: Pack, measure: Measure): Size {
   return { width: measure(packLabel(pack, false)) + 2 * PACK_PAD, height: LEAF_HEIGHT };
 }

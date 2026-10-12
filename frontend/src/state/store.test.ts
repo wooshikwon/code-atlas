@@ -963,7 +963,7 @@ describe("reopen", () => {
     expect([now.theme, now.panel, now.split, now.legendOpen, now.minimapOpen]).toEqual(["dark", { x: 10, y: 20, width: 300, height: 200 }, 0.4, true, false]);
   });
 
-  it("순환 묶음이 없는 그래프를 받으면 덮개를 끈다", () => {
+  it("순환 묶음이 없는 그래프를 받으면 분석 표시를 끈다", () => {
     vi.stubGlobal("localStorage", { setItem: () => undefined });
     useOverlay.getState().set("unused");
     store().reopen(repo, { ...repoFixture, edges: [] }, tree);

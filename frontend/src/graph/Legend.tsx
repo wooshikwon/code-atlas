@@ -1,5 +1,5 @@
 // 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시와 접힌 상자의 배지, 선 모양 세 개와 갈림·합류, 찾은 경로의 선,
-// 변경 표시 두 색을 보여 주고, 선 모양에 마우스를 올리면 그 분류에 드는 선 종류를 말풍선에 적는다. 분석 덮개를 켜면 그 덮개의 표시를 끝에 덧붙인다.
+// 변경 표시 두 색을 보여 주고, 선 모양에 마우스를 올리면 그 분류에 드는 선 종류를 말풍선에 적는다. 분석 표시를 켜면 켠 표시의 견본과 뜻을 끝에 덧붙인다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
 import { useOverlay, type OverlayKind } from "../state/overlay";
@@ -67,7 +67,7 @@ function Shape({ kind }: { kind: string }) {
   }
 }
 
-/** 켠 덮개의 견본과 뜻. 순환은 critical 색 import 선과 순환 아이콘, 미사용은 점선 테두리다. */
+/** 켠 분석 표시의 견본과 뜻. 순환은 critical 색 import 선과 순환 아이콘, 미사용은 점선 테두리다. */
 function Overlay({ kind }: { kind: OverlayKind }) {
   return kind === "cycles" ? (
     <li className="legend-overlay" data-kind={kind}>

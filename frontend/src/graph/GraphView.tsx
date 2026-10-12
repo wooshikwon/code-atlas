@@ -64,7 +64,7 @@ interface Scene {
   lit: Lit | null;
   /** 초점을 둔 노드 */
   focus: string | null;
-  /** 토글, 접은 폴더, 전부 펼친 파일 상자, 미사용 덮개를 켰는지와 미사용 후보, 초점을 둔 노드, 흐름 단계를 적은 글. 같은 그래프와 경로에서 이 글이 같으면 배치가 같다. */
+  /** 토글, 접은 폴더, 전부 펼친 파일 상자, 미사용 후보 표시를 켰는지와 미사용 후보, 초점을 둔 노드, 흐름 단계를 적은 글. 같은 그래프와 경로에서 이 글이 같으면 배치가 같다. */
   key: string;
   /** 접은 폴더와 전부 펼친 파일 상자 */
   collapsed: Set<string>;
@@ -72,13 +72,13 @@ interface Scene {
   layout: Layout;
 }
 
-/** 분석 덮개가 노드에 더하는 표시 */
+/** 분석 표시가 노드에 더하는 표시 */
 interface Cover {
   /** 순환 아이콘을 다는 상자와 묶음마다 든 파일 id */
   cycle: Map<string, string[][]>;
-  /** 미사용 덮개가 표시하는 후보. 덮개를 껐으면 비어 있다. */
+  /** 미사용 후보 표시가 표시하는 후보. 분석 표시를 껐으면 비어 있다. */
   unused: Set<string>;
-  /** 파일과 폴더마다 미사용 후보 수. 덮개를 껐으면 비어 있다. */
+  /** 파일과 폴더마다 미사용 후보 수. 분석 표시를 껐으면 비어 있다. */
   candidates: Map<string, number>;
 }
 
@@ -92,7 +92,7 @@ function endsOf(lit: Lit | null): Map<string, RouteEnd> {
   return ends;
 }
 
-/** selected는 선택 고리를 그리는 노드이고 cover는 분석 덮개의 표시다. 경로 위의 미사용 후보는 점선 테두리만 받고 흐려지지 않는다. */
+/** selected는 선택 고리를 그리는 노드이고 cover는 분석 표시가 노드에 더하는 표시다. 경로 위의 미사용 후보는 점선 테두리만 받고 흐려지지 않는다. */
 function itemsOf(
   scene: Scene,
   nodes: Map<string, AtlasNode>,
@@ -142,7 +142,7 @@ function itemsOf(
 
 /**
  * 손잡이마다 화면 기준 상자 at에 놓은 React Flow 노드. 글자와 같은 층에 그리고 불투명도는 손잡이를 단 상자의 값을 쓴다.
- * covered는 미사용 덮개를 켰는지다.
+ * covered는 미사용 후보 표시를 켰는지다.
  */
 function packNodes(scene: Scene, nodes: Map<string, AtlasNode>, at: Map<string, Box>, opacity: Map<string, number>, covered: boolean, fresh: Set<string> | null): PackFlowNode[] {
   const result: PackFlowNode[] = [];
@@ -443,7 +443,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   }, [scene, index, making, lit, pinFocus, aimed, cover, overlay, getViewport, fly, jump, heading]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
-  /** 그릴 선과 그 가운데 순환 선의 키. 순환 덮개를 켠 동안에만 순환 선을 넣고 칠한다. */
+  /** 그릴 선과 그 가운데 순환 선의 키. 순환 의존 표시를 켠 동안에만 순환 선을 넣고 칠한다. */
   const lines = useMemo(() => {
     if (scene === null || loops === null) {
       return { edges: [], keys: new Set<EdgeKey>() };
