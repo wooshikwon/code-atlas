@@ -3,6 +3,7 @@ import ELK, { type ElkExtendedEdge, type ElkNode } from "elkjs/lib/elk-api";
 import elkWorkerUrl from "elkjs/lib/elk-worker.min.js?url";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { entryUnits, siblings, type Columns } from "./columns";
+import type { Compared, Lines } from "./compare";
 import { cycles } from "./cycles";
 import { cycleMarks } from "./overlay";
 import { valueAside } from "./names";
@@ -43,7 +44,9 @@ export type Measure = (text: string, bold?: boolean) => number;
 /** ELK를 한 번 돌린다. 브라우저는 worker로, 시험은 elk.bundled.js로 돌린다. */
 export type RunElk = (graph: ElkNode) => Promise<ElkNode>;
 
-const FONT = '12px system-ui, -apple-system, "Segoe UI", sans-serif';
+/** 이름표의 글자 크기(px) */
+const LABEL_FONT = 12;
+const FONT = `${LABEL_FONT}px system-ui, -apple-system, "Segoe UI", sans-serif`;
 export const HEADER = 32;
 /** 자식을 그리는 상자의 안쪽 여백 */
 export const PAD = 16;
@@ -77,6 +80,10 @@ export const BADGE_GAP = 3;
 export const CIRCLE_GAP = BADGE_OVERHANG + BADGE_GAP;
 /** 변수 노드의 이름표와 그 뒤에 적는 값의 종류·원소 수 사이의 폭 */
 export const ASIDE_GAP = 6;
+/** 시점 비교에서 이름표 뒤에 적는 줄 수(`+12 −3`)의 글자 크기, 이름표와의 간격, 두 수 사이의 간격 */
+export const DIFF_FONT = 10;
+export const DIFF_GAP = 5;
+export const DIFF_SPACE = 4;
 /** 강조하는 경로의 출발 노드와 도착 노드 이름표 뒤에 적는 표지 */
 export const END_NAMES = { from: "출발", to: "도착" } as const;
 export type RouteEnd = keyof typeof END_NAMES;
@@ -331,17 +338,30 @@ function packSize(pack: Pack, measure: Measure): Size {
   return { width: measure(packLabel(pack, false)) + 2 * PACK_PAD, height: LEAF_HEIGHT };
 }
 
-/** 이름표 둘레에 그리는 표시. cycle은 이름표 앞에 순환 아이콘을 다는지, end는 이름표 뒤에 적는 출발·도착 표지다. */
+/** 이름표 둘레에 그리는 표시. cycle은 이름표 앞에 순환 아이콘을 다는지, end는 이름표 뒤에 적는 출발·도착 표지, lines는 시점 비교에서 이름표 뒤에 적는 줄 수다. */
 interface Marks {
   cycle: boolean;
   end?: RouteEnd;
+  lines?: Lines;
 }
 
-/** 순환 아이콘, 진입점 표지, 이름표의 폭. 출발·도착 표지가 있으면 그 폭을 더한다. */
+/** 이름표 뒤에 적는 줄 수의 글. 0인 쪽은 적지 않는다. 빼기는 U+2212다. */
+export function diffTexts(lines: Lines): { added: string | null; deleted: string | null } {
+  return { added: lines.added > 0 ? `+${lines.added}` : null, deleted: lines.deleted > 0 ? `−${lines.deleted}` : null };
+}
+
+/** 이름표 뒤에 적는 줄 수가 차지하는 폭. 이름표와의 간격을 포함한다. */
+function diffWidth(lines: Lines, measure: Measure): number {
+  const texts = Object.values(diffTexts(lines)).filter((text) => text !== null);
+  const width = texts.reduce((sum, text) => sum + measure(text), 0);
+  return texts.length === 0 ? 0 : DIFF_GAP + Math.ceil((width * DIFF_FONT) / LABEL_FONT) + (texts.length - 1) * DIFF_SPACE;
+}
+
+/** 순환 아이콘, 진입점 표지, 이름표의 폭. 출발·도착 표지와 줄 수가 있으면 그 폭을 더한다. */
 function labelWidth(node: AtlasNode, measure: Measure, bold: boolean, marks: Marks): number {
   const label = (marks.cycle ? CYCLE_MARK_WIDTH : 0) + (node.entry ? ENTRY_MARK_WIDTH : 0) + measure(labelOf(node), bold);
   const tag = marks.end === undefined ? 0 : END_GAP + measure(END_NAMES[marks.end], true) + 2 * END_PAD;
-  return label + tag;
+  return label + tag + (marks.lines === undefined ? 0 : diffWidth(marks.lines, measure));
 }
 
 function tableSize(node: AtlasNode, measure: Measure, marks: Marks): Size {
@@ -416,9 +436,9 @@ export interface ElkInput {
  * 선의 양 끝을 보이는 노드로 올린 뒤 같은 부모 아래 형제가 될 때까지 다시 올려 형제 쌍마다 모은다.
  * 올린 선이 하나라도 있는 쌍은 집계 선 하나가, 그 밖의 쌍은 원래 선마다 하나가 된다.
  * 함수 안 import만 있는 쌍을 빼고 부모 노드 id 아래에 담는다. 진입점 단위 사이의 쌍은 두 단위가 같은 열0에 놓이므로
- * 담지 않고, 그 선은 `edgeViews`가 `sideRoute`로 잇는다.
+ * 담지 않고, 그 선은 `edgeViews`가 `sideRoute`로 잇는다. 시점 비교에서 삭제된 선만 든 쌍은 양 끝이 같은 열이면 같은 까닭으로 담지 않는다.
  */
-function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
+function links(graph: Graph, shown: Shown, columns: Columns, compare: Compared | null): Map<string | null, Link[]> {
   const nodes = nodeIndex(graph);
   const entries = entryUnits(graph, shown.hidden);
   const pairs = new Map<string, { source: string; target: string; edges: AtlasEdge[]; lifted: boolean }>();
@@ -442,6 +462,9 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
     if (used.length === 0 || (entries.has(source) && entries.has(target))) {
       continue;
     }
+    if (compare !== null && columns.column.get(source) === columns.column.get(target) && used.every((e) => compare.gone.edges.has(edgeKey(e)))) {
+      continue;
+    }
     const found = (lifted ? [aggKey(source, target)] : used.map(edgeKey)).map((key) => ({ key, source, target }));
     const parent = nodes.get(source)!.parent;
     inside.set(parent, [...(inside.get(parent) ?? []), ...found]);
@@ -455,8 +478,9 @@ function links(graph: Graph, shown: Shown): Map<string | null, Link[]> {
  * ends는 강조하는 경로의 출발 노드와 도착 노드이고, 그 노드의 크기에 표지의 폭을 더한다.
  * 순환 아이콘을 다는 상자는 아이콘의 폭을 크기에 더한다. 접힌 파일 상자와 접힌 폴더 상자는 아래 글자의 줄을 상자 아래에 잡아 둔다.
  * 손잡이를 다는 파일 상자(`shown.packs`)는 자식을 놓는 영역 아래에 손잡이 한 줄을 비워 둔다(`boxOptions`).
+ * 시점 비교 compare가 있으면 이름표 뒤에 적는 줄 수의 폭을 크기에 더하고, 옆 통로의 거리와 순환 아이콘은 대상 시점의 그래프로 정한다.
  */
-export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure: Measure, ends: Map<string, RouteEnd>): ElkInput {
+export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure: Measure, ends: Map<string, RouteEnd>, compare: Compared | null = null): ElkInput {
   const nodes = nodeIndex(graph);
   const children = new Map<string, AtlasNode[]>();
   for (const node of graph.nodes) {
@@ -468,7 +492,7 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
     list.sort((a, b) => columns.order.get(a.id)! - columns.order.get(b.id)!);
   }
 
-  const inside = links(graph, shown);
+  const inside = links(graph, shown, columns, compare);
   const edgesOf = (parent: string | null, members?: Set<string>): ElkExtendedEdge[] =>
     (inside.get(parent) ?? [])
       .filter((link) => members === undefined || members.has(link.source))
@@ -483,11 +507,12 @@ export function elkGraphs(graph: Graph, shown: Shown, columns: Columns, measure:
     targets.set(link.source, (targets.get(link.source) ?? new Set()).add(link.target));
   }
 
-  const lane = laneOf(numberDigits(graph, shown.hidden));
+  const live = compare?.live ?? graph;
+  const lane = laneOf(numberDigits(live, shown.hidden));
   const options = elkOptions(lane);
-  const functions = functionCounts(graph);
-  const marked = cycleMarks(graph, cycles(graph, shown.hidden), shown);
-  const marksOf = (id: string): Marks => ({ cycle: marked.has(id), end: ends.get(id) });
+  const functions = functionCounts(live);
+  const marked = cycleMarks(graph, cycles(live, shown.hidden), shown);
+  const marksOf = (id: string): Marks => ({ cycle: marked.has(id), end: ends.get(id), lines: compare?.lines.get(id) });
   const packs: ElkInput["packs"] = new Map();
   const build = (node: AtlasNode): ElkNode => {
     const kids = children.get(node.id) ?? [];
@@ -712,9 +737,9 @@ export function stopElk(): void {
   elk = null;
 }
 
-export async function layout(graph: Graph, shown: Shown, columns: Columns, ends: Map<string, RouteEnd>): Promise<Layout> {
+export async function layout(graph: Graph, shown: Shown, columns: Columns, ends: Map<string, RouteEnd>, compare: Compared | null = null): Promise<Layout> {
   const started = performance.now();
-  const result = await arrange(elkGraphs(graph, shown, columns, measureText, ends), runElk);
+  const result = await arrange(elkGraphs(graph, shown, columns, measureText, ends, compare), runElk);
   console.info(`layout ${shown.nodes.size} nodes ${Math.round(performance.now() - started)}ms`);
   return result;
 }

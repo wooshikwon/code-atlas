@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AtlasEdge, AtlasNode, Graph } from "../api/types";
 import { columns, entryUnits, siblings } from "./columns";
-import { repoFixture } from "./fixture";
+import { compared } from "./compare";
+import { compareFixture, repoFixture } from "./fixture";
 import { nodeIndex } from "./visible";
 
 const off = { showTests: false, showExternal: false };
@@ -202,5 +203,67 @@ describe("columns", () => {
     expect(result.components).toEqual([["a", "b"]]);
     expect(result.shelf).toEqual([]);
     expect(pick(result.column, ["a", "b"])).toEqual({ a: 0, b: 0 });
+  });
+});
+
+describe("columns: 시점 비교", () => {
+  const { graph } = compareFixture;
+  const compare = compared(graph, compareFixture);
+  const both = { showTests: true, showExternal: true };
+  /** 부모마다 자식을 순서 번호 순으로 늘어놓은 글. only에 든 노드만 적는다. */
+  const sequence = (result: ReturnType<typeof columns>, only: Set<string>) => {
+    const lists = new Map<string | null, string[]>();
+    for (const node of graph.nodes.filter((n) => only.has(n.id) && result.order.has(n.id))) {
+      lists.set(node.parent, [...(lists.get(node.parent) ?? []), node.id]);
+    }
+    return [...lists].map(([parent, ids]) => `${parent}: ${ids.sort((a, b) => result.order.get(a)! - result.order.get(b)!).join(",")}`).sort();
+  };
+
+  it("비교를 켜도 대상 시점 노드의 열 번호와 형제 사이의 상대 순서, 연결 묶음과 선반 안의 순서가 같다", () => {
+    for (const opts of [off, both]) {
+      const before = columns(repoFixture, opts);
+      const after = columns(graph, opts, compare);
+      const live = new Set(before.order.keys());
+      expect(live.size).toBeGreaterThan(10);
+      expect(pick(after.column, [...live])).toEqual(Object.fromEntries(before.column));
+      expect(sequence(after, live)).toEqual(sequence(before, live));
+      expect(after.components.map((ids) => ids.filter((id) => live.has(id)))).toEqual(before.components);
+      expect(after.shelf.filter((id) => live.has(id))).toEqual(before.shelf);
+    }
+  });
+
+  it("비교가 없거나 흐린 단계로 그리는 노드가 없으면 대상 시점의 열과 순서 그대로다", () => {
+    expect(columns(repoFixture, off, null)).toEqual(columns(repoFixture, off));
+    const none = compared(repoFixture, { ...compareFixture, graph: repoFixture, nodes: {}, edges: {} });
+    expect(columns(repoFixture, off, none)).toEqual(columns(repoFixture, off));
+  });
+
+  it("삭제된 정의는 slot의 줄 번호로 소스 정의 순서에 끼우고, 그 노드로 선을 보내는 형제의 다음 열에 놓는다", () => {
+    const result = columns(graph, off, compare);
+    expect(sequence(result, new Set(result.order.keys()))).toContain("pkg.mod: pkg.mod:Store,pkg.mod:Row,pkg.mod:parse,pkg.mod:drop");
+    expect(pick(result.column, ["pkg.mod:Store", "pkg.mod:drop"])).toEqual({ "pkg.mod:Store": 0, "pkg.mod:drop": 1 });
+    const early = compared(graph, { ...compareFixture, nodes: { ...compareFixture.nodes, "pkg.mod:drop": { change: "deleted", added: 0, deleted: 7, slot: 31 } } });
+    expect(sequence(columns(graph, off, early), new Set(result.order.keys()))).toContain("pkg.mod: pkg.mod:Store,pkg.mod:drop,pkg.mod:Row,pkg.mod:parse");
+  });
+
+  it("삭제된 파일은 형제 순서(폴더, 파일, 이름순)에 끼우고 들어오는 선이 없으면 형제의 첫 열에 놓는다", () => {
+    const result = columns(graph, off, compare);
+    expect(sequence(result, new Set(result.order.keys()))).toContain("pkg: pkg.mod,pkg.old,pkg.util");
+    expect(pick(result.column, ["pkg.old", "pkg.old:legacy"])).toEqual({ "pkg.old": 0, "pkg.old:legacy": 0 });
+  });
+
+  it("기준 시점에만 있던 최상위 단위는 선으로 이어진 단위의 연결 묶음에 들고, 선이 없으면 선반에, 더한 단위끼리만 이어지면 새 묶음에 든다", () => {
+    const linked = columns(graph, both, compare);
+    expect(linked.components.find((ids) => ids.includes("ext:yaml"))).toContain("pkg");
+    expect(linked.column.get("ext:yaml")).toBe(linked.column.get("pkg")! + 1);
+    expect(columns(graph, off, compare).order.has("ext:yaml")).toBe(false);
+
+    const base = small([unit("a"), unit("b"), unit("z")], [["a", "b"]]);
+    const more: Graph = { nodes: [...base.nodes, unit("gone"), unit("lost"), unit("left")], edges: [...base.edges, link("lost", "left")] };
+    const deleted = { change: "deleted" as const, added: 0, deleted: 1 };
+    const result = columns(more, off, compared(more, { ...compareFixture, graph: more, files: [], nodes: { gone: deleted, lost: deleted, left: deleted }, edges: { "lost|left|import": { change: "deleted", before: 1 } } }));
+    expect(result.components).toEqual([["a", "b"], ["left", "lost"]]);
+    expect(result.shelf).toEqual(["gone", "z"]);
+    expect(pick(result.column, ["gone", "lost", "left"])).toEqual({ gone: 0, lost: 0, left: 1 });
   });
 });

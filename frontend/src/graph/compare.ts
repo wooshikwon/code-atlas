@@ -82,6 +82,37 @@ export function lineTotals(graph: Graph, files: ComparedFile[]): Map<string, Lin
   return totals;
 }
 
+/** 켜져 있는 비교 하나에서 그래프의 배치와 노드·선이 쓰는 값 */
+export interface Compared {
+  /** 대상 시점의 그래프(`liveGraph`) */
+  live: Graph;
+  /** 흐린 단계로 그리는 노드와 원래 선(`gone`) */
+  gone: { nodes: Set<string>; edges: Set<EdgeKey> };
+  /** 노드마다 이름 옆에 적는 줄 수. 정의는 비교 결과의 nodes에서, 파일과 폴더는 `lineTotals`에서 읽는다. 바뀐 줄이 없는 노드는 담지 않는다. */
+  lines: Map<string, Lines>;
+  /** 삭제된 노드마다 형제 사이의 순서를 정하는 줄 번호(`NodeChange.slot`) */
+  slots: Map<string, number>;
+  /** 원래 선마다의 변경 내용. 비교 결과의 edges다. */
+  changes: Comparison["edges"];
+}
+
+/** 비교 결과 result를 그래프 graph에 그릴 값으로 바꾼다. graph는 result의 그래프다. */
+export function compared(graph: Graph, result: Comparison): Compared {
+  const nodes = nodeIndex(graph);
+  const lines = lineTotals(graph, result.files);
+  const slots = new Map<string, number>();
+  for (const [id, change] of Object.entries(result.nodes)) {
+    const kind = nodes.get(id)?.kind;
+    if (kind !== undefined && kind !== "module" && kind !== "package" && change.added + change.deleted > 0) {
+      lines.set(id, { added: change.added, deleted: change.deleted });
+    }
+    if (change.slot !== undefined) {
+      slots.set(id, change.slot);
+    }
+  }
+  return { live: liveGraph(graph, result), gone: gone(result), lines, slots, changes: result.edges };
+}
+
 /** 말풍선 한 줄의 변경 칸에 적는 값 */
 export interface RowChange {
   /** 줄에 든 원래 선 가운데 추가된 선의 수 */

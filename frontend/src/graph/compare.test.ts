@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gone, lineTotals, liveGraph, liveSites, rowChange } from "./compare";
+import { compared, gone, lineTotals, liveGraph, liveSites, rowChange } from "./compare";
 import { compareFixture, edge, repoFixture } from "./fixture";
 import { edgeKey } from "./scope";
 
@@ -123,5 +123,32 @@ describe("rowChange", () => {
   it("기준 시점의 수가 지금과 같은 선은 수만 달라진 선이 아니다", () => {
     const same = lines("main:run", "main:helper")[0];
     expect(rowChange([same], { [edgeKey(same)]: { change: null, before: 1 } }).before).toBeNull();
+  });
+});
+
+describe("compared", () => {
+  const drawn = compared(graph, compareFixture);
+
+  it("대상 시점의 그래프, 흐린 단계로 그리는 노드와 선, 선마다의 변경 내용을 한 번에 낸다", () => {
+    expect(drawn.live).toEqual(liveGraph(graph, compareFixture));
+    expect(drawn.gone).toEqual(gone(compareFixture));
+    expect(drawn.changes).toBe(compareFixture.edges);
+  });
+
+  it("이름 옆 줄 수는 정의면 비교 결과의 nodes에서, 파일과 폴더면 lineTotals에서 읽고 바뀐 줄이 없는 노드는 담지 않는다", () => {
+    expect(drawn.lines.get("pkg.mod:parse")).toEqual({ added: 3, deleted: 1 });
+    expect(drawn.lines.get("pkg.mod:drop")).toEqual({ added: 0, deleted: 7 });
+    expect(drawn.lines.get("app.text:pad")).toEqual({ added: 7, deleted: 0 });
+    expect(drawn.lines.get("pkg.old")).toEqual({ added: 0, deleted: 12 });
+    expect(drawn.lines.get("pkg")).toEqual({ added: 5, deleted: 21 });
+    expect(drawn.lines.has("ext:yaml")).toBe(false);
+    expect(drawn.lines.has("main:run")).toBe(false);
+  });
+
+  it("삭제된 노드의 slot을 담는다", () => {
+    expect([...drawn.slots]).toEqual([
+      ["pkg.mod:drop", 51],
+      ["pkg.old:legacy", 1],
+    ]);
   });
 });
