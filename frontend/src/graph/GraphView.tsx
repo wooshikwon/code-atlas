@@ -10,6 +10,7 @@ import {
   ViewportPortal,
   type NodeMouseHandler,
   type OnMove,
+  type OnMoveStart,
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
@@ -26,6 +27,7 @@ import { CallView } from "./CallView";
 import { columns, type Columns } from "./columns";
 import { cycles } from "./cycles";
 import { edgeTypes, Markers, useFlowEdges } from "./edges/OrthogonalEdge";
+import { useFlight, useFlying } from "./flight";
 import { flow, opacities, type Flow } from "./flow";
 import { functionCounts, labelOf, layout, packId, packLabel, titleOf, type Box, type Layout, type Point, type RouteEnd } from "./layout";
 import { Dock } from "./Dock";
@@ -40,7 +42,7 @@ import { drawn, followed, type EdgeKey } from "./scope";
 import { clipped, nodeTip, packTip, tipOf } from "./tips";
 import { tooltip } from "./Tooltip";
 import { edgeViews, NO_LINES, parentFirst, type Lines } from "./view";
-import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
+import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, FRAME_ZOOM, frameOn, NAMED_ZOOM, stageOf, ZOOM_MAX, ZOOM_MIN, type Stage } from "./viewport";
 import { hidden, insideCounts, lift, local, nodeIndex, shown, type Shown } from "./visible";
 
 const SHELF_NAME = "연결 없음";
@@ -216,7 +218,9 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const making = useSummaries(makingKey);
   const overlay = useOverlay((s) => s.kind);
   const candidates = useOverlay((s) => s.unused);
-  const { getViewport, setViewport } = useReactFlow();
+  const { getViewport } = useReactFlow();
+  const { fly, jump, halt, heading } = useFlight();
+  const flying = useFlying((s) => s.on);
   /** 확대 비율 구간. 구간이 바뀔 때만 다시 그린다. */
   const zoom = useStore((s) => (s.transform[2] < 0.4 ? 0 : s.transform[2] < NAMED_ZOOM ? 1 : 2));
 
@@ -226,7 +230,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
   const [shelf, setShelf] = useState<Point | null>(null);
   const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** 선을 눌러 간 폴더와 간 횟수. 그 폴더 영역에 도착 표시를 잠깐 그린다. */
+  /** 선을 눌러 간 폴더와 간 횟수. 배치 움직임과 화면 이동이 끝나면 그 폴더 영역에 도착 표시를 잠깐 그린다. */
   const [reached, setReached] = useState<{ id: string; count: number } | null>(null);
   /** 마우스를 올린 노드 id */
   const [hover, setHover] = useState<string | null>(null);
@@ -284,9 +288,10 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
     if (root.current === null) {
       return;
     }
-    const scale = Math.max(getViewport().zoom, NAMED_ZOOM);
+    const scale = Math.max(heading().zoom, NAMED_ZOOM);
+    const { clear } = stageOf(root.current);
     useAtlas.setState({ fitted: false });
-    void setViewport({ ...centerOn(box, stageOf(root.current).clear, scale), zoom: scale }, { duration: reducedMotion() ? 0 : PAN_MS });
+    fly({ ...centerOn(box, clear, scale), zoom: scale }, clear);
   };
   /** 선을 눌러 폴더 id에 왔다. 전체 맞춤 상태가 아니면 그 폴더의 상자로 화면을 옮기고, 도착 표시를 그린다. */
   const arrive = (id: string, box: Box) => {
@@ -323,16 +328,18 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       return;
     }
     home.current = fittedView(scene.layout, stageOf(root.current), null);
-    void setViewport(home.current);
+    jump(home.current);
     useAtlas.setState({ fitted: true });
-  }, [scene, home, setViewport]);
+  }, [scene, home, jump]);
   useEffect(
     () => () => {
+      const view = heading();
+      halt();
       if (home.current !== null) {
-        home.current = getViewport();
+        home.current = view;
       }
     },
-    [home, getViewport],
+    [home, heading, halt],
   );
 
   /** 지금 배치의 순환 묶음. 배치가 순환 아이콘의 폭을 잡을 때와 같은 숨긴 노드로 찾는다. */
@@ -382,15 +389,17 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       } else if (box !== undefined) {
         const boxes = path.map((id) => to.boxes.get(id)!);
         const step = boundsOf([box, boxes[at + 1] ?? boxes[at - 1] ?? box]);
+        const { clear } = stageOf(root.current);
         useAtlas.setState({ fitted: false });
-        void setViewport(frameOn(boxes, step, box, stageOf(root.current).clear, getViewport(), fresh), { duration: still ? 0 : PAN_MS });
+        fly(frameOn(boxes, step, box, clear, heading(), fresh), clear);
       }
     }
 
     // 전체 맞춤 상태에서 배치가 바뀌면 화면을 다시 맞춘다(`fittedView`).
     const whole = useAtlas.getState().fitted;
     if (whole && from !== null && !settled(from, to) && root.current !== null) {
-      void setViewport(fittedView(to, stageOf(root.current), changed.length === 1 ? changed[0] : null), { duration: still ? 0 : PAN_MS });
+      const stage = stageOf(root.current);
+      fly(fittedView(to, stage, changed.length === 1 ? changed[0] : null), stage.free);
     }
 
     // 전체 맞춤 상태가 아닐 때 폴더나 손잡이를 눌러 상자 하나를 펼치거나 접었으면 그 상자의 왼쪽 위 모서리를 화면의 같은 좌표에 둔다.
@@ -407,7 +416,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       setShelf(shelfCorner(scene, at));
       const box = held === null ? undefined : at.boxes.get(held.id);
       if (held !== null && box !== undefined) {
-        void setViewport(anchorOn(held.before, box, held.view));
+        jump(anchorOn(held.before, box, held.view));
       }
     };
     /** 펼치거나 접은 상자의 왼쪽 위 모서리가 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역을 벗어났으면 모서리가 들어오게만 옮긴다. */
@@ -417,9 +426,10 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         return;
       }
       const view = held === null ? getViewport() : anchorOn(held.before, box, held.view);
-      const next = cornerInto(box, stageOf(root.current).clear, view);
+      const { clear } = stageOf(root.current);
+      const next = cornerInto(box, clear, view);
       if (next.x !== view.x || next.y !== view.y) {
-        void setViewport(next, { duration: still ? 0 : PAN_MS });
+        fly(next, clear);
       }
     };
 
@@ -441,7 +451,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         reveal();
       },
     );
-  }, [scene, index, making, lit, pinFocus, aimed, cover, overlay, getViewport, setViewport]);
+  }, [scene, index, making, lit, pinFocus, aimed, cover, overlay, getViewport, fly, jump, heading]);
 
   const hovered = hover !== null && scene?.shown.nodes.has(hover) === true ? hover : null;
   /** 그릴 선과 그 가운데 순환 선의 키. 순환 덮개를 켠 동안에만 순환 선을 넣고 칠한다. */
@@ -580,6 +590,12 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       useAtlas.setState({ fitted: false });
     }
   };
+  /** 사용자가 화면을 끌거나 확대·축소하기 시작하면 그리는 중인 화면 이동을 멈춘다. 코드가 옮긴 화면은 event가 null이다. */
+  const grabbed: OnMoveStart = (event) => {
+    if (event !== null) {
+      halt();
+    }
+  };
   const onNodeLeave = () => {
     setHover(null);
     setAimedNode(null);
@@ -599,6 +615,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
       ref={root}
       data-zoom={zoom}
       data-moving={moving ? "" : undefined}
+      data-flying={flying ? "" : undefined}
       data-pinned={scene.lit !== null ? "" : undefined}
       data-overlay={overlay ?? undefined}
     >
@@ -617,6 +634,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         onEdgeMouseMove={aim.onEdgeMove}
         onEdgeMouseLeave={aim.onEdgeLeave}
         onPaneClick={onPaneClick}
+        onMoveStart={grabbed}
         onMove={released}
         nodesDraggable={false}
         nodesConnectable={false}
@@ -628,7 +646,7 @@ function StructureView({ home }: { home: RefObject<Viewport | null> }) {
         maxZoom={ZOOM_MAX}
         proOptions={{ hideAttribution: true }}
       >
-        {reached !== null && !moving && scene.layout.boxes.has(reached.id) && (
+        {reached !== null && !moving && !flying && scene.layout.boxes.has(reached.id) && (
           <ViewportPortal>
             <span
               key={reached.count}

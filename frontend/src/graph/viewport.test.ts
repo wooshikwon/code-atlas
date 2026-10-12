@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, fitTarget, frameOn, freeRect } from "./viewport";
+import { anchorOn, autoView, boundsOf, centerOn, cornerInto, fitPadding, frameOn, freeRect } from "./viewport";
 
 const area = { x: 0, y: 0, width: 1400, height: 900 };
 
@@ -133,23 +133,6 @@ describe("boundsOf", () => {
 
   it("상자가 없으면 크기가 0이다", () => {
     expect(boundsOf([])).toEqual({ x: 0, y: 0, width: 0, height: 0 });
-  });
-});
-
-describe("fitTarget", () => {
-  const free = { x: 0, y: 0, width: 912, height: 900 };
-  const clear = { x: 0, y: 0, width: 912, height: 500 };
-
-  it("강조하는 경로가 없으면 그래프 전체를 free에 맞추고 확대 비율을 100%보다 키우지 않는다", () => {
-    expect(fitTarget({ area, free, clear }, null)).toEqual({ padding: fitPadding(area, free), maxZoom: 1 });
-  });
-
-  it("경로 고정 중에는 경로 위 노드를 clear에 맞추고 확대 비율을 100%보다 키우지 않는다", () => {
-    expect(fitTarget({ area, free, clear }, ["a", "b"])).toEqual({
-      padding: { top: "24px", right: "512px", bottom: "424px", left: "24px" },
-      nodes: [{ id: "a" }, { id: "b" }],
-      maxZoom: 1,
-    });
   });
 });
 
