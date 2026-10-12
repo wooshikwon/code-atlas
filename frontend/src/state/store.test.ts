@@ -59,6 +59,36 @@ describe("select", () => {
   });
 });
 
+describe("picked", () => {
+  it("select, show, follow, enterFunction이 노드를 고를 때마다 늘고, 이미 고른 노드를 다시 골라 선택과 이력이 그대로일 때도 는다", () => {
+    const line = `${b}|${a}|call`;
+    const picks: (() => void)[] = [() => store().select(a), () => store().show(a), () => store().follow([line], a), () => store().enterFunction(a)];
+    store().select(a);
+    for (const pick of picks) {
+      const before = store().picked;
+      pick();
+      expect(store().selection).toEqual(node(a));
+      expect(store().picked).toBe(before + 1);
+    }
+    expect(selected()).toEqual([null, node(a), node(a), node(a)]);
+  });
+
+  it("선택을 푸는 select, 선과 폴더를 고르는 액션, 뒤로·앞으로, 그래프에 없는 id는 늘리지 않는다", () => {
+    store().select("main");
+    store().select(a);
+    const before = store().picked;
+    store().back();
+    store().select("main");
+    store().selectEdge("agg|x|y");
+    store().toggleFolder(folder);
+    store().select(null);
+    store().select("없는:노드");
+    store().back();
+    store().forward();
+    expect(store().picked).toBe(before);
+  });
+});
+
 describe("togglePack", () => {
   it("상자를 전부 펼침에 넣고 빼며 선택은 그대로 두고, 이력에 한 단계씩 넣어 뒤로·앞으로로 되돌아간다", () => {
     store().select("pkg.mod");
@@ -819,6 +849,7 @@ describe("경로 고정", () => {
     expect(store().finder).toEqual({ ...before.finder, focus: left, aimed: aimed + 2 });
     store().show(begin);
     expect(store().finder).toEqual({ ...before.finder, focus: begin, aimed: aimed + 3 });
+    expect(store().picked).toBe(before.picked + 3);
     expect(kept(store())).toEqual(kept(before));
     expect(store().history).toBe(before.history);
   });

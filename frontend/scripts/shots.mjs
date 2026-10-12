@@ -1227,6 +1227,8 @@ const placedOf = (page, range) =>
 const centered = (at) => (at.long ? near(at.first, 0, 2) : Math.abs(at.off) <= at.line);
 const placedText = (at) => `첫 줄의 위 끝 ${Math.round(at.first)}px, 가운데 차이 ${Math.round(at.off)}px, 줄 높이 ${at.line}px, 뷰어 높이 ${Math.round(at.height)}px`;
 
+const HF13 = (name) => join(OUT, `hf13-recenter-${name}.png`);
+
 async function codeScope(t, page) {
   const asked = [];
   page.on("request", (request) => {
@@ -1299,6 +1301,48 @@ async function codeScope(t, page) {
     `마지막 줄 번호 ${bottom.at(-1)?.line}`,
   );
 
+  // 스크롤한 뒤에 고른 함수를 다시 고르면 선택과 그래프 화면은 그대로이고 코드 뷰어가 처음 골랐을 때의 위치로 돌아온다.
+  const viewOf = () => page.evaluate(() => `${document.querySelector(".react-flow__viewport")?.style.transform} ${document.querySelectorAll(".react-flow__node").length}`);
+  /** 코드 뷰어 위에서 휠을 dy씩 열 번 돌린다. */
+  const wheelCode = async (dy) => {
+    await page.mouse.move(code.x + code.width / 2, code.y + code.height / 2);
+    for (let i = 0; i < 10; i += 1) {
+      await page.mouse.wheel(0, dy);
+    }
+    await page.waitForTimeout(300);
+  };
+  /** 지금 스크롤해 둔 코드 뷰어에서 again으로 그 함수를 다시 고르고, 정의가 처음 위치 first에 놓였는지 본다. */
+  const repicked = async (label, range, first, again) => {
+    const [scrolled, view] = [await placedOf(page, range), await viewOf()];
+    await again();
+    await settle(page);
+    await page.waitForTimeout(300);
+    const back = await placedOf(page, range);
+    t.check(
+      label,
+      Math.abs(scrolled.first - first.first) > first.line && near(back.first, first.first, 1) && centered(back) && (await selectedOf(page)) === FUNCTION && (await viewOf()) === view,
+      `스크롤한 뒤 첫 줄의 위 끝 ${Math.round(scrolled.first)}px → 다시 고른 뒤 ${Math.round(back.first)}px (처음 ${Math.round(first.first)}px), 선택 ${await selectedOf(page)}`,
+    );
+  };
+  await repicked("맨 아래로 스크롤한 뒤 파일트리에서 고른 함수의 행을 다시 누르면 정의의 첫 줄이 처음 골랐을 때의 위치로 돌아온다", target.range, long, () =>
+    page.click(`.tree-row.tree-symbol[data-node="${FUNCTION}"]`),
+  );
+  await wheelCode(-40);
+  await page.screenshot({ path: HF13("scrolled") });
+  await repicked("위로 스크롤한 뒤 그래프에서 고른 함수의 노드를 다시 누르면 정의의 첫 줄이 처음 골랐을 때의 위치로 돌아온다", target.range, long, () => clickNode(page, FUNCTION));
+  await page.screenshot({ path: HF13("again") });
+  await wheelCode(40);
+  await repicked("스크롤한 뒤 Mod+P 팔레트에서 고른 함수를 다시 고르면 정의의 첫 줄이 처음 골랐을 때의 위치로 돌아온다", target.range, long, () => palettePick(page, target.name, FUNCTION));
+  const still = await placedOf(page, target.range);
+  await wheelCode(40);
+  await page.waitForTimeout(600);
+  const left = await placedOf(page, target.range);
+  t.check(
+    "다시 고른 뒤에 스크롤한 위치는 다시 누르기 전까지 그대로다",
+    still.first - left.first > left.line && near((await placedOf(page, target.range)).first, left.first, 1),
+    `첫 줄의 위 끝 ${Math.round(still.first)}px → ${Math.round(left.first)}px`,
+  );
+
   await page.click(`.tree-row.tree-symbol[data-node="${later.id}"]`);
   await waitSelected(page, later.id);
   await waitLine(later.range[0]);
@@ -1358,6 +1402,17 @@ async function codeScope(t, page) {
     `첫 줄 번호 ${whole[0]?.line}, 흐린 줄 ${whole.filter((row) => row.dim).length}개`,
   );
   t.check(`함수 셋과 파일을 차례로 고르는 동안 /api/file 요청이 ${path} 한 번뿐이다`, same(asked, [path]), asked.join(", "));
+
+  // 함수 시점 뷰에서도 고른 가운데 함수를 다시 누르면 코드 뷰어가 처음 위치로 돌아온다.
+  await clickNode(page, FUNCTION, 2);
+  await page.waitForSelector(".node-call", { timeout: 30_000 });
+  await settle(page);
+  await waitLine(target.range[0]);
+  const entered = await placedOf(page, target.range);
+  await wheelCode(40);
+  await repicked("함수 시점 뷰에서 스크롤한 뒤 고른 가운데 함수를 다시 누르면 정의의 첫 줄이 처음 위치로 돌아온다", target.range, entered, () => clickNode(page, FUNCTION));
+  await page.keyboard.press("Escape");
+  await waitSelected(page, FUNCTION);
 
   // 파일 맨 위의 정의는 가운데에 둘 줄이 위에 없으므로 1번 줄부터 보인다. 창을 높여 뷰어 높이의 절반 안에서 끝나는 정의를 찾는다.
   await page.setViewportSize({ width: VIEW.width, height: 1400 });
