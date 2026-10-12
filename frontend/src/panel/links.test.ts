@@ -68,7 +68,8 @@ describe("contentsOf", () => {
 describe("글", () => {
   it("종류가 하나면 종류와 수를, 여럿이면 합과 종류마다의 수를 적는다", () => {
     expect(linksText({ call: 2 })).toBe("호출 2곳");
-    expect(linksText({ call: 9, import: 3 })).toBe("12곳 (호출 9, import 3)");
+    expect(linksText({ import: 3 })).toBe("import 3줄");
+    expect(linksText({ import: 3, call: 9 })).toBe("12개 (호출 9곳, import 3줄)");
     expect(linksText({})).toBe("없음");
   });
 

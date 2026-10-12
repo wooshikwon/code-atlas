@@ -1,10 +1,10 @@
 // 그래프 왼쪽 아래 칸(`Dock.tsx`)의 둥근 범례 버튼과 그 위에 펼치는 범례. 노드 모양 여섯 개와 이름표 옆 표시와 접힌 상자의 배지, 선 모양 세 개와 합류, 찾은 경로의 선,
-// 변경 표시 두 색을 보여 주고, 분석 덮개를 켜면 그 덮개의 표시를 끝에 덧붙인다.
+// 변경 표시 두 색을 보여 주고, 선 모양에 마우스를 올리면 그 분류에 드는 선 종류를 말풍선에 적는다. 분석 덮개를 켜면 그 덮개의 표시를 끝에 덧붙인다.
 import type { Change, EdgeGroup } from "../api/types";
 import { CHANGE_LETTERS } from "../state/changes";
 import { useOverlay, type OverlayKind } from "../state/overlay";
 import { useAtlas } from "../state/store";
-import { GROUP_NAMES } from "./names";
+import { EDGE_KIND_NAMES, GROUP_KINDS, GROUP_NAMES } from "./names";
 import { CycleMark } from "./nodes/common";
 
 const SHAPES = [
@@ -112,7 +112,7 @@ export function Legend() {
       </ul>
       <ul className="legend-list">
         {GROUPS.map((group) => (
-          <li key={group}>
+          <li key={group} data-tip={`${GROUP_NAMES[group]} 선: ${GROUP_KINDS[group].map((kind) => EDGE_KIND_NAMES[kind]).join(", ")}`}>
             <svg width={30} height={16}>
               <path
                 d="M2,8 L27,8"
@@ -164,7 +164,7 @@ export function LegendButton() {
     <button
       className="dock-button legend-button"
       onClick={toggleLegend}
-      title="범례"
+      data-tip="범례"
       aria-label="범례"
       aria-expanded={open}
       aria-controls="legend"

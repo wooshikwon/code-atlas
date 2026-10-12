@@ -271,7 +271,7 @@ describe("edgeViews: 강조하는 경로", () => {
 describe("trunkViews", () => {
   const view = (key: string, target: string, points: [number, number][], more: Partial<EdgeView> = {}): EdgeView => {
     const path = points.map(([x, y]) => ({ x, y }));
-    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, sites: 1, route: null, via: false, joins: true, below: false, into: null, branch: path, trunk: null, ...more };
+    return { key, source: key, target, group: "run", points: path, tone: "muted", opacity: 0.5, sites: 1, kinds: { call: 1 }, route: null, via: false, joins: true, below: false, into: null, branch: path, trunk: null, ...more };
   };
   /** 세 선이 x=100의 세로선에 차례로 붙어 (120, 50)으로 들어간다. c는 아래에서 올라온다. */
   const a = view("a", "t", [[0, 0], [100, 0], [100, 50], [120, 50]]);

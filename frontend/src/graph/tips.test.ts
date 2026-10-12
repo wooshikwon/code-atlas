@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { repoFixture } from "./fixture";
-import { busyTip, cycleTip, globalTip, insideTip, locTip, nodeTip, packTip, trunkTip } from "./tips";
+import { busyTip, cycleTip, globalTip, insideTip, lineTip, locTip, nodeTip, packTip, trunkTip } from "./tips";
 import { nodeIndex } from "./visible";
 
 const nodes = nodeIndex(repoFixture);
@@ -28,8 +28,15 @@ describe("배지 말풍선", () => {
     expect(locTip({ ...fn, loc: 131 })).toBe("줄 수 131줄 · 빈 줄을 뺀 수");
   });
 
-  it("줄기는 선을 내보내는 노드 수, 도착 노드, 지점 수를 적는다", () => {
-    expect(trunkTip(12, "parser/common.py", 144)).toBe("노드 12개 → parser/common.py · 144곳");
+  it("선은 출발과 도착, 종류마다의 수와 단위를 적고 실행 선이 없는 이음은 걸음의 이름을 적는다", () => {
+    expect(lineTip("run()", "load()", { call: 2 }, null)).toBe("run() → load() · 호출 2곳");
+    expect(lineTip("a.py", "b.py", { import: 1, call: 3, type: 2 }, null)).toBe("a.py → b.py · 호출 3곳 · import 1줄 · 타입 2곳");
+    expect(lineTip("run()", "Engine", { construct: 1 }, "construct")).toBe("run() → Engine · 생성 1곳");
+    expect(lineTip("Engine", "__init__()", {}, "init")).toBe("Engine → __init__() · 생성자 이음");
+  });
+
+  it("줄기는 선을 내보내는 노드 수, 도착 노드, 종류마다 합친 수를 적는다", () => {
+    expect(trunkTip(12, "parser/common.py", { call: 140, import: 4 })).toBe("노드 12개 → parser/common.py · 호출 140곳 · import 4줄");
   });
 
   it("순환 아이콘은 묶음의 파일 수와 이름을 적고 여섯 개부터는 줄인다", () => {
@@ -44,10 +51,13 @@ describe("배지 말풍선", () => {
     ]);
   });
 
-  it("미사용 후보는 노드의 말풍선 둘째 줄에 뜻을 적는다", () => {
-    expect(nodeTip("run()", "함수", false)).toBe("run() · 함수");
-    expect(nodeTip("run()", "함수", true).split("\n")).toEqual([
-      "run() · 함수",
+  it("노드의 말풍선은 잘린 이름, 요약의 요지, 미사용 후보의 뜻을 줄마다 적고 적을 줄이 없으면 띄우지 않는다", () => {
+    expect(nodeTip(null, null, false)).toBeNull();
+    expect(nodeTip(null, "주문 목록을 받아 품목별 수량을 더한다", false)).toBe("주문 목록을 받아 품목별 수량을 더한다");
+    expect(nodeTip("pkg/parser/common_helpers.py", null, false)).toBe("pkg/parser/common_helpers.py");
+    expect(nodeTip("run_everything()", "설정을 읽어 엔진을 띄운다", true)!.split("\n")).toEqual([
+      "run_everything()",
+      "설정을 읽어 엔진을 띄운다",
       "미사용 후보 · 들어오는 실행·사용 선이 없다 · 동적 호출이면 실제로는 쓰일 수 있다",
     ]);
   });

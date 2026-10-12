@@ -25,8 +25,7 @@ import { flowNodes, parts, pointing, type Drawn } from "./nodes/common";
 import { UNUSED_OPACITY } from "./overlay";
 import { nodeTip, tipOf } from "./tips";
 import { NO_LINES } from "./view";
-import { Tooltip, type TooltipHandle } from "./Tooltip";
-import { GROUP_NAMES, KIND_NAMES } from "./names";
+import { tooltip } from "./Tooltip";
 import type { EdgeKey } from "./scope";
 import { boundsOf, fitPadding, FRAME_ZOOM, PAN_MS, stageOf, ZOOM_MAX, ZOOM_MIN } from "./viewport";
 import { hidden, nodeIndex } from "./visible";
@@ -98,7 +97,6 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const [aimedNode, setAimedNode] = useState<string | null>(null);
 
   const root = useRef<HTMLDivElement | null>(null);
-  const tip = useRef<TooltipHandle | null>(null);
   /** 지금 화면에 그린 배치. 움직임은 여기서 출발한다. */
   const onScreen = useRef<Layout | null>(null);
   /** 화면을 맞춰 둔 가운데 함수 */
@@ -172,9 +170,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   const aim = useAim({
     lines,
     boxes: scene?.layout.boxes ?? NO_BOXES,
-    tip,
     name: nameOf,
-    describe: ({ source, target, group, sites }) => `${nameOf(source)} → ${nameOf(target)} · ${GROUP_NAMES[group]} · ${sites}곳`,
     only: null,
     skip: (event) => {
       const again = repeated(event);
@@ -207,7 +203,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
   };
 
   const onNodeClick: NodeMouseHandler<CallFlowNode> = (event, node) => {
-    tip.current?.hide();
+    tooltip.hide();
     if ((event.target as Element).closest(".call-more") !== null) {
       clicked.current = null;
       expandFunction(node.data.node.id);
@@ -220,7 +216,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     select(node.data.node.id);
   };
   const onPaneClick = (event: ReactMouseEvent) => {
-    tip.current?.hide();
+    tooltip.hide();
     if (repeated(event)) {
       return;
     }
@@ -228,7 +224,7 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
     select(null);
   };
   /**
-   * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 이름과 종류를 말풍선에 적는다. 올린 노드는 선의 hover처럼 가장 진한 단계로 그린다.
+   * 마우스 아래가 배지나 표시면 그 뜻을, 아니면 노드의 말풍선(`nodeTip`)을 띄운다. 올린 노드는 선의 hover처럼 가장 진한 단계로 그린다.
    * 마우스 버튼을 누른 동안(화면을 끄는 동안)에는 아무것도 하지 않는다.
    */
   const onNodeOver: NodeMouseHandler<CallFlowNode> = (event, node) => {
@@ -236,12 +232,14 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       return;
     }
     setAimedNode(node.data.node.id);
+    const { id } = node.data.node;
     const title = index === null ? node.data.label : callTitle(index, node.data.node);
-    tip.current?.show(tipOf(event.target) ?? nodeTip(title, KIND_NAMES[node.data.node.kind], node.data.unused), event.clientX, event.clientY);
+    const text = tipOf(event.target) ?? nodeTip(node.data.label === title ? null : title, useSummaries.getState().leads[id] ?? null, node.data.unused);
+    tooltip.show(text, event.clientX, event.clientY);
   };
   const onLeave = () => {
     setAimedNode(null);
-    tip.current?.hide();
+    tooltip.hide();
   };
   if (scene === null) {
     return (
@@ -279,7 +277,6 @@ export function CallView({ center, expanded }: { center: string; expanded: strin
       />
       <Dock />
       <Arranging />
-      <Tooltip ref={tip} />
       {aim.menu}
     </div>
   );

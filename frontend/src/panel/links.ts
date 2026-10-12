@@ -1,6 +1,6 @@
 // 정보 패널의 "정보" 구역에 적는 값. 노드의 크기와 안에 든 정의 수, 나가는 연결과 들어오는 연결, 선을 눌러 온 상태의 지나온 선을 계산한다.
 import type { AtlasEdge, AtlasNode, EdgeKind, Graph, SiteRef } from "../api/types";
-import { EDGE_KIND_NAMES, nameOf } from "../graph/names";
+import { EDGE_KIND_NAMES, nameOf, relationOf } from "../graph/names";
 import { along, endsOf, type EdgeKey } from "../graph/scope";
 import { unitOf, within } from "../graph/visible";
 
@@ -95,17 +95,20 @@ export function contentsOf(graph: Graph, nodes: Map<string, AtlasNode>, off: Set
   return counts.filter(({ count }) => count > 0);
 }
 
-/** 종류마다의 수 kinds를 `12곳 (호출 9, import 3)`으로 적는다. 종류가 하나면 `호출 12곳`이고 관계가 없으면 `없음`이다. */
+/**
+ * 종류마다의 수 kinds를 합과 함께 `12개 (호출 9곳, import 3줄)`로 적는다. 종류가 하나면 `호출 12곳`이고 관계가 없으면 `없음`이다.
+ * 종류의 이름과 단위, 순서는 `relationOf`와 `EDGE_KIND_NAMES`를 따른다.
+ */
 export function linksText(kinds: Links["kinds"]): string {
-  const list = Object.entries(kinds) as [EdgeKind, number][];
+  const list = (Object.keys(EDGE_KIND_NAMES) as EdgeKind[]).filter((kind) => kinds[kind] !== undefined).map((kind) => relationOf(kind, kinds[kind]!));
   if (list.length === 0) {
     return "없음";
   }
   if (list.length === 1) {
-    return `${EDGE_KIND_NAMES[list[0][0]]} ${list[0][1]}곳`;
+    return list[0];
   }
-  const total = list.reduce((sum, [, count]) => sum + count, 0);
-  return `${total}곳 (${list.map(([kind, count]) => `${EDGE_KIND_NAMES[kind]} ${count}`).join(", ")})`;
+  const total = Object.values(kinds).reduce((sum, count) => sum + count, 0);
+  return `${total}개 (${list.join(", ")})`;
 }
 
 /** 노드의 줄 수와 정의의 줄 범위를 `42줄 (120~161)`로 적는다. 파일 상자와 폴더 상자는 줄 수만 적고, 외부 노드는 null이다. */

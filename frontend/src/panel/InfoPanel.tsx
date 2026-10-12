@@ -153,7 +153,7 @@ export function InfoPanel() {
     id,
     topic,
     text: linksText(links.kinds),
-    brief: `${topic} ${links.total}곳`,
+    brief: `${topic} ${links.total}개`,
     press: links.total === 0 ? undefined : () => list(id),
     pressed: listed === id,
   });
@@ -285,7 +285,7 @@ export function InfoPanel() {
     >
       {rect !== null && item !== null && index !== null && (
         <>
-          <div className="info-panel-head" onPointerDown={grip("move")} onDoubleClick={restore} title="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다">
+          <div className="info-panel-head" onPointerDown={grip("move")} onDoubleClick={restore} data-tip="끌어서 옮기고, 더블클릭하면 기본 위치와 크기로 돌아간다">
             <Header item={item} nodes={index.nodes} />
           </div>
           {rows.length > 0 && <Facts rows={rows} />}
@@ -295,7 +295,7 @@ export function InfoPanel() {
           {item.type === "repo" && <Overview nodes={index.nodes} />}
           {summarized && <Summary node={node.id} split={code === null || !summaryOpen ? null : split} />}
           {summarized && summaryOpen && code !== null && (
-            <div className="info-panel-divide" onPointerDown={part} onDoubleClick={() => setSplit(null)} title="끌어서 요약 칸과 코드의 높이를 바꾸고, 더블클릭하면 기본 높이로 돌아간다" />
+            <div className="info-panel-divide" onPointerDown={part} onDoubleClick={() => setSplit(null)} data-tip="끌어서 요약 칸과 코드의 높이를 바꾸고, 더블클릭하면 기본 높이로 돌아간다" />
           )}
           {code !== null && <CodeView {...code} />}
         </>

@@ -26,7 +26,7 @@ from .lsp import Location, Session
 from .model import Analysis, to_dict
 from .resolve import EXTERNAL_PREFIX, Index, external_of
 from .runner import Runner
-from .summary import Subject, Summaries, SummaryError, digest_of, prompt_of, range_code, range_prompt_of
+from .summary import Subject, Summaries, SummaryError, digest_of, lead_of, prompt_of, range_code, range_prompt_of
 
 HOST = "127.0.0.1"
 PORT = 8766
@@ -291,6 +291,13 @@ def create_app(
         reason = await summaries.unavailable()
         summary, stale = summaries.kept(prompt, Subject(app.state.repo["root"], "node", node))
         return {"summary": summary, "stale": stale, "available": reason is None, "reason": reason}
+
+    @app.get("/api/summaries", dependencies=ready)
+    def get_summaries() -> dict:
+        """노드마다 남겨 둔 가장 최근 요약의 요지. 지금 분석 결과에 있는 노드만 담는다."""
+        kept = app.state.summaries.latest.listed(app.state.repo["root"], "node")
+        found = [{"node": k.name, "lead": lead_of(k.text)} for k in kept if k.name in app.state.nodes]
+        return {"summaries": sorted(found, key=lambda s: s["node"])}
 
     async def made(request: Request, making: Awaitable[str]) -> str:
         """설명을 다 만들 때까지 기다린다. 호출자가 먼저 연결을 끊으면 기다리기를 그만둔다."""

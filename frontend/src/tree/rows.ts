@@ -26,6 +26,7 @@ export interface Row {
   /** 1부터 세는 깊이 */
   level: number;
   label: string;
+  /** 줄이지 않은 이름. 폴더·파일은 레포 루트 기준 경로, 클래스·함수는 이름표다. 행의 글자가 잘렸을 때 말풍선이 적는다. */
   title: string;
   /** 폴더면 패키지 노드 id, 파일이면 모듈 노드 id. 패키지 노드가 없는 폴더와 모듈 노드가 없는 파일은 null이다. */
   node: string | null;
@@ -183,7 +184,7 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
             icon: node.kind as IconKind,
             level: level + 1,
             label: labelOf(nodes, node),
-            title: node.id,
+            title: labelOf(nodes, node),
             node: node.id,
             file: null,
             expanded: null,

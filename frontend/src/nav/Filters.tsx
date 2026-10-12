@@ -2,7 +2,6 @@
 // 레포 정보(통계, 브랜치, 진입점 목록) 두 구역이다. 버튼은 기본값과 다른 보기 설정의 수를 적는다.
 import { useMemo, useRef, useState } from "react";
 import { titleOf } from "../graph/layout";
-import { Tooltip, type TooltipHandle } from "../graph/Tooltip";
 import { hidden } from "../graph/visible";
 import { useBranch } from "../state/changes";
 import { useCycles } from "../state/cycles";
@@ -63,7 +62,8 @@ function Entries({ onPick }: { onPick: () => void }) {
             <button
               className="filter-entry"
               data-node={node.id}
-              title={node.path ?? node.id}
+              data-full={titleOf(node)}
+              data-tip={node.kind === "module" || node.path === null ? undefined : node.path}
               onClick={() => {
                 show(node.id);
                 onPick();
@@ -94,7 +94,6 @@ export function Filters() {
   const toggleAutoSummary = useAtlas((s) => s.toggleAutoSummary);
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
-  const tip = useRef<TooltipHandle | null>(null);
   useDismiss(open, root, setOpen);
 
   const names = changed({ depth, overlay, showTests, showExternal, autoSummary });
@@ -109,20 +108,14 @@ export function Filters() {
         aria-expanded={open}
         aria-controls="toolbar-filters"
         data-changed={names.length > 0 ? "" : undefined}
-        onClick={() => {
-          tip.current?.hide();
-          setOpen(!open);
-        }}
-        onMouseEnter={(event) => !open && tip.current?.show(filterTip(names), event.clientX, event.clientY)}
-        onMouseMove={(event) => tip.current?.move(event.clientX, event.clientY)}
-        onMouseLeave={() => tip.current?.hide()}
+        data-tip={open ? undefined : filterTip(names)}
+        onClick={() => setOpen(!open)}
       >
         <svg className="filter-icon" viewBox="0 0 14 14" width={14} height={14} aria-hidden>
           <path d="M1.5 2.5 H12.5 L8.5 7.5 V11.5 L5.5 12.5 V7.5 Z" />
         </svg>
         {names.length > 0 && <span className="filter-count">{names.length}</span>}
       </button>
-      <Tooltip ref={tip} />
       {open && (
         <div className="filter-panel" id="toolbar-filters" role="dialog" aria-label="필터">
           <section className="filter-section" aria-label="보기 설정">
@@ -141,7 +134,7 @@ export function Filters() {
               <input type="checkbox" checked={showExternal} onChange={toggleExternal} disabled={pin} />
               외부 노드
             </label>
-            <label className="toolbar-toggle" title="노드를 고르면 캐시에 없는 LLM 요약을 만든다">
+            <label className="toolbar-toggle" data-tip="노드를 고르면 캐시에 없는 LLM 요약을 만든다">
               <input type="checkbox" checked={autoSummary} onChange={toggleAutoSummary} />
               자동 요약
             </label>
@@ -160,7 +153,7 @@ export function Filters() {
               </>
             )}
             {branch !== null && (
-              <span className="filter-branch" title="현재 git 브랜치">
+              <span className="filter-branch" data-tip="현재 git 브랜치">
                 브랜치 {branch}
               </span>
             )}

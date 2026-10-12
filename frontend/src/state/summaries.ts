@@ -1,7 +1,8 @@
 // 노드마다의 LLM 요약과 요약 요청. 요청은 정보 패널이 아니라 이 저장소가 보내므로 다른 노드를 고르거나 폴더를 접거나
 // 뷰를 바꿔도 끝까지 가고, 그 노드를 다시 고르면 만드는 중인 상태나 끝난 결과가 보인다.
 import { create } from "zustand";
-import { getSummary, makeSummary } from "../api/client";
+import { getSummaries, getSummary, makeSummary } from "../api/client";
+import { partsOf } from "../panel/parts";
 
 /** stale은 요약을 만든 뒤 코드나 앞뒤 흐름이 바뀌었다는 뜻이고, refresh는 캐시에 있어도 다시 만든 요청이다. */
 export type SummaryState =
@@ -15,6 +16,10 @@ export type SummaryState =
 export interface SummaryStore {
   /** 노드 id → 요약 상태. 한 번도 읽지 않은 노드는 없다. */
   states: Record<string, SummaryState>;
+  /** 노드 id → 요약의 요지. 요약이 있는 노드만 담는다. 노드의 말풍선이 적는다. */
+  leads: Record<string, string>;
+  /** 레포에 남겨 둔 요약의 요지를 한 번에 받아 `leads`를 바꾼다. 받는 동안 화면에서 만든 요약의 요지는 그대로 둔다. */
+  list(): void;
   /** 캐시에 있는 요약을 읽는다. 읽는 중이거나 만드는 중이거나 이미 결과(요약, 실패)가 있는 노드는 다시 읽지 않는다. */
   read(node: string): void;
   /** 캐시에 없으면 요약을 만든다. refresh면 캐시에 있어도 다시 만든다. 만드는 중인 노드에는 요청을 다시 보내지 않는다. */
@@ -26,10 +31,28 @@ export interface SummaryStore {
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export const useSummaries = create<SummaryStore>()((set, get) => {
-  const put = (node: string, state: SummaryState) => set((store) => ({ states: { ...store.states, [node]: state } }));
+  const put = (node: string, state: SummaryState) =>
+    set((store) => ({
+      states: { ...store.states, [node]: state },
+      leads: state.phase === "done" ? { ...store.leads, [node]: partsOf(state.summary).lead } : store.leads,
+    }));
 
   return {
     states: {},
+    leads: {},
+    list: () => {
+      const before = get().leads;
+      getSummaries().then(
+        ({ summaries }) =>
+          set((store) => ({
+            leads: {
+              ...Object.fromEntries(summaries.map(({ node, lead }) => [node, lead])),
+              ...Object.fromEntries(Object.entries(store.leads).filter(([node, lead]) => before[node] !== lead)),
+            },
+          })),
+        () => undefined,
+      );
+    },
     read: (node) => {
       const phase = get().states[node]?.phase;
       if (phase !== undefined && phase !== "empty" && phase !== "unavailable") {

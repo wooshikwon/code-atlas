@@ -88,12 +88,14 @@ export const useStatus = create<StatusStore>()((set, get) => {
         return false;
       }
       useOverlay.getState().load();
+      useSummaries.getState().list();
       return true;
     }
     const [repo, graph, tree] = await Promise.all([getRepo(), getGraph(), getTree()]);
     forgetFiles();
     useOpened.getState().close();
     useSummaries.getState().forget();
+    useSummaries.getState().list();
     useExplanations.getState().forget();
     useAtlas.getState().reopen(repo, graph, tree);
     useOverlay.getState().load();

@@ -163,7 +163,7 @@ export function FileTree() {
             <div className="tree-deleted-title">지워진 파일</div>
             <ul>
               {deleted.map((file) => (
-                <li key={file.path} className="tree-deleted-row" title={file.path}>
+                <li key={file.path} className="tree-deleted-row" data-full={file.path}>
                   {file.path}
                 </li>
               ))}

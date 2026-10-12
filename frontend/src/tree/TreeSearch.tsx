@@ -1,5 +1,6 @@
 import { useEffect, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import type { EntryKind } from "../search/index";
+import { useSummaries } from "../state/summaries";
 import { Icon } from "./Icon";
 import type { Result } from "./rows";
 import { ChangeMark } from "./TreeNode";
@@ -81,7 +82,7 @@ export function TreeSearch({ input, query, onQuery, list, active, onActive, onPi
           type="button"
           className="tree-search-clear"
           aria-label="검색 지우기"
-          title="검색 지우기"
+          data-tip="검색 지우기"
           onClick={() => {
             onQuery("");
             input.current?.focus();
@@ -96,6 +97,7 @@ export function TreeSearch({ input, query, onQuery, list, active, onActive, onPi
 
 /** 검색 결과 목록. 한 줄에 이름, 종류와 경로를 적는다. */
 export function TreeResults({ list, active, onPick }: Pick<SearchProps, "list" | "active" | "onPick">) {
+  const leads = useSummaries((s) => s.leads);
   useEffect(() => {
     document.getElementById(resultId(active))?.scrollIntoView({ block: "nearest" });
   }, [active, list]);
@@ -109,7 +111,8 @@ export function TreeResults({ list, active, onPick }: Pick<SearchProps, "list" |
           className={`tree-row tree-result${selected ? " active" : ""}${index === active ? " cursor" : ""}`}
           role="option"
           aria-selected={index === active}
-          title={`${hit.entry.name} · ${hit.entry.path}`}
+          data-full={`${hit.entry.name} · ${hit.entry.path}`}
+          data-tip={leads[hit.entry.id]}
           data-node={hit.entry.id}
           onClick={() => onPick(list[index])}
         >

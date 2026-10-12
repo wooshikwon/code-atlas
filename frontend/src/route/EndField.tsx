@@ -104,7 +104,7 @@ export function EndField({ end, entries, nodes }: EndFieldProps) {
             <button
               type="button"
               className="finder-value"
-              title={`${END_NAMES[end]} 다시 고르기`}
+              data-tip={`${END_NAMES[end]} 다시 고르기`}
               onClick={() => setEditing(true)}
             >
               <span className="finder-name">{nameOf(nodes, node)}</span>
@@ -114,7 +114,7 @@ export function EndField({ end, entries, nodes }: EndFieldProps) {
               type="button"
               className="finder-unset"
               aria-label={`${END_NAMES[end]} 비우기`}
-              title={`${END_NAMES[end]} 비우기`}
+              data-tip={`${END_NAMES[end]} 비우기`}
               onClick={() => setEnd(end, null)}
             >
               ×

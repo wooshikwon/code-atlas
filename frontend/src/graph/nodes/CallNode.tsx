@@ -50,7 +50,7 @@ export const CallNode = memo(function CallNode({ data }: NodeProps<CallFlowNode>
   const more =
     data.more &&
     (face ? (
-      <button className="call-more" title="한 단계 더 펼치기" aria-label="한 단계 더 펼치기">
+      <button className="call-more" data-tip="한 단계 더 펼치기" aria-label="한 단계 더 펼치기">
         +
       </button>
     ) : (

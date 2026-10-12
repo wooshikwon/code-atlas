@@ -4,6 +4,7 @@ import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panel
 import { usePick } from "./graph/aim";
 import { GraphView } from "./graph/GraphView";
 import { Progress } from "./graph/Progress";
+import { Tooltip } from "./graph/Tooltip";
 import { fitTarget, stageOf } from "./graph/viewport";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
@@ -46,10 +47,10 @@ function Toolbar() {
   return (
     <div className="toolbar">
       <div className="toolbar-nav">
-        <button className="toolbar-button" onClick={back} disabled={!canBack || pin} title="뒤로" aria-label="뒤로">
+        <button className="toolbar-button" onClick={back} disabled={!canBack || pin} data-tip="뒤로" aria-label="뒤로">
           ←
         </button>
-        <button className="toolbar-button" onClick={forward} disabled={!canForward || pin} title="앞으로" aria-label="앞으로">
+        <button className="toolbar-button" onClick={forward} disabled={!canForward || pin} data-tip="앞으로" aria-label="앞으로">
           →
         </button>
         <Trail />
@@ -99,29 +100,32 @@ export function App() {
   );
 
   return (
-    <Group
-      id="main"
-      className="app"
-      orientation="horizontal"
-      defaultLayout={main.defaultLayout}
-      onLayoutChanged={main.onLayoutChanged}
-    >
-      <Panel id="explorer" defaultSize={260} minSize={160} maxSize="40">
-        <FileTree key={epoch} />
-      </Panel>
-      <Separator className="separator" />
-      <Panel id="workspace" minSize="30">
-        <ReactFlowProvider>
-          <div className="workspace">
-            <Toolbar />
-            <div className="stage">
-              {opened ? <GraphView key={epoch} /> : <Progress />}
-              {opened && <InfoPanel />}
+    <>
+      <Group
+        id="main"
+        className="app"
+        orientation="horizontal"
+        defaultLayout={main.defaultLayout}
+        onLayoutChanged={main.onLayoutChanged}
+      >
+        <Panel id="explorer" defaultSize={260} minSize={160} maxSize="40">
+          <FileTree key={epoch} />
+        </Panel>
+        <Separator className="separator" />
+        <Panel id="workspace" minSize="30">
+          <ReactFlowProvider>
+            <div className="workspace">
+              <Toolbar />
+              <div className="stage">
+                {opened ? <GraphView key={epoch} /> : <Progress />}
+                {opened && <InfoPanel />}
+              </div>
+              <Palette />
             </div>
-            <Palette />
-          </div>
-        </ReactFlowProvider>
-      </Panel>
-    </Group>
+          </ReactFlowProvider>
+        </Panel>
+      </Group>
+      <Tooltip />
+    </>
   );
 }

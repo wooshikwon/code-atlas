@@ -54,7 +54,7 @@ export function Header({ item, nodes }: HeaderProps) {
   return (
     <>
       <div className="info-panel-title">
-        <b className="info-panel-name" title={path + name}>
+        <b className="info-panel-name" data-full={path + name}>
           {entry && <EntryMark />}
           {path !== "" && (
             <span className="info-panel-path">
