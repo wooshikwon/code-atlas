@@ -98,8 +98,11 @@ def _skipped(root: Path, rel: str, ignore: pathspec.PathSpec) -> bool:
     return (root / rel / "pyvenv.cfg").exists() or ignore.match_file(rel + "/")
 
 
-def _each(root: Path, ignore: pathspec.PathSpec, suffixes: tuple[str, ...]):
-    """훑지 않는 폴더와 `.gitignore`에 걸린 파일을 건너뛰며 `suffixes`로 끝나는 파일의 레포 루트 기준 경로를 하나씩 낸다."""
+def _each(root: Path, ignore: pathspec.PathSpec, suffixes: tuple[str, ...] | None):
+    """훑지 않는 폴더와 `.gitignore`에 걸린 파일을 건너뛰며 `suffixes`로 끝나는 파일의 레포 루트 기준 경로를 하나씩 낸다.
+
+    `suffixes`가 None이면 확장자를 가리지 않는다.
+    """
     stack = [root]
     while stack:
         current = stack.pop()
@@ -108,7 +111,7 @@ def _each(root: Path, ignore: pathspec.PathSpec, suffixes: tuple[str, ...]):
             if entry.is_dir():
                 if not _skipped(root, rel, ignore):
                     stack.append(entry)
-            elif entry.suffix in suffixes and not ignore.match_file(rel):
+            elif (suffixes is None or entry.suffix in suffixes) and not ignore.match_file(rel):
                 yield rel
 
 
@@ -133,8 +136,13 @@ def _read_pyproject(root: Path) -> tuple[list[str], list[str]]:
     return scripts, list(pythonpath)
 
 
-def collected(root: Path, paths: list[str]) -> set[str]:
-    """레포 루트 기준 경로 가운데 `collect`가 모으는 파일. 레포를 훑지 않고 경로마다 조상 폴더와 `.gitignore`만 확인한다."""
+def others(root: Path) -> list[str]:
+    """`collect`가 모으지 않는 파일의 레포 루트 기준 경로. 훑지 않는 폴더와 `.gitignore`는 `collect`와 같다."""
+    return sorted(rel for rel in _each(root, _load_gitignore(root), None) if not rel.endswith(".py"))
+
+
+def listed(root: Path, paths: list[str]) -> set[str]:
+    """레포 루트 기준 경로 가운데 `collect`나 `others`가 내는 파일. 레포를 훑지 않고 경로마다 조상 폴더와 `.gitignore`만 확인한다."""
     if not paths:
         return set()
     ignore = _load_gitignore(root)
@@ -142,9 +150,14 @@ def collected(root: Path, paths: list[str]) -> set[str]:
     for path in paths:
         parts = path.split("/")
         folders = ("/".join(parts[:i]) for i in range(1, len(parts)))
-        if path.endswith(".py") and not ignore.match_file(path) and not any(_skipped(root, f, ignore) for f in folders):
+        if not ignore.match_file(path) and not any(_skipped(root, f, ignore) for f in folders):
             found.add(path)
     return found
+
+
+def collected(root: Path, paths: list[str]) -> set[str]:
+    """레포 루트 기준 경로 가운데 `collect`가 모으는 파일. 레포를 훑지 않고 경로마다 조상 폴더와 `.gitignore`만 확인한다."""
+    return listed(root, [path for path in paths if path.endswith(".py")])
 
 
 def config_texts(root: Path) -> list[str]:

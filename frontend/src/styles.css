@@ -226,6 +226,11 @@ ul {
   cursor: pointer;
 }
 
+/* 분석 대상이 아닌 파일과 그 파일만 든 폴더 */
+.tree-row[data-rest] {
+  color: var(--muted-text);
+}
+
 .tree-row:hover {
   background: var(--hover-bg);
 }

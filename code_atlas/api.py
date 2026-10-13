@@ -22,7 +22,8 @@ import platform
 import re
 import threading
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections import ChainMap
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict, astuple, dataclass, field, replace
 from functools import partial
@@ -37,7 +38,7 @@ from pydantic import BaseModel
 
 from . import compare, git, opening, shellenv, tools
 from .analyze import Analyzed, Progress
-from .collect import RepoFiles, SourceFile, any_source, collected, disk_path, is_test_path, module_id
+from .collect import RepoFiles, SourceFile, any_source, collected, disk_path, is_test_path, listed, module_id, others
 from .extract import FileFacts, extract
 from .lsp import Location, Session, to_utf8
 from .model import Analysis, Node, to_dict
@@ -81,8 +82,11 @@ _HASH = re.compile(r"[0-9a-f]{40}")
 T = TypeVar("T")
 
 
-def _tree(files: RepoFiles, analysis: Analysis) -> list[dict]:
-    """수집한 파일과 그 조상 폴더로 파일 트리를 만든다. 폴더가 앞, 그 안은 이름 순서다."""
+def _tree(files: RepoFiles, analysis: Analysis, rest: list[str]) -> list[dict]:
+    """수집한 파일, 분석 대상이 아닌 파일 `rest`, 그 조상 폴더로 파일 트리를 만든다. 폴더가 앞, 그 안은 이름 순서다.
+
+    `source`는 분석 대상 파일과 그 파일이 든 폴더에서 참이다.
+    """
     module_of = {n.path: n.id for n in analysis.nodes if n.kind == "module"}
     package_of = {n.path: n.id for n in analysis.nodes if n.kind == "package" and n.path}
     root: dict = {"children": {}}
@@ -99,6 +103,7 @@ def _tree(files: RepoFiles, analysis: Analysis) -> list[dict]:
                     "name": name,
                     "kind": "dir",
                     "test": f.test,
+                    "source": True,
                     "node": package_of.get(path, package_of.get(init)),
                     "children": {},
                 },
@@ -109,8 +114,23 @@ def _tree(files: RepoFiles, analysis: Analysis) -> list[dict]:
             "name": parts[-1],
             "kind": "file",
             "test": f.test,
+            "source": True,
             "node": module_of.get(f.path),
         }
+    for file in rest:
+        parts = file.split("/")
+        test = is_test_path(file)
+        current = root
+        for i, name in enumerate(parts[:-1]):
+            path = "/".join(parts[: i + 1])
+            current = current["children"].setdefault(
+                name, {"path": path, "name": name, "kind": "dir", "test": test, "source": False, "node": None, "children": {}}
+            )
+            if not current["source"]:
+                current["test"] = current["test"] and test
+        current["children"].setdefault(
+            parts[-1], {"path": file, "name": parts[-1], "kind": "file", "test": test, "source": False, "node": None}
+        )
     return _entries(root["children"])
 
 
@@ -248,7 +268,7 @@ def create_app(
             "python": state.runner.python,
             "stats": analysis.stats,
         }
-        state.tree = {"entries": _tree(files, analysis)}
+        state.tree = {"entries": _tree(files, analysis, others(files.root))}
         state.graph = {
             "nodes": [to_dict(n) for n in analysis.nodes],
             "edges": [to_dict(e) for e in analysis.edges],
@@ -359,6 +379,23 @@ def create_app(
             yield root
 
         return worktree
+
+    def text_at(state: Workspace, analyzed: Analyzed, at: str | None, path: str) -> str | None:
+        """그 시점의 파일 본문. 분석 대상 파일은 분석할 때 읽은 본문이고, 그 밖의 파일은 `at`이 None이면 디스크에서, 커밋이면 그 커밋에서 읽는다.
+
+        파일트리에 없는 파일이거나 글이 아니면 None이다.
+        """
+        if path in analyzed.texts:
+            return analyzed.texts[path]
+        root = state.analyzed.files.root
+        if path.endswith(".py") or not listed(root, [path]):
+            return None
+        return git.read(root, path) if at is None else git.show(root, at, path)
+
+    def texts_at(state: Workspace, analyzed: Analyzed, path: str) -> Mapping[str, str]:
+        """지금 보이는 시점의 분석 대상 파일 본문에 `path`의 본문을 더한 것."""
+        text = text_at(state, analyzed, state.shown[0] if state.shown is not None else None, path)
+        return analyzed.texts if text is None else ChainMap({path: text}, analyzed.texts)
 
     async def ask(state: Workspace, path: str, request: Callable[[Session], Awaitable[T]]) -> T:
         if path not in state.analyzed.texts:
@@ -587,16 +624,21 @@ def create_app(
 
     @app.get("/api/file")
     async def get_file(path: str, at: str | None = None, state: Workspace = ready) -> dict:
-        """분석할 때 읽은 본문. `at`이 커밋 해시면 그 커밋의 본문이고, 이번 실행에서 비교에 쓴 커밋만 받는다."""
+        """파일의 본문. 분석 대상 파일은 분석할 때 읽은 본문이고 그 밖의 파일은 디스크에서 읽는다.
+
+        `at`이 커밋 해시면 그 커밋의 본문이고, 이번 실행에서 비교에 쓴 커밋만 받는다.
+        """
         if at is None or at == git.WORKTREE:
             analyzed: Analyzed = state.analyzed
+            at = None
         elif at not in state.seen:
             raise HTTPException(status_code=404, detail=f"비교에 쓴 커밋이 아닙니다: {at}")
         else:
             analyzed = snapshots(state).held(at) or await snapshots(state).at(at, [state.analyzed])
-        if path not in analyzed.texts:
-            raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아닙니다: {path}")
-        return {"path": path, "text": analyzed.texts[path]}
+        text = await asyncio.to_thread(text_at, state, analyzed, at, path)
+        if text is None:
+            raise HTTPException(status_code=404, detail=f"읽을 수 있는 파일이 아닙니다: {path}")
+        return {"path": path, "text": text}
 
     def snapshots(state: Workspace) -> Snapshots:
         if state.closed:
@@ -665,15 +707,15 @@ def create_app(
 
     @app.get("/api/compare/stat")
     def get_stat(a: str, b: str, state: Workspace = ready) -> dict:
-        """고른 두 시점의 기준·대상·갈라진 커밋과, 그 사이에 바뀐 분석 대상 `.py` 파일의 수와 줄 수."""
+        """고른 두 시점의 기준·대상·갈라진 커밋과, 그 사이에 바뀐 파일의 수와 줄 수."""
         base, target, fork = arranged(state, moment(a), moment(b))
         root = state.analyzed.files.root
-        added, deleted = _counted(git.hunks(root, base, target))
+        added, deleted = _counted({**git.hunks(root, base, target), **git.hunks(root, base, target, source=False)})
         return {
             "base": base,
             "target": target,
             "fork": fork,
-            "files": len(git.changed(root, base, target)),
+            "files": len(git.changed(root, base, target)) + len(git.changed(root, base, target, source=False)),
             "added": added,
             "deleted": deleted,
         }
@@ -685,6 +727,12 @@ def create_app(
         except OSError:
             return set()
 
+    def rest_at(root: Path, at: str) -> list[str]:
+        """그 시점의 분석 대상이 아닌 파일. 커밋이면 그 커밋에 든 파일 가운데 `collect.others`가 내는 경로다."""
+        if at == git.WORKTREE:
+            return others(root)
+        return sorted(listed(root, [path for path in git.files(root, at) if not path.endswith(".py")]))
+
     def answer(
         base: str,
         target: str,
@@ -694,25 +742,47 @@ def create_app(
         files: list[git.Changed],
         hunks: dict[str, list[git.Hunk]],
         skip: set[str],
+        rest: list[str],
+        rest_files: list[git.Changed],
+        rest_hunks: dict[str, list[git.Hunk]],
     ) -> bytes:
-        """두 시점의 분석 결과를 견줘 `POST /api/compare`의 응답 본문(JSON)을 만든다. 파일트리에는 삭제된 파일과 폴더를 더한다."""
+        """두 시점의 분석 결과를 견줘 `POST /api/compare`의 응답 본문(JSON)을 만든다. 파일트리에는 삭제된 파일과 폴더를 더한다.
+
+        `rest`는 대상 시점의 분석 대상이 아닌 파일이고 `rest_files`와 `rest_hunks`는 그 파일의 변경이다.
+        """
         result = compare.compare(
             before.analysis, _facts(before), before.texts, after.analysis, _facts(after), after.texts, files, hunks, skip
         )
         listed = {f.path for f in after.files.files}
         gone = {f["path"] for f in result.files if f["status"] == git.DELETED} - listed
         files_with_gone = replace(after.files, files=[*after.files.files, *(f for f in before.files.files if f.path in gone)])
+        counted = {path: _counted({path: found}) for path, found in rest_hunks.items()}
+        changed = [
+            *result.files,
+            *(
+                {"path": c.path, "old": c.old, "status": c.status, "added": added, "deleted": deleted}
+                for c in rest_files
+                for added, deleted in [counted.get(c.path, (0, 0))]
+            ),
+        ]
+        hunks = {**hunks, **rest_hunks}
         body = {
             "base": base,
             "target": target,
             "revision": revision,
             "graph": {"nodes": [to_dict(n) for n in result.nodes], "edges": [to_dict(e) for e in result.edges]},
-            "tree": {"entries": _tree(files_with_gone, replace(after.analysis, nodes=result.nodes))},
+            "tree": {
+                "entries": _tree(
+                    files_with_gone,
+                    replace(after.analysis, nodes=result.nodes),
+                    [*rest, *(c.path for c in rest_files if c.status == git.DELETED)],
+                )
+            },
             "nodes": {node: _change(change) for node, change in result.node_changes.items()},
             "edges": {key: asdict(change) for key, change in result.edge_changes.items()},
             "files": [
                 {**f, "hunks": [astuple(h) for h in hunks.get(f["path"], [])], "test": is_test_path(f["path"])}
-                for f in result.files
+                for f in sorted(changed, key=lambda f: f["path"])
             ],
             "unused": to_dict(after.unused),
         }
@@ -745,14 +815,19 @@ def create_app(
                 near = [state.analyzed, after]
             before = await snapshots(state).at(base, near, report)
             report(Progress("build"))
-            files, hunks, skip = await asyncio.gather(
+            files, hunks, skip, rest, rest_files, rest_hunks = await asyncio.gather(
                 asyncio.to_thread(git.changed, root, base, target),
                 asyncio.to_thread(git.hunks, root, base, target),
                 asyncio.to_thread(unsaved, after) if target == git.WORKTREE else asyncio.sleep(0, set()),
+                asyncio.to_thread(rest_at, root, target),
+                asyncio.to_thread(git.changed, root, base, target, False),
+                asyncio.to_thread(git.hunks, root, base, target, False),
             )
-            key = (base, target, revision, files, hunks, skip)
+            key = (base, target, revision, files, hunks, skip, rest, rest_files, rest_hunks)
             if state.compared is None or state.compared[0] != key:
-                body = await asyncio.to_thread(answer, base, target, revision, before, after, files, hunks, skip)
+                body = await asyncio.to_thread(
+                    answer, base, target, revision, before, after, files, hunks, skip, rest, rest_files, rest_hunks
+                )
                 state.compared = (key, body)
             state.seen.update(name for name in (base, target) if name != git.WORKTREE)
             state.shown = None if target == git.WORKTREE else (target, after, {n.id: n for n in after.analysis.nodes})
@@ -875,16 +950,15 @@ def create_app(
         시점의 비교에 묶는다. 없으면 대상 시점의 파일과 줄 범위에 묶는다.
         """
         analyzed, nodes = shown(state)
-        prompt = range_prompt_of(
-            nodes, analyzed.analysis.edges, analyzed.texts, path, start, end, code, old, question or None
-        )
+        texts = texts_at(state, analyzed, path)
+        prompt = range_prompt_of(nodes, analyzed.analysis.edges, texts, path, start, end, code, old, question or None)
         if prompt is None:
             raise HTTPException(status_code=404, detail=f"설명할 코드 범위가 아닙니다: {path} {start}~{end}줄")
         root = state.repo["root"]
         if old is not None:
             name = asked_name(compared_name(base, target, path, old, (start, end)), question)
             return prompt, Subject(root, "compared", name, digest_of(code), question)
-        digest = digest_of(range_code(analyzed.texts, path, start, end))
+        digest = digest_of(range_code(texts, path, start, end))
         return prompt, Subject(root, "range", asked_name(f"{path}:{start}-{end}", question), digest, question)
 
     @app.get("/api/explanations")
@@ -900,15 +974,16 @@ def create_app(
         analyzed, _ = shown(state)
         latest = app.state.summaries.latest
         root = state.repo["root"]
-        if path not in analyzed.texts and (base is None or target is None):
-            raise HTTPException(status_code=404, detail=f"분석 대상 파일이 아닙니다: {path}")
+        texts = texts_at(state, analyzed, path)
+        if path not in texts and (base is None or target is None):
+            raise HTTPException(status_code=404, detail=f"읽을 수 있는 파일이 아닙니다: {path}")
         found = []
-        for kept in latest.listed(root, "range") if path in analyzed.texts else []:
+        for kept in latest.listed(root, "range") if path in texts else []:
             file, _, span = kept.name.partition("?")[0].rpartition(":")
             if file != path:
                 continue
             start, end = (int(n) for n in span.split("-"))
-            code = range_code(analyzed.texts, path, start, end)
+            code = range_code(texts, path, start, end)
             stale = code is None or digest_of(code) != kept.digest
             if stale and state.shown is not None:
                 continue

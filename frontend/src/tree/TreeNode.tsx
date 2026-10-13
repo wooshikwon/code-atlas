@@ -48,6 +48,7 @@ export function TreeNode({ row, id, cursor, onPick }: { row: Row; id: string; cu
       data-tip={lead}
       data-node={row.node ?? undefined}
       data-gone={row.gone ? "" : undefined}
+      data-rest={row.source ? undefined : ""}
       onClick={() => onPick(row)}
     >
       <span className="tree-indent" style={{ width: (row.level - 1) * INDENT }} />

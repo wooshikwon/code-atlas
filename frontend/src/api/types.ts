@@ -25,6 +25,8 @@ export interface TreeEntry {
   name: string;
   kind: "dir" | "file";
   test: boolean;
+  /** 분석 대상 파일이거나 그 파일이 든 폴더다 */
+  source: boolean;
   /** 폴더면 패키지 노드 id, 파일이면 모듈 노드 id. 함수·클래스 정의가 없는 패키지의 `__init__.py`는 모듈 노드가 없으므로 null이다. */
   node: string | null;
   children?: TreeEntry[];

@@ -142,7 +142,7 @@ export function CodeView({ path, range, highlight, base = false }: CodeViewProps
   }, [woven, side, range]);
   const lit = highlight === undefined ? undefined : woven === null ? highlight : (rowOf(woven, side, highlight) ?? undefined);
   /** 모델의 줄이 작업 중인 상태의 파일에서 몇째 줄인지. 언어 서버에 물을 수 없는 줄이면 null이다. */
-  const fileLine = useMemo(() => (line: number) => (!live ? null : woven === null ? line : (woven.rows[line - 1]?.target ?? null)), [live, woven]);
+  const fileLine = useMemo(() => (line: number) => (!live || !file.endsWith(".py") ? null : woven === null ? line : (woven.rows[line - 1]?.target ?? null)), [live, file, woven]);
   // 줄 번호 칸의 폭은 가장 큰 줄 번호의 자릿수다. 엮은 문서는 두 시점의 가장 큰 줄 번호를, 그 밖에는 파일의 줄 수를 쓴다.
   const options = useMemo(() => {
     if (woven === null) {
@@ -405,7 +405,6 @@ export function CodeView({ path, range, highlight, base = false }: CodeViewProps
       {code !== undefined && (
         <Editor
           path={key}
-          defaultLanguage="python"
           value={code}
           theme={monacoTheme(theme)}
           onMount={(mounted) => {

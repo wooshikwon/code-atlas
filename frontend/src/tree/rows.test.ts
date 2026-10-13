@@ -33,6 +33,7 @@ const file = (path: string, nodeId: string | null, test = false) => ({
   name: path.split("/").at(-1)!,
   kind: "file" as const,
   test,
+  source: true,
   node: nodeId,
 });
 
@@ -43,6 +44,7 @@ const tree: Tree = {
       name: "src",
       kind: "dir",
       test: false,
+      source: true,
       node: null,
       children: [
         {
@@ -50,6 +52,7 @@ const tree: Tree = {
           name: "parser",
           kind: "dir",
           test: false,
+          source: true,
           node: "parser",
           children: [file("src/parser/__init__.py", null), file("src/parser/plan.py", "parser.plan")],
         },
@@ -57,12 +60,13 @@ const tree: Tree = {
         file("src/empty.py", "empty"),
       ],
     },
-    { path: "tests", name: "tests", kind: "dir", test: true, node: "tests", children: [file("tests/test_plan.py", "tests.test_plan", true)] },
+    { path: "tests", name: "tests", kind: "dir", test: true, source: true, node: "tests", children: [file("tests/test_plan.py", "tests.test_plan", true)] },
   ],
 };
 
 const state = (change: Partial<TreeState> = {}): TreeState => ({
   collapsed: new Set(),
+  unfolded: new Set(),
   selected: null,
   opened: null,
   showTests: false,
@@ -117,6 +121,20 @@ describe("rows", () => {
     const list = rows(tree, graph, state({ collapsed: new Set(["src"]) }));
     expect(list[0]).toMatchObject({ key: "src", node: null, expanded: true });
     expect(list).toHaveLength(6);
+  });
+
+  it("분석 대상 파일이 없는 폴더는 접어 두고 펼친 폴더 집합에 들면 펼친다", () => {
+    const guide = { ...file("docs/guide.md", null), source: false };
+    const docs = { path: "docs", name: "docs", kind: "dir" as const, test: false, source: false, node: null, children: [guide] };
+    const mixed = { entries: [docs, ...tree.entries, { ...file("pyproject.toml", null), source: false }] };
+    const folded = rows(mixed, graph, state());
+    expect(folded[0]).toMatchObject({ key: "docs", expanded: false, source: false });
+    expect(folded.find((row) => row.key === "docs/guide.md")).toBeUndefined();
+    expect(folded.at(-1)).toMatchObject({ key: "pyproject.toml", file: "pyproject.toml", node: null, source: false });
+    expect(folded.find((row) => row.key === "src/arbiter.py")).toMatchObject({ source: true });
+    const open = rows(mixed, graph, state({ unfolded: new Set(["docs"]), opened: "docs/guide.md" }));
+    expect(open[0]).toMatchObject({ key: "docs", expanded: true });
+    expect(open[1]).toMatchObject({ key: "docs/guide.md", level: 2, file: "docs/guide.md", selected: true, source: false });
   });
 
   it("고른 파일 아래에 클래스·함수 목록을 소스 정의 순서로 잇는다", () => {
@@ -368,7 +386,7 @@ describe("시점 비교", () => {
         {
           ...tree.entries[0],
           children: [
-            { path: "src/old", name: "old", kind: "dir", test: false, node: "old", children: [file("src/old/legacy.py", "old.legacy")] },
+            { path: "src/old", name: "old", kind: "dir", test: false, source: true, node: "old", children: [file("src/old/legacy.py", "old.legacy")] },
             ...tree.entries[0].children!,
           ],
         },

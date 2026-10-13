@@ -19,10 +19,12 @@ from code_atlas.git import (
     commits,
     default_branch,
     export,
+    files,
     head,
     hunks,
     is_ancestor,
     merge_base,
+    read,
     show,
     status,
 )
@@ -138,6 +140,48 @@ def test_changed_and_hunks_leave_out_files_the_analysis_skips(git_repo):
     assert changed(git_repo, head(git_repo), WORKTREE) == [
         Changed("deleted", "src/app/kept.py"),
         Changed("added", "src/app/shown.py"),
+    ]
+
+
+def test_changed_and_hunks_of_files_outside_the_analysis(git_repo):
+    (git_repo / "docs").mkdir()
+    (git_repo / "docs" / "guide.md").write_text("하나\n둘\n")
+    (git_repo / "logo.png").write_bytes(b"\x89PNG\0\0one")
+    (git_repo / "empty.txt").write_text("")
+    git(git_repo, "add", "-A")
+    git(git_repo, "commit", "-q", "-m", "문서")
+    base = head(git_repo)
+    assert files(git_repo, base) == sorted(files(git_repo, base)) and {"docs/guide.md", "logo.png", CORE} <= set(files(git_repo, base))
+    assert show(git_repo, base, "docs/guide.md") == "하나\n둘\n" and show(git_repo, base, "logo.png") is None
+    assert read(git_repo, "docs/guide.md") == "하나\n둘\n"
+    assert read(git_repo, "logo.png") is None and read(git_repo, "nope.md") is None and read(git_repo, "../x.md") is None
+
+    edit(git_repo, "docs/guide.md", "둘\n", "둘\n셋\n")
+    edit(git_repo, "pyproject.toml", 'version = "0.0.1"', 'version = "0.0.2"')
+    edit(git_repo, CORE, "def helper", "def helper2")
+    (git_repo / "logo.png").write_bytes(b"\x89PNG\0\0two")
+    git(git_repo, "mv", "empty.txt", "blank.txt")
+    (git_repo / "notes.md").write_text("메모\n")
+    (git_repo / "new.bin").write_bytes(b"\0\1")
+    (git_repo / "__pycache__").mkdir()
+    (git_repo / "__pycache__" / "skip.md").write_text("x\n")
+    assert changed(git_repo, base, WORKTREE, source=False) == [
+        Changed("renamed", "blank.txt", "empty.txt"),
+        Changed("modified", "docs/guide.md"),
+        Changed("added", "notes.md"),
+        Changed("modified", "pyproject.toml"),
+    ]
+    assert hunks(git_repo, base, WORKTREE, source=False) == {
+        "docs/guide.md": [Hunk(2, 0, 3, 1)],
+        "notes.md": [Hunk(0, 0, 1, 1)],
+        "pyproject.toml": [Hunk(3, 1, 3, 1)],
+    }
+    assert changed(git_repo, base, WORKTREE) == [Changed("modified", CORE)]
+
+    git(git_repo, "add", "-A")
+    git(git_repo, "commit", "-q", "-m", "고침")
+    assert [c.path for c in changed(git_repo, base, head(git_repo), source=False)] == [
+        "blank.txt", "docs/guide.md", "notes.md", "pyproject.toml"
     ]
 
 

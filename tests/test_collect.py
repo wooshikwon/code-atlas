@@ -1,5 +1,5 @@
 from code_atlas import collect as collecting
-from code_atlas.collect import collect, collected, config_texts, disk_path, find_source_root, is_test_path, module_id
+from code_atlas.collect import collect, collected, config_texts, disk_path, find_source_root, is_test_path, listed, module_id, others
 
 
 def test_collect_skips_ignored_and_venv(sample_repo):
@@ -27,6 +27,19 @@ def test_collected_judges_paths_like_collect(sample_repo):
     assert collected(sample_repo, paths) == {"src/app/core.py", "src/app/late.py"}
     assert {f.path for f in collect(sample_repo).files} >= {"src/app/core.py"}
     assert collected(sample_repo, []) == set()
+    assert listed(sample_repo, paths) == {"src/app/core.py", "src/app/late.py", "src/app/notes.md"}
+
+
+def test_others_are_the_files_collect_leaves_out(sample_repo):
+    (sample_repo / "docs").mkdir()
+    (sample_repo / "docs" / "guide.md").write_text("# 안내\n")
+    (sample_repo / "ignored_dir" / "skip.json").write_text("{}\n")
+    (sample_repo / ".tools").mkdir()
+    (sample_repo / ".tools" / "hidden.yml").write_text("a: 1\n")
+    found = others(sample_repo)
+    assert {"docs/guide.md", "pyproject.toml"} <= set(found) and found == sorted(found)
+    assert not any(p.endswith(".py") or p.startswith(("ignored_dir/", "env/", ".tools/")) for p in found)
+    assert listed(sample_repo, found) == set(found)
 
 
 def test_config_texts_read_config_files_like_collect(sample_repo, monkeypatch):

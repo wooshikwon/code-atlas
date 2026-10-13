@@ -1,4 +1,4 @@
-// 파일트리를 화면에 그리는 행 배열로 편다. 폴더의 열림은 접은 폴더 집합에서, 파일 아래 목록은 선택에서 정한다.
+// 파일트리를 화면에 그리는 행 배열로 편다. 폴더의 열림은 접은 폴더 집합과 펼친 폴더 집합에서, 파일 아래 목록은 선택에서 정한다.
 // 검색 칸에 질의가 있으면 행 배열 대신 검색 결과 행을 낸다.
 import type { AtlasNode, Change, ChangedFile, Changes, Comparison, Graph, Tree, TreeEntry } from "../api/types";
 import { gone, inSource, lineTotals, type Lines } from "../graph/compare";
@@ -9,6 +9,8 @@ import type { IconKind } from "./Icon";
 export interface TreeState {
   /** 접은 폴더(패키지 노드 id) */
   collapsed: Set<string>;
+  /** 펼친 폴더(레포 루트 기준 경로). 분석 대상 파일이 없는 폴더는 여기에 든 것만 펼친다. */
+  unfolded: Set<string>;
   /** 고른 노드 id */
   selected: string | null;
   /** 그래프 선택과 무관하게 정보 패널에 연 파일의 경로 */
@@ -34,8 +36,10 @@ export interface Row {
   title: string;
   /** 폴더면 패키지 노드 id, 파일이면 모듈 노드 id. 패키지 노드가 없는 폴더와 모듈 노드가 없는 파일은 null이다. */
   node: string | null;
-  /** 누르면 정보 패널에 코드만 여는 파일의 경로. 분석한 파일 가운데 모듈 노드가 없는 `__init__.py`가 해당한다. */
+  /** 누르면 정보 패널에 코드만 여는 파일의 경로. 모듈 노드가 없는 `__init__.py`와 분석 대상이 아닌 파일이 해당한다. */
   file: string | null;
+  /** 분석 대상 파일이거나 그 파일이 든 폴더, 또는 그 파일의 정의다 */
+  source: boolean;
   /** 아래 행을 펼쳤는지. 펼칠 행이 없으면 null이다. */
   expanded: boolean | null;
   selected: boolean;
@@ -133,18 +137,19 @@ function grown(entries: TreeEntry[], fresh: ChangedFile[]): TreeEntry[] {
     parts.slice(0, -1).forEach((name, depth) => {
       const folder =
         list.find((e) => e.kind === "dir" && e.name === name) ??
-        put(list, { path: parts.slice(0, depth + 1).join("/"), name, kind: "dir", test, node: null, children: [] });
+        put(list, { path: parts.slice(0, depth + 1).join("/"), name, kind: "dir", test, source: true, node: null, children: [] });
       folder.test &&= test;
       list = folder.children ??= [];
     });
-    put(list, { path, name: parts.at(-1)!, kind: "file", test, node: null });
+    put(list, { path, name: parts.at(-1)!, kind: "file", test, source: true, node: null });
   }
   return root;
 }
 
 /**
  * 펼친 폴더, 파일, 고른 노드가 든 파일의 클래스·함수·변수 목록을 위에서 아래로 그리는 순서로 낸다.
- * 고른 노드를 품은 폴더는 접은 폴더여도 펼친 것으로 그린다.
+ * 고른 노드를 품은 폴더는 접은 폴더여도 펼친 것으로 그린다. 패키지 노드가 없는 폴더는 분석 대상 파일이 들었으면 늘 펼치고,
+ * 들지 않았으면 펼친 폴더 집합에 든 것만 펼친다.
  * 레포를 열어 분석한 뒤 생긴 파일은 그래프에 노드가 없는 행으로 넣는다. 파일 행은 모듈 노드만 가리키므로
  * 모듈 노드가 없는 `__init__.py` 행은 node 없이 file에 경로를 담는다.
  * 시점 비교가 켜져 있으면 마지막 커밋 뒤의 변경 내용을 쓰지 않고, 비교 결과의 파일트리에 든 삭제된 파일·폴더·정의를 그 순서대로 낸다.
@@ -195,9 +200,12 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
       if (entry.test && !state.showTests) {
         continue;
       }
-      const base = { key: entry.path, level, title: entry.path };
+      const base = { key: entry.path, level, title: entry.path, source: entry.source };
       if (entry.kind === "dir") {
-        const expanded = entry.node === null || !state.collapsed.has(entry.node) || held.has(entry.node);
+        const expanded =
+          entry.node === null
+            ? entry.source || state.unfolded.has(entry.path)
+            : !state.collapsed.has(entry.node) || held.has(entry.node);
         const change: Change | null = !expanded && within(entry.path) ? "modified" : null;
         const selected = entry.node !== null && entry.node === state.selected;
         const icon = expanded ? "folder-open" : "folder";
@@ -232,6 +240,7 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
             title: labelOf(nodes, node),
             node: node.id,
             file: null,
+            source: true,
             expanded: null,
             selected: node.id === state.selected,
             change: changes?.nodes[node.id] ?? null,

@@ -660,7 +660,7 @@ RANGE_AROUND = 60
 
 
 def enclosing(nodes: Mapping[str, Node], path: str, start: int, end: int) -> Node | None:
-    """파일의 줄 범위를 품은 가장 안쪽 노드. 어느 정의에도 들지 않으면 그 파일의 모듈 노드다."""
+    """파일의 줄 범위를 품은 가장 안쪽 노드. 어느 정의에도 들지 않으면 그 파일의 모듈 노드이고, 모듈 노드가 없는 파일이면 None이다."""
     found: Node | None = None
     for node in nodes.values():
         if node.path != path or node.kind not in KIND_NAMES or node.range is None:
@@ -672,7 +672,7 @@ def enclosing(nodes: Mapping[str, Node], path: str, start: int, end: int) -> Nod
 
 
 def range_code(texts: Mapping[str, str], path: str, start: int, end: int) -> str | None:
-    """파일의 `start`줄부터 `end`줄까지의 코드. 분석 대상 파일이 아니거나 줄 범위가 파일을 벗어나면 None이다."""
+    """파일의 `start`줄부터 `end`줄까지의 코드. `texts`에 없는 파일이거나 줄 범위가 파일을 벗어나면 None이다."""
     text = texts.get(path)
     if text is None:
         return None
@@ -715,11 +715,11 @@ def range_prompt_of(
         return "\n\n".join([where, MARKED_NOTE, f"[고른 범위의 코드]\n{marked}", tail])
     code = range_code(texts, path, start, end)
     owner = enclosing(nodes, path, start, end)
-    if code is None or owner is None or not code.strip():
+    if code is None or not code.strip():
         return None
     lines = texts[path].splitlines()
-    first, last = owner.range
-    if owner.kind == "module":
+    first, last = owner.range if owner is not None else (1, len(lines))
+    if owner is None or owner.kind == "module":
         inside, signature = f"{path}의 최상위 코드", None
     else:
         inside = f"{_title(owner, file_labels(nodes))} ({KIND_NAMES[owner.kind]}, {first}~{last}줄)"
@@ -743,7 +743,7 @@ def range_prompt_of(
             f"[범위가 든 정의의 전체 코드]\n{whole}",
         ]
     )
-    if owner.kind == "module":
+    if owner is None or owner.kind == "module":
         return f"{head}\n\n{tail}"
     flow = flow_of(nodes, list(edges), texts, owner)
     for detail in DETAILS[1:]:

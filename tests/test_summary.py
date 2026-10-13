@@ -723,6 +723,15 @@ def test_range_prompt_of_top_level_code_has_no_flow_and_bad_ranges_are_none():
         assert summary.range_prompt_of(NODES, EDGES, TEXTS, path, start, end) is None
 
 
+def test_range_prompt_of_a_file_without_a_module_node_is_top_level_code():
+    texts = {**TEXTS, "docs/guide.md": "# 안내\n\n설치한다\n실행한다\n"}
+    found = sections(summary.range_prompt_of(NODES, EDGES, texts, "docs/guide.md", 3, 3))
+    assert found["대상"].endswith("위치: docs/guide.md 3~3줄\n범위가 든 정의: docs/guide.md의 최상위 코드")
+    assert found["고른 범위의 코드"] == "설치한다"
+    assert found["범위가 든 정의의 전체 코드"] == "1: # 안내\n2: \n3> 설치한다\n4: 실행한다"
+    assert "범위가 든 정의의 시그니처" not in found and "대상을 호출하는 쪽" not in found
+
+
 def test_range_prompt_of_marked_code_holds_the_marks_and_what_they_mean():
     marked = " def run_engine(config: Config) -> Engine:\n-    engine = Engine()\n+    engine = Engine(config)"
     prompt = summary.range_prompt_of(NODES, EDGES, TEXTS, "src/core.py", 29, 30, marked, (40, 41))

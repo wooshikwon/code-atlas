@@ -100,15 +100,17 @@ def test_repo(client):
 
 def test_tree(client):
     entries = client.get("/api/tree").json()["entries"]
-    assert [e["name"] for e in entries] == ["src", "tests"]
-    src, tests = entries
-    assert src["node"] is None and tests["test"] and not src["test"]
+    assert [e["name"] for e in entries if e["kind"] == "dir"] == ["src", "tests"]
+    src, tests = entries[:2]
+    assert src["node"] is None and tests["test"] and not src["test"] and src["source"]
+    project = next(e for e in entries if e["name"] == "pyproject.toml")
+    assert (project["kind"], project["node"], project["source"], project["test"]) == ("file", None, False, False)
     app = src["children"][0]
     assert (app["path"], app["kind"], app["node"]) == ("src/app", "dir", "app")
     assert [c["name"] for c in app["children"]][:2] == ["plugins", "__init__.py"]
     assert app["children"][1]["node"] is None
     core = next(c for c in app["children"] if c["name"] == "core.py")
-    assert (core["kind"], core["node"], "children" in core) == ("file", "app.core", False)
+    assert (core["kind"], core["node"], core["source"], "children" in core) == ("file", "app.core", True, False)
     plugins = app["children"][0]
     assert plugins["node"] == "app.plugins"
 
@@ -221,7 +223,22 @@ def test_file(client):
     assert "엔진 시작" in body["text"]
 
 
-@pytest.mark.parametrize("path", ["pyproject.toml", "../etc/passwd", "ignored_dir/skip.py", "src/app/nope.py"])
+def test_file_outside_the_analysis_is_read_from_disk(client):
+    body = client.get("/api/file", params={"path": "pyproject.toml"}).json()
+    assert body["path"] == "pyproject.toml" and body["text"].startswith("[project]\n")
+
+
+def test_range_of_a_file_outside_the_analysis_is_explained(client, generated):
+    span = {"path": "pyproject.toml", "start": 5, "end": 6}
+    made = client.post("/api/explanation", params=span, json={}).json()
+    assert (made["start"], made["end"]) == (5, 6)
+    assert "범위가 든 정의: pyproject.toml의 최상위 코드" in generated[0][1]
+    assert '[고른 범위의 코드]\n[project.scripts]\nsample = "app.cli:main"' in generated[0][1]
+    (kept,) = client.get("/api/explanations", params={"path": "pyproject.toml"}).json()["explanations"]
+    assert (kept["start"], kept["end"], kept["stale"]) == (5, 6, False)
+
+
+@pytest.mark.parametrize("path", ["nope.toml", "../etc/passwd", "ignored_dir/skip.py", "ignored_dir/skip.md", "src/app/nope.py"])
 def test_file_outside_analysis_is_404(client, path):
     response = client.get("/api/file", params={"path": path})
     assert response.status_code == 404
@@ -1365,6 +1382,42 @@ def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch
     compared(client, at["base"], at["edit"])
     compared(client, at["edit"], "worktree")  # 대상이 작업 중인 상태인 비교도 작업 중인 상태를 보인다
     assert client.get("/api/summary", params=past).status_code == 404
+
+
+def test_compare_includes_files_outside_the_analysis(git_repo, tmp_path, monkeypatch):
+    (git_repo / "docs").mkdir()
+    (git_repo / "docs" / "guide.md").write_text("하나\n둘\n")
+    (git_repo / "docs" / "old.md").write_text("옛 글\n")
+    git(git_repo, "add", "-A")
+    git(git_repo, "commit", "-q", "-m", "문서")
+    first = history_run(git_repo, "rev-parse", "HEAD").strip()
+    (git_repo / "docs" / "guide.md").write_text("하나\n둘\n셋\n")
+    (git_repo / "docs" / "old.md").unlink()
+    git(git_repo, "add", "-A")
+    git(git_repo, "commit", "-q", "-m", "고침")
+    second = history_run(git_repo, "rev-parse", "HEAD").strip()
+    (git_repo / "docs" / "guide.md").write_text("하나\n둘\n셋\n넷\n")
+    monkeypatch.setattr(summary, "CACHE_PATH", tmp_path / "summaries.db")
+    monkeypatch.setattr(summary, "find_cli", lambda: None)
+    with TestClient(create_app(git_repo, sys.executable)) as client:
+        analysed(client)
+        assert stat(client, first, second)["files"] == 2
+        body = compared(client, first, second)
+        assert [(f["path"], f["status"], f["added"], f["deleted"], f["hunks"]) for f in body["files"]] == [
+            ("docs/guide.md", "modified", 1, 0, [[2, 0, 3, 1]]),
+            ("docs/old.md", "deleted", 0, 1, [[1, 1, 0, 0]]),
+        ]
+        docs = next(e for e in body["tree"]["entries"] if e["name"] == "docs")
+        assert [(c["name"], c["source"]) for c in docs["children"]] == [("guide.md", False), ("old.md", False)]
+        assert not docs["source"]
+        assert client.get("/api/file", params={"path": "docs/guide.md", "at": second}).json()["text"] == "하나\n둘\n셋\n"
+        assert client.get("/api/file", params={"path": "docs/old.md", "at": first}).json()["text"] == "옛 글\n"
+        assert client.get("/api/file", params={"path": "docs/old.md", "at": second}).status_code == 404
+        assert client.get("/api/explanations", params={"path": "docs/guide.md"}).json() == {"explanations": []}
+
+        now = compared(client, second, "worktree")
+        assert [(f["path"], f["added"]) for f in now["files"]] == [("docs/guide.md", 1)]
+        assert client.get("/api/file", params={"path": "docs/guide.md"}).json()["text"].endswith("넷\n")
 
 
 def test_compare_routes_outside_git(client):

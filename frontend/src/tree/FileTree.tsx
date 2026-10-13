@@ -37,9 +37,12 @@ export function FileTree() {
   const opened = useOpened((s) => s.path);
   const toggleOpened = useOpened((s) => s.toggle);
   const selected = useAtlas(chosenOf);
+  /** 펼친 폴더의 경로. 분석 대상 파일이 없는 폴더는 접어 두고 누르면 펼친다. */
+  const [unfolded, setUnfolded] = useState<Set<string>>(() => new Set());
   const list = useMemo(
-    () => (tree === null || graph === null ? [] : rows(tree, graph, { collapsed, selected, opened, showTests, showExternal, changes, compared })),
-    [tree, graph, collapsed, selected, opened, showTests, showExternal, changes, compared],
+    () =>
+      tree === null || graph === null ? [] : rows(tree, graph, { collapsed, unfolded, selected, opened, showTests, showExternal, changes, compared }),
+    [tree, graph, collapsed, unfolded, selected, opened, showTests, showExternal, changes, compared],
   );
   /** 지워진 파일은 노드가 없으므로 파일트리 아래에 경로만 적는다. */
   const deleted = useMemo(() => (changes?.files ?? []).filter((file) => file.status === "deleted"), [changes]);
@@ -73,13 +76,22 @@ export function FileTree() {
 
   /**
    * 폴더 행은 접거나 펼치고, 파일·클래스·함수 행은 구조 뷰에서 고른다. 구조 뷰에서 고른 파일 행을 다시 누르면 선택을 풀고, 고른 클래스·함수 행을 다시 눌러도 선택은 그대로다.
-   * 패키지 노드가 없는 폴더는 늘 펼쳐 둔다. 모듈 노드가 없는 `__init__.py` 행은 그래프 선택을 바꾸지 않고
+   * 패키지 노드가 없는 폴더는 분석 대상 파일이 들었으면 늘 펼쳐 두고, 들지 않았으면 누를 때마다 펼치거나 접는다. 접으면 그 안에서 연 파일을 닫는다.
+   * 모듈 노드가 없는 `__init__.py` 행과 분석 대상이 아닌 파일 행은 그래프 선택을 바꾸지 않고
    * 정보 패널에 그 파일의 코드를 열고, 다시 누르면 닫는다.
    */
   const pick = (row: Row) => {
     setCursor(row.key);
     if (row.node !== null) {
       (row.kind === "dir" ? toggleFolder : row.selected && structure ? select : show)(row.node);
+    } else if (row.kind === "dir" && !row.source) {
+      const next = new Set(unfolded);
+      if (!next.delete(row.key)) {
+        next.add(row.key);
+      } else if (opened?.startsWith(`${row.key}/`)) {
+        useOpened.getState().close();
+      }
+      setUnfolded(next);
     } else if (row.file !== null) {
       toggleOpened(row.file);
     }
@@ -145,7 +157,7 @@ export function FileTree() {
         }
         break;
       case "ArrowLeft":
-        if (row.kind === "dir" && row.expanded === true && row.node !== null) {
+        if (row.kind === "dir" && row.expanded === true && (row.node !== null || !row.source)) {
           pick(row);
         } else if (parentOf(list, active) >= 0) {
           move(parentOf(list, active));

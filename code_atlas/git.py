@@ -1,7 +1,7 @@
 """대상 레포의 git 이력과 변경을 읽는다.
 
 git 명령 실행과 출력 해석은 이 모듈만 하고, 실행 파일은 `tools.git`이 확인한 경로를 쓴다. 부르는 명령은 `rev-parse`,
-`symbolic-ref`, `log`, `status`, `diff`, `merge-base`, `archive`, `show`이고 모두 `_run` 하나를 지난다. `git status`는
+`symbolic-ref`, `log`, `status`, `diff`, `merge-base`, `archive`, `show`, `ls-tree`이고 모두 `_run` 하나를 지난다. `git status`는
 `GIT_OPTIONAL_LOCKS=0`으로, `git diff`는 `diff.autoRefreshIndex=false`로 인덱스를 다시 쓰지 않게 하므로 대상 레포는
 바뀌지 않는다. `git archive`의 출력은 레포 밖 폴더에만 푼다. 경로는 모두 레포 루트 기준 posix 경로이고, 레포 루트가 git 저장소의 하위 폴더면 그 폴더 안의
 파일만 낸다. 분석 결과와 캐시, 어느 시점을 견주는지는 모른다.
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import tools
-from .collect import collected, disk_path
+from .collect import disk_path, listed
 
 GIT_TIMEOUT = 5.0
 ARCHIVE_TIMEOUT = 60.0
@@ -39,6 +39,9 @@ _LOG_FORMAT = f"--format=%H{_FIELD}%P{_FIELD}%ct{_FIELD}%D{_FIELD}%s%x01"
 _REF_KINDS = {"branch": "refs/heads/", "tag": "refs/tags/", "remote": "refs/remotes/"}  # 이름표의 종류 → 앞머리. 내는 순서다
 _STATES = {"A": ADDED, "D": DELETED, "R": RENAMED}
 _DIFF = ("--relative", "-M", "--no-color", "--no-ext-diff", "--no-textconv")
+_SOURCE = ("*.py",)  # 분석 대상 파일의 pathspec
+_OTHERS = (".", ":(exclude)*.py")  # 그 밖의 파일의 pathspec
+_SNIFFED = 8000  # 글인지 가릴 때 보는 앞 바이트 수. git이 바이너리 파일을 가릴 때 보는 길이다
 
 
 @dataclass
@@ -214,16 +217,30 @@ def _ends(base: str, target: str) -> list[str]:
     return [base] if target == WORKTREE else [base, target]
 
 
-def _untracked(root: Path, known: set[str]) -> list[str]:
-    """추적하지 않는 `.py` 파일 가운데 `known`에 없는 경로."""
+def _spec(source: bool) -> tuple[str, ...]:
+    return _SOURCE if source else _OTHERS
+
+
+def textual(data: bytes) -> bool:
+    """바이트가 글이다. 앞 `_SNIFFED`바이트에 NUL이 없으면 글로 본다."""
+    return b"\0" not in data[:_SNIFFED]
+
+
+def _untracked(root: Path, known: set[str], source: bool) -> list[str]:
+    """추적하지 않는 파일 가운데 `known`에 없는 경로. `source`가 참이면 `.py` 파일을, 거짓이면 그 밖의 파일을 낸다."""
     states = status(root) or {}
-    return sorted(p for p, state in states.items() if state == ADDED and p.endswith(".py") and p not in known)
+    return sorted(
+        p for p, state in states.items() if state == ADDED and p.endswith(".py") == source and p not in known
+    )
 
 
-def _patched(root: Path, base: str, target: str) -> dict[str, list[Hunk]]:
-    """`git diff -U0`가 낸 `.py` 파일마다의 토막. 키는 대상 쪽 경로이고 삭제된 파일은 기준 쪽 경로다."""
+def _patched(root: Path, base: str, target: str, source: bool) -> dict[str, list[Hunk]]:
+    """`git diff -U0`가 낸 파일마다의 토막. 키는 대상 쪽 경로이고 삭제된 파일은 기준 쪽 경로다.
+
+    `source`가 참이면 `.py` 파일을, 거짓이면 그 밖의 파일을 낸다. 글이 아닌 파일은 토막이 없으므로 키가 없다.
+    """
     out = _git(
-        root, "diff", "-U0", *_DIFF, "--src-prefix=a/", "--dst-prefix=b/", *_ends(base, target), "--", "*.py"
+        root, "diff", "-U0", *_DIFF, "--src-prefix=a/", "--dst-prefix=b/", *_ends(base, target), "--", *_spec(source)
     )
     found: dict[str, list[Hunk]] = {}
     old: str | None = None
@@ -243,12 +260,15 @@ def _patched(root: Path, base: str, target: str) -> dict[str, list[Hunk]]:
     return found
 
 
-def changed(root: Path, base: str, target: str) -> list[Changed]:
+def changed(root: Path, base: str, target: str, source: bool = True) -> list[Changed]:
     """두 시점 사이에 바뀐 분석 대상 `.py` 파일. `target`이 `WORKTREE`면 디스크의 파일과 견주고 추적하지 않는 파일을 added로 더한다.
 
     `collect`가 모으지 않는 경로는 뺀다. 이름이 바뀐 파일의 한쪽 경로만 분석 대상이면 그쪽의 추가나 삭제로 낸다.
+
+    `source`가 거짓이면 `.py`가 아닌 파일 가운데 `collect.others`가 내는 경로를 같은 규칙으로 낸다. 그 파일은 줄이
+    달라졌거나 이름이 바뀐 것만 내므로 글이 아닌 파일은 이름이 바뀐 것만 남는다.
     """
-    out = _git(root, "diff", "--name-status", "-z", *_DIFF, *_ends(base, target), "--", "*.py")
+    out = _git(root, "diff", "--name-status", "-z", *_DIFF, *_ends(base, target), "--", *_spec(source))
     fields = (out or "").split("\0")
     found: list[Changed] = []
     i = 0
@@ -260,12 +280,15 @@ def changed(root: Path, base: str, target: str) -> list[Changed]:
         else:
             found.append(Changed(state, fields[i + 1]))
             i += 2
-    if target == WORKTREE:
+    if target == WORKTREE or not source:
         # 인덱스를 다시 쓰지 않으므로 수정 시각만 바뀐 파일도 수정으로 나온다. 줄이 달라진 파일만 남긴다.
-        differing = _patched(root, base, target)
-        found = [c for c in found if c.status != MODIFIED or c.path in differing]
-        found.extend(Changed(ADDED, path) for path in _untracked(root, {c.path for c in found}))
-    kept = collected(root, [p for c in found for p in (c.path, c.old) if p is not None])
+        differing = _patched(root, base, target, source)
+        found = [c for c in found if c.path in differing or (c.status != MODIFIED if source else c.status == RENAMED)]
+    if target == WORKTREE:
+        fresh = _untracked(root, {c.path for c in found}, source)
+        found.extend(Changed(ADDED, path) for path in fresh if source or _lines(root / path))
+    ends = [p for c in found for p in (c.path, c.old) if p is not None]
+    kept = listed(root, [p for p in ends if p.endswith(".py") == source])
     result: list[Changed] = []
     for c in found:
         if c.old is not None and c.path in kept and c.old in kept:
@@ -278,27 +301,37 @@ def changed(root: Path, base: str, target: str) -> list[Changed]:
 
 
 def _lines(file: Path) -> int:
+    """파일의 줄 수. 읽지 못하거나 글이 아니면 0이다."""
     try:
         data = file.read_bytes()
     except OSError:
         return 0
+    if not textual(data):
+        return 0
     return data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
 
 
-def hunks(root: Path, base: str, target: str) -> dict[str, list[Hunk]]:
+def hunks(root: Path, base: str, target: str, source: bool = True) -> dict[str, list[Hunk]]:
     """분석 대상 `.py` 파일마다 두 시점 사이의 토막. 키는 대상 쪽 경로이고 삭제된 파일은 기준 쪽 경로다.
 
     `target`이 `WORKTREE`면 디스크의 파일과 견주고, 추적하지 않는 파일은 파일의 줄 수 전체를 추가된 줄로 낸다.
     줄이 달라지지 않은 파일(이름만 바뀐 파일, 빈 파일)은 키가 없다. 읽지 못하면 빈 dict다.
+    `source`가 거짓이면 `.py`가 아닌 파일 가운데 `collect.others`가 내는 경로의 토막을 낸다.
     """
-    found = _patched(root, base, target)
+    found = _patched(root, base, target, source)
     if target == WORKTREE:
-        for path in _untracked(root, set(found)):
+        for path in _untracked(root, set(found), source):
             count = _lines(root / path)
             if count:
                 found[path] = [Hunk(0, 0, 1, count)]
-    kept = collected(root, list(found))
+    kept = listed(root, list(found))
     return {path: found[path] for path in sorted(kept)}
+
+
+def files(root: Path, commit: str) -> list[str]:
+    """그 커밋에 든 파일의 레포 루트 기준 경로. 읽지 못하면 빈 목록이다."""
+    out = _git(root, "ls-tree", "-r", "--name-only", "-z", commit)
+    return sorted(path for path in (out or "").split("\0") if path)
 
 
 def export(root: Path, commit: str, dest: Path) -> None:
@@ -322,6 +355,17 @@ def export(root: Path, commit: str, dest: Path) -> None:
 
 
 def show(root: Path, commit: str, path: str) -> str | None:
-    """그 커밋에 든 파일의 본문. 커밋이나 파일이 없으면 None이다."""
+    """그 커밋에 든 파일의 본문. 커밋이나 파일이 없거나 글이 아니면 None이다."""
     out = _run(root, "show", "--no-textconv", f"{commit}:./{path}")
-    return out.decode("utf-8-sig", errors="replace") if out is not None else None
+    return out.decode("utf-8-sig", errors="replace") if out is not None and textual(out) else None
+
+
+def read(root: Path, path: str) -> str | None:
+    """디스크에 있는 파일의 본문. 파일이 레포 루트 밖이거나 없거나 글이 아니면 None이다."""
+    top = disk_path(root).resolve()
+    try:
+        file = (top / path).resolve()
+        data = file.read_bytes() if file.is_relative_to(top) else None
+    except OSError:
+        return None
+    return data.decode("utf-8-sig", errors="replace") if data is not None and textual(data) else None
