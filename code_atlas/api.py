@@ -22,8 +22,8 @@ import platform
 import re
 import threading
 import time
-from collections.abc import Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict, astuple, dataclass, field, replace
 from functools import partial
 from importlib import metadata
@@ -347,6 +347,18 @@ def create_app(
         """지금 보이는 시점의 분석 결과와 노드. 마지막 비교의 대상이 커밋이면 그 시점이고 그 밖에는 작업 중인 상태다."""
         held = state.shown
         return (held[1], held[2]) if held is not None else (state.analyzed, state.nodes)
+
+    def readable(state: Workspace) -> Callable[[], AbstractAsyncContextManager[str]]:
+        """지금 보이는 시점의 파일이 든 폴더를 여는 함수. 작업 중인 상태면 레포 루트이고 커밋이면 그 커밋을 꺼낸 폴더다."""
+        if state.shown is not None:
+            return partial(snapshots(state).tree, state.shown[0])
+        root = state.repo["root"]
+
+        @asynccontextmanager
+        async def worktree() -> AsyncIterator[str]:
+            yield root
+
+        return worktree
 
     async def ask(state: Workspace, path: str, request: Callable[[Session], Awaitable[T]]) -> T:
         if path not in state.analyzed.texts:
@@ -877,7 +889,7 @@ def create_app(
 
     @app.get("/api/explanations")
     def get_explanations(path: str, base: str | None = None, target: str | None = None, state: Workspace = ready) -> dict:
-        """파일에 남겨 둔 코드 범위 설명. 설명을 만든 뒤 그 줄 범위의 코드가 달라졌으면 `stale`이 참이다.
+        """파일에 남겨 둔 코드 범위 설명. 설명을 만든 뒤 그 줄 범위의 코드가 달라졌으면 `stale`이 참이고, 커밋을 보는 중에는 그 설명을 뺀다.
 
         같은 줄 범위에 질문이 다른 설명이 여럿이면 만든 순서로 담고, `question`은 그 설명의 질문(없으면 빈 글)이다.
 
@@ -898,6 +910,8 @@ def create_app(
             start, end = (int(n) for n in span.split("-"))
             code = range_code(analyzed.texts, path, start, end)
             stale = code is None or digest_of(code) != kept.digest
+            if stale and state.shown is not None:
+                continue
             lines = {"start": start, "end": end, "question": kept.question}
             found.append({**lines, "text": kept.text, "stale": stale, "created": kept.created})
         listed = {"explanations": sorted(found, key=lambda e: (e["start"], e["end"]))}
@@ -930,7 +944,7 @@ def create_app(
         """코드 범위의 설명을 만든다. 두 시점을 엮은 문서에서 고른 범위에 바뀐 줄이 있으면 본문 `code`에 표시 붙은 본문이 온다.
 
         본문 `question`에 그 범위를 두고 적은 질문이 오면 설명 대신 그 질문의 답을 만들고, 같은 범위의 다른 질문과 따로 남긴다.
-        보이는 그래프가 작업 폴더의 것이면 `claude`가 레포의 파일을 읽으며 만들고, 커밋의 것이면 프롬프트의 자료만으로 만든다.
+        `claude`는 지금 보이는 시점의 파일을 읽으며 만든다.
 
         삭제된 줄이 든 범위는 두 시점과 기준 시점의 줄(`old_start`, `old_end`)이 함께 오고, `start`와 `end`는 대상 시점의
         줄이며 그 범위에 대상 시점의 줄이 없으면 둘 다 0이다.
@@ -940,8 +954,7 @@ def create_app(
             raise HTTPException(status_code=422, detail="두 시점의 비교에 묶는 범위는 표시 붙은 본문 code를 넘겨야 합니다")
         asked = (question or "").strip()[:MAX_QUESTION]
         prompt, subject = explained(state, path, start, end, code, base, target, old, asked)
-        root = state.repo["root"] if state.shown is None else None
-        explanation = await made(request, app.state.summaries.make(prompt, refresh, "range", subject, root))
+        explanation = await made(request, app.state.summaries.make(prompt, refresh, "range", subject, readable(state)))
         lines = {"start": start, "end": end, "question": asked}
         return {**lines, "text": explanation.text, "stale": False, "usage": explanation.usage and asdict(explanation.usage)}
 

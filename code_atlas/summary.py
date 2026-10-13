@@ -18,8 +18,8 @@ import sqlite3
 import tempfile
 import textwrap
 import time
-from collections.abc import Iterable, Mapping
-from contextlib import closing
+from collections.abc import Callable, Iterable, Mapping
+from contextlib import AbstractAsyncContextManager, closing
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -1088,14 +1088,14 @@ class Summaries:
         refresh: bool = False,
         kind: str = "node",
         subject: Subject | None = None,
-        root: str | None = None,
+        root: Callable[[], AbstractAsyncContextManager[str]] | None = None,
     ) -> Made:
         """캐시에 있으면 그 설명을, 없거나 `refresh`면 새로 만든 설명을 돌려준다. 같은 프롬프트의 요청이 겹치면 한 번만 만들고, 기다린 호출자가 모두 그 호출의 사용량을 받는다.
 
         서술 규약 문서는 부를 때마다 읽는다. 기다리는 호출자가 모두 취소되면 동시 실행 자리를 기다리는 설명은 만들지 않고,
         프로세스를 띄운 설명은 끝까지 만들어 캐시에 넣는다. `kind`는 노드 설명인지 코드 범위 설명인지이고,
-        `subject`를 주면 돌려주는 설명을 그 대상의 가장 최근 설명으로 남긴다. 코드 범위 설명에 `root`를 주면 그 레포의
-        파일을 읽으며 만든다.
+        `subject`를 주면 돌려주는 설명을 그 대상의 가장 최근 설명으로 남긴다. 코드 범위 설명에 `root`를 주면 그 함수가
+        여는 폴더의 파일을 읽으며 만들고, 폴더는 `claude`를 띄울 때 열어 끝나면 닫는다.
         """
         system = system_prompt_of(self.style_guide, "explore" if kind == "range" and root is not None else kind)
         key = key_of(system, prompt)
@@ -1129,12 +1129,27 @@ class Summaries:
             task.exception()
 
     async def _generate(
-        self, key: str, system: str, prompt: str, kind: str, subject: Subject | None, root: str | None
+        self,
+        key: str,
+        system: str,
+        prompt: str,
+        kind: str,
+        subject: Subject | None,
+        root: Callable[[], AbstractAsyncContextManager[str]] | None,
     ) -> Made:
         async with self._slots:
             self._making[key].started = True
             started = time.monotonic()
-            made = await (generate(system, prompt) if kind == "node" else explain(system, prompt, root))
+            if kind == "node":
+                made = await generate(system, prompt)
+            elif root is None:
+                made = await explain(system, prompt)
+            else:
+                try:
+                    async with root() as opened:
+                        made = await explain(system, prompt, opened)
+                except OSError as exc:
+                    raise SummaryError(f"읽을 파일을 꺼내지 못했습니다: {exc}") from exc
             logger.info("summary %s made in %.1fs", key[:12], time.monotonic() - started)
         self.cache.put(key, made.text)
         if subject is not None:

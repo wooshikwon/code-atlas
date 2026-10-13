@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import itertools
 import os
 import shutil
-from collections.abc import Callable
-from contextlib import AsyncExitStack
+from collections.abc import AsyncIterator, Callable
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,9 +58,9 @@ def _alive(name: str) -> bool:
 class Snapshots:
     """레포 하나의 시점별 분석 결과와 그 분석이 쓰는 꺼낸 폴더.
 
-    꺼낸 폴더는 `{directory}/snapshots/{레포 루트 해시 16자}/{프로세스 id}/{커밋 해시}`이고 `directory`를 주지 않으면
-    분석 캐시의 폴더다. 같은 레포를 연 다른 서버와 폴더가 겹치지 않는다. 만들 때 끝난 프로세스가 남긴 그 레포의 폴더를
-    지운다. `python`은 원본 레포를 분석하는 인터프리터의 절대 경로다.
+    분석이 쓰는 폴더는 `{directory}/snapshots/{레포 루트 해시 16자}/{프로세스 id}/{커밋 해시}`이고 `tree`가 여는 폴더는
+    그 프로세스 id 폴더의 `trees` 아래다. `directory`를 주지 않으면 분석 캐시의 폴더다. 같은 레포를 연 다른 서버와 폴더가
+    겹치지 않는다. 만들 때 끝난 프로세스가 남긴 그 레포의 폴더를 지운다. `python`은 원본 레포를 분석하는 인터프리터의 절대 경로다.
     """
 
     def __init__(self, root: Path, python: str, cache: Cache | None, directory: Path | None = None):
@@ -71,6 +72,7 @@ class Snapshots:
         self.directory = shared / str(os.getpid())
         self._held: dict[str, Analyzed] = {}  # 커밋 해시 → 결과. 마지막에 쓴 시점이 뒤에 온다
         self._running: dict[str, _Running] = {}
+        self._opened = itertools.count()
         for left in shared.iterdir() if shared.is_dir() else ():
             if left == self.directory or not _alive(left.name):
                 shutil.rmtree(left, ignore_errors=True)
@@ -137,6 +139,16 @@ class Snapshots:
         while len(self._held) > HELD:
             del self._held[next(iter(self._held))]
         return analyzed
+
+    @asynccontextmanager
+    async def tree(self, commit: str) -> AsyncIterator[str]:
+        """그 커밋의 파일을 꺼낸 폴더의 경로. 여는 호출마다 따로 꺼내고 닫을 때 지운다. 꺼내지 못하면 `OSError`다."""
+        dest = self.directory / "trees" / f"{commit}-{next(self._opened)}"
+        try:
+            await _finished(git.export, self.root, commit, dest)
+            yield str(dest)
+        finally:
+            await _finished(shutil.rmtree, dest, True)
 
     def _nearest(self, commit: str, dest: Path, near: list[Analyzed]) -> Analyzed | None:
         """증분의 바탕. 캐시에 그 커밋의 판정이 지금 환경 지문으로 있으면 None이고, 없으면 `near` 가운데 바뀐 `.py`가 가장 적은 결과다."""

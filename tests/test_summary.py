@@ -5,7 +5,7 @@ import time
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import asynccontextmanager, closing
 
 import pytest
 
@@ -102,9 +102,20 @@ async def test_explain_with_a_root_runs_in_the_repo_with_read_only_tools(fake_cl
 async def test_make_of_range_with_a_root_uses_the_explore_system_prompt(fake_cli, tmp_path):
     record = fake_cli(OK)
     summaries = Summaries(tmp_path / "summaries.db")
-    await summaries.make("[대상]\n종류: 코드 범위", kind="range", root=str(tmp_path))
+    opened: list[str] = []
+
+    @asynccontextmanager
+    async def root():
+        opened.append("open")
+        yield str(tmp_path)
+        opened.append("close")
+
+    await summaries.make("[대상]\n종류: 코드 범위", kind="range", root=root)
     args = (record / "args").read_text()
     assert summary.system_prompt_of(None, "explore") in args and "Read,Grep,Glob" in args
+    assert os.path.samefile((record / "cwd").read_text().strip(), tmp_path) and opened == ["open", "close"]
+    await summaries.make("[대상]\n종류: 코드 범위", kind="range", root=root)  # 캐시에 있으면 폴더를 열지 않는다
+    assert opened == ["open", "close"]
     await summaries.make("[대상]\n종류: 코드 범위", kind="range")  # 읽으며 만든 설명과 따로 캐시에 둔다
     assert (record / "runs").read_text().count("run") == 2
 

@@ -6,6 +6,7 @@ import signal
 import sqlite3
 import sys
 import time
+from pathlib import Path
 from urllib.parse import urlencode
 
 import pytest
@@ -1311,6 +1312,7 @@ def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch
     client, at = history_client
     calls: list[str] = []
     explored: list[tuple[bool, str | None]] = []
+    read: list[bool] = []
 
     async def generate(system, prompt):
         calls.append(prompt)
@@ -1318,6 +1320,7 @@ def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch
 
     async def explain(system, prompt, root=None):
         explored.append((system == summary.system_prompt_of(None, "explore"), root))
+        read.append(Path(root, "src/shop/audit.py").is_file())
         return Made("설명", USED)
 
     async def unavailable():
@@ -1331,6 +1334,9 @@ def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch
 
     client.get("/api/graph")
     assert client.get("/api/summary", params=past).status_code == 404
+    priced = {"path": "src/shop/pricing.py"}
+    assert client.post("/api/explanation", params={**priced, "start": 5, "end": 6}).status_code == 200
+    assert explored.pop()[1] == client.get("/api/repo").json()["root"] and read.pop() is False
     compared(client, at["base"], at["edit"])  # 대상이 커밋이다. `audit.py`는 그 커밋에 있고 작업 중인 상태에 없다
     assert client.get("/api/summary", params=past).json()["summary"] is None
     made = client.post("/api/summary", params=past)
@@ -1342,12 +1348,15 @@ def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch
     assert [s["node"] for s in client.get("/api/summaries").json()["summaries"]] == ["shop.audit:log", "shop.pricing:tax"]
     explained = client.post("/api/explanation", params={"path": "src/shop/audit.py", "start": 6, "end": 8})
     assert explained.status_code == 200
-    assert explored == [(False, None)]  # 커밋의 그래프를 보는 동안에는 작업 폴더의 파일을 읽지 않는다
+    (explores, root), = explored  # 그 커밋을 꺼낸 폴더에서 읽고, 다 만들면 폴더를 지운다
+    assert explores and read == [True] and not Path(root).exists()
+    assert client.get("/api/explanations", params=priced).json()["explanations"] == []  # 코드가 다른 시점의 설명은 뺀다
     assert len(client.get("/api/explanations", params={"path": "src/shop/audit.py"}).json()["explanations"]) == 1
 
     client.get("/api/graph")  # 화면이 비교를 끄면 작업 중인 상태의 그래프를 다시 받는다
     assert client.get("/api/summary", params=past).status_code == 404
     assert client.get("/api/explanations", params={"path": "src/shop/audit.py"}).status_code == 404
+    assert [e["stale"] for e in client.get("/api/explanations", params=priced).json()["explanations"]] == [False]
     assert client.get("/api/summary", params=both).json() == {
         "summary": "요약 2", "stale": True, "available": True, "reason": None, "code": None,
     }  # fmt: skip
