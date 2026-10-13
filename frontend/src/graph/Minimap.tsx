@@ -13,7 +13,7 @@ import { isPack, type PackFlowNode } from "./nodes/PackNode";
 import { tooltip } from "./Tooltip";
 import { nearest, stageOf } from "./viewport";
 
-const SIZE = { width: 220, height: 140 };
+const SIZE = { width: 308, height: 196 };
 /** 커서에서 이 거리(화면 px) 안의 사각형까지 커서 밑의 사각형으로 본다. */
 const REACH = 4;
 
