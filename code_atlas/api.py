@@ -57,6 +57,7 @@ from .summary import (
     compared_name,
     compared_spans,
     digest_of,
+    file_prompt_of,
     lead_of,
     prompt_of,
     range_code,
@@ -878,20 +879,24 @@ def create_app(
         locations = await ask(state, path, lambda session: session.definition_at(path, line, col, LSP_TIMEOUT))
         return {"targets": [_target(loc, state.analyzed, state.nodes) for loc in locations]}
 
-    def summarized(state: Workspace, node_id: str) -> str:
-        """노드 id를 설명을 만들 프롬프트로 바꾼다."""
+    def summarized(state: Workspace, node_id: str) -> tuple[str, str]:
+        """노드 id를 설명을 만들 프롬프트와 설명의 종류("node", "file")로 바꾼다. 분석 대상이 아닌 파일은 그 경로가 id다."""
         analyzed, nodes = shown(state)
         prompt = prompt_of(nodes, analyzed.analysis.edges, analyzed.texts, node_id)
-        if prompt is None:
+        if prompt is not None:
+            return prompt, "node"
+        at = state.shown[0] if state.shown is not None else None
+        text = None if node_id in nodes or node_id in analyzed.texts else text_at(state, analyzed, at, node_id)
+        if text is None:
             raise HTTPException(status_code=404, detail=f"요약할 노드가 아닙니다: {node_id}")
-        return prompt
+        return file_prompt_of(node_id, text), "file"
 
     @app.get("/api/summary")
     async def get_summary(node: str, state: Workspace = ready) -> dict:
-        prompt = summarized(state, node)
+        prompt, kind = summarized(state, node)
         summaries: Summaries = app.state.summaries
         reason = await summaries.unavailable()
-        summary, stale = summaries.kept(prompt, Subject(state.repo["root"], "node", node))
+        summary, stale = summaries.kept(prompt, Subject(state.repo["root"], "node", node), kind)
         return {"summary": summary, "stale": stale, "available": reason is None, "reason": reason, "code": summaries.code}
 
     @app.get("/api/summaries")
@@ -921,7 +926,9 @@ def create_app(
     @app.post("/api/summary")
     async def make_summary(request: Request, node: str, refresh: bool = False, state: Workspace = ready) -> dict:
         subject = Subject(state.repo["root"], "node", node)
-        summary = await made(request, app.state.summaries.make(summarized(state, node), refresh, "node", subject))
+        prompt, kind = summarized(state, node)
+        root = readable(state) if kind == "file" else None
+        summary = await made(request, app.state.summaries.make(prompt, refresh, kind, subject, root))
         return {"summary": summary.text, "usage": summary.usage and asdict(summary.usage)}
 
     def between(base: str | None, target: str | None, old_start: int | None, old_end: int | None) -> tuple[int, int] | None:

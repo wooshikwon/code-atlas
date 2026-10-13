@@ -68,8 +68,13 @@ def generated(client, tmp_path, monkeypatch):
         calls.append((system, prompt))
         return Made(f"{prompt.split(chr(10) + '위치: ', 1)[1].split(chr(10), 1)[0]} 설명 {len(calls)}", USED)
 
+    async def describe(system, prompt, root):
+        calls.append((system, prompt))
+        return Made(f"{name_in(prompt)} 요약 {len(calls)}", USED)
+
     monkeypatch.setattr(summary, "generate", generate)
     monkeypatch.setattr(summary, "explain", explain)
+    monkeypatch.setattr(summary, "describe", describe)
     monkeypatch.setattr(summary, "unavailable", unavailable)
     monkeypatch.setattr(client.app.state, "summaries", Summaries(tmp_path / "summaries.db"))
     return calls
@@ -622,6 +627,26 @@ def test_summary_is_made_on_post_and_read_from_cache(client, generated):
 
     assert client.post("/api/summary", params={**node, "refresh": "true"}).json() == {"summary": "app/core.py::run_engine 요약 2", "usage": USAGE}
     assert client.get("/api/summary", params=node).json()["summary"] == "app/core.py::run_engine 요약 2"
+
+
+def test_file_outside_the_analysis_is_summarized(client, generated):
+    node = {"node": "pyproject.toml"}
+    assert client.get("/api/summary", params=node).json()["summary"] is None
+
+    assert client.post("/api/summary", params=node).json() == {"summary": "pyproject.toml 요약 1", "usage": USAGE}
+    system, prompt = generated[0]
+    assert system == summary.system_prompt_of(None, "file")
+    assert prompt.startswith("[대상]\n종류: 파일\n이름: pyproject.toml\n위치: pyproject.toml\n\n[내용]\n[project]\n")
+
+    assert client.post("/api/summary", params=node).json() == {"summary": "pyproject.toml 요약 1", "usage": None}
+    assert client.get("/api/summary", params=node).json()["summary"] == "pyproject.toml 요약 1"
+    assert len(generated) == 1
+
+
+@pytest.mark.parametrize("node", ["nope.toml", "../etc/passwd", "ignored_dir/skip.md", "src/app/__init__.py"])
+def test_summary_of_a_file_that_is_not_read_is_404(client, generated, node):
+    assert client.get("/api/summary", params={"node": node}).status_code == 404
+    assert client.post("/api/summary", params={"node": node}).status_code == 404
 
 
 def test_summaries_list_the_lead_of_every_kept_summary(client, generated, monkeypatch):

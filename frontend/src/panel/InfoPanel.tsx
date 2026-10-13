@@ -264,8 +264,17 @@ export function PanelBody({ frame, grip, reset, tip }: PanelBodyProps) {
         : node !== undefined && node.kind !== "package" && node.path !== null
           ? { path: node.path, range: node.kind === "module" ? null : node.range, base: past.nodes.has(node.id) }
           : null;
-  /** LLM 요약 칸을 그리는 노드. 대상 시점에 없는 노드는 요약을 요청할 수 없다. */
-  const summarized = node !== undefined && SUMMARIZED.has(node.kind) && !past.nodes.has(node.id);
+  /**
+   * LLM 요약 칸에 넘기는 id. 노드는 노드 id고, 분석 대상이 아닌 연 파일은 그 경로다. 대상 시점에 없는 노드는 요약을 요청할 수 없다.
+   */
+  const summarized =
+    file !== null
+      ? file.endsWith(".py")
+        ? null
+        : file
+      : node !== undefined && SUMMARIZED.has(node.kind) && !past.nodes.has(node.id)
+        ? node.id
+        : null;
   /** LLM 요약 칸과 코드 뷰어 사이의 경계선을 끌어 요약 칸의 높이를 바꾸고, 그 높이를 패널 높이로 나눈 값을 저장한다. */
   const part = (event: ReactPointerEvent<HTMLElement>) => {
     const panel = frame.current;
@@ -322,8 +331,8 @@ export function PanelBody({ frame, grip, reset, tip }: PanelBodyProps) {
         </Facts>
       )}
       {item.type === "repo" && <Overview nodes={index.nodes} />}
-      {summarized && <Summary node={node.id} split={code === null || !summaryOpen ? null : split} />}
-      {summarized && summaryOpen && code !== null && (
+      {summarized !== null && <Summary node={summarized} split={code === null || !summaryOpen ? null : split} />}
+      {summarized !== null && summaryOpen && code !== null && (
         <div className="info-panel-divide" onPointerDown={part} onDoubleClick={() => setSplit(null)} data-tip="끌어서 요약 칸과 코드의 높이를 바꾸고, 더블클릭하면 기본 높이로 돌아갑니다" />
       )}
       {code !== null && <CodeView {...code} />}

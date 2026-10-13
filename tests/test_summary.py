@@ -99,6 +99,25 @@ async def test_explain_with_a_root_runs_in_the_repo_with_read_only_tools(fake_cl
 
 
 @pytest.mark.asyncio
+async def test_make_of_file_reads_the_repo_and_gives_the_three_parts(fake_cli, tmp_path):
+    record = fake_cli(OK)
+    summaries = Summaries(tmp_path / "summaries.db")
+
+    @asynccontextmanager
+    async def root():
+        yield str(tmp_path)
+
+    prompt = summary.file_prompt_of("db/schema.sql", "CREATE TABLE t (id int);\n")
+    assert prompt.startswith("[대상]\n종류: 파일\n이름: db/schema.sql\n위치: db/schema.sql\n\n[내용]\nCREATE TABLE t (id int);\n")
+    made = await summaries.make(prompt, kind="file", root=root)
+    assert made.text == "설정을 받아 엔진을 만들고 시작한다.\n\n하는 일\n엔진을 만든다.\n\n앞뒤 흐름\n`main`이 호출한다."
+    args = (record / "args").read_text()
+    assert summary.system_prompt_of(None, "file") in args and "Read,Grep,Glob" in args
+    assert os.path.samefile((record / "cwd").read_text().strip(), tmp_path)
+    assert summaries.cached(prompt, "file") == made.text and summaries.cached(prompt) is None
+
+
+@pytest.mark.asyncio
 async def test_make_of_range_with_a_root_uses_the_explore_system_prompt(fake_cli, tmp_path):
     record = fake_cli(OK)
     summaries = Summaries(tmp_path / "summaries.db")
