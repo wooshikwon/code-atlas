@@ -85,6 +85,31 @@ async def test_generate_sends_system_prompt_as_argument_and_prompt_on_stdin(fake
 
 
 @pytest.mark.asyncio
+async def test_explain_with_a_root_runs_in_the_repo_with_read_only_tools(fake_cli, tmp_path):
+    record = fake_cli(OK)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    await summary.explain("s", "p", str(repo))
+    assert (record / "args").read_text().startswith("-p\n--model\nsonnet\n--tools\nRead,Grep,Glob\n--system-prompt\ns\n--safe-mode\n")
+    assert os.path.samefile((record / "cwd").read_text().strip(), repo)
+
+    await summary.explain("s", "p")
+    assert (record / "args").read_text().startswith("-p\n--model\nsonnet\n--tools\n\n--system-prompt\n")
+    assert not os.path.exists((record / "cwd").read_text().strip())
+
+
+@pytest.mark.asyncio
+async def test_make_of_range_with_a_root_uses_the_explore_system_prompt(fake_cli, tmp_path):
+    record = fake_cli(OK)
+    summaries = Summaries(tmp_path / "summaries.db")
+    await summaries.make("[대상]\n종류: 코드 범위", kind="range", root=str(tmp_path))
+    args = (record / "args").read_text()
+    assert summary.system_prompt_of(None, "explore") in args and "Read,Grep,Glob" in args
+    await summaries.make("[대상]\n종류: 코드 범위", kind="range")  # 읽으며 만든 설명과 따로 캐시에 둔다
+    assert (record / "runs").read_text().count("run") == 2
+
+
+@pytest.mark.asyncio
 async def test_generate_passes_a_system_prompt_as_long_as_the_style_guide_limit(fake_cli):
     record = fake_cli(OK)
     await summary.generate("가" * (summary.MAX_STYLE_GUIDE // 3), "x")

@@ -63,7 +63,7 @@ def generated(client, tmp_path, monkeypatch):
     async def unavailable():
         return None
 
-    async def explain(system, prompt):
+    async def explain(system, prompt, root=None):
         calls.append((system, prompt))
         return Made(f"{prompt.split(chr(10) + '위치: ', 1)[1].split(chr(10), 1)[0]} 설명 {len(calls)}", USED)
 
@@ -633,7 +633,7 @@ def test_explanation_is_made_listed_and_deleted(client, generated):
     made = client.post("/api/explanation", params=span).json()
     assert made == {"start": 32, "end": 33, "question": "", "text": "src/app/core.py 32~33줄 설명 1", "stale": False, "usage": USAGE}
     system, prompt = generated[0]
-    assert system == summary.system_prompt_of(None, "range")
+    assert system == summary.system_prompt_of(None, "explore")
     assert "범위가 든 정의: app/core.py::run_engine (함수, 31~35줄)" in prompt
     assert "[고른 범위의 코드]\n    engine = Engine(config)\n    engine.start(config)\n" in prompt
     assert "32>     engine = Engine(config)" in prompt and "- app/core.py::Engine.start" in prompt
@@ -677,7 +677,7 @@ def test_explanation_with_a_question_is_kept_beside_the_others_of_the_same_range
 
     asked = client.post("/api/explanation", params=span, json={"question": "  config가 None이면?  "}).json()
     assert (asked["question"], asked["usage"]) == ("config가 None이면?", USAGE)
-    assert generated[1][0] == summary.system_prompt_of(None, "range")
+    assert generated[1][0] == summary.system_prompt_of(None, "explore")
     assert "[질문]\nconfig가 None이면?\n\n[내기 전에 확인]" in generated[1][1]
     assert "[고른 범위의 코드]\n    engine = Engine(config)\n    engine.start(config)\n" in generated[1][1]
     client.post("/api/explanation", params=span, json={"question": "왜 start를 부르나?"})
@@ -1310,16 +1310,21 @@ def test_compare_of_two_commits_judges_definitions_and_edges(history_client):
 def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch):
     client, at = history_client
     calls: list[str] = []
+    explored: list[tuple[bool, str | None]] = []
 
     async def generate(system, prompt):
         calls.append(prompt)
         return Made(f"요약 {len(calls)}", USED)
 
+    async def explain(system, prompt, root=None):
+        explored.append((system == summary.system_prompt_of(None, "explore"), root))
+        return Made("설명", USED)
+
     async def unavailable():
         return None
 
     monkeypatch.setattr(summary, "generate", generate)
-    monkeypatch.setattr(summary, "explain", generate)
+    monkeypatch.setattr(summary, "explain", explain)
     monkeypatch.setattr(summary, "unavailable", unavailable)
     monkeypatch.setattr(client.app.state, "summaries", Summaries(tmp_path / "summaries.db"))
     past, gone, both = {"node": "shop.audit:log"}, {"node": "shop.pricing:legacy_total"}, {"node": "shop.pricing:tax"}
@@ -1337,6 +1342,7 @@ def test_summaries_follow_the_shown_commit(history_client, tmp_path, monkeypatch
     assert [s["node"] for s in client.get("/api/summaries").json()["summaries"]] == ["shop.audit:log", "shop.pricing:tax"]
     explained = client.post("/api/explanation", params={"path": "src/shop/audit.py", "start": 6, "end": 8})
     assert explained.status_code == 200
+    assert explored == [(False, None)]  # 커밋의 그래프를 보는 동안에는 작업 폴더의 파일을 읽지 않는다
     assert len(client.get("/api/explanations", params={"path": "src/shop/audit.py"}).json()["explanations"]) == 1
 
     client.get("/api/graph")  # 화면이 비교를 끄면 작업 중인 상태의 그래프를 다시 받는다

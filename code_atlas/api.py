@@ -930,6 +930,7 @@ def create_app(
         """코드 범위의 설명을 만든다. 두 시점을 엮은 문서에서 고른 범위에 바뀐 줄이 있으면 본문 `code`에 표시 붙은 본문이 온다.
 
         본문 `question`에 그 범위를 두고 적은 질문이 오면 설명 대신 그 질문의 답을 만들고, 같은 범위의 다른 질문과 따로 남긴다.
+        보이는 그래프가 작업 폴더의 것이면 `claude`가 레포의 파일을 읽으며 만들고, 커밋의 것이면 프롬프트의 자료만으로 만든다.
 
         삭제된 줄이 든 범위는 두 시점과 기준 시점의 줄(`old_start`, `old_end`)이 함께 오고, `start`와 `end`는 대상 시점의
         줄이며 그 범위에 대상 시점의 줄이 없으면 둘 다 0이다.
@@ -939,7 +940,8 @@ def create_app(
             raise HTTPException(status_code=422, detail="두 시점의 비교에 묶는 범위는 표시 붙은 본문 code를 넘겨야 합니다")
         asked = (question or "").strip()[:MAX_QUESTION]
         prompt, subject = explained(state, path, start, end, code, base, target, old, asked)
-        explanation = await made(request, app.state.summaries.make(prompt, refresh, "range", subject))
+        root = state.repo["root"] if state.shown is None else None
+        explanation = await made(request, app.state.summaries.make(prompt, refresh, "range", subject, root))
         lines = {"start": start, "end": end, "question": asked}
         return {**lines, "text": explanation.text, "stale": False, "usage": explanation.usage and asdict(explanation.usage)}
 
