@@ -1745,10 +1745,9 @@ ul {
 
 /* 선 */
 
-/* 누름 영역은 칠하지 않는다. 선 묶음이 받는 pointer-events: visibleStroke는 stroke의 값과 무관하게 굵기만큼의 둘레에서 마우스를 받는다. */
 .edge-hit {
   fill: none;
-  stroke: none;
+  stroke: transparent;
   stroke-width: 12;
   cursor: pointer;
 }
