@@ -1,4 +1,4 @@
-// 키보드 단축키. window의 capture 단계 keydown 하나에서 이력 이동, Esc, 검색 팔레트 열기, 새로고침을 나눠 부른다.
+// 키보드 단축키. window의 capture 단계 keydown 하나에서 이력 이동, Esc, 검색 팔레트 열기, 새로고침, LLM 요약 만들기를 나눠 부른다.
 
 export interface KeyHandlers {
   /** Alt+←, Mac은 Cmd+[도 */
@@ -10,6 +10,8 @@ export interface KeyHandlers {
   palette(): void;
   /** Mod+R */
   reload(): void;
+  /** Mod+Enter */
+  summarize(): void;
 }
 
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -17,6 +19,11 @@ const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 /** 말풍선에 적는 Mod+key의 이름. Mac은 `⌘R`, 그 밖은 `Ctrl+R` 꼴이다. */
 export function modName(key: string): string {
   return MAC ? `⌘${key}` : `Ctrl+${key}`;
+}
+
+/** 말풍선에 적는 이력 이동 단축키의 이름. Mac은 `⌘[`·`⌘]`, 그 밖은 `Alt+←`·`Alt+→`다. */
+export function historyName(to: "back" | "forward"): string {
+  return MAC ? (to === "back" ? "⌘[" : "⌘]") : to === "back" ? "Alt+←" : "Alt+→";
 }
 
 /** Mod만 누른 채인지. Mod는 Mac에서 Cmd, 그 밖에서 Ctrl이다. */
@@ -60,7 +67,8 @@ export function dismiss(button: Element): void {
 
 /**
  * 단축키를 등록하고 등록을 푸는 함수를 돌려준다. 이력 이동과 팔레트 열기, 새로고침은 브라우저의 기본 동작(이전 페이지, 인쇄,
- * 페이지 다시 읽기)을 막는다. Shift를 함께 누른 Mod+Shift+R은 받지 않아 브라우저가 페이지를 다시 읽는다.
+ * 페이지 다시 읽기)을 막는다. Shift를 함께 누른 Mod+Shift+R은 받지 않아 브라우저가 페이지를 다시 읽는다. Mod+Enter는 글자 입력 칸
+ * 밖에서만 받고, 포커스가 든 파일트리나 메뉴가 같은 누름을 Enter로 받지 않게 이벤트를 넘기지 않는다.
  */
 export function bind(handlers: KeyHandlers): () => void {
   const onKey = (event: KeyboardEvent) => {
@@ -73,6 +81,13 @@ export function bind(handlers: KeyHandlers): () => void {
       // 글자 입력 칸과 코드 뷰어에서도 받는다. Mod+R은 글자 입력이나 Monaco의 키와 겹치지 않는다.
       event.preventDefault();
       handlers.reload();
+    } else if (modOnly(event) && key === "Enter") {
+      if (typing()) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      handlers.summarize();
     } else if (event.altKey && !mod && !event.shiftKey && (key === "ArrowLeft" || key === "ArrowRight")) {
       if (typing()) {
         return;

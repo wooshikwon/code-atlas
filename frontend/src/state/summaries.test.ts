@@ -21,7 +21,7 @@ vi.mock("../api/client", () => ({
     new Promise<MadeSummary>((resolve, reject) => makes.push({ node, refresh, resolve, reject })),
 }));
 
-const { makingKey, makingOf, MAX_REQUESTS, useSummaries } = await import("./summaries");
+const { asked, makingKey, makingOf, MAX_REQUESTS, useSummaries } = await import("./summaries");
 
 const store = () => useSummaries.getState();
 const IDLE = { total: 0, ended: 0, failed: 0, held: false, cancelled: false, usage: null };
@@ -246,5 +246,19 @@ describe("makingKey", () => {
     store().make("a", false);
     store().read("c");
     expect(makingOf(makingKey(store()))).toEqual(["a", "b"]);
+  });
+});
+
+describe("asked", () => {
+  it("요약 칸에 버튼이 있는 상태에서만 그 버튼의 refresh를 돌려준다", () => {
+    const done = { phase: "done" as const, summary: "", stale: false, usage: null };
+    expect(asked({ phase: "empty" })).toBe(false);
+    expect(asked({ phase: "failed", error: "", refresh: true })).toBe(true);
+    expect(asked({ phase: "failed", error: "", refresh: false })).toBe(false);
+    expect(asked({ ...done, available: true })).toBe(true);
+    expect(asked({ ...done, available: false })).toBeNull();
+    expect(asked({ phase: "making" })).toBeNull();
+    expect(asked({ phase: "unavailable", reason: "", code: null })).toBeNull();
+    expect(asked(undefined)).toBeNull();
   });
 });

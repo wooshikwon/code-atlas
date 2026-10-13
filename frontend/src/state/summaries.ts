@@ -26,6 +26,22 @@ export type SummaryState =
   | { phase: "unavailable"; reason: string; code: string | null };
 
 /**
+ * 요약 칸의 버튼("요약 생성", "다시 시도", "다시 생성")이 보내는 요청의 refresh. 버튼이 없는 상태면 null이다.
+ */
+export function asked(state: SummaryState | undefined): boolean | null {
+  switch (state?.phase) {
+    case "empty":
+      return false;
+    case "failed":
+      return state.refresh;
+    case "done":
+      return state.available ? true : null;
+    default:
+      return null;
+  }
+}
+
+/**
  * 요청 묶음의 진행. 묶음은 기다리는 요청도 보낸 요청도 없을 때 들어온 요청에서 시작하고, 둘이 다시 없어지면 끝난다.
  * 묶음이 없는 동안은 수가 모두 0이다.
  */

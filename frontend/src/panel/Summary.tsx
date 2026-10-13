@@ -3,6 +3,7 @@
 // 구역 머리를 눌러 접으면 요약의 요지만 한 줄로 보인다. 필터 창의 "자동 요약"이 켜져 있으면 노드를 고른 채 잠시 머문 뒤에 만든다. 요약 상태와 요청은 `state/summaries.ts`가 가지므로
 // 노드를 떠나도 만들고 있던 요약은 끝까지 만든다. Claude Code를 쓰지 못하면 까닭과 고치는 방법, 환경 점검 화면을 여는 버튼을 적는다.
 import { useEffect } from "react";
+import { modName } from "../nav/keys";
 import { ClaudeHelp } from "../open/Tools";
 import { useAtlas } from "../state/store";
 import { useSummaries, type SummaryState } from "../state/summaries";
@@ -16,6 +17,9 @@ import { SectionHead } from "./Section";
 const DELAY = 600;
 
 const READING: SummaryState = { phase: "reading" };
+
+/** 요약 칸의 버튼을 누르는 단축키의 이름 */
+const KEY = modName("Enter");
 
 function Explained({ summary, stale }: { summary: string; stale: boolean }) {
   const inline = useInline();
@@ -121,13 +125,13 @@ export function Summary({ node, split }: SummaryProps) {
 
   if (!open) {
     return (
-      <div className="info-panel-summary" data-folded="">
+      <div className="info-panel-summary" data-folded="" data-node={node}>
         <SectionHead name="LLM 요약" open={false} toggle={toggle} brief={briefOf(state)} />
       </div>
     );
   }
   return (
-    <div className="info-panel-summary" data-sized={split === null ? undefined : ""} style={split === null ? undefined : { height: `${split * 100}%`, maxHeight: "none" }}>
+    <div className="info-panel-summary" data-node={node} data-sized={split === null ? undefined : ""} style={split === null ? undefined : { height: `${split * 100}%`, maxHeight: "none" }}>
       <div className="summary-head">
         <SectionHead name="LLM 요약" open toggle={toggle} brief="" />
         {state.phase === "done" && state.usage !== null && (
@@ -136,14 +140,14 @@ export function Summary({ node, split }: SummaryProps) {
           </span>
         )}
         {state.phase === "done" && state.available && (
-          <button className="summary-action" onClick={() => make(node, true)}>
+          <button className="summary-action" data-tip={`다시 생성 ${KEY}`} onClick={() => make(node, true)}>
             다시 생성
           </button>
         )}
       </div>
       {state.phase === "reading" && <span className="info-panel-hint">&nbsp;</span>}
       {state.phase === "empty" && (
-        <button className="summary-action summary-make" onClick={() => make(node, false)}>
+        <button className="summary-action summary-make" data-tip={`요약 생성 ${KEY}`} onClick={() => make(node, false)}>
           요약 생성
         </button>
       )}
@@ -153,7 +157,7 @@ export function Summary({ node, split }: SummaryProps) {
       {state.phase === "failed" && (
         <>
           <span className="info-panel-hint">{state.error}</span>
-          <button className="summary-action" onClick={() => make(node, state.refresh)}>
+          <button className="summary-action" data-tip={`다시 시도 ${KEY}`} onClick={() => make(node, state.refresh)}>
             다시 시도
           </button>
         </>

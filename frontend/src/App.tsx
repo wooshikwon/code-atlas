@@ -13,7 +13,7 @@ import { host } from "./host";
 import { Entries } from "./nav/Entries";
 import { Filters } from "./nav/Filters";
 import { Reload } from "./nav/Reload";
-import { bind, dismiss } from "./nav/keys";
+import { bind, dismiss, historyName } from "./nav/keys";
 import { judge } from "./nav/layout";
 import { LayoutButton } from "./nav/LayoutButton";
 import { NodeMenu, SummaryNotice } from "./nav/NodeMenu";
@@ -32,6 +32,7 @@ import { asking, useOpening } from "./state/opening";
 import { busy, reload } from "./state/reload";
 import { useStatus } from "./state/status";
 import { litOf, pinned, useAtlas, type Mode } from "./state/store";
+import { asked, useSummaries } from "./state/summaries";
 import { useTools } from "./state/tools";
 import { FileTree } from "./tree/FileTree";
 
@@ -91,10 +92,10 @@ function Toolbar({ mode }: { mode: Mode }) {
   return (
     <div className="toolbar">
       <div className="toolbar-nav">
-        <button className="toolbar-button" onClick={back} disabled={!canBack || pin} data-tip="뒤로" aria-label="뒤로">
+        <button className="toolbar-button" onClick={back} disabled={!canBack || pin} data-tip={`뒤로 ${historyName("back")}`} aria-label="뒤로">
           ←
         </button>
-        <button className="toolbar-button" onClick={forward} disabled={!canForward || pin} data-tip="앞으로" aria-label="앞으로">
+        <button className="toolbar-button" onClick={forward} disabled={!canForward || pin} data-tip={`앞으로 ${historyName("forward")}`} aria-label="앞으로">
           →
         </button>
         <Entries />
@@ -154,6 +155,7 @@ export function App() {
   // 레포를 여는 동안 뜬 창이 있으면 Esc는 그 창만 닫고, 환경 점검 화면이 떠 있으면 그 화면만 닫는다. 팔레트가 열려 있으면 Esc는 팔레트 입력이 받아 팔레트만 닫는다. 비교 창이 펴져 있으면 그 창만 접는다. 되돌릴 느린 배치가 있으면 그 배치만 취소하고,
   // 정보 패널에 연 파일이 있으면 그 파일만 닫는다. 함수 시점 뷰에서는 구조 뷰로 돌아가고, 구조 뷰에서는 선택을 푼다.
   // 새로고침 단축키는 새로고침 버튼을 누른 것과 같다. 팔레트와 펼친 메뉴, 필터 창, 고정한 선의 말풍선을 닫고 새로고침한다.
+  // 요약 단축키는 정보 패널의 LLM 요약 칸에 보이는 버튼("요약 생성", "다시 시도", "다시 생성")을 누른 것과 같고, 접힌 요약 칸은 편다.
   useEffect(
     () =>
       bind({
@@ -200,6 +202,17 @@ export function App() {
           useAtlas.getState().setPalette(false);
           dismiss(button);
           void reload();
+        },
+        summarize: () => {
+          const node = document.querySelector<HTMLElement>(".info-panel-summary")?.dataset.node;
+          const refresh = node === undefined ? null : asked(useSummaries.getState().states[node]);
+          if (node === undefined || refresh === null) {
+            return;
+          }
+          if (!useAtlas.getState().summaryOpen) {
+            useAtlas.getState().toggleSummary();
+          }
+          useSummaries.getState().make(node, refresh);
         },
       }),
     [],
