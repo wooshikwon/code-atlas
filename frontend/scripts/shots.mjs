@@ -2445,7 +2445,49 @@ async function minimap(t, page) {
       `접힌 폴더 상자 ${fills.drawn.length}개, 채움 ${fills.drawn[0] ?? "없음"}, 폴더 색 ${fills.folder}, 말풍선 "${found?.tip ?? ""}"`,
     );
     await page.screenshot({ path: join(OUT, "s2-minimap-tip.png") });
+    // 미니맵의 접힌 폴더 상자를 누르면 그 폴더가 펼쳐지고, 펼친 폴더 영역의 빈 곳을 누르면 접힌다. 화면은 옮기지 않는다.
+    const spotOf = (kind) =>
+      page.evaluate((name) => {
+        const rect = document.querySelector(`.react-flow__minimap-node.minimap-${name}`).getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      }, kind);
+    const held = await zoomOf(page);
+    const closedAt = await spotOf("package:not(.minimap-open)");
+    await page.mouse.click(closedAt.x, closedAt.y);
+    await page.waitForSelector(`${node(shut)} > .node-region`, { timeout: 30_000 }).catch(() => {});
+    await settle(page);
+    const unfolded = (await count(page, `${node(shut)} > .node-region`)) === 1;
+    const edge = await page.evaluate((id) => {
+      const minis = [...document.querySelectorAll(".react-flow__minimap-node.minimap-package.minimap-open")];
+      const rect = minis.map((n) => n.getBoundingClientRect()).sort((a, b) => a.width * a.height - b.width * b.height)[0];
+      return { x: rect.x + rect.width / 2, y: rect.y + 1 };
+    }, shut);
+    await page.mouse.move(edge.x, edge.y);
+    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+    const aimed = await tipText(page);
+    await page.mouse.click(edge.x, edge.y);
+    await page.waitForSelector(`${node(aimed.slice(0, -1).replaceAll("/", "."))} > .node-package`, { timeout: 10_000 }).catch(() => {});
+    await settle(page);
+    const folded = aimed.endsWith("/") && (await count(page, `${node(aimed.slice(0, -1).replaceAll("/", "."))} > .node-package`)) === 1;
+    t.check(
+      "미니맵의 접힌 폴더 상자를 누르면 그 폴더가 펼쳐지고 펼친 폴더 영역을 누르면 접히며 확대 비율은 그대로다",
+      unfolded && folded && near(await zoomOf(page), held, 0.001),
+      `펼침 ${unfolded}, 누른 영역 "${aimed}", 접힘 ${folded}`,
+    );
+    await openFolder(page, aimed.slice(0, -1).replaceAll("/", "."));
     await openFolder(page, shut);
+    await page.mouse.move(5, 5);
+    await rest(page);
+    const fileAt = await spotOf("module");
+    await page.mouse.move(fileAt.x, fileAt.y);
+    await page.waitForFunction(() => document.querySelector(".tooltip")?.textContent.endsWith(".py") === true, null, { timeout: 3_000 }).catch(() => {});
+    const path = await tipText(page);
+    await page.mouse.click(fileAt.x, fileAt.y);
+    await waitSelected(page, path.slice(0, -3).replaceAll("/", ".")).catch(() => {});
+    t.check("미니맵의 파일 사각형을 누르면 그 파일을 고른다", path.endsWith(".py") && (await selectedOf(page)) === path.slice(0, -3).replaceAll("/", "."), `말풍선 "${path}", 고른 노드 ${await selectedOf(page)}`);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "화면 맞춤" }).click();
+    await settle(page);
   }
   await page.mouse.move(map.x + map.width / 2, map.y - 40);
   await page.waitForSelector(".tooltip", { state: "detached", timeout: 3_000 }).catch(() => {});
@@ -2473,11 +2515,21 @@ async function minimap(t, page) {
 
   const [zoom, before] = [await zoomOf(page), await viewport()];
   const area = await rectOf(page, ".graph-minimap");
-  await page.mouse.click(area.x + area.width * 0.8, area.y + area.height * 0.5);
+  // 말풍선이 뜨지 않는 점이 미니맵의 빈 곳이다.
+  let blank = null;
+  for (const [fx, fy] of [[0.8, 0.5], [0.9, 0.2], [0.9, 0.85], [0.6, 0.15], [0.6, 0.9]]) {
+    await page.mouse.move(area.x + area.width * fx, area.y + area.height * fy);
+    await rest(page);
+    if ((await tipText(page)) === "") {
+      blank = { x: area.x + area.width * fx, y: area.y + area.height * fy };
+      break;
+    }
+  }
+  await page.mouse.click(blank?.x ?? area.x, blank?.y ?? area.y);
   await settle(page);
   t.check(
-    "미니맵을 누르면 확대 비율은 그대로 두고 화면이 그 위치로 옮겨 간다",
-    (await viewport()) !== before && near(await zoomOf(page), zoom, 0.001) && (await selectedOf(page)) === FILE,
+    "미니맵의 빈 곳을 누르면 확대 비율은 그대로 두고 화면이 그 위치로 옮겨 간다",
+    blank !== null && (await viewport()) !== before && near(await zoomOf(page), zoom, 0.001) && (await selectedOf(page)) === FILE,
     `${before} → ${await viewport()}`,
   );
   const moved = await viewport();

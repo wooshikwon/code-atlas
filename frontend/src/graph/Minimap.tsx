@@ -1,9 +1,10 @@
 // 그래프 왼쪽 아래의 미니맵. 전체 그래프의 축소 그림 위에 지금 화면에 보이는 영역을 사각형으로 그리고,
-// 누르거나 끌면 확대 비율을 그대로 둔 채 그 위치로 화면을 옮기고 전체 맞춤 상태를 끈다. 범례처럼 둥근 버튼으로 접고 편다.
-// 커서를 올리면 커서 밑의 폴더나 파일의 경로를 말풍선에 적고 그 사각형의 테두리를 본문 잉크로 그린다. 경로 고정 중에는 강조하는 경로를 그 위에 그린다.
+// 빈 곳을 누르거나 끌면 확대 비율을 그대로 둔 채 그 위치로 화면을 옮기고 전체 맞춤 상태를 끈다. 범례처럼 둥근 버튼으로 접고 편다.
+// 커서를 올리면 커서 밑의 폴더나 파일의 경로를 말풍선에 적고 그 사각형의 테두리를 본문 잉크로 그리며, 그 사각형을 누르면 그래프에서 그 노드를 누른 것처럼 움직인다. 경로 고정 중에는 강조하는 경로를 그 위에 그린다.
 import { MiniMap, useStore, useStoreApi, type Node, type XYPosition } from "@xyflow/react";
 import { useCallback, useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
+import type { AtlasNode } from "../api/types";
 import { useAtlas } from "../state/store";
 import { useFlight } from "./flight";
 import { DIM } from "./flow";
@@ -86,11 +87,36 @@ export function Minimap() {
   const open = useAtlas((s) => s.minimapOpen);
   const path = useAtlas((s) => s.finder.route?.paths[s.finder.pick]);
   const { fly, halt, heading } = useFlight();
+  const select = useAtlas((s) => s.select);
+  const toggleFolder = useAtlas((s) => s.toggleFolder);
   const store = useStoreApi<Node<AtlasNodeData> | PackFlowNode>();
   const [pointed, setPointed] = useState<string | null>(null);
   const className = useCallback(
     (node: Node<AtlasNodeData> | PackFlowNode) => (node.id === pointed ? `${minimapClass(node)} minimap-pointed` : minimapClass(node)),
     [pointed],
+  );
+  /** 화면 좌표의 그래프 좌표를 품은 가장 작은 폴더나 파일, 없으면 `REACH` 안에서 가장 가까운 것과 그 말풍선. */
+  const under = useCallback(
+    (event: { clientX: number; clientY: number }): { id: string; node: AtlasNode; tip: string } | null => {
+      const matrix = document.querySelector<SVGSVGElement>(".graph-minimap svg")?.getScreenCTM() ?? null;
+      if (matrix === null) {
+        return null;
+      }
+      const at = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+      const found = new Map<string, { id: string; node: AtlasNode; tip: string }>();
+      const boxes: [string, Box][] = [];
+      for (const [id, node] of store.getState().nodeLookup) {
+        const drawn = node.internals.userNode;
+        const tip = node.hidden === true ? null : minimapTip(drawn);
+        if (tip !== null && !isPack(drawn)) {
+          found.set(id, { id, node: drawn.data.node, tip });
+          boxes.push([id, { ...node.internals.positionAbsolute, width: node.measured.width ?? 0, height: node.measured.height ?? 0 }]);
+        }
+      }
+      const id = nearest(boxes, at, REACH / matrix.a);
+      return id === null ? null : found.get(id)!;
+    },
+    [store],
   );
   // 미니맵을 누르거나 끌면 화면이 옮겨지므로 그리는 중인 화면 이동을 멈추고 전체 맞춤 상태를 끈다. React Flow의 MiniMap은 pointerdown 처리기를 받지 않는다.
   // MiniMap은 ariaLabel을 SVG의 `<title>`로 그려 브라우저 기본 말풍선이 뜨므로, 비워 두고 접근성 이름을 `aria-label`로 준다.
@@ -106,26 +132,11 @@ export function Minimap() {
       halt();
       useAtlas.setState({ fitted: false });
     };
-    /** 커서의 그래프 좌표를 품은 가장 작은 폴더나 파일을 찾고, 없으면 `REACH` 안에서 가장 가까운 것을 찾는다. 끄는 동안에는 찾지 않는다. */
+    /** 끄는 동안이 아니면 커서 밑의 사각형을 가리키고 그 말풍선을 띄운다. */
     const point = (event: MouseEvent) => {
-      const matrix = svg?.getScreenCTM() ?? null;
-      if (matrix === null || event.buttons !== 0) {
-        leave();
-        return;
-      }
-      const at = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
-      const tips = new Map<string, string>();
-      const boxes: [string, Box][] = [];
-      for (const [id, node] of store.getState().nodeLookup) {
-        const tip = node.hidden === true ? null : minimapTip(node.internals.userNode);
-        if (tip !== null) {
-          tips.set(id, tip);
-          boxes.push([id, { ...node.internals.positionAbsolute, width: node.measured.width ?? 0, height: node.measured.height ?? 0 }]);
-        }
-      }
-      const id = nearest(boxes, at, REACH / matrix.a);
-      setPointed(id);
-      tooltip.show(id === null ? null : tips.get(id)!, event.clientX, event.clientY);
+      const found = event.buttons === 0 ? under(event) : null;
+      setPointed(found?.id ?? null);
+      tooltip.show(found?.tip ?? null, event.clientX, event.clientY);
     };
     svg?.setAttribute("aria-label", "미니맵");
     element?.addEventListener("pointerdown", release);
@@ -136,14 +147,22 @@ export function Minimap() {
       element?.removeEventListener("mousemove", point);
       element?.removeEventListener("mouseleave", leave);
     };
-  }, [open, halt, store]);
+  }, [open, halt, under]);
   if (!open) {
     return null;
   }
-  /** 누른 그래프 좌표가 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역의 가운데에 오도록 옮긴다. */
+  /**
+   * 누른 곳이 사각형이면 그래프에서 그 노드를 누른 것처럼 폴더는 펼치거나 접고 그 밖의 노드는 고른다.
+   * 빈 곳이면 누른 그래프 좌표가 정보 패널과 왼쪽 아래 칸이 가리지 않는 영역의 가운데에 오도록 옮긴다.
+   */
   const onClick = (event: ReactMouseEvent, at: XYPosition) => {
     const root = (event.target as Element).closest(".graph");
     if (root === null) {
+      return;
+    }
+    const found = under(event);
+    if (found !== null) {
+      (found.node.kind === "package" ? toggleFolder : select)(found.node.id);
       return;
     }
     const { clear } = stageOf(root);
