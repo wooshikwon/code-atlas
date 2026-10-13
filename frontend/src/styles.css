@@ -2389,9 +2389,10 @@ button.line-cell:focus-visible {
   box-shadow: 0 4px 18px color-mix(in srgb, var(--ink) 12%, transparent);
 }
 
+/* 머리 줄과 구역 머리는 아래 구역의 위쪽 테두리까지 더해 파일트리 칸의 머리 줄(32px), 검색 칸(--control-md)과 같은 높이를 쓴다. */
 .info-panel-head {
   flex: none;
-  padding: var(--space-4) var(--space-5) 7px;
+  padding: 0 var(--space-5);
   cursor: move;
   user-select: none;
   touch-action: none;
@@ -2413,7 +2414,8 @@ button.line-cell:focus-visible {
 
 .info-panel-title {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  height: 31px;
   gap: var(--space-3);
 }
 
@@ -2423,7 +2425,8 @@ button.line-cell:focus-visible {
   align-items: baseline;
   min-width: 0;
   margin-right: var(--space-1);
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -2472,16 +2475,20 @@ button.line-cell:focus-visible {
 /* 구역 머리. 누르면 구역을 접거나 편다. 접힌 구역은 이름 옆에 한 줄 요약을 적고 넘치는 글은 줄인다. */
 .info-section-head {
   display: flex;
-  align-items: baseline;
+  flex: none;
+  align-items: center;
   gap: var(--space-3);
   min-width: 0;
   max-width: 100%;
+  height: calc(var(--control-md) - 1px);
   padding: 0;
+  font-size: var(--text-md);
   text-align: left;
 }
 
 .info-section-head .info-panel-label {
   flex: none;
+  font-size: inherit;
 }
 
 /* 구역 머리는 화살표를 구역 이름 뒤에 그려 구역 이름과 본문이 같은 안쪽 여백에서 시작한다. */
@@ -2527,8 +2534,12 @@ button.line-cell:focus-visible {
   flex: 0 1 auto;
   flex-direction: column;
   align-items: flex-start;
-  padding: var(--space-4) var(--space-5);
+  padding: 0 var(--space-5) var(--space-4);
   border-top: 1px solid var(--line);
+}
+
+.info-panel-facts[data-folded] {
+  padding-bottom: 0;
 }
 
 .info-panel-facts > * {
@@ -2540,7 +2551,7 @@ button.line-cell:focus-visible {
   align-self: stretch;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: var(--space-2) var(--space-5);
-  margin: var(--space-2) 0 0;
+  margin: 0;
   line-height: 1.5;
 }
 
@@ -2581,7 +2592,7 @@ button.line-cell:focus-visible {
 .info-panel-summary {
   flex: 1 1 0;
   min-height: 0;
-  padding: var(--space-4) var(--space-5);
+  padding: 0 var(--space-5) var(--space-4);
   border-top: 1px solid var(--line);
   line-height: 1.6;
   overflow-y: auto;
@@ -2617,6 +2628,7 @@ button.line-cell:focus-visible {
 .info-panel-summary[data-folded] {
   flex: none;
   max-height: none;
+  padding-bottom: 0;
   line-height: inherit;
   overflow: hidden;
 }
@@ -3823,7 +3835,7 @@ ol.summary-list {
 .info-panel-ends {
   display: flex;
   gap: var(--space-3);
-  margin-top: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 
