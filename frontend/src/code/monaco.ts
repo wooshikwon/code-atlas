@@ -25,7 +25,8 @@ for (const theme of ["light", "dark"] as const) {
   monaco.editor.defineTheme(monacoTheme(theme), {
     base: theme === "light" ? "vs" : "vs-dark",
     inherit: true,
-    rules: [],
+    // SQL 문자열은 Monaco 기본 테마가 순색 빨강(FF0000)으로 칠하므로 다른 언어의 문자열 색으로 맞춘다.
+    rules: [{ token: "string.sql", foreground: theme === "light" ? "A31515" : "CE9178" }],
     colors: { "editor.background": c.surface, "editorLineNumber.foreground": c.muted },
   });
 }
