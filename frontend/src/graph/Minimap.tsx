@@ -1,21 +1,25 @@
 // 그래프 왼쪽 아래의 미니맵. 전체 그래프의 축소 그림 위에 지금 화면에 보이는 영역을 사각형으로 그리고,
 // 누르거나 끌면 확대 비율을 그대로 둔 채 그 위치로 화면을 옮기고 전체 맞춤 상태를 끈다. 범례처럼 둥근 버튼으로 접고 편다.
-// 경로 고정 중에는 강조하는 경로를 그 위에 그린다.
-import { MiniMap, useStore, type Node, type XYPosition } from "@xyflow/react";
-import { useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
+// 커서를 올리면 커서 밑의 폴더나 파일의 경로를 말풍선에 적고 그 사각형의 테두리를 본문 잉크로 그린다. 경로 고정 중에는 강조하는 경로를 그 위에 그린다.
+import { MiniMap, useStore, useStoreApi, type Node, type XYPosition } from "@xyflow/react";
+import { useCallback, useEffect, useLayoutEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { useAtlas } from "../state/store";
 import { useFlight } from "./flight";
 import { DIM } from "./flow";
+import { titleOf, type Box } from "./layout";
 import type { AtlasNodeData } from "./nodes/common";
 import { isPack, type PackFlowNode } from "./nodes/PackNode";
-import { stageOf } from "./viewport";
+import { tooltip } from "./Tooltip";
+import { nearest, stageOf } from "./viewport";
 
 const SIZE = { width: 220, height: 140 };
+/** 커서에서 이 거리(화면 px) 안의 사각형까지 커서 밑의 사각형으로 본다. */
+const REACH = 4;
 
 /**
  * 미니맵에 그리는 노드의 클래스. 노드의 바탕 요소만 그린다. 펼친 폴더 영역과 펼친 파일 상자는 테두리와 옅은 바탕으로 그린다.
- * 진하기는 구조 뷰의 불투명도를 세 단계(1, 1 미만, 흐린 단계 이하)로 따르고 고른 노드는 본문 잉크로 그린다. 시점 비교에서 삭제된 노드는 골라도 흐린 단계다. 손잡이는 손잡이를 단 상자의 진하기를 따르는 노드 하나로 그린다.
+ * 접힌 폴더 상자는 폴더 색으로 그린다. 진하기는 구조 뷰의 불투명도를 세 단계(1, 1 미만, 흐린 단계 이하)로 따르고 고른 노드는 본문 잉크로 그린다. 시점 비교에서 삭제된 노드는 골라도 흐린 단계다. 손잡이는 손잡이를 단 상자의 진하기를 따르는 노드 하나로 그린다.
  */
 export function minimapClass(node: Node<AtlasNodeData> | PackFlowNode): string {
   const opacity = Number(node.style?.opacity ?? 1);
@@ -29,6 +33,21 @@ export function minimapClass(node: Node<AtlasNodeData> | PackFlowNode): string {
   }
   const tone = selected && compare?.gone !== true ? "selected" : shade;
   return `minimap-${atlas.kind}${expanded ? " minimap-open" : ""} minimap-${tone}`;
+}
+
+/**
+ * 미니맵에서 커서를 올린 노드의 말풍선. 그래프 뷰는 폴더와 파일의 소스 루트 기준 경로를, 리니지 뷰는 노드의 이름표를 적는다.
+ * 그 밖의 노드는 null이어서 그 노드를 품은 파일의 경로가 뜬다.
+ */
+export function minimapTip(node: Node<AtlasNodeData> | PackFlowNode): string | null {
+  if (isPack(node) || node.data.part === "face") {
+    return null;
+  }
+  if (typeof node.data.label === "string") {
+    return node.data.label;
+  }
+  const atlas = node.data.node;
+  return atlas.kind === "package" || atlas.kind === "module" ? titleOf(atlas) : null;
 }
 
 /**
@@ -67,18 +86,57 @@ export function Minimap() {
   const open = useAtlas((s) => s.minimapOpen);
   const path = useAtlas((s) => s.finder.route?.paths[s.finder.pick]);
   const { fly, halt, heading } = useFlight();
+  const store = useStoreApi<Node<AtlasNodeData> | PackFlowNode>();
+  const [pointed, setPointed] = useState<string | null>(null);
+  const className = useCallback(
+    (node: Node<AtlasNodeData> | PackFlowNode) => (node.id === pointed ? `${minimapClass(node)} minimap-pointed` : minimapClass(node)),
+    [pointed],
+  );
   // 미니맵을 누르거나 끌면 화면이 옮겨지므로 그리는 중인 화면 이동을 멈추고 전체 맞춤 상태를 끈다. React Flow의 MiniMap은 pointerdown 처리기를 받지 않는다.
   // MiniMap은 ariaLabel을 SVG의 `<title>`로 그려 브라우저 기본 말풍선이 뜨므로, 비워 두고 접근성 이름을 `aria-label`로 준다.
   useEffect(() => {
-    const element = open ? document.querySelector(".graph-minimap") : null;
+    const element = open ? document.querySelector<HTMLElement>(".graph-minimap") : null;
+    const svg = element?.querySelector("svg") ?? null;
+    const leave = () => {
+      setPointed(null);
+      tooltip.hide();
+    };
     const release = () => {
+      leave();
       halt();
       useAtlas.setState({ fitted: false });
     };
-    element?.querySelector("svg")?.setAttribute("aria-label", "미니맵");
+    /** 커서의 그래프 좌표를 품은 가장 작은 폴더나 파일을 찾고, 없으면 `REACH` 안에서 가장 가까운 것을 찾는다. 끄는 동안에는 찾지 않는다. */
+    const point = (event: MouseEvent) => {
+      const matrix = svg?.getScreenCTM() ?? null;
+      if (matrix === null || event.buttons !== 0) {
+        leave();
+        return;
+      }
+      const at = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+      const tips = new Map<string, string>();
+      const boxes: [string, Box][] = [];
+      for (const [id, node] of store.getState().nodeLookup) {
+        const tip = node.hidden === true ? null : minimapTip(node.internals.userNode);
+        if (tip !== null) {
+          tips.set(id, tip);
+          boxes.push([id, { ...node.internals.positionAbsolute, width: node.measured.width ?? 0, height: node.measured.height ?? 0 }]);
+        }
+      }
+      const id = nearest(boxes, at, REACH / matrix.a);
+      setPointed(id);
+      tooltip.show(id === null ? null : tips.get(id)!, event.clientX, event.clientY);
+    };
+    svg?.setAttribute("aria-label", "미니맵");
     element?.addEventListener("pointerdown", release);
-    return () => element?.removeEventListener("pointerdown", release);
-  }, [open, halt]);
+    element?.addEventListener("mousemove", point);
+    element?.addEventListener("mouseleave", leave);
+    return () => {
+      element?.removeEventListener("pointerdown", release);
+      element?.removeEventListener("mousemove", point);
+      element?.removeEventListener("mouseleave", leave);
+    };
+  }, [open, halt, store]);
   if (!open) {
     return null;
   }
@@ -97,7 +155,7 @@ export function Minimap() {
       <MiniMap<Node<AtlasNodeData> | PackFlowNode>
         className="graph-minimap"
         style={SIZE}
-        nodeClassName={minimapClass}
+        nodeClassName={className}
         nodeBorderRadius={2}
         nodeStrokeWidth={1}
         pannable

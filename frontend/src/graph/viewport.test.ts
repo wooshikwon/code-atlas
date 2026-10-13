@@ -234,4 +234,11 @@ describe("nearest", () => {
     expect(nearest(boxes, { x: 230, y: 400 })).toBe("right");
     expect(nearest([], { x: 0, y: 0 })).toBeNull();
   });
+
+  it("reach를 주면 변까지의 거리가 그 값을 넘는 상자를 고르지 않는다", () => {
+    const boxes: [string, ReturnType<typeof box>][] = [["left", box(0, 0, 100, 100)], ["right", box(300, 0, 100, 100)]];
+    expect(nearest(boxes, { x: 120, y: 50 }, 20)).toBe("left");
+    expect(nearest(boxes, { x: 121, y: 50 }, 20)).toBeNull();
+    expect(nearest(boxes, { x: 350, y: 50 }, 0)).toBe("right");
+  });
 });

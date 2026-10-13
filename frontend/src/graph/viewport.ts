@@ -107,13 +107,17 @@ export function anchorOn(before: Point, after: Point, view: View): View {
 
 /**
  * 상자 boxes 가운데 점 point에 가장 가까운 상자의 id. 점을 품은 상자는 거리가 0이고, 거리가 같으면 넓이가 작은 상자를 고른다.
- * 상자가 없으면 null이다. 다시 분석한 그래프의 배치가 올 때 화면 가운데의 상자를 찾아 그 상자를 화면의 같은 좌표에 둔다(`anchorOn`).
+ * 거리가 reach를 넘는 상자는 고르지 않는다. 고를 상자가 없으면 null이다. 다시 분석한 그래프의 배치가 올 때 화면 가운데의 상자를 찾아
+ * 그 상자를 화면의 같은 좌표에 두고(`anchorOn`), 미니맵이 커서 밑의 폴더와 파일을 찾는다.
  */
-export function nearest(boxes: Iterable<[string, Box]>, point: Point): string | null {
+export function nearest(boxes: Iterable<[string, Box]>, point: Point, reach = Infinity): string | null {
   let best: { id: string; far: number; size: number } | null = null;
   for (const [id, box] of boxes) {
     const far = Math.hypot(Math.max(box.x - point.x, 0, point.x - box.x - box.width), Math.max(box.y - point.y, 0, point.y - box.y - box.height));
     const size = box.width * box.height;
+    if (far > reach) {
+      continue;
+    }
     if (best === null || far < best.far || (far === best.far && size < best.size)) {
       best = { id, far, size };
     }

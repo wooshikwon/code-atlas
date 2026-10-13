@@ -1,5 +1,5 @@
 // 앱의 말풍선. 문서 최상위의 고정 위치 요소 하나를 마우스 옆으로 옮기고, App이 한 번 그린다.
-// 그래프의 노드는 그래프 뷰가 `tooltip`으로 글을 띄우고, 선은 세 칸 말풍선(`LineBubble.tsx`)을 따로 띄운다. 그 밖의 요소는 `data-tip`·`data-full`에 글을 담고(`tips.ts`의 `tipOf`),
+// 그래프의 노드는 그래프 뷰가, 미니맵의 폴더와 파일은 미니맵이 `tooltip`으로 글을 띄우고, 선은 세 칸 말풍선(`LineBubble.tsx`)을 따로 띄운다. 그 밖의 요소는 `data-tip`·`data-full`에 글을 담고(`tips.ts`의 `tipOf`),
 // 마우스를 올리거나 키보드 초점을 받았을 때 이 컴포넌트가 띄운다.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -34,8 +34,8 @@ export const tooltip: TooltipHandle = {
   hide: () => drawn?.hide(),
 };
 
-/** 그래프의 노드와 선 위인지. 그 위의 말풍선은 그래프 뷰가 띄운다. */
-const inGraph = (target: EventTarget | null) => target instanceof Element && target.closest(".react-flow__viewport") !== null;
+/** 그래프의 노드와 선, 미니맵 위인지. 그 위의 말풍선은 그래프 뷰와 미니맵이 띄운다. */
+const inGraph = (target: EventTarget | null) => target instanceof Element && target.closest(".react-flow__viewport, .graph-minimap") !== null;
 
 export function Tooltip() {
   const element = useRef<HTMLDivElement | null>(null);
@@ -86,7 +86,7 @@ export function Tooltip() {
       held = false;
       handle.hide();
     };
-    /** 그래프의 노드와 선을 누를 때의 말풍선은 그래프 뷰가 클릭을 처리하며 감춘다. */
+    /** 그래프의 노드와 선, 미니맵을 누를 때의 말풍선은 그래프 뷰와 미니맵이 클릭을 처리하며 감춘다. */
     const press = (event: MouseEvent) => !inGraph(event.target) && hide();
     document.addEventListener("mouseover", over);
     document.addEventListener("mousemove", move);

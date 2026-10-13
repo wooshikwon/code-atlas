@@ -2058,8 +2058,8 @@ ul {
   stroke-width: 1.5;
 }
 
-/* 미니맵. 노드는 무채색 진하기 세 단계와 고른 노드의 본문 잉크로만 그린다. 화면에 보이는 영역 밖을 화면 바탕색으로 덮고
-   영역의 테두리를 본문 잉크로 그린다. */
+/* 미니맵. 노드는 진하기 세 단계와 고른 노드의 본문 잉크로 그리고, 접힌 폴더 상자만 폴더 색을 쓴다. 화면에 보이는 영역 밖을 화면 바탕색으로 덮고
+   영역의 테두리를 본문 잉크로 그린다. 커서를 올린 폴더나 파일은 테두리를 본문 잉크로 그린다. */
 .graph-minimap.react-flow__panel {
   position: static;
   margin: 0;
@@ -2093,6 +2093,18 @@ ul {
   fill: color-mix(in srgb, var(--ink) 18%, var(--surface));
 }
 
+.react-flow__minimap-node.minimap-package {
+  fill: var(--folder);
+}
+
+.react-flow__minimap-node.minimap-package.minimap-half {
+  fill: color-mix(in srgb, var(--folder) 64%, var(--surface));
+}
+
+.react-flow__minimap-node.minimap-package.minimap-dim {
+  fill: color-mix(in srgb, var(--folder) 33%, var(--surface));
+}
+
 .react-flow__minimap-node.minimap-selected {
   fill: var(--ink);
 }
@@ -2107,7 +2119,8 @@ ul {
   stroke: var(--folder-line);
 }
 
-.react-flow__minimap-node.minimap-open.minimap-selected {
+.react-flow__minimap-node.minimap-open.minimap-selected,
+.react-flow__minimap-node.minimap-pointed {
   stroke: var(--ink);
 }
 

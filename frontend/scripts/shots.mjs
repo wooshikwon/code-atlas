@@ -2394,6 +2394,67 @@ async function minimap(t, page) {
   const { panel } = await stageOf(page);
   t.check("미니맵, 버튼 줄, 정보 패널이 서로 겹치지 않는다", apart(map, buttons) && apart(map, panel), `미니맵 ${rectText(map)}, 버튼 줄 ${rectText(buttons)}`);
 
+  /** 미니맵에서 종류 kind의 첫 사각형에 커서를 올리고 말풍선의 글, 테두리를 본문 잉크로 그린 사각형의 수, 커서 밑의 사각형이 그 사각형인지를 읽는다. */
+  const pointAt = async (kind) => {
+    const at = await page.evaluate((name) => {
+      const rect = document.querySelector(`.react-flow__minimap-node.minimap-${name}`)?.getBoundingClientRect();
+      return rect === undefined ? null : { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    }, kind);
+    if (at === null) {
+      return null;
+    }
+    await page.mouse.move(at.x, at.y);
+    await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+    const found = await page.evaluate(
+      ({ x, y }) => ({
+        pointed: document.querySelectorAll(".react-flow__minimap-node.minimap-pointed").length,
+        under: document.elementFromPoint(x, y)?.classList.contains("minimap-pointed") ?? false,
+        titles: [...document.querySelectorAll(".react-flow__node[data-id]")].map((n) => n.dataset.id.replaceAll(".", "/")),
+      }),
+      at,
+    );
+    return { ...found, tip: await tipText(page) };
+  };
+  for (const [kind, name, end] of [["package.minimap-open", "펼친 폴더", "/"], ["module", "파일", ".py"]]) {
+    const found = await pointAt(kind);
+    t.check(
+      `미니맵의 ${name} 사각형에 커서를 올리면 말풍선에 그 경로를 적고 그 사각형의 테두리를 본문 잉크로 그린다`,
+      found !== null && found.tip.endsWith(end) && found.titles.includes(found.tip.slice(0, -end.length)) && found.pointed === 1 && found.under,
+      found === null ? "사각형이 없다" : `말풍선 "${found.tip}", 테두리를 그린 사각형 ${found.pointed}개`,
+    );
+  }
+  // load가 펼쳐 둔 폴더 하나를 파일트리의 폴더 행으로 접어 접힌 폴더 상자의 색과 말풍선을 보고 다시 펼친다.
+  const shut = await page.evaluate(() => document.querySelector(".react-flow__node > .node-region")?.closest(".react-flow__node").dataset.id ?? null);
+  if (shut === null) {
+    t.skip("미니맵이 접힌 폴더 상자를 폴더 색으로 그리고 커서를 올리면 말풍선에 그 폴더의 경로를 적는다", "화면에 펼친 폴더가 없다");
+  } else {
+    await page.click(`.tree-row.tree-dir[data-node="${shut}"]`);
+    await page.waitForSelector(`${node(shut)} > .node-package`, { timeout: 30_000 });
+    await settle(page);
+    const fills = await page.evaluate(() => {
+      const probe = document.querySelector(".graph-minimap").appendChild(document.createElement("i"));
+      probe.style.color = "var(--folder)";
+      const folder = getComputedStyle(probe).color;
+      probe.remove();
+      return { folder, drawn: [...document.querySelectorAll(".react-flow__minimap-node.minimap-package:not(.minimap-open)")].map((n) => getComputedStyle(n).fill) };
+    });
+    const found = await pointAt("package:not(.minimap-open)");
+    t.check(
+      "미니맵이 접힌 폴더 상자를 폴더 색으로 그리고 커서를 올리면 말풍선에 그 폴더의 경로를 적는다",
+      fills.drawn.length > 0 && fills.drawn.every((fill) => fill === fills.folder) && found !== null && found.tip.endsWith("/") && found.titles.includes(found.tip.slice(0, -1)) && found.pointed === 1,
+      `접힌 폴더 상자 ${fills.drawn.length}개, 채움 ${fills.drawn[0] ?? "없음"}, 폴더 색 ${fills.folder}, 말풍선 "${found?.tip ?? ""}"`,
+    );
+    await page.screenshot({ path: join(OUT, "s2-minimap-tip.png") });
+    await openFolder(page, shut);
+  }
+  await page.mouse.move(map.x + map.width / 2, map.y - 40);
+  await page.waitForSelector(".tooltip", { state: "detached", timeout: 3_000 }).catch(() => {});
+  t.check(
+    "커서가 미니맵을 벗어나면 말풍선과 테두리가 사라진다",
+    (await tipText(page)) === "" && (await count(page, ".react-flow__minimap-node.minimap-pointed")) === 0,
+    `말풍선 "${await tipText(page)}"`,
+  );
+
   await pick(page, FILE);
   const tones = await page.evaluate(() => {
     const of = (name) => document.querySelectorAll(`.react-flow__minimap-node.minimap-${name}`).length;
@@ -2446,6 +2507,16 @@ async function minimap(t, page) {
     (await count(page, ".graph-minimap")) === 1 && (await drawn()) === (await count(page, ".react-flow__node > .node-body.node-call")),
     `미니맵 노드 ${await drawn()}개, 함수 노드 ${await count(page, ".react-flow__node > .node-body.node-call")}개`,
   );
+  const spot = await page.evaluate(() => {
+    const rect = [...document.querySelectorAll(".react-flow__minimap-node")].find((n) => getComputedStyle(n).display !== "none").getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  });
+  await page.mouse.move(spot.x, spot.y);
+  await page.waitForSelector(".tooltip", { timeout: 3_000 }).catch(() => {});
+  const called = await tipText(page);
+  const names = await page.evaluate(() => [...document.querySelectorAll(".node-call .node-label")].map((n) => n.textContent));
+  t.check("함수 시점 뷰의 미니맵 사각형에 커서를 올리면 말풍선에 그 함수의 이름표를 적는다", called !== "" && names.some((name) => name.includes(called)), `말풍선 "${called}"`);
+  await page.mouse.move(5, 5);
 }
 
 async function region(t, page) {
