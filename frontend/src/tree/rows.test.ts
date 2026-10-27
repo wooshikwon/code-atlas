@@ -422,11 +422,17 @@ describe("시점 비교", () => {
     expect(row("src/empty.py").lines).toBeNull();
   });
 
-  it("폴더 행의 수는 아래 파일의 합이고 패키지 노드가 없는 폴더도 같다", () => {
-    expect(row("src/parser").lines).toEqual({ added: 3, deleted: 1 });
-    expect(row("src/old").lines).toEqual({ added: 0, deleted: 9 });
-    expect(row("src").lines).toEqual({ added: 8, deleted: 18 });
-    expect(row("tests", { showTests: true }).lines).toEqual({ added: 3, deleted: 0 });
+  it("접은 폴더 행의 수는 아래 파일의 합이다", () => {
+    const folded = { collapsed: new Set(["parser", "old", "tests"]), showTests: true };
+    expect(row("src/parser", folded).lines).toEqual({ added: 3, deleted: 1 });
+    expect(row("src/old", folded).lines).toEqual({ added: 0, deleted: 9 });
+    expect(row("tests", folded).lines).toEqual({ added: 3, deleted: 0 });
+  });
+
+  it("펼친 폴더와 목록을 편 파일의 행에는 줄 수를 적지 않는다", () => {
+    expect(row("src").lines).toBeNull();
+    expect(row("src/parser").lines).toBeNull();
+    expect(row("src/arbiter.py", { selected: "arbiter" }).lines).toBeNull();
   });
 
   it("정의 행에 그 정의의 줄 수를 적는다", () => {

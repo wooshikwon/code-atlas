@@ -45,7 +45,7 @@ export interface Row {
   selected: boolean;
   /** 마지막 커밋 뒤의 변경 상태. 접은 폴더는 안에 바뀐 파일이 있으면 수정이다. 시점 비교가 켜져 있으면 null이다. */
   change: Change | null;
-  /** 시점 비교의 두 시점 사이에 추가되고 삭제된 줄 수. 폴더는 아래 파일의 합이다. 바뀐 줄이 없거나 비교가 꺼져 있으면 null이다. */
+  /** 시점 비교의 두 시점 사이에 추가되고 삭제된 줄 수. 폴더는 아래 파일의 합이다. 바뀐 줄이 없거나 비교가 꺼져 있거나 아래 행을 펼쳤으면 null이다. */
   lines: Lines | null;
   /** 대상 시점에 없는 파일·폴더·정의다 */
   gone: boolean;
@@ -209,7 +209,7 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
         const change: Change | null = !expanded && within(entry.path) ? "modified" : null;
         const selected = entry.node !== null && entry.node === state.selected;
         const icon = expanded ? "folder-open" : "folder";
-        const marks = { change, lines: folderLines(entry), gone: entry.node !== null && off.has(entry.node), from: null };
+        const marks = { change, lines: expanded ? null : folderLines(entry), gone: entry.node !== null && off.has(entry.node), from: null };
         out.push({ ...base, kind: "dir", icon, label: `${entry.name}/`, node: entry.node, file: null, expanded, selected, ...marks });
         if (expanded) {
           walk(entry.children ?? [], level + 1);
@@ -224,7 +224,7 @@ export function rows(tree: Tree, graph: Graph, state: TreeState): Row[] {
       const found = files.get(entry.path);
       const marks = {
         change: changed.get(entry.path) ?? null,
-        lines: found === undefined ? null : lined(found),
+        lines: found === undefined || expanded === true ? null : lined(found),
         gone: found?.status === "deleted",
         from: renamed(entry.path),
       };

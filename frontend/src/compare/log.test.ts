@@ -20,8 +20,8 @@ describe("rowsOf", () => {
     // x는 다른 브랜치의 끝이고 지금 커밋 c보다 새 커밋이다.
     const rows = rowsOf(history([commit("x", ["a"]), commit("c", ["a"]), commit("a", [])], "c"));
     expect(rows.map((row) => row.lane)).toEqual([0, 1, 0, 0]);
-    expect(rows[1].links).toEqual([{ to: "c", from: 0, into: 0, loose: true }]);
-    expect(rows[2].links).toEqual([
+    expect(rows[1].links).toMatchObject([{ to: "c", from: 0, into: 0, loose: true }]);
+    expect(rows[2].links).toMatchObject([
       { to: "c", from: 0, into: 0, loose: true },
       { to: "a", from: 1, into: 1, loose: false },
     ]);
@@ -39,6 +39,36 @@ describe("rowsOf", () => {
     expect(rows.slice(1, at + 1).every((row) => row.links.filter((link) => link.loose).length === 1)).toBe(true);
     expect(rows.slice(at + 1).some((row) => row.links.some((link) => link.loose))).toBe(false);
     expect(rows[at].links.find((link) => link.loose)?.into).toBe(rows[at].lane);
+  });
+});
+
+describe("선의 말풍선", () => {
+  // main은 m2에서 feature를 합쳤다. feature의 끝 f2에는 이름표가 있고, 지운 브랜치의 커밋 d는 m1에서 합쳤다.
+  const commits = [
+    commit("m2", ["m1", "f2"], [{ name: "main", kind: "branch" }, { name: "v1", kind: "tag" }]),
+    commit("f2", ["f1"], [{ name: "origin/feature", kind: "remote" }]),
+    commit("f1", ["m0"]),
+    commit("m1", ["m0", "d"]),
+    commit("d", ["m0"]),
+    commit("m0", []),
+  ];
+  const rows = rowsOf(history(commits, "m2"));
+  const tips = (id: string) => rows.find((row) => row.id === id)!.links.map((link) => [link.to, link.tip]);
+
+  it("첫째 부모로 내려가는 선은 자식 커밋의 브랜치이고 이름표가 없는 커밋은 자식에게서 이름을 받는다", () => {
+    expect(tips("f1")).toContainEqual(["f1", "브랜치 origin/feature"]);
+    expect(tips("m1")).toContainEqual(["m1", "브랜치 main"]);
+    expect(tips("m0")).toContainEqual(["m0", "브랜치 origin/feature"]);
+  });
+
+  it("둘째 부모로 내려가는 선은 합친 선이고 이름표가 없는 쪽은 합친 브랜치의 이름을 빌린다", () => {
+    expect(tips("f2")).toEqual([["m1", "브랜치 main"], ["f2", "합친 선 · 브랜치 origin/feature → main"]]);
+    expect(tips("d")).toContainEqual(["d", "합친 선 · main에 합친 브랜치 → main"]);
+    expect(tips("m0")).toContainEqual(["m0", "main에 합친 브랜치"]);
+  });
+
+  it("작업 중인 상태에서 내려가는 선은 지금 커밋으로 가는 선이다", () => {
+    expect(tips("m2")).toEqual([["m2", "작업 중인 상태에서 지금 커밋으로 내려가는 선"]]);
   });
 });
 

@@ -1,5 +1,5 @@
 // 비교 창의 커밋 그래프. 줄은 높이가 같으므로 스크롤 위치에서 보이는 줄의 범위를 구해 그 줄만 그리고, 아래 끝에 가까워지면 다음 묶음을 받는다.
-// 세로 줄과 잇는 선, 커밋의 점은 SVG로 그리고 줄의 글은 그 옆에 적는다. 줄을 누르거나 키보드로 옮겨 Enter나 Space로 고른다.
+// 세로 줄과 잇는 선, 커밋의 점은 SVG로 그리고 줄의 글은 그 옆에 적는다. 선에 마우스를 올리면 그 선이 속한 브랜치를 말풍선에 적는다. 줄을 누르거나 키보드로 옮겨 Enter나 Space로 고른다.
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { WORKTREE } from "../api/types";
 import { useChanges } from "../state/changes";
@@ -151,9 +151,15 @@ export function Rows({ rows, gutter }: { rows: Row[]; gutter: number }) {
         <svg className="compare-lanes" width={gutter} height={(end - start) * ROW} style={{ top: start * ROW }} aria-hidden>
           <g transform={`translate(0 ${-start * ROW})`}>
             {drawn.flatMap(({ row, index }) =>
-              row.links.map((link) => (
-                <path key={`${index}:${link.from}:${link.into}:${link.to}`} className="compare-lane" data-loose={link.loose ? "" : undefined} d={linkPath(link, index)} />
-              )),
+              row.links.map((link) => {
+                const d = linkPath(link, index);
+                return (
+                  <g key={`${index}:${link.from}:${link.into}:${link.to}`} className="compare-link">
+                    <path className="compare-lane" data-loose={link.loose ? "" : undefined} d={d} />
+                    <path className="compare-lane-hit" data-tip={link.tip} d={d} />
+                  </g>
+                );
+              }),
             )}
             {drawn.map(({ row, index, mark, picked }) => {
               const [cx, cy] = [laneX(row.lane), rowY(index)];

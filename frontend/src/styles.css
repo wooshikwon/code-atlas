@@ -3627,11 +3627,23 @@ ol.summary-list {
   position: relative;
 }
 
-/* 세로 줄과 잇는 선, 커밋의 점. 색은 muted 잉크와 본문 잉크만 쓴다. */
+/* 세로 줄과 잇는 선, 커밋의 점. 색은 muted 잉크와 본문 잉크만 쓴다. 줄 위에 그려 선의 넓은 투명 획만 마우스를 받고, 그 밖은 아래 줄이 받는다. */
 .compare-lanes {
   position: absolute;
+  z-index: 1;
   left: 0;
   pointer-events: none;
+}
+
+.compare-lane-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 8;
+  pointer-events: stroke;
+}
+
+.compare-link:hover .compare-lane {
+  stroke: var(--ink);
 }
 
 .compare-lane {

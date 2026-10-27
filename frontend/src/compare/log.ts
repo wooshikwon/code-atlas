@@ -10,9 +10,65 @@ const SHORT = 7;
 /** 보이는 범위의 위와 아래에 더 그리는 줄 수이자, 아래 끝에서 이 수 안으로 들어오면 다음 묶음을 받는 줄 수 */
 export const AHEAD = 5;
 
-/** 윗줄에서 이 줄로 내려오는 선. loose는 작업 중인 상태의 줄에서 지금 커밋으로 내려가는 선이고 점선으로 그린다. */
+/** 윗줄에서 이 줄로 내려오는 선. loose는 작업 중인 상태의 줄에서 지금 커밋으로 내려가는 선이고 점선으로 그린다. tip은 선의 말풍선 글이다. */
 export interface RowLink extends Link {
   loose: boolean;
+  tip: string;
+}
+
+/** 선이 속한 브랜치의 이름. merged는 이름표가 없어 그 커밋을 합친 브랜치의 이름을 빌렸는지다. */
+interface Branch {
+  name: string;
+  merged: boolean;
+}
+
+/** 커밋을 가리키는 브랜치 이름표. 로컬 브랜치, 원격 브랜치 순서로 찾고 태그는 쓰지 않는다. */
+function ownBranch(commit: Commit): Branch | null {
+  const ref = commit.refs.find((each) => each.kind === "branch") ?? commit.refs.find((each) => each.kind === "remote");
+  return ref === undefined ? null : { name: ref.name, merged: false };
+}
+
+function branchText(branch: Branch | null): string {
+  if (branch === null) {
+    return "이름표가 없는 브랜치";
+  }
+  return branch.merged ? `${branch.name}에 합친 브랜치` : `브랜치 ${branch.name}`;
+}
+
+/**
+ * 커밋마다 속한 브랜치. 브랜치 이름표가 있으면 그 이름이고, 없으면 첫째 부모로 이 커밋을 가리키는 자식의 브랜치를 받는다. 그런 자식이 여럿이면
+ * 이 커밋과 같은 세로 줄에 놓인 자식을 고른다. 그런 자식이 없고 둘째 부모로 가리키는 자식만 있으면 그 자식의 브랜치에 합친 브랜치다.
+ * 목록에 없는 부모도 목록 안의 자식에서 받은 이름을 담는다.
+ */
+function branchesOf(laid: { hash: string; lane: number }[], commits: Map<string, Commit>): Map<string, Branch | null> {
+  const firsts = new Map<string, { lane: number; branch: Branch }[]>();
+  const merges = new Map<string, Branch>();
+  const names = new Map<string, Branch | null>();
+  const inherited = (hash: string, lane: number | null): Branch | null => {
+    const children = firsts.get(hash) ?? [];
+    return (children.find((child) => child.lane === lane) ?? children[0])?.branch ?? merges.get(hash) ?? null;
+  };
+  for (const { hash, lane } of laid) {
+    const commit = commits.get(hash)!;
+    const branch = ownBranch(commit) ?? inherited(hash, lane);
+    names.set(hash, branch);
+    if (branch === null) {
+      continue;
+    }
+    commit.parents.forEach((parent, order) => {
+      if (order === 0) {
+        firsts.set(parent, [...(firsts.get(parent) ?? []), { lane, branch }]);
+      } else if (!merges.has(parent)) {
+        merges.set(parent, { name: branch.name, merged: true });
+      }
+    });
+  }
+  for (const hash of new Set([...firsts.keys(), ...merges.keys()])) {
+    if (!names.has(hash)) {
+      names.set(hash, inherited(hash, null));
+    }
+  }
+  return names;
 }
 
 export interface Row {
@@ -35,19 +91,41 @@ export function rowsOf(history: History): Row[] {
   const top: Commit = { hash: WORKTREE, parents: head === null ? [] : [head], time: 0, subject: "", refs: [] };
   /** 작업 중인 상태에서 내려가는 선이 윗줄에서 지나던 세로 줄. 지금 커밋의 줄을 지나면 null이다. */
   let down: number | null = null;
-  return lanes([top, ...commits]).map(({ hash, lane, links }, index) => {
+  const laid = lanes([top, ...commits]);
+  const byHash = new Map(commits.map((commit) => [commit.hash, commit]));
+  const names = branchesOf(laid.slice(1), byHash);
+  /** 윗줄의 선이 닿은 세로 줄과 그 선이 닿으려는 커밋에서, 그 선을 낸 자식 커밋. 한 세로 줄에 두 선이 모이면 먼저 지나던 선의 자식을 둔다. */
+  let owners = new Map<string, string>();
+  const tipOf = (link: Link, by: string | undefined): string => {
+    if (by === WORKTREE) {
+      return "작업 중인 상태에서 지금 커밋으로 내려가는 선";
+    }
+    const child = by === undefined ? undefined : byHash.get(by);
+    if (child === undefined || child.parents[0] === link.to) {
+      return branchText(child === undefined ? (names.get(link.to) ?? null) : (names.get(child.hash) ?? null));
+    }
+    return `합친 선 · ${branchText(names.get(link.to) ?? null)} → ${names.get(child.hash)?.name ?? "이름표가 없는 브랜치"}`;
+  };
+  return laid.map(({ hash, lane, links }, index) => {
     const from = down;
     if (index === 0) {
       down = head === null ? null : lane;
     } else if (from !== null) {
       down = hash === head ? null : (links.find((link) => link.to === head && link.from === from)?.into ?? null);
     }
-    return {
-      id: hash,
-      commit: index === 0 ? null : commits[index - 1],
-      lane,
-      links: links.map((link) => ({ ...link, loose: from !== null && link.to === head && link.from === from })),
-    };
+    const above = index === 0 ? null : laid[index - 1];
+    const parents = above === null ? [] : above.hash === WORKTREE ? top.parents : byHash.get(above.hash)!.parents;
+    const next = new Map<string, string>();
+    const drawn = links.map((link) => {
+      const by = above !== null && above.lane === link.from && parents.includes(link.to) ? above.hash : owners.get(`${link.from}:${link.to}`);
+      const key = `${link.into}:${link.to}`;
+      if (by !== undefined && !next.has(key)) {
+        next.set(key, by);
+      }
+      return { ...link, loose: from !== null && link.to === head && link.from === from, tip: tipOf(link, by) };
+    });
+    owners = next;
+    return { id: hash, commit: index === 0 ? null : commits[index - 1], lane, links: drawn };
   });
 }
 
